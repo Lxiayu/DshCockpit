@@ -71,14 +71,14 @@
 ## 🚀 快速开始
 
 ### 方式一：下载便携版（推荐给普通用户）
-从 [Releases](https://github.com/<owner>/dsh-cockpit/releases) 下载 `DshCockpit-<version>-win-x64.zip` → **用 7-Zip/WinRAR 解压** → 双击根目录的 `DshCockpit.exe`。
+从 [Releases](https://github.com/Lxiayu/dsh-desktop/releases) 下载 `DshCockpit-<version>-win-x64.zip` → **用 7-Zip/WinRAR 解压** → 双击根目录的 `DshCockpit.exe`。
 > 首次启动约 **9 秒开窗**，内置运行时，无需安装 Node/dsh、无需联网下载。后续版本自动更新。
 
 ### 方式二：从源码运行（推荐给开发者/尝鲜者）
 ```bash
 # 前置：Node.js ≥ 22；推荐本机已安装 @deepseek-ai/dsh（未安装时首次启动会自动下载）
-git clone https://github.com/<owner>/dsh-cockpit.git
-cd dsh-cockpit
+git clone https://github.com/Lxiayu/dsh-desktop.git
+cd dsh-desktop
 npm install
 npm start
 ```
