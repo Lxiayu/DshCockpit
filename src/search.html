@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+<title>搜索会话</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #14171c; color: #e6edf3;
+    font: 13px/1.5 "Segoe UI","Microsoft YaHei",system-ui,sans-serif; }
+  #box { padding: 12px; }
+  #q { width: 100%; background: #1c2128; color: #e6edf3; border: 1px solid #2d333b;
+    border-radius: 8px; padding: 8px 10px; font: inherit; outline: none; }
+  #q:focus { border-color: #2563eb; }
+  #results { margin-top: 8px; max-height: 320px; overflow-y: auto; }
+  .item { padding: 8px 4px; border-bottom: 1px solid #2d333b; }
+  .item .snip { color: #e6edf3; word-break: break-all; }
+  .item .meta { color: #8b949e; font-size: 11px; margin-top: 3px; }
+  .item button { float: right; background: #2d333b; color: #e6edf3; border: 0;
+    border-radius: 5px; padding: 2px 8px; cursor: pointer; font-size: 11px; }
+  #empty { color: #8b949e; padding: 8px 0; }
+</style>
+</head>
+<body>
+<div id="box">
+  <input id="q" placeholder="" />
+  <div id="results"></div>
+</div>
+<script>
+  const qEl = document.getElementById('q');
+  const resEl = document.getElementById('results');
+  const L = { zh: { ph: '搜索历史会话（Enter）…', empty: '无结果', copy: '复制', copied: '已复制' },
+              en: { ph: 'Search session history (Enter)…', empty: 'No results', copy: 'Copy', copied: 'Copied' } };
+  let lang = 'zh';
+  (async () => {
+    try { const s = await window.dshSearch.getSettings(); lang = s.resolvedLanguage === 'en' ? 'en' : 'zh'; } catch {}
+    qEl.placeholder = L[lang].ph;
+    qEl.focus();
+  })();
+  let timer = null;
+  qEl.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const q = qEl.value.trim();
+      if (!q) return;
+      const r = await window.dshSearch.query(q);
+      render(r);
+    } else if (e.key === 'Escape') {
+      window.dshSearch.close();
+    }
+  });
+  qEl.addEventListener('input', () => {
+    clearTimeout(timer);
+    const q = qEl.value.trim();
+    if (!q) { resEl.innerHTML = ''; return; }
+    timer = setTimeout(async () => render(await window.dshSearch.query(q)), 400);
+  });
+  function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+  function render(results) {
+    resEl.innerHTML = '';
+    if (!results || !results.length) {
+      const d = document.createElement('div');
+      d.id = 'empty';
+      d.textContent = L[lang].empty;
+      resEl.appendChild(d);
+      return;
+    }
+    for (const r of results) {
+      const item = document.createElement('div');
+      item.className = 'item';
+      const date = new Date(r.mtimeMs).toLocaleString();
+      const meta = `${r.cwd || '(unknown)'} · ${date} · ${r.matchCount} 处匹配`;
+      const btn = document.createElement('button');
+      btn.textContent = L[lang].copy;
+      btn.addEventListener('click', async () => {
+        await navigator.clipboard.writeText(r.snippet);
+        btn.textContent = L[lang].copied;
+        setTimeout(() => { btn.textContent = L[lang].copy; }, 1200);
+      });
+      item.innerHTML = `<div class="snip">${esc(r.snippet)}</div><div class="meta">${esc(meta)}</div>`;
+      item.appendChild(btn);
+      resEl.appendChild(item);
+    }
+  }
+</script>
+</body>
+</html>

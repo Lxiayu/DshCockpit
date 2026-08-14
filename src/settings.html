@@ -1,0 +1,752 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+<title>DshCockpit 设置</title>
+<style>
+  :root {
+    --bg: #14171c; --panel: #1c2128; --line: #2d333b; --text: #e6edf3;
+    --dim: #8b949e; --acc: #2563eb; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.6 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line); display: flex;
+    align-items: baseline; gap: 10px; }
+  header h1 { font-size: 15px; margin: 0; }
+  header span { color: var(--dim); font-size: 12px; }
+  main { padding: 16px 20px 40px; max-width: 640px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; margin-bottom: 16px; }
+  section h2 { margin: 0 0 10px; font-size: 13px; color: var(--acc); text-transform: uppercase;
+    letter-spacing: .04em; }
+  .row { display: flex; align-items: center; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
+  .row label { width: 160px; color: var(--dim); flex-shrink: 0; }
+  .row input[type="text"], .row input[type="number"], .row select {
+    flex: 1; min-width: 180px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+  .row input[type="checkbox"] { width: auto; }
+  .hint { color: var(--dim); font-size: 12px; margin: 2px 0 0 170px; }
+  button { background: var(--acc); color: #fff; border: 0; border-radius: 6px;
+    padding: 6px 14px; cursor: pointer; font-size: 12px; }
+  button.secondary { background: var(--line); color: var(--text); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.danger { background: var(--bad); }
+  .status { margin-top: 10px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--dim); white-space: pre-wrap; word-break: break-all; }
+  .status.ok { color: var(--ok); border-color: var(--ok); }
+  .status.warn { color: var(--warn); border-color: var(--warn); }
+  .status.bad { color: var(--bad); border-color: var(--bad); }
+  .warn { color: var(--warn); font-size: 12px; margin: 2px 0 0 170px; line-height: 1.5; }
+  .kv { display: flex; justify-content: space-between; padding: 3px 0; color: var(--dim); }
+  .kv b { color: var(--text); font-weight: 600; }
+  .btnrow { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  #busy { display: none; color: var(--warn); }
+  .note { color: var(--dim); font-size: 12px; margin-top: 8px; line-height: 1.7; }
+</style>
+</head>
+<body>
+<header><h1 data-i18n="title">DshCockpit 设置</h1><span id="ver"></span></header>
+<main>
+  <div id="busy">⏳ 处理中…</div>
+
+  <section id="sec-firstrun" style="display:none; border-color: var(--acc)">
+    <h2 data-i18n="sec.firstrun">首次使用</h2>
+    <ol style="margin:0; padding-left:20px; color:var(--text); line-height:2">
+      <li data-i18n="firstrun.step1">在窗口的 Harness 界面中打开「设置」，配置 DeepSeek API Key</li>
+      <li data-i18n="firstrun.step2">回到此窗口，选择工作区目录（或把文件夹拖到右上角工具条）</li>
+      <li data-i18n="firstrun.step3">开始对话；右上角胶囊会实时显示 token 用量</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2 data-i18n="sec.update">更新</h2>
+    <div class="row">
+      <label data-i18n="channel">更新通道</label>
+      <select id="channel">
+        <option value="rc" data-i18n="channel.rc">rc（跟随预览版，推荐）</option>
+        <option value="latest" data-i18n="channel.latest">latest（仅正式版）</option>
+        <option value="pinned" data-i18n="channel.pinned">pinned（锁定版本）</option>
+      </select>
+    </div>
+    <div class="row" id="row-pinned" style="display:none">
+      <label data-i18n="pinnedVersion">锁定版本</label>
+      <input type="text" id="pinnedVersion" placeholder="0.1.0-rc.6" />
+    </div>
+    <div class="row">
+      <label data-i18n="registry">npm 镜像源</label>
+      <select id="registry">
+        <option value="https://registry.npmjs.org/" data-i18n="registry.official">官方源 registry.npmjs.org</option>
+        <option value="https://registry.npmmirror.com/" data-i18n="registry.mirror">镜像 npmmirror.com</option>
+      </select>
+    </div>
+    <div class="hint" data-i18n="hint.registry">从哪里下载运行时与插件依赖（第三方镜像有供应链信任风险）</div>
+    <div class="warn" id="warn-registry" style="display:none"></div>
+    <div class="row">
+      <label data-i18n="keepVersions">保留版本数</label>
+      <input type="number" id="keepVersions" min="1" max="5" />
+    </div>
+    <div class="hint" data-i18n="hint.keepVersions">运行时版本目录最多保留几个（用于一键回滚）</div>
+    <div class="row">
+      <label data-i18n="checkOnStart">启动时检查更新</label>
+      <input type="checkbox" id="checkUpdatesOnStartup" />
+    </div>
+    <div class="btnrow">
+      <button id="btn-check" data-i18n="btn.check">检查更新</button>
+      <button id="btn-apply" disabled data-i18n="btn.apply">应用更新</button>
+      <button id="btn-rollback" class="secondary" disabled data-i18n="btn.rollback">回滚到上一版本</button>
+    </div>
+    <div class="status" id="update-status"></div>
+  </section>
+
+  <section>
+    <h2 data-i18n="sec.plugins">插件市场</h2>
+    <div class="btnrow">
+      <button id="btn-open-market" data-i18n="btn.openMarket">打开插件市场…</button>
+      <span id="plugins-count" style="align-self:center; color:var(--dim); font-size:12px"></span>
+    </div>
+    <div class="note" data-i18n="plugins.note">插件来自 GitHub「dsh-plugin」话题，由社区维护；安装会执行仓库脚本并重启运行时，请只安装你信任的插件。搜索与安装都在独立窗口中完成，不占用本页空间。</div>
+  </section>
+
+  <section>
+    <h2 data-i18n="sec.runtime">运行时</h2>
+    <div class="row">
+      <label data-i18n="workspace">工作区目录</label>
+      <input type="text" id="workspace" data-i18n-placeholder="workspace.ph" placeholder="默认：用户主目录" />
+      <button class="secondary" id="pick-workspace" data-i18n="btn.browse">浏览…</button>
+    </div>
+    <div class="warn" id="warn-workspace" style="display:none"></div>
+    <div class="hint" data-i18n="hint.workspace">Agent 的工作目录（默认用户主目录；拖文件夹到窗口右上角工具条可快速切换）</div>
+    <div class="row">
+      <label>DSH_HOME</label>
+      <input type="text" id="dshHome" data-i18n-placeholder="dshHome.ph" placeholder="默认：~/.dsh" />
+      <button class="secondary" id="pick-dshHome" data-i18n="btn.browse">浏览…</button>
+    </div>
+    <div class="warn" id="warn-dshhome" style="display:none"></div>
+    <div class="hint" data-i18n="hint.dshHome">会话、配置与 API 凭据的存放目录（默认 ~/.dsh）</div>
+    <div class="row">
+      <label data-i18n="port">端口</label>
+      <input type="number" id="port" min="0" max="65535" />
+      <span class="hint" style="margin-left:0" data-i18n="port.hint">0 = 由系统自动分配（推荐）</span>
+    </div>
+    <div class="warn" id="warn-port" style="display:none"></div>
+    <div class="row">
+      <label data-i18n="nodeBin">Node 可执行文件</label>
+      <input type="text" id="nodeBin" data-i18n-placeholder="auto" placeholder="留空自动检测" />
+    </div>
+    <div class="hint" data-i18n="hint.nodeBin">运行 dsh 的 Node 程序，一般留空自动检测（高级用户可指定）</div>
+    <div class="row">
+      <label data-i18n="dshBin">dsh bin.js 路径</label>
+      <input type="text" id="dshBin" data-i18n-placeholder="auto" placeholder="留空自动检测" />
+    </div>
+    <div class="hint" data-i18n="hint.dshBin">dsh 的 lib/bin.js 文件路径，一般留空自动检测（高级用户可指定）</div>
+    <div class="row">
+      <label data-i18n="settings.contextWindow">上下文窗口（估算）</label>
+      <input type="number" id="contextWindow" min="1024" max="10000000" step="1024" />
+    </div>
+    <div class="hint" data-i18n="settings.contextWindowHint">token 胶囊的「上下文压力」按此值估算；DeepSeek 模型通常 64k–128k</div>
+    <div class="hint" data-i18n="runtime.hint">工作区 / DSH_HOME / 端口 / Node / dsh 路径的修改将在下次重启运行时后生效（托盘 → 重启运行时）。</div>
+  </section>
+
+  <section>
+    <h2 data-i18n="sec.app">应用</h2>
+    <div class="row">
+      <label data-i18n="trayOnClose">关闭窗口时最小化到托盘</label>
+      <input type="checkbox" id="trayOnClose" />
+    </div>
+    <div class="row">
+      <label data-i18n="autoStart">开机自启</label>
+      <input type="checkbox" id="autoStart" />
+    </div>
+    <div class="row">
+      <label data-i18n="language">界面语言</label>
+      <select id="language">
+        <option value="system" data-i18n="language.system">跟随系统</option>
+        <option value="zh" data-i18n="language.zh">中文</option>
+        <option value="en" data-i18n="language.en">English</option>
+      </select>
+    </div>
+    <div class="row">
+      <label data-i18n="shellAutoUpdate">自动检查壳更新</label>
+      <input type="checkbox" id="shellAutoUpdate" />
+    </div>
+  </section>
+
+  <section>
+    <h2 data-i18n="sec.data">数据与安全</h2>
+    <div class="row">
+      <label data-i18n="backupOnQuit">退出时自动备份会话</label>
+      <input type="checkbox" id="backupOnQuit" />
+    </div>
+    <div class="row">
+      <label data-i18n="backupKeep">保留备份份数</label>
+      <input type="number" id="backupKeep" min="1" max="20" />
+    </div>
+    <div class="btnrow">
+      <button id="btn-backup" class="secondary" data-i18n="btn.backupNow">立即备份</button>
+    </div>
+    <div class="status" id="backup-status"></div>
+    <div class="row" style="align-items:flex-start; margin-top:12px">
+      <label data-i18n="storage">存储占用</label>
+      <div id="storage-list" style="flex:1; font-size:12px; color:var(--dim); line-height:1.9"></div>
+    </div>
+    <div class="btnrow">
+      <button id="btn-cleanup" class="danger" data-i18n="btn.cleanup">清理（日志 / 旧备份）</button>
+    </div>
+    <div class="status" id="storage-status"></div>
+    <div style="border:1px solid var(--acc); border-radius:6px; padding:10px 12px; margin-top:12px; background:rgba(37,99,235,.08)">
+      <b data-i18n="privacy.title" style="color:var(--acc)">隐私声明</b>
+      <div class="note" style="margin-top:4px" data-i18n="privacy.body">本应用完全在本地运行。我们不会收集、上传或存储您的任何个人信息、API Key、会话内容或用量数据；所有数据仅保存在本机。仅在以下情况访问网络：更新检查（npm registry / GitHub Releases）、插件市场列表（GitHub）、运行时下载（npm registry）。费用估算基于您自行配置的价格参数，不构成计费依据。</div>
+    </div>
+    <div class="note" data-i18n="security.note">安全说明：会话备份只包含会话记录与 settings.yaml，不包含 API 凭据（凭据仍在 DSH_HOME 的 .credentials.yaml，系统钥匙串集成规划中）；运行时下载全程校验完整性；harness 自带的文件沙箱与审批机制不受桌面化影响。</div>
+  </section>
+
+  <section>
+    <h2 data-i18n="sec.schedule">定时任务</h2>
+    <div class="row">
+      <label data-i18n="schedule.name">任务名</label>
+      <input type="text" id="schedName" />
+    </div>
+    <div class="row">
+      <label data-i18n="schedule.prompt">提示词</label>
+      <input type="text" id="schedPrompt" />
+    </div>
+    <div class="row">
+      <label data-i18n="schedule.type">类型</label>
+      <select id="schedKind" style="width:120px">
+        <option value="every" data-i18n="schedule.every">间隔</option>
+        <option value="daily" data-i18n="schedule.daily">每天</option>
+      </select>
+      <input type="number" id="schedEvery" min="60" value="3600" style="width:110px" />
+      <span id="schedEveryLabel" data-i18n="schedule.seconds">秒</span>
+      <input type="time" id="schedDaily" style="width:120px; display:none" />
+    </div>
+    <div class="btnrow">
+      <button id="btn-sched-add" data-i18n="btn.schedAdd">添加任务</button>
+    </div>
+    <div id="sched-list"></div>
+    <div class="note" data-i18n="schedule.note">到点后会在后台用无头会话运行该提示词（需已配置 API Key），完成后系统通知。</div>
+  </section>
+
+  <section>
+    <h2 data-i18n="sec.cost">用量与成本</h2>
+    <div class="row">
+      <label data-i18n="cost.inputRate">输入 ¥/百万</label>
+      <input type="number" id="costInputPerM" min="0" step="0.1" />
+    </div>
+    <div class="row">
+      <label data-i18n="cost.outputRate">输出 ¥/百万</label>
+      <input type="number" id="costOutputPerM" min="0" step="0.1" />
+    </div>
+    <div class="row">
+      <label data-i18n="cost.cacheReadRate">缓存读 ¥/百万</label>
+      <input type="number" id="costCacheReadPerM" min="0" step="0.1" />
+    </div>
+    <div class="row">
+      <label data-i18n="cost.cacheWriteRate">缓存写 ¥/百万</label>
+      <input type="number" id="costCacheWritePerM" min="0" step="0.1" />
+    </div>
+    <div class="row">
+      <label data-i18n="cost.budget">月度预算 ¥</label>
+      <input type="number" id="monthlyBudget" min="0" step="1" />
+      <span class="hint" style="margin-left:0" data-i18n="cost.budgetHint">0 = 不限制；达到 80% / 100% 时提醒</span>
+    </div>
+    <div class="status" id="cost-status"></div>
+    <div class="note" data-i18n="cost.ratesHint">费用按你配置的价格估算，仅供参考，不构成实际计费。</div>
+  </section>
+
+  <section>
+    <h2 data-i18n="sec.about">关于</h2>
+    <div class="kv"><span data-i18n="about.shell">壳版本</span><b id="about-shell"></b></div>
+    <div class="kv"><span data-i18n="about.runtime">当前运行时</span><b id="about-runtime"></b></div>
+    <div class="kv"><span data-i18n="about.path">运行时路径</span><b id="about-path" style="word-break:break-all"></b></div>
+    <div class="kv"><span data-i18n="about.dshHome">DSH_HOME</span><b id="about-dshHome" style="word-break:break-all"></b></div>
+    <div class="kv"><span data-i18n="about.diagnostics">崩溃诊断</span><b id="about-diagnostics"></b></div>
+    <div class="btnrow">
+      <button class="secondary" id="open-logs" data-i18n="btn.openLogs">打开日志目录</button>
+      <button class="secondary" id="open-diagnostics" data-i18n="btn.openDiagnostics">打开诊断目录</button>
+    </div>
+  </section>
+
+  <div class="btnrow">
+    <button id="btn-save" data-i18n="btn.save">保存</button>
+    <span class="hint" style="margin-left:0" data-i18n="save.hint">保存后立即生效（更新相关设置作用于下次检查；路径设置作用于下次重启运行时）。</span>
+  </div>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let current = null;
+  let updating = false;
+  let resolvedLang = 'zh';
+
+  // ----------------------------------------------------------------- i18n
+  const I18N = {
+    zh: {
+      title: 'DshCockpit 设置', sec_update: '更新', sec_runtime: '运行时', sec_app: '应用',
+      sec_data: '数据与安全', sec_about: '关于',
+      channel: '更新通道', channel_rc: 'rc（跟随预览版，推荐）', channel_latest: 'latest（仅正式版）', channel_pinned: 'pinned（锁定版本）',
+      pinnedVersion: '锁定版本', registry: 'npm 镜像源',
+      registry_official: '官方源 registry.npmjs.org', registry_mirror: '镜像 npmmirror.com',
+      keepVersions: '保留版本数', checkOnStart: '启动时检查更新',
+      btn_check: '检查更新', btn_apply: '应用更新', btn_rollback: '回滚到上一版本', btn_browse: '浏览…',
+      btn_backupNow: '立即备份', btn_openLogs: '打开日志目录', btn_save: '保存',
+      status_notChecked: '尚未检查。',
+      workspace: '工作区目录', workspace_ph: '默认：用户主目录',
+      dshHome_ph: '默认：~/.dsh', port: '端口', port_hint: '0 = 由系统自动分配（推荐）',
+      nodeBin: 'Node 可执行文件', dshBin: 'dsh bin.js 路径', auto: '留空自动检测',
+      runtime_hint: '工作区 / DSH_HOME / 端口 / Node / dsh 路径的修改将在下次重启运行时后生效（托盘 → 重启运行时）。',
+      trayOnClose: '关闭窗口时最小化到托盘', autoStart: '开机自启',
+      language: '界面语言', language_system: '跟随系统', language_zh: '中文', language_en: 'English',
+      backupOnQuit: '退出时自动备份会话', backupKeep: '保留备份份数',
+      security_note: '安全说明：会话备份只包含会话记录与 settings.yaml，不包含 API 凭据（凭据仍在 DSH_HOME 的 .credentials.yaml，系统钥匙串集成规划中）；运行时下载全程校验完整性；harness 自带的文件沙箱与审批机制不受桌面化影响。',
+      about_shell: '壳版本', about_runtime: '当前运行时', about_path: '运行时路径', about_dshHome: 'DSH_HOME',
+      save_hint: '保存后立即生效（更新相关设置作用于下次检查；路径设置作用于下次重启运行时）。',
+      busy_saving: '⏳ 保存中…', saved_ok: '✅ 设置已保存。', saved_fail: '❌ 保存失败：',
+      backup_running: '⏳ 正在备份…', backup_done: '✅ 备份完成',
+      backup_info: '备份目录：{dir}\n份数：{count} | 最新：{latest} | 大小：{size} MB',
+      backup_none: '暂无备份。',
+      check_running: '正在查询 npm registry…',
+      check_fail: '❌ 检查失败：', new_found: '发现新版本：{a} → {b}\n已下载并验证后，「应用更新」会可用。',
+      up_to_date: '已是最新（{v}）。', apply_ok: '✅ 已切换到 {v}，运行时已重启。', apply_fail: '❌ 应用更新失败：',
+      rollback_ok: '↩️ 已回滚 {a} → {b}，运行时已重启。', rollback_fail: '❌ 回滚失败：',
+      pending_hint: '待应用更新：{v}。点击「应用更新」。',
+      warn_mirror: '注意：非官方镜像由第三方维护，存在供应链信任风险；下载完整性仍会校验。',
+      warn_port_hyperv: '⚠ 3070–3169 是 Windows Hyper-V/WSL2 的保留端口区间，启动可能失败（官方讨论区 #589），建议换用其他端口。',
+      warn_path_ascii: '⚠ 路径含非 ASCII 字符：dsh 在 Windows 上有已知路径 bug（官方讨论区 #107），建议使用纯英文路径。',
+      sec_firstrun: '首次使用', firstrun_step1: '在窗口的 Harness 界面中打开「设置」，配置 DeepSeek API Key', firstrun_step2: '回到此窗口，选择工作区目录（或把文件夹拖到右上角工具条）', firstrun_step3: '开始对话；右上角胶囊会实时显示 token 用量',
+      shellAutoUpdate: '自动检查壳更新',
+      sec_plugins: '插件市场', btn_pluginsRefresh: '刷新插件列表',
+      btn_openMarket: '打开插件市场…', plugins_installedCount: '已安装 {n} 个插件',
+      hint_registry: '从哪里下载运行时与插件依赖（第三方镜像有供应链信任风险）',
+      hint_keepVersions: '运行时版本目录最多保留几个（用于一键回滚）',
+      hint_workspace: 'Agent 的工作目录（默认用户主目录；拖文件夹到窗口右上角工具条可快速切换）',
+      hint_dshHome: '会话、配置与 API 凭据的存放目录（默认 ~/.dsh）',
+      hint_nodeBin: '运行 dsh 的 Node 程序，一般留空自动检测（高级用户可指定）',
+      hint_dshBin: 'dsh 的 lib/bin.js 文件路径，一般留空自动检测（高级用户可指定）',
+      plugins_note: '插件来自 GitHub「dsh-plugin」话题，由社区维护；安装会执行仓库脚本并重启运行时，请只安装你信任的插件。搜索与安装都在独立窗口中完成，不占用本页空间。',
+      plugins_loading: '正在从 GitHub 加载插件列表…', plugins_empty: '暂无插件。', plugins_error: '插件操作失败：',
+      plugins_install: '安装', plugins_remove: '卸载', plugins_action_ok: '✅ 操作完成，运行时已重启。',
+      storage: '存储占用', btn_cleanup: '清理（日志 / 旧备份）', cleanup_confirm: '确定清理旧日志和超出保留份数的备份吗？', cleanup_done: '✅ 清理完成，释放约 {mb} MB', storage_total: '合计：{mb} MB',
+    },
+    en: {
+      title: 'DshCockpit Settings', sec_update: 'Updates', sec_runtime: 'Runtime', sec_app: 'Application',
+      sec_data: 'Data & Security', sec_about: 'About',
+      channel: 'Update channel', channel_rc: 'rc (follow previews, recommended)', channel_latest: 'latest (stable only)', channel_pinned: 'pinned (locked version)',
+      pinnedVersion: 'Pinned version', registry: 'npm registry',
+      registry_official: 'Official registry.npmjs.org', registry_mirror: 'Mirror npmmirror.com',
+      keepVersions: 'Keep versions', checkOnStart: 'Check updates on startup',
+      btn_check: 'Check updates', btn_apply: 'Apply update', btn_rollback: 'Roll back', btn_browse: 'Browse…',
+      btn_backupNow: 'Back up now', btn_openLogs: 'Open log folder', btn_save: 'Save',
+      status_notChecked: 'Not checked yet.',
+      workspace: 'Workspace', workspace_ph: 'Default: home directory',
+      dshHome_ph: 'Default: ~/.dsh', port: 'Port', port_hint: '0 = auto-assigned by the OS (recommended)',
+      nodeBin: 'Node executable', dshBin: 'dsh bin.js path', auto: 'leave empty for auto-detect',
+      runtime_hint: 'Workspace / DSH_HOME / port / Node / dsh path changes take effect after "Restart runtime" in the tray.',
+      trayOnClose: 'Minimize to tray on close', autoStart: 'Start at login',
+      language: 'Language', language_system: 'Follow system', language_zh: '中文', language_en: 'English',
+      backupOnQuit: 'Back up sessions on quit', backupKeep: 'Keep backups',
+      security_note: 'Security: backups contain only session logs and settings.yaml, never API credentials (credentials stay in DSH_HOME/.credentials.yaml; OS-keychain integration is planned); runtime downloads are integrity-checked end to end; the harness file sandbox and approval prompts are unaffected.',
+      about_shell: 'Shell version', about_runtime: 'Active runtime', about_path: 'Runtime path', about_dshHome: 'DSH_HOME',
+      save_hint: 'Saves immediately (update settings apply on the next check; path settings apply after the next runtime restart).',
+      busy_saving: '⏳ Saving…', saved_ok: '✅ Settings saved.', saved_fail: '❌ Save failed: ',
+      backup_running: '⏳ Backing up…', backup_done: '✅ Backup complete',
+      backup_info: 'Backup folder: {dir}\nCopies: {count} | Latest: {latest} | Size: {size} MB',
+      backup_none: 'No backups yet.',
+      check_running: 'Querying npm registry…',
+      check_fail: '❌ Check failed: ', new_found: 'New version: {a} → {b}\nOnce downloaded and verified, "Apply update" becomes available.',
+      up_to_date: 'Up to date ({v}).', apply_ok: '✅ Switched to {v}; runtime restarted.', apply_fail: '❌ Apply failed: ',
+      rollback_ok: '↩️ Rolled back {a} → {b}; runtime restarted.', rollback_fail: '❌ Rollback failed: ',
+      pending_hint: 'Pending update: {v}. Click "Apply update".',
+      warn_mirror: 'Note: third-party mirrors are a supply-chain trust boundary; integrity is still verified.',
+      warn_port_hyperv: '⚠ 3070–3169 is the Windows Hyper-V/WSL2 reserved port range; boot may fail (discussion #589), pick another port.',
+      warn_path_ascii: '⚠ Non-ASCII path: dsh has known Windows path bugs (discussion #107); prefer ASCII-only paths.',
+      sec_firstrun: 'First run', firstrun_step1: 'Open the Harness "Settings" in the window and configure your DeepSeek API key', firstrun_step2: 'Back here, pick a workspace folder (or drag a folder onto the top-right bar)', firstrun_step3: 'Start chatting; the top-right pill shows live token usage',
+      shellAutoUpdate: 'Auto-check shell updates',
+      sec_plugins: 'Plugin market', btn_pluginsRefresh: 'Refresh plugin list',
+      btn_openMarket: 'Open plugin market…', plugins_installedCount: '{n} installed',
+      hint_registry: 'Where runtime and plugin dependencies are downloaded from (third-party mirrors are a supply-chain trust boundary)',
+      hint_keepVersions: 'How many runtime version dirs to keep (for one-click rollback)',
+      hint_workspace: "The agent's working directory (default: home; drag a folder onto the top-right bar to switch quickly)",
+      hint_dshHome: 'Where sessions, config and API credentials live (default ~/.dsh)',
+      hint_nodeBin: 'The Node executable used to run dsh; usually auto-detected (advanced)',
+      hint_dshBin: 'The dsh lib/bin.js path; usually auto-detected (advanced)',
+      plugins_note: 'Plugins come from the GitHub "dsh-plugin" topic, maintained by the community; installing runs the repo scripts and restarts the runtime — only install plugins you trust. Search and install happen in a separate window.',
+      plugins_loading: 'Loading plugins from GitHub…', plugins_empty: 'No plugins found.', plugins_error: 'Plugin error: ',
+      plugins_install: 'Install', plugins_remove: 'Remove', plugins_action_ok: '✅ Done; runtime restarted.',
+      storage: 'Storage usage', btn_cleanup: 'Clean up (logs / old backups)', cleanup_confirm: 'Delete old logs and backups beyond the keep count?', cleanup_done: '✅ Cleaned up, freed ~{mb} MB', storage_total: 'Total: {mb} MB',
+    },
+  };
+
+  function tr(key, vars) {
+    let s = (I18N[resolvedLang] && I18N[resolvedLang][key]) || I18N.en[key] || key;
+    if (vars) for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, String(v));
+    return s;
+  }
+
+  function applyI18n() {
+    document.querySelectorAll('[data-i18n]').forEach((el) => {
+      const key = el.dataset.i18n.replaceAll('-', '_');
+      el.textContent = tr(key);
+    });
+    document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+      const key = el.dataset.i18nPlaceholder.replaceAll('-', '_');
+      el.placeholder = tr(key);
+    });
+    document.title = tr('title');
+  }
+
+  // ----------------------------------------------------------------- state
+  function busy(on, text) {
+    updating = on;
+    $('busy').style.display = on ? 'block' : 'none';
+    if (text) $('busy').textContent = text;
+  }
+
+  function setStatus(el, text, cls) {
+    el.textContent = text;
+    el.className = 'status' + (cls ? ' ' + cls : '');
+  }
+
+  // ------------------------------------------------------- input warnings
+  function warn(el, key, show) {
+    el.style.display = show ? 'block' : 'none';
+    if (show) el.textContent = tr(key);
+  }
+
+  function validateWarnings() {
+    warn($('warn-registry'), 'warn_mirror', $('registry').value !== 'https://registry.npmjs.org/');
+    const p = Number($('port').value) || 0;
+    warn($('warn-port'), 'warn_port_hyperv', p >= 3070 && p <= 3169);
+    warn($('warn-workspace'), 'warn_path_ascii', /[^\x00-\x7F]/.test($('workspace').value));
+    warn($('warn-dshhome'), 'warn_path_ascii', /[^\x00-\x7F]/.test($('dshHome').value));
+  }
+
+  function fillForm(s) {
+    current = s;
+    const firstrun = document.getElementById('sec-firstrun');
+    if (firstrun) firstrun.style.display = s.needsSetup ? '' : 'none';
+    $('channel').value = s.channel;
+    $('pinnedVersion').value = s.pinnedVersion || '';
+    $('registry').value = s.registry;
+    $('keepVersions').value = s.keepVersions;
+    $('checkUpdatesOnStartup').checked = !!s.checkUpdatesOnStartup;
+    $('workspace').value = s.workspace || '';
+    $('dshHome').value = s.dshHome || '';
+    $('port').value = s.port;
+    $('nodeBin').value = s.nodeBin || '';
+    $('dshBin').value = s.dshBin || '';
+    $('contextWindow').value = s.contextWindow || 128000;
+    $('trayOnClose').checked = !!s.trayOnClose;
+    $('autoStart').checked = !!s.autoStart;
+    $('language').value = s.language || 'system';
+    $('shellAutoUpdate').checked = !!s.shellAutoUpdate;
+    $('backupOnQuit').checked = !!s.backupOnQuit;
+    $('backupKeep').value = s.backupKeep;
+    $('costInputPerM').value = s.costInputPerM;
+    $('costOutputPerM').value = s.costOutputPerM;
+    $('costCacheReadPerM').value = s.costCacheReadPerM;
+    $('costCacheWritePerM').value = s.costCacheWritePerM;
+    $('monthlyBudget').value = s.monthlyBudget;
+    $('row-pinned').style.display = s.channel === 'pinned' ? '' : 'none';
+    $('about-shell').textContent = s.shellVersion || '';
+    $('about-dshHome').textContent = s.dshHome || '(~/.dsh)';
+    resolvedLang = s.resolvedLanguage || 'zh';
+    applyI18n();
+  }
+
+  function collectForm() {
+    return {
+      channel: $('channel').value,
+      pinnedVersion: $('pinnedVersion').value.trim(),
+      registry: $('registry').value,
+      keepVersions: Math.max(1, Number($('keepVersions').value) || 2),
+      checkUpdatesOnStartup: $('checkUpdatesOnStartup').checked,
+      workspace: $('workspace').value.trim(),
+      dshHome: $('dshHome').value.trim(),
+      port: Math.max(0, Number($('port').value) || 0),
+      nodeBin: $('nodeBin').value.trim(),
+      dshBin: $('dshBin').value.trim(),
+      contextWindow: Math.max(1024, Number($('contextWindow').value) || 128000),
+      trayOnClose: $('trayOnClose').checked,
+      autoStart: $('autoStart').checked,
+      language: $('language').value,
+      shellAutoUpdate: $('shellAutoUpdate').checked,
+      backupOnQuit: $('backupOnQuit').checked,
+      backupKeep: Math.max(1, Number($('backupKeep').value) || 5),
+      costInputPerM: Math.max(0, Number($('costInputPerM').value) || 0),
+      costOutputPerM: Math.max(0, Number($('costOutputPerM').value) || 0),
+      costCacheReadPerM: Math.max(0, Number($('costCacheReadPerM').value) || 0),
+      costCacheWritePerM: Math.max(0, Number($('costCacheWritePerM').value) || 0),
+      monthlyBudget: Math.max(0, Number($('monthlyBudget').value) || 0),
+    };
+  }
+
+  // ---------------------------------------------------------------- events
+  $('channel').addEventListener('change', () => {
+    $('row-pinned').style.display = $('channel').value === 'pinned' ? '' : 'none';
+  });
+  $('language').addEventListener('change', () => {
+    const v = $('language').value;
+    if (v === 'zh' || v === 'en') resolvedLang = v;
+    applyI18n();
+  });
+  ['registry', 'port', 'workspace', 'dshHome'].forEach((id) => {
+    $(id).addEventListener('input', validateWarnings);
+    $(id).addEventListener('change', validateWarnings);
+  });
+
+  $('btn-save').addEventListener('click', async () => {
+    busy(true, tr('busy_saving'));
+    try {
+      const saved = await window.dshShell.saveSettings(collectForm());
+      fillForm(saved);
+      setStatus($('update-status'), tr('saved_ok'), 'ok');
+    } catch (e) {
+      setStatus($('update-status'), tr('saved_fail') + e.message, 'bad');
+    } finally {
+      busy(false);
+    }
+  });
+
+  $('btn-check').addEventListener('click', async () => {
+    busy(true, tr('check_running'));
+    setStatus($('update-status'), tr('check_running'));
+    try {
+      const r = await window.dshShell.checkUpdate();
+      if (!r.ok) setStatus($('update-status'), tr('check_fail') + r.reason, 'bad');
+      else if (r.available) {
+        setStatus($('update-status'), tr('new_found', { a: r.current, b: r.target }), 'warn');
+        $('btn-apply').disabled = false;
+      } else {
+        setStatus($('update-status'), tr('up_to_date', { v: r.current }), 'ok');
+        $('btn-apply').disabled = true;
+      }
+    } catch (e) {
+      setStatus($('update-status'), tr('check_fail') + e.message, 'bad');
+    } finally {
+      busy(false);
+    }
+  });
+
+  $('btn-apply').addEventListener('click', async () => {
+    busy(true, tr('busy_saving'));
+    try {
+      const r = await window.dshShell.applyUpdate();
+      setStatus($('update-status'), tr('apply_ok', { v: r.current }), 'ok');
+      $('btn-apply').disabled = true;
+      refreshInfo();
+    } catch (e) {
+      setStatus($('update-status'), tr('apply_fail') + e.message, 'bad');
+    } finally {
+      busy(false);
+    }
+  });
+
+  $('btn-rollback').addEventListener('click', async () => {
+    busy(true, tr('busy_saving'));
+    try {
+      const r = await window.dshShell.rollback();
+      setStatus($('update-status'), tr('rollback_ok', { a: r.from, b: r.to }), 'warn');
+      refreshInfo();
+    } catch (e) {
+      setStatus($('update-status'), tr('rollback_fail') + e.message, 'bad');
+    } finally {
+      busy(false);
+    }
+  });
+
+  $('btn-backup').addEventListener('click', async () => {
+    busy(true, tr('backup_running'));
+    try {
+      const info = await window.dshShell.backupNow();
+      renderBackup(info, tr('backup_done'), 'ok');
+      renderStorage(await window.dshShell.storageInfo());
+    } catch (e) {
+      setStatus($('backup-status'), tr('saved_fail') + e.message, 'bad');
+    } finally {
+      busy(false);
+    }
+  });
+
+  function renderStorage(info) {
+    if (!info || !info.items) return;
+    const lines = info.items.map((i) => `${i.name}: ${i.sizeMB} MB`);
+    lines.push('— ' + tr('storage_total', { mb: info.totalMB }));
+    $('storage-list').textContent = lines.join('\n');
+  }
+
+  $('btn-cleanup').addEventListener('click', async () => {
+    if (!confirm(tr('cleanup_confirm'))) return;
+    busy(true, '…');
+    try {
+      const r = await window.dshShell.storageCleanup();
+      setStatus($('storage-status'), tr('cleanup_done', { mb: r.freedMB }), 'ok');
+      renderStorage(await window.dshShell.storageInfo());
+    } catch (e) {
+      setStatus($('storage-status'), tr('saved_fail') + e.message, 'bad');
+    } finally {
+      busy(false);
+    }
+  });
+
+  function renderBackup(info, extra, cls) {
+    if (!info.count) { setStatus($('backup-status'), tr('backup_none')); return; }
+    let text = tr('backup_info', { dir: info.dir, count: info.count, latest: info.latest, size: info.sizeMB });
+    if (extra) text = extra + '\n' + text;
+    setStatus($('backup-status'), text, cls);
+  }
+
+  // ------------------------------------------------------------ scheduler
+  function schedDesc(t) {
+    if (t.kind === 'every') return tr('schedule.every') + ' ' + (Number(t.everySeconds) || 60) + ' ' + tr('schedule.seconds');
+    return tr('schedule.daily') + ' ' + (t.dailyTime || '');
+  }
+
+  async function renderSched() {
+    try {
+      const list = await window.dshShell.scheduledList();
+      const el = $('sched-list');
+      el.innerHTML = '';
+      if (!list.length) return;
+      for (const t of list) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid var(--line); font-size:12px;';
+        const info = document.createElement('div');
+        info.style.flex = '1';
+        info.innerHTML = `<b>${escapeHtml(t.name || t.id)}</b> <span style="color:var(--dim)">${escapeHtml(schedDesc(t))}</span><br><span style="color:var(--dim)">${escapeHtml((t.prompt || '').slice(0, 80))}</span>`;
+        const en = document.createElement('input');
+        en.type = 'checkbox';
+        en.checked = !!t.enabled;
+        en.title = tr('schedule.enabled');
+        en.addEventListener('change', async () => {
+          await window.dshShell.scheduledUpsert({ ...t, enabled: en.checked });
+          renderSched();
+        });
+        const del = document.createElement('button');
+        del.textContent = tr('schedule.delete');
+        del.className = 'danger';
+        del.addEventListener('click', async () => {
+          await window.dshShell.scheduledRemove(t.id);
+          renderSched();
+        });
+        row.appendChild(info); row.appendChild(en); row.appendChild(del);
+        el.appendChild(row);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  $('schedKind').addEventListener('change', () => {
+    const daily = $('schedKind').value === 'daily';
+    $('schedDaily').style.display = daily ? '' : 'none';
+    $('schedEvery').style.display = daily ? 'none' : '';
+    $('schedEveryLabel').style.display = daily ? 'none' : '';
+  });
+
+  $('btn-sched-add').addEventListener('click', async () => {
+    const name = $('schedName').value.trim();
+    const prompt = $('schedPrompt').value.trim();
+    if (!name || !prompt) return;
+    const kind = $('schedKind').value;
+    const task = kind === 'every'
+      ? { name, prompt, kind, everySeconds: Math.max(60, Number($('schedEvery').value) || 3600), enabled: true }
+      : { name, prompt, kind, dailyTime: $('schedDaily').value || '09:00', enabled: true };
+    await window.dshShell.scheduledUpsert(task);
+    $('schedName').value = ''; $('schedPrompt').value = '';
+    renderSched();
+  });
+
+  // ------------------------------------------------------- cost & diagnostics
+  function renderCost(info) {
+    if (!info) return;
+    const fmtTok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n));
+    const row = (label, d) => `${label}: ${fmtTok(d.input)}/${fmtTok(d.output)} tok · ${info.currency}${d.cost.toFixed(2)}`;
+    const lines = [
+      row(tr('cost.today'), info.today),
+      row(tr('cost.week'), info.week),
+      row(tr('cost.month'), info.month),
+    ];
+    if (info.perWorkspace && info.perWorkspace.length) {
+      lines.push('— ' + tr('cost.perWorkspace'));
+      for (const w of info.perWorkspace.slice(0, 8)) {
+        lines.push(`  ${w.cwd || '(unknown)'}: ${info.currency}${w.cost.toFixed(2)} (${fmtTok(w.input)} in)`);
+      }
+    }
+    setStatus($('cost-status'), lines.join('\n'));
+  }
+
+  async function refreshCost() {
+    try { renderCost(await window.dshShell.costInfo()); } catch (e) { /* ignore */ }
+  }
+
+  async function refreshDiagnostics() {
+    try {
+      const d = await window.dshShell.diagnosticsInfo();
+      $('about-diagnostics').textContent = d.crashCount ? tr('about.diagnosticsCount', { n: d.crashCount }) : tr('about.diagnosticsNone');
+    } catch (e) { /* ignore */ }
+  }
+
+  $('open-diagnostics').addEventListener('click', () => window.dshShell.openDiagnostics());
+
+  // ---------------------------------------------------------- plugin market
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  async function refreshPluginsCount() {
+    try {
+      const r = await window.dshShell.pluginsList();
+      if (r.ok) {
+        const n = (r.plugins || []).filter((p) => p.installed).length;
+        $('plugins-count').textContent = tr('plugins.installedCount', { n });
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  $('btn-open-market').addEventListener('click', () => window.dshShell.openMarket());
+
+  async function refreshInfo() {
+    try {
+      const info = await window.dshShell.runtimeInfo();
+      $('about-runtime').textContent = info.activeVersion || '—';
+      $('about-path').textContent = info.activePath || '—';
+      const pending = info.pendingVersion;
+      if (pending) {
+        $('btn-apply').disabled = false;
+        setStatus($('update-status'), tr('pending_hint', { v: pending }), 'warn');
+      } else {
+        $('btn-apply').disabled = true;
+      }
+      $('btn-rollback').disabled = !(info.installed && info.installed.length > 1);
+    } catch (e) { /* ignore */ }
+    try {
+      renderBackup(await window.dshShell.backupInfo());
+    } catch (e) { /* ignore */ }
+    try {
+      renderStorage(await window.dshShell.storageInfo());
+    } catch (e) { /* ignore */ }
+    refreshCost();
+    refreshDiagnostics();
+    refreshPluginsCount();
+    renderSched();
+  }
+
+  async function pick(kind) {
+    const res = await window.dshShell.pickFolder(kind);
+    if (res && res.path) $(kind).value = res.path;
+  }
+  $('pick-workspace').addEventListener('click', () => pick('workspace'));
+  $('pick-dshHome').addEventListener('click', () => pick('dshHome'));
+  $('open-logs').addEventListener('click', () => window.dshShell.openLogDir());
+
+  (async () => {
+    const s = await window.dshShell.getSettings();
+    fillForm(s);
+    setStatus($('update-status'), tr('status_notChecked'));
+    validateWarnings();
+    await refreshInfo();
+  })();
+</script>
+</body>
+</html>

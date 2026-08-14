@@ -1,0 +1,47 @@
+﻿# electron-builder configuration — portable ZIP distribution (industry standard
+# for large Windows OSS, e.g. MaaAssistantArknights ships MAA-*-win-x64.zip).
+# The release artifact is a zip: extract it anywhere and double-click
+# "DshCockpit.exe" at its root. No installer, no admin, no NSIS compression
+# stalls. Users can also run from source (npm start, see README).
+appId: com.dshcockpit.app
+productName: DshCockpit
+directories:
+  output: dist
+  buildResources: resources
+files:
+  - "!**/*.map"
+  - "!test/**/*"
+  - "!.trial/**"
+  - "!dist/**/*"
+  - "!vendor/**/*"
+asar: true
+compression: normal
+# Bundled runtime seed -> resources/runtime/<version> (install-and-use, no first-run download)
+extraResources:
+  - from: vendor/runtime
+    to: runtime
+win:
+  target:
+    - target: zip
+      arch:
+        - x64
+  icon: resources/icon.png
+  artifactName: DshCockpit-${version}-win-${arch}.${ext}
+# NSIS installer intentionally NOT used as the default (solid-compressing the
+# 268MB runtime of small files stalls); can be built on demand with:
+#   node scripts/build.js --win nsis
+mac:
+  target:
+    - zip
+    - dmg
+  icon: resources/icon.png
+  category: public.app-category.developer-tools
+  darkModeSupport: true
+  artifactName: DshCockpit-${version}-mac-${arch}.${ext}
+# Publish feed for electron-updater. Publishing uses env vars so the config
+# never needs editing: set DSH_REPO_OWNER / DSH_REPO_NAME / GH_TOKEN and run
+# `npm run publish:win`. Until then the shell fails silently on update checks.
+publish:
+  provider: github
+  owner: ${env.DSH_REPO_OWNER}
+  repo: ${env.DSH_REPO_NAME}

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+<title>准备中</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #14171c; color: #e6edf3; display: flex; align-items: center;
+    justify-content: center; height: 100vh; font: 13px/1.6 "Segoe UI","Microsoft YaHei",system-ui,sans-serif; }
+  #box { text-align: center; padding: 20px; max-width: 420px; }
+  .spinner { width: 34px; height: 34px; margin: 0 auto 14px; border: 3px solid #2d333b;
+    border-top-color: #2563eb; border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #status { color: #8b949e; white-space: pre-wrap; word-break: break-word; }
+</style>
+</head>
+<body>
+<div id="box">
+  <div class="spinner"></div>
+  <div id="status"></div>
+</div>
+<script>
+  const status = document.getElementById('status');
+  window.dshLoading.onProgress((text) => { status.textContent = text; });
+</script>
+</body>
+</html>

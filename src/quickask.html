@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+<title>Quick Ask</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #14171c; color: #e6edf3;
+    font: 13px/1.5 "Segoe UI","Microsoft YaHei",system-ui,sans-serif; }
+  #box { padding: 12px; }
+  textarea { width: 100%; height: 64px; resize: none; background: #1c2128; color: #e6edf3;
+    border: 1px solid #2d333b; border-radius: 8px; padding: 8px 10px; font: inherit; outline: none; }
+  textarea:focus { border-color: #2563eb; }
+  #status { margin-top: 8px; color: #8b949e; white-space: pre-wrap; word-break: break-all;
+    max-height: 120px; overflow-y: auto; font-size: 12px; }
+  #status.done { color: #3fb950; }
+  #status.err { color: #f85149; }
+</style>
+</head>
+<body>
+<div id="box">
+  <textarea id="prompt" rows="2" placeholder=""></textarea>
+  <div id="status"></div>
+</div>
+<script>
+  const ta = document.getElementById('prompt');
+  const status = document.getElementById('status');
+  const L = { zh: { ph: '输入问题，回车提交（后台运行，完成后通知）', running: '运行中…（完成后会通知）', done: '✅ 完成', fail: '❌ 失败', empty: '⚠ 未返回结果' },
+              en: { ph: 'Ask anything, Enter to run in the background', running: 'Running… (you will be notified)', done: '✅ Done', fail: '❌ Failed', empty: '⚠ No result' } };
+  let lang = 'zh';
+  (async () => {
+    try { const s = await window.dshQuickAsk.getSettings(); lang = s.resolvedLanguage === 'en' ? 'en' : 'zh'; } catch {}
+    ta.placeholder = L[lang].ph;
+    ta.focus();
+  })();
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+    if (e.key === 'Escape') window.dshQuickAsk.close();
+  });
+  async function submit() {
+    const text = ta.value.trim();
+    if (!text) return;
+    ta.disabled = true;
+    status.textContent = L[lang].running;
+    status.className = '';
+    try {
+      const r = await window.dshQuickAsk.submit(text);
+      if (r && r.output) {
+        const snippet = r.output.slice(0, 600);
+        status.textContent = (r.ok ? L[lang].done : L[lang].fail) + ` (${Math.round((r.durationMs || 0) / 1000)}s)\n${snippet}`;
+        status.className = r.ok ? 'done' : 'err';
+      } else {
+        status.textContent = L[lang].empty;
+      }
+    } catch (e) {
+      status.textContent = L[lang].fail + ' ' + e.message;
+      status.className = 'err';
+    } finally {
+      ta.disabled = false;
+    }
+  }
+</script>
+</body>
+</html>

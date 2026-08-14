@@ -1,0 +1,29 @@
+﻿{
+  "name": "dsh-cockpit",
+  "version": "0.1.0",
+  "description": "Desktop shell for DeepSeek Harness (dsh web): double-click to launch, tray resident, embedded runtime",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "node scripts/build.js --publish never",
+    "build:win": "node scripts/build.js --win --publish never",
+    "build:win:dir": "node scripts/build.js --win dir --publish never",
+    "build:win:nsis": "node scripts/build.js --win nsis --publish never",
+    "build:mac": "node scripts/build.js --mac --publish never",
+    "publish:win": "node scripts/build.js --win --publish always",
+    "publish:mac": "node scripts/build.js --mac --publish always",
+    "test": "node --test"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^37.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "@npmcli/arborist": "^9.9.1",
+    "electron-updater": "^6.8.9",
+    "fzstd": "^0.1.1",
+    "pacote": "^21.5.1",
+    "semver": "^7.8.5"
+  }
+}
