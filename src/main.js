@@ -1,4 +1,4 @@
-﻿// src/main.js — DshCockpit shell (stage 2: shell settings UI + update pipeline)
+// src/main.js — DshCockpit shell (stage 2: shell settings UI + update pipeline)
 //
 // Responsibilities:
 //   - single-instance lock, tray resident, settings window
@@ -680,6 +680,10 @@ function buildAppMenu() {
         { label: t(L, 'tray.quit'), accelerator: 'CmdOrCtrl+Q', click: () => { quitting = true; app.quit(); } },
       ],
     },
+    // Edit menu: required on macOS so Cmd+C/V/X/A route into the webContents.
+    // Without these roles the OS menu has no copy/paste handlers and every
+    // edit shortcut silently does nothing — both directions of clipboard break.
+    { role: 'editMenu' },
     {
       label: t(L, 'menu.view'),
       submenu: [

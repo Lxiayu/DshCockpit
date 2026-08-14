@@ -1,0 +1,69 @@
+# Build & publish macOS .dmg/.zip for arm64 + x64 on tag push.
+# Unsigned for now (no Apple Developer ID yet) — users follow the README
+# "macOS 安装" one-time Gatekeeper override. Swap in signing/notarization
+# later by adding the CSC_LINK / APPLE_* secrets and dropping identity:null.
+name: release-mac
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native builds per arch — cross-compiling x64 on arm64 is flaky.
+          - os: macos-latest   # Apple Silicon runner
+            arch: arm64
+          - os: macos-13        # last Intel runner
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm install
+
+      # Seed the bundled runtime so first launch needs no download.
+      - run: node scripts/prepare-runtime.js
+
+      - run: node scripts/build.js --mac --${{ matrix.arch }} --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-${{ matrix.arch }}
+          if-no-files-found: error
+          path: |
+            dist/DshCockpit-*-mac-${{ matrix.arch }}.dmg
+            dist/DshCockpit-*-mac-${{ matrix.arch }}.zip
+
+  release:
+    name: publish to GitHub Releases
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/mac-arm64/*
+            artifacts/mac-x64/*

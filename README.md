@@ -70,11 +70,27 @@
 
 ## 🚀 快速开始
 
-### 方式一：下载便携版（推荐给普通用户）
+### 方式一：Windows 便携版
 从 [Releases](https://github.com/Lxiayu/DshCockpit/releases) 下载 `DshCockpit-<version>-win-x64.zip` → **用 7-Zip/WinRAR 解压** → 双击根目录的 `DshCockpit.exe`。
 > 首次启动约 **9 秒开窗**，内置运行时，无需安装 Node/dsh、无需联网下载。后续版本自动更新。
 
-### 方式二：从源码运行（推荐给开发者/尝鲜者）
+### 方式二：macOS 安装包（.dmg）
+从 [Releases](https://github.com/Lxiayu/DshCockpit/releases) 按机型下载对应 `.dmg`：
+- **Apple Silicon（M1/M2/M3/M4）** → `DshCockpit-<version>-mac-arm64.dmg`
+- **Intel Mac** → `DshCockpit-<version>-mac-x64.dmg`
+
+双击挂载 → 把 `DshCockpit` 拖进「应用程序」→ 在启动台/访达双击启动。
+
+> ⚠️ **首次打开会提示「已损坏」或「无法验证开发者」**：当前 macOS 包**尚未签名公证**（暂无 Apple Developer 证书），这是 Gatekeeper 的正常拦截，应用本身没坏。任选其一放行即可：
+> - **图形界面**：先双击一次（弹出警告点取消）→「系统设置 → 隐私与安全性」→ 滚到底部点「仍要打开」→ 再点「打开」。
+> - **终端一行**（推荐，最快）：
+>   ```bash
+>   xattr -dr com.apple.quarantine /Applications/DshCockpit.app
+>   ```
+>
+> 放行一次后即可永久正常启动。后续接入 Apple 签名公证后此提示会消失。
+
+### 方式三：从源码运行（推荐给开发者/尝鲜者）
 ```bash
 # 前置：Node.js ≥ 22；推荐本机已安装 @deepseek-ai/dsh（未安装时首次启动会自动下载）
 git clone https://github.com/Lxiayu/DshCockpit.git

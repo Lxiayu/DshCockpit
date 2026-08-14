@@ -55,7 +55,7 @@ async function installFromRegistry(version, dest) {
 }
 
 (async () => {
-  const fromRegistry = process.argv.includes('--registry');
+  let fromRegistry = process.argv.includes('--registry');
   let version = null;
   let source = null;
 

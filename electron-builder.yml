@@ -1,4 +1,4 @@
-﻿# electron-builder configuration — portable ZIP distribution (industry standard
+# electron-builder configuration — portable ZIP distribution (industry standard
 # for large Windows OSS, e.g. MaaAssistantArknights ships MAA-*-win-x64.zip).
 # The release artifact is a zip: extract it anywhere and double-click
 # "DshCockpit.exe" at its root. No installer, no admin, no NSIS compression
@@ -32,11 +32,25 @@ win:
 #   node scripts/build.js --win nsis
 mac:
   target:
-    - zip
-    - dmg
+    - target: zip
+      arch:
+        - arm64
+        - x64
+    - target: dmg
+      arch:
+        - arm64
+        - x64
   icon: resources/icon.png
   category: public.app-category.developer-tools
   darkModeSupport: true
+  # Unsigned distribution (no Apple Developer ID yet). identity:null skips
+  # code signing; hardenedRuntime MUST be false when unsigned, otherwise the
+  # app may fail to launch. Users get a Gatekeeper prompt on first open — see
+  # README "macOS 安装" for the one-time override. Flip to signing+notarization
+  # later by setting CSC_LINK/CSC_KEY_PASSWORD/APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/
+  # APPLE_TEAM_ID env vars and removing the two lines below.
+  identity: null
+  hardenedRuntime: false
   artifactName: DshCockpit-${version}-mac-${arch}.${ext}
 # Publish feed for electron-updater. Publishing uses env vars so the config
 # never needs editing: set DSH_REPO_OWNER / DSH_REPO_NAME / GH_TOKEN and run
