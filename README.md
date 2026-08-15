@@ -17,6 +17,16 @@
 
 ---
 
+## 💬 交流群
+
+欢迎扫码进群，讨论使用问题、反馈建议，或聊聊 Agent 桌面化的玩法。
+
+<div align="center">
+<img src="b5f31d11d2c10688d6dcb8dc24fc39c8.jpg" width="260" alt="DshCockpit 交流群二维码" />
+</div>
+
+---
+
 ## ✨ 为什么选择 DshCockpit？
 
 别的壳把 dsh web **装进窗口**；DshCockpit 把 dsh 变成**一台后台服务**，并在其上构建了四个其他项目都没有的差异化能力：
