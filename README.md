@@ -76,9 +76,7 @@
 > 若内置运行时被解压工具截断（极少见），应用会自动尝试从 npm registry 安装兜底，并按提示用 7-Zip 重新解压。
 
 ### 方式二：macOS 安装包（.dmg）
-从 [Releases](https://github.com/Lxiayu/DshCockpit/releases) 按机型下载对应 `.dmg`：
-- **Apple Silicon（M1/M2/M3/M4）** → `DshCockpit-<version>-mac-arm64.dmg`
-- **Intel Mac** → `DshCockpit-<version>-mac-x64.dmg`
+从 [Releases](https://github.com/Lxiayu/DshCockpit/releases) 下载 `DshCockpit-<version>-mac-universal.dmg`（Universal 包，Apple Silicon 与 Intel Mac 通用，无需选机型）。
 
 双击挂载 → 把 `DshCockpit` 拖进「应用程序」→ 在启动台/访达双击启动。
 
@@ -136,7 +134,8 @@ DshCockpit (Electron)
 - [x] Quick Ask + 定时任务 + 任务/审批通知
 - [x] 会话全文检索 + 自动备份 + 隐私声明
 - [x] 插件市场 + 三语界面 + 便携打包（内置运行时）
-- [ ] macOS 构建与签名（需 macOS 环境）
+- [x] macOS 构建（CI 自动产出 Universal 包）
+- [ ] macOS 代码签名与公证
 - [ ] 代码签名（Windows Authenticode）
 - [ ] 系统钥匙串集成（凭据加密）
 - [ ] 手机远程控制 / 更多工作流

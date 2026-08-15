@@ -1,7 +1,7 @@
-# Build & publish macOS .dmg/.zip for arm64 + x64 on tag push.
-# Unsigned for now (no Apple Developer ID yet) — users follow the README
-# "macOS 安装" one-time Gatekeeper override. Swap in signing/notarization
-# later by adding the CSC_LINK / APPLE_* secrets and dropping identity:null.
+# Build & publish a universal macOS .dmg/.zip on tag push or manual run.
+# Universal = arm64+x64 merged into one package, so only a single
+# macos-latest (Apple Silicon) runner is needed — no macos-13 Intel runner
+# queue stalls. Unsigned for now; swap in CSC_LINK / APPLE_* secrets later.
 name: release-mac
 
 on:
@@ -15,17 +15,8 @@ permissions:
 
 jobs:
   build:
-    name: build (${{ matrix.arch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Native builds per arch — cross-compiling x64 on arm64 is flaky.
-          - os: macos-latest   # Apple Silicon runner
-            arch: arm64
-          - os: macos-13        # last Intel runner
-            arch: x64
-    runs-on: ${{ matrix.os }}
+    name: build universal mac
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -36,18 +27,26 @@ jobs:
 
       - run: npm install
 
-      # Seed the bundled runtime so first launch needs no download.
+      # Reuse the ~256MB bundled dsh runtime across runs when the seed script
+      # is unchanged — prepare-runtime.js skips the download if vendor/runtime
+      # already exists, cutting CI time sharply on repeat runs.
+      - name: Cache bundled runtime
+        uses: actions/cache@v4
+        with:
+          path: vendor/runtime
+          key: runtime-${{ hashFiles('scripts/prepare-runtime.js') }}
+
       - run: node scripts/prepare-runtime.js
 
-      - run: node scripts/build.js --mac --${{ matrix.arch }} --publish never
+      - run: node scripts/build.js --mac --universal --publish never
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mac-${{ matrix.arch }}
+          name: mac-universal
           if-no-files-found: error
           path: |
-            dist/DshCockpit-*-mac-${{ matrix.arch }}.dmg
-            dist/DshCockpit-*-mac-${{ matrix.arch }}.zip
+            dist/DshCockpit-*-mac-universal.dmg
+            dist/DshCockpit-*-mac-universal.zip
 
   release:
     name: publish to GitHub Releases
@@ -59,11 +58,12 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          name: mac-universal
           path: artifacts
 
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            artifacts/mac-arm64/*
-            artifacts/mac-x64/*
+            artifacts/DshCockpit-*-mac-universal.dmg
+            artifacts/DshCockpit-*-mac-universal.zip
