@@ -70,6 +70,8 @@ let searchWindow = null;
 let scheduler = null;
 let loadingWindow = null;
 let pluginMarketWindow = null;
+let guidedInstallInProgress = false;
+let mainWindowPending = false; // guided first-run: runtime booting, main window not open yet
 const scheduledRunning = new Set();
 const budgetNotified = new Set();
 const materializing = new Set();
@@ -490,6 +492,7 @@ function waitForHealth(url, timeoutMs = HEALTH_TIMEOUT_MS) {
 // windows
 // ---------------------------------------------------------------------------
 function createWindow(url) {
+  mainWindowPending = false; // the main window is (about to be) open
   const saved = windowState.load(windowStateFile());
   const bounds = safeBounds(saved) || { width: 1280, height: 840 };
   mainWindow = new BrowserWindow({
@@ -571,6 +574,7 @@ function createSettingsWindow() {
 }
 
 function iconPath() {
+  if (app.isPackaged) return path.join(process.resourcesPath, 'icon.png');
   return path.join(__dirname, '..', 'resources', 'icon.png');
 }
 
@@ -700,7 +704,7 @@ function buildAppMenu() {
 // update pipeline
 // ---------------------------------------------------------------------------
 async function runUpdateCheck(notifyUser) {
-  if (updateInFlight) return { ok: false, reason: 'already running' };
+  if (updateInFlight || guidedInstallInProgress) return { ok: false, reason: 'already running' };
   updateInFlight = true;
   try {
     const report = await manager.checkForUpdate();
@@ -1263,11 +1267,26 @@ function findBundledRuntime() {
     const root = path.join(process.resourcesPath, 'runtime');
     for (const d of fs.readdirSync(root, { withFileTypes: true })) {
       if (!d.isDirectory()) continue;
-      const binJs = path.join(root, d.name, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
-      if (fs.existsSync(binJs)) return { version: d.name, path: path.join(root, d.name) };
+      const seed = path.join(root, d.name);
+      const binJs = path.join(seed, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
+      let size = 0;
+      try { size = fs.statSync(binJs).size; } catch { continue; }
+      if (size === 0) continue; // truncated extraction leaves zero-byte files
+      if (!bundledVersionMatches(seed, d.name)) continue; // tampered/truncated seed
+      return { version: d.name, path: seed };
     }
   } catch { /* not packaged or no seed */ }
   return null;
+}
+
+/** The seed's package.json version must agree with its directory name. */
+function bundledVersionMatches(seed, dirName) {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(seed, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), 'utf8'));
+    return pkg.version === dirName;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1277,36 +1296,40 @@ function findBundledRuntime() {
 function registerBundledRuntime() {
   const bundle = findBundledRuntime();
   if (!bundle) return null;
-  const existing = manager.entry(bundle.version);
-  const existingBin = existing ? path.join(existing.path, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js') : null;
-  if (existing && existingBin && fs.existsSync(existingBin)) return existing; // valid entry, keep it
-  // stale/moved entry: replace it with the current bundle location
-  const stale = manager.state.installed.findIndex((e) => e.version === bundle.version && e.source === 'bundled');
-  if (stale !== -1) manager.state.installed.splice(stale, 1);
-  if (!manager.state.activeVersion) manager.state.activeVersion = bundle.version;
-  manager.state.installed.push({ version: bundle.version, path: bundle.path, source: 'bundled' });
-  manager.saveState();
-  log(`[shell] using bundled runtime ${bundle.version} at ${bundle.path} (replaced stale entry)`);
-  return manager.entry(bundle.version);
+  const entry = manager.registerBundled(bundle);
+  if (entry) log(`[shell] using bundled runtime ${entry.version} at ${entry.path}`);
+  return entry;
 }
 
 async function ensureRuntimeWithGuide() {
   if (ensureRuntimeRegistered()) return true;
   // brand-new machine with NO dsh and NO usable bundle: registry install (rare)
-  createLoadingWindow();
+  log('[shell] guided first-run: no usable runtime found, installing from the registry');
+  try {
+    createLoadingWindow();
+    log('[shell] guided first-run: loading window up');
+  } catch (err) {
+    // A window failure must not abort the install attempt (M14)
+    log('[shell] guided first-run: loading window failed: ' + err.message);
+  }
   setLoading(hasBrokenBundle()
     ? t(lang(), 'loading.bundleBroken')
     : t(lang(), 'loading.step1'));
   try {
+    guidedInstallInProgress = true;
+    log('[shell] guided first-run: checking registry for target version');
     const check = await manager.checkForUpdate();
+    log('[shell] guided first-run: check ok=' + check.ok + ' available=' + check.available + (check.target ? ' target=' + check.target : ''));
     const target = check.available ? check.target : (manager.getInfo().activeVersion || null);
     if (!target) throw new Error(t(lang(), 'loading.noVersion'));
     setLoading(t(lang(), 'loading.step2', { v: target }));
+    log('[shell] guided first-run: installing ' + target + ' (this can take a while)');
     const entry = await manager.installVersion(target);
     setLoading(t(lang(), 'loading.step3'));
     const smoke = await manager.smokeTest(entry);
     if (!smoke.ok) throw new Error(smoke.reason || `smoke exit ${smoke.exitCode}`);
     await manager.activate(target);
+    log(`[shell] guided first-run: installed runtime ${target} from the registry`);
     setLoading(t(lang(), 'loading.done'));
     setTimeout(() => { if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.close(); }, 800);
     return true;
@@ -1314,6 +1337,8 @@ async function ensureRuntimeWithGuide() {
     log(`[shell] guided first-run failed: ${err.message}`);
     setLoading(t(lang(), 'loading.failed', { msg: err.message }));
     return false;
+  } finally {
+    guidedInstallInProgress = false;
   }
 }
 
@@ -1572,6 +1597,10 @@ if (!gotLock) {
     if (quitting) return;
     if (runtimeReady) {
       seedInstalledPlugins();
+      // The guided flow may have just closed its loading window; with no main
+      // window open yet, window-all-closed would otherwise quit the app while
+      // the runtime is still booting (M15). Hold quit until the window opens.
+      mainWindowPending = true;
       spawnRuntime();
     }
     registerQuickAskHotkey();
@@ -1603,6 +1632,7 @@ if (!gotLock) {
   });
 
   app.on('window-all-closed', () => {
+    if (mainWindowPending) return; // runtime still booting; the main window opens soon
     if (noTray || quitting || !settings.get().trayOnClose) app.quit();
   });
 

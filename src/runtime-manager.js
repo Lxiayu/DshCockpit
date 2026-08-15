@@ -28,6 +28,7 @@ class RuntimeManager {
     this.settings = settings; // SettingsStore (call .get()/.effective() when needed)
     this.log = log || (() => {});
     this.resolveNodeBin = resolveNodeBin; // () => path string
+    this._installLocks = new Map(); // per-version in-flight install promises (dedupe)
     this.state = { activeVersion: null, previousVersion: null, pendingVersion: null, installed: [], broken: [], knownIssues: {}, lastSnapshot: null };
     this.loadState();
   }
@@ -88,6 +89,13 @@ class RuntimeManager {
     return this.state.installed.find((e) => e.version === version) || null;
   }
 
+  /** entry() whose lib/bin.js actually exists on disk, or null. */
+  liveEntry(version) {
+    const e = this.entry(version);
+    if (!e) return null;
+    return fs.existsSync(path.join(e.path, 'node_modules', PACKAGE, 'lib', 'bin.js')) ? e : null;
+  }
+
   /** Whether the active version is served from an owned dir (managed or bundled seed). */
   isActiveManaged() {
     const e = this.state.activeVersion ? this.entry(this.state.activeVersion) : null;
@@ -106,6 +114,62 @@ class RuntimeManager {
     if (!this.state.activeVersion) this.state.activeVersion = version;
     this.saveState();
     return this.entry(version);
+  }
+
+  /**
+   * Register the bundled installer seed (resources/runtime/<version>) as an
+   * entry — run in place, zero copy, zero network.
+   *
+   * - A live managed copy keeps priority (entry() prefers managed).
+   * - Stale bundled/bootstrap entries for the same version are replaced: a
+   *   portable app may move to a new directory, leaving old absolute paths in
+   *   runtime-state.json (the 'cannot find lib/bin.js' bug).
+   * - If the active version currently has no live entry (dropped by
+   *   revalidate() / never installed), the active pointer is repointed to the
+   *   bundled version so boot can proceed.
+   *
+   * Returns the resulting entry, or null when the bundle is unusable.
+   */
+  registerBundled(bundle) {
+    if (!bundle || !bundle.version || !bundle.path) return null;
+    const bin = path.join(bundle.path, 'node_modules', PACKAGE, 'lib', 'bin.js');
+    if (!fs.existsSync(bin)) return null;
+    const existing = this.entry(bundle.version);
+    if (existing) {
+      const existingBin = path.join(existing.path, 'node_modules', PACKAGE, 'lib', 'bin.js');
+      if (existing.source === 'managed' && fs.existsSync(existingBin)) {
+        return existing; // a live managed copy wins (updatable, stable in userData)
+      }
+      if (existing.source === 'bundled' && existing.path === bundle.path && fs.existsSync(existingBin)) {
+        return existing; // already registered at this very bundle path — no churn
+      }
+      // stale bundled (app moved) or bootstrap reference: replace below
+    }
+    // Drop stale duplicates for this version (moved app dir / old bootstrap
+    // reference), keeping any live managed copy.
+    const before = this.state.installed.length;
+    this.state.installed = this.state.installed.filter((e) => {
+      if (e.version !== bundle.version) return true;
+      if (e.source === 'managed') {
+        return fs.existsSync(path.join(e.path, 'node_modules', PACKAGE, 'lib', 'bin.js'));
+      }
+      return false;
+    });
+    if (this.state.installed.length !== before) {
+      const reason = existing && existing.path !== bundle.path
+        ? ' (was ' + existing.path + ')'
+        : '';
+      this.log('[runtime] replaced entry for ' + bundle.version + ' with bundled seed' + reason);
+    }
+    // The active pointer must have a LIVE entry (e.g. the previous install's
+    // version was dropped, or points at a moved/deleted path); point it at the
+    // bundle so boot can proceed.
+    if (!this.state.activeVersion || !this.liveEntry(this.state.activeVersion)) {
+      this.state.activeVersion = bundle.version;
+    }
+    this.state.installed.push({ version: bundle.version, path: bundle.path, source: 'bundled' });
+    this.saveState();
+    return this.entry(bundle.version);
   }
 
   // ------------------------------------------------------------- discovery
@@ -134,13 +198,24 @@ class RuntimeManager {
     const pacote = require('pacote');
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 30_000);
+    // Hard deadline: pacote may not honor the AbortSignal, so a dead/unroutable
+    // network must not hang the guided first-run (or the 15s update check)
+    // forever. The losing promise is left to settle on its own.
+    const deadline = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('registry check timed out')), 40_000);
+    });
     try {
-      return await pacote.packument(PACKAGE, {
-        registry,
-        cache: this.cacheDir,
-        fullMetadata: false,
-        signal: ac.signal,
-      });
+      const p = await Promise.race([
+        pacote.packument(PACKAGE, {
+          registry,
+          cache: this.cacheDir,
+          fullMetadata: false,
+          signal: ac.signal,
+        }),
+        deadline,
+      ]);
+      this.log('[runtime] registry check ok (versions=' + Object.keys(p.versions || {}).length + ')');
+      return p;
     } finally {
       clearTimeout(timer);
     }
@@ -179,6 +254,15 @@ class RuntimeManager {
       this.log(`[runtime] version ${version} already installed (managed)`);
       return existingManaged;
     }
+    // Dedupe concurrent installs of the same version (guided first-run vs the
+    // delayed background update check) so arborist never reifies one dir twice.
+    if (this._installLocks.has(version)) return this._installLocks.get(version);
+    const promise = this._doInstall(version).finally(() => this._installLocks.delete(version));
+    this._installLocks.set(version, promise);
+    return promise;
+  }
+
+  async _doInstall(version) {
     const targetDir = path.join(this.runtimeDir, version);
     fs.mkdirSync(targetDir, { recursive: true });
     fs.writeFileSync(
@@ -240,6 +324,38 @@ class RuntimeManager {
 
   // --------------------------------------------------------------- switch
   /**
+   * Copy a tree, pruning node_modules directories.
+   *
+   * DSH_HOME/profiles/node_modules is a junction farm into the ACTIVE
+   * runtime's node_modules (dsh heals it on every start; see DESIGN.md §10).
+   * A naive recursive copy would follow those junctions and duplicate the
+   * whole runtime tree (tens of thousands of files), blocking the main
+   * process. Snapshots only need the profile's own files; dsh rebuilds the
+   * junction farm automatically, so node_modules is deliberately skipped.
+   * Symlinks are copied as links (never dereferenced).
+   */
+  copyTreePruningNodeModules(src, dest) {
+    fs.mkdirSync(dest, { recursive: true });
+    for (const e of fs.readdirSync(src, { withFileTypes: true })) {
+      if (e.name === 'node_modules') continue;
+      const s = path.join(src, e.name);
+      const d = path.join(dest, e.name);
+      if (e.isDirectory()) {
+        this.copyTreePruningNodeModules(s, d);
+      } else if (e.isFile()) {
+        try { fs.copyFileSync(s, d); } catch { /* best effort */ }
+      } else if (e.isSymbolicLink()) {
+        // copy the link itself (never dereference junctions into the runtime)
+        try {
+          const target = fs.readlinkSync(s);
+          try { fs.symlinkSync(target, d, 'junction'); }
+          catch { fs.symlinkSync(target, d); }
+        } catch { /* best effort */ }
+      }
+    }
+  }
+
+  /**
    * Snapshot DSH_HOME key config before activating a different version.
    * M4: credentials are deliberately EXCLUDED (plaintext key copies are a
    * liability; backups/snapshots never carry them). Old snapshots are pruned.
@@ -253,8 +369,10 @@ class RuntimeManager {
     fs.mkdirSync(dest, { recursive: true });
     for (const key of keys) {
       const src = path.join(dshHome, key);
+      if (!fs.existsSync(src)) continue;
       try {
-        fs.cpSync(src, path.join(dest, key), { recursive: true });
+        if (fs.statSync(src).isDirectory()) this.copyTreePruningNodeModules(src, path.join(dest, key));
+        else fs.copyFileSync(src, path.join(dest, key));
       } catch { /* key may not exist */ }
     }
     // prune old snapshots (keep the 3 newest)
@@ -282,7 +400,10 @@ class RuntimeManager {
     for (const key of ['settings.yaml', 'profiles']) {
       const src = path.join(snap, key);
       if (fs.existsSync(src)) {
-        try { fs.cpSync(src, path.join(dshHome, key), { recursive: true }); } catch (err) { this.log(`[runtime] snapshot restore ${key} failed: ${err.message}`); }
+        try {
+          if (fs.statSync(src).isDirectory()) this.copyTreePruningNodeModules(src, path.join(dshHome, key));
+          else fs.copyFileSync(src, path.join(dshHome, key));
+        } catch (err) { this.log(`[runtime] snapshot restore ${key} failed: ${err.message}`); }
       }
     }
     this.log(`[runtime] DSH_HOME restored from ${snap}`);

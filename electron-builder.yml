@@ -20,6 +20,8 @@ compression: normal
 extraResources:
   - from: vendor/runtime
     to: runtime
+  - from: resources/icon.png
+    to: icon.png
 win:
   target:
     - target: zip

@@ -72,7 +72,8 @@
 
 ### 方式一：Windows 便携版
 从 [Releases](https://github.com/Lxiayu/DshCockpit/releases) 下载 `DshCockpit-<version>-win-x64.zip` → **用 7-Zip/WinRAR 解压** → 双击根目录的 `DshCockpit.exe`。
-> 首次启动约 **9 秒开窗**，内置运行时，无需安装 Node/dsh、无需联网下载。后续版本自动更新。
+> **约 9 秒开窗**（首次启动若 DSH_HOME 尚未初始化会多花约 20–30 秒建立 profile），内置运行时，无需安装 Node/dsh、无需联网下载。后续版本自动更新。
+> 若内置运行时被解压工具截断（极少见），应用会自动尝试从 npm registry 安装兜底，并按提示用 7-Zip 重新解压。
 
 ### 方式二：macOS 安装包（.dmg）
 从 [Releases](https://github.com/Lxiayu/DshCockpit/releases) 按机型下载对应 `.dmg`：
