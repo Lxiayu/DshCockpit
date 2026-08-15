@@ -644,7 +644,21 @@ function updateTray() {
 
 function createTray() {
   if (noTray) return;
-  tray = new Tray(require('electron').nativeImage.createFromPath(iconPath()).resize({ width: 16, height: 16 }));
+  const nativeImage = require('electron').nativeImage;
+  const baseIcon = nativeImage.createFromPath(iconPath());
+  if (process.platform === 'darwin') {
+    // macOS menu bar icon. The bundled icon.png is a 512x512 RGBA app icon
+    // with an opaque background — using it as a template image (Electron's
+    // default for small icons) renders it as a solid block because the whole
+    // alpha channel is fully opaque. Show it as a colored icon instead:
+    // resize to 22x22 (the standard menubar size) and explicitly opt out of
+    // template mode so macOS shows the original artwork.
+    const resized = baseIcon.resize({ width: 22, height: 22 });
+    resized.setTemplateImage(false);
+    tray = new Tray(resized);
+  } else {
+    tray = new Tray(baseIcon.resize({ width: 16, height: 16 }));
+  }
   tray.setToolTip(APP_NAME);
   tray.on('click', () => showMain());
   updateTray();
@@ -1683,6 +1697,22 @@ if (!gotLock) {
   app.on('window-all-closed', () => {
     if (mainWindowPending) return; // runtime still booting; the main window opens soon
     if (noTray || quitting || !settings.get().trayOnClose) app.quit();
+  });
+
+  // macOS: clicked the dock icon (or activated via Spotlight/Launchpad) while
+  // the app is still running. Without this, hiding the main window on close
+  // (trayOnClose=true) leaves the user unable to bring it back via the dock —
+  // they had to quit and relaunch. Re-show the hidden window, or recreate it
+  // if it was actually destroyed.
+  app.on('activate', () => {
+    if (quitting) return;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (!mainWindow.isVisible()) mainWindow.show();
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    } else if (runtimeUrl) {
+      createWindow(runtimeUrl);
+    }
   });
 
   app.on('before-quit', () => {
