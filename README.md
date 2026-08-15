@@ -86,9 +86,11 @@
 > 若内置运行时被解压工具截断（极少见），应用会自动尝试从 npm registry 安装兜底，并按提示用 7-Zip 重新解压。
 
 ### 方式二：macOS 安装包（.dmg）
-从 [Releases](https://github.com/Lxiayu/DshCockpit/releases) 下载 `DshCockpit-<version>-mac-universal.dmg`（Universal 包，Apple Silicon 与 Intel Mac 通用，无需选机型）。
+从 [Releases](https://github.com/Lxiayu/DshCockpit/releases) 下载 `DshCockpit-<version>-mac-arm64.dmg`（仅支持 Apple Silicon：M1/M2/M3/M4）。
 
 双击挂载 → 把 `DshCockpit` 拖进「应用程序」→ 在启动台/访达双击启动。
+
+> Intel Mac 暂不支持：内置 dsh 运行时的图像模块（sharp）为 arm64 专用二进制，后续按需求再单独提供 x64 包。
 
 > ⚠️ **首次打开会提示「已损坏」或「无法验证开发者」**：当前 macOS 包**尚未签名公证**（暂无 Apple Developer 证书），这是 Gatekeeper 的正常拦截，应用本身没坏。任选其一放行即可：
 > - **图形界面**：先双击一次（弹出警告点取消）→「系统设置 → 隐私与安全性」→ 滚到底部点「仍要打开」→ 再点「打开」。

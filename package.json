@@ -14,6 +14,7 @@
     "publish:mac": "node scripts/build.js --mac --publish always",
     "test": "node --test"
   },
+  "author": "Lxiayu",
   "license": "MIT",
   "devDependencies": {
     "electron": "^37.0.0",

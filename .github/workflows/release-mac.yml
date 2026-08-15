@@ -1,7 +1,8 @@
-# Build & publish a universal macOS .dmg/.zip on tag push or manual run.
-# Universal = arm64+x64 merged into one package, so only a single
-# macos-latest (Apple Silicon) runner is needed — no macos-13 Intel runner
-# queue stalls. Unsigned for now; swap in CSC_LINK / APPLE_* secrets later.
+# Build & publish an arm64 macOS .dmg/.zip on tag push or manual run.
+# arm64-only: the bundled dsh runtime ships arch-specific native modules
+# (sharp), so universal merge fails. Single macos-latest (Apple Silicon)
+# runner — no Intel runner queue stalls. Unsigned for now; swap in
+# CSC_LINK / APPLE_* secrets later.
 name: release-mac
 
 on:
@@ -15,7 +16,7 @@ permissions:
 
 jobs:
   build:
-    name: build universal mac
+    name: build arm64 mac
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,15 +39,15 @@ jobs:
 
       - run: node scripts/prepare-runtime.js
 
-      - run: node scripts/build.js --mac --universal --publish never
+      - run: node scripts/build.js --mac --arm64 --publish never
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mac-universal
+          name: mac-arm64
           if-no-files-found: error
           path: |
-            dist/DshCockpit-*-mac-universal.dmg
-            dist/DshCockpit-*-mac-universal.zip
+            dist/DshCockpit-*-mac-arm64.dmg
+            dist/DshCockpit-*-mac-arm64.zip
 
   release:
     name: publish to GitHub Releases
@@ -58,12 +59,12 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: mac-universal
+          name: mac-arm64
           path: artifacts
 
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            artifacts/DshCockpit-*-mac-universal.dmg
-            artifacts/DshCockpit-*-mac-universal.zip
+            artifacts/DshCockpit-*-mac-arm64.dmg
+            artifacts/DshCockpit-*-mac-arm64.zip

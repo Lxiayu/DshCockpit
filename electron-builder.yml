@@ -34,16 +34,17 @@ win:
 #   node scripts/build.js --win nsis
 mac:
   target:
-    # Universal single package (arm64+x64 merged). One package covers all Macs,
-    # so CI only needs one macos-latest (Apple Silicon) runner — no Intel
-    # runner (macos-13) queue stalls. No native modules in this app, so the
-    # universal merge is just electron binaries (stable, ~330MB dmg).
+    # arm64 only. The bundled dsh runtime ships arch-specific native modules
+    # (sharp), so a universal merge fails — sharp-darwin-arm64 ends up present
+    # in both the x64 and arm64 builds. Intel Mac support needs a separate x64
+    # runtime seed on a macos-13 runner (heavy queue) — deferred until real
+    # demand appears. Apple Silicon covers ~all current Mac users.
     - target: zip
       arch:
-        - universal
+        - arm64
     - target: dmg
       arch:
-        - universal
+        - arm64
   icon: resources/icon.png
   category: public.app-category.developer-tools
   darkModeSupport: true
