@@ -34,14 +34,16 @@ win:
 #   node scripts/build.js --win nsis
 mac:
   target:
+    # Universal single package (arm64+x64 merged). One package covers all Macs,
+    # so CI only needs one macos-latest (Apple Silicon) runner — no Intel
+    # runner (macos-13) queue stalls. No native modules in this app, so the
+    # universal merge is just electron binaries (stable, ~330MB dmg).
     - target: zip
       arch:
-        - arm64
-        - x64
+        - universal
     - target: dmg
       arch:
-        - arm64
-        - x64
+        - universal
   icon: resources/icon.png
   category: public.app-category.developer-tools
   darkModeSupport: true
