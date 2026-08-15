@@ -86,11 +86,11 @@
 > 若内置运行时被解压工具截断（极少见），应用会自动尝试从 npm registry 安装兜底，并按提示用 7-Zip 重新解压。
 
 ### 方式二：macOS 安装包（.dmg）
-从 [Releases](https://github.com/Lxiayu/DshCockpit/releases) 下载 `DshCockpit-<version>-mac-arm64.dmg`（仅支持 Apple Silicon：M1/M2/M3/M4）。
+从 [Releases](https://github.com/Lxiayu/DshCockpit/releases) 下载对应架构的 `.dmg`：
+- **Apple Silicon（M1/M2/M3/M4）**：`DshCockpit-<version>-mac-arm64.dmg`
+- **Intel Mac**：`DshCockpit-<version>-mac-x64.dmg`
 
 双击挂载 → 把 `DshCockpit` 拖进「应用程序」→ 在启动台/访达双击启动。
-
-> Intel Mac 暂不支持：内置 dsh 运行时的图像模块（sharp）为 arm64 专用二进制，后续按需求再单独提供 x64 包。
 
 > ⚠️ **首次打开会提示「已损坏」或「无法验证开发者」**：当前 macOS 包**尚未签名公证**（暂无 Apple Developer 证书），这是 Gatekeeper 的正常拦截，应用本身没坏。任选其一放行即可：
 > - **图形界面**：先双击一次（弹出警告点取消）→「系统设置 → 隐私与安全性」→ 滚到底部点「仍要打开」→ 再点「打开」。
@@ -119,7 +119,16 @@ npm start
 
 ## 📸 界面预览
 
-*（截图待补充：主窗口 / 成本中心 / 插件市场 / Quick Ask / 会话搜索）*
+<div align="center">
+
+<img src="photo/preview-1.png" width="720" alt="DshCockpit 主界面" />
+
+<table><tr>
+<td><img src="photo/preview-2.png" width="280" alt="DshCockpit 功能预览" /></td>
+<td><img src="photo/preview-3.png" width="280" alt="DshCockpit 功能预览" /></td>
+</tr></table>
+
+</div>
 
 ---
 
@@ -146,7 +155,7 @@ DshCockpit (Electron)
 - [x] Quick Ask + 定时任务 + 任务/审批通知
 - [x] 会话全文检索 + 自动备份 + 隐私声明
 - [x] 插件市场 + 三语界面 + 便携打包（内置运行时）
-- [x] macOS 构建（CI 自动产出 Universal 包）
+- [x] macOS 构建（CI 自动产出 arm64 + x64 包）
 - [ ] macOS 代码签名与公证
 - [ ] 代码签名（Windows Authenticode）
 - [ ] 系统钥匙串集成（凭据加密）
