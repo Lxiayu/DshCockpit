@@ -5,80 +5,206 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
 <title>搜索会话</title>
 <style>
-  * { box-sizing: border-box; }
-  body { margin: 0; background: #14171c; color: #e6edf3;
-    font: 13px/1.5 "Segoe UI","Microsoft YaHei",system-ui,sans-serif; }
-  #box { padding: 12px; }
-  #q { width: 100%; background: #1c2128; color: #e6edf3; border: 1px solid #2d333b;
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body { background: #14171c; color: #e6edf3;
+    font: 13px/1.5 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    display: flex; flex-direction: column; overflow: hidden; }
+
+  /* top bar: input + close button */
+  #topbar { display: flex; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #2d333b; }
+  #q { flex: 1; background: #1c2128; color: #e6edf3; border: 1px solid #2d333b;
     border-radius: 8px; padding: 8px 10px; font: inherit; outline: none; }
   #q:focus { border-color: #2563eb; }
-  #results { margin-top: 8px; max-height: 320px; overflow-y: auto; }
-  .item { padding: 8px 4px; border-bottom: 1px solid #2d333b; overflow: hidden; }
+  #close { width: 30px; height: 30px; flex-shrink: 0; background: #2d333b; color: #8b949e;
+    border: 0; border-radius: 8px; cursor: pointer; font-size: 16px; line-height: 1;
+    display: flex; align-items: center; justify-content: center; }
+  #close:hover { background: #f85149; color: #fff; }
+
+  /* results */
+  #results { flex: 1; overflow-y: auto; padding: 4px 12px; }
+  .item { padding: 8px 4px; border-bottom: 1px solid #2d333b; overflow: hidden; cursor: pointer; border-radius: 4px; }
+  .item:hover { background: rgba(37,99,235,.08); }
+  .item.active { background: rgba(37,99,235,.16); }
   .item .snip { color: #e6edf3; word-break: break-all; }
-  .item .meta { color: #8b949e; font-size: 11px; margin-top: 3px; }
-  .item button { float: right; background: #2d333b; color: #e6edf3; border: 0;
+  .item .snip mark { background: rgba(210,153,34,.3); color: #d29922; border-radius: 2px; padding: 0 1px; }
+  .item .meta { color: #8b949e; font-size: 11px; margin-top: 3px; display: flex; align-items: center; gap: 8px; }
+  .item .copy-btn { margin-left: auto; background: #2d333b; color: #e6edf3; border: 0;
     border-radius: 5px; padding: 2px 8px; cursor: pointer; font-size: 11px; }
-  #empty { color: #8b949e; padding: 8px 0; }
+  .item .copy-btn:hover { background: #3d444b; }
+
+  #status { color: #8b949e; padding: 12px 4px; font-size: 12px; }
+  #status.loading::before { content: ''; display: inline-block; width: 10px; height: 10px;
+    margin-right: 6px; border: 2px solid #2d333b; border-top-color: #2563eb; border-radius: 50%;
+    animation: spin .7s linear infinite; vertical-align: -1px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .hint { color: #6e7681; font-size: 11px; padding: 6px 12px; border-top: 1px solid #2d333b; }
+  kbd { background: #2d333b; border-radius: 3px; padding: 0 4px; font-size: 10px; }
 </style>
 </head>
 <body>
-<div id="box">
-  <input id="q" placeholder="" />
-  <div id="results"></div>
+<div id="topbar">
+  <input id="q" placeholder="" autocomplete="off" spellcheck="false" />
+  <button id="close" title="关闭 (Esc)">×</button>
+</div>
+<div id="results"></div>
+<div class="hint">
+  <kbd>↑</kbd><kbd>↓</kbd> 选择 · <kbd>Enter</kbd> 复制 · <kbd>Esc</kbd> 关闭
 </div>
 <script>
   const qEl = document.getElementById('q');
   const resEl = document.getElementById('results');
-  const L = { zh: { ph: '搜索历史会话（Enter）…', empty: '无结果', copy: '复制', copied: '已复制' },
-              en: { ph: 'Search session history (Enter)…', empty: 'No results', copy: 'Copy', copied: 'Copied' } };
+  const closeBtn = document.getElementById('close');
+  const L = {
+    zh: { ph: '搜索历史会话…', empty: '无结果', loading: '搜索中…', copy: '复制', copied: '已复制', hint: '处匹配' },
+    en: { ph: 'Search session history…', empty: 'No results', loading: 'Searching…', copy: 'Copy', copied: 'Copied', hint: 'matches' },
+  };
   let lang = 'zh';
   (async () => {
     try { const s = await window.dshSearch.getSettings(); lang = s.resolvedLanguage === 'en' ? 'en' : 'zh'; } catch {}
     qEl.placeholder = L[lang].ph;
     qEl.focus();
   })();
+
+  // ---- query state: cancelable + debounced ----
   let timer = null;
-  qEl.addEventListener('keydown', async (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const q = qEl.value.trim();
-      if (!q) return;
-      const r = await window.dshSearch.query(q);
-      render(r);
-    } else if (e.key === 'Escape') {
-      window.dshSearch.close();
+  let querySeq = 0;        // monotonically increasing query id
+  let activeIdx = -1;      // keyboard-selected result index
+  let lastResults = [];
+
+  function setStatus(text, loading) {
+    resEl.innerHTML = '';
+    activeIdx = -1;
+    if (text === null) return;
+    const d = document.createElement('div');
+    d.id = 'status';
+    if (loading) d.className = 'loading';
+    d.textContent = text;
+    resEl.appendChild(d);
+  }
+
+  async function runQuery(q) {
+    const seq = ++querySeq;
+    setStatus(L[lang].loading, true);
+    let r;
+    try {
+      r = await window.dshSearch.query(q);
+    } catch (e) {
+      if (seq === querySeq) setStatus(String(e.message || e), false);
+      return;
     }
-  });
+    // a newer query superseded this one — discard
+    if (seq !== querySeq) return;
+    render(r);
+  }
+
   qEl.addEventListener('input', () => {
     clearTimeout(timer);
     const q = qEl.value.trim();
-    if (!q) { resEl.innerHTML = ''; return; }
-    timer = setTimeout(async () => render(await window.dshSearch.query(q)), 400);
+    if (!q) { setStatus(null); return; }
+    // 600ms debounce: balances responsiveness vs AV-scanned log reads on Windows
+    timer = setTimeout(() => runQuery(q), 600);
   });
-  function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
-  function render(results) {
-    resEl.innerHTML = '';
-    if (!results || !results.length) {
-      const d = document.createElement('div');
-      d.id = 'empty';
-      d.textContent = L[lang].empty;
-      resEl.appendChild(d);
+
+  qEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); window.dshSearch.close(); return; }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      // Enter on a selected item copies its snippet; otherwise no-op (query already runs on input)
+      if (activeIdx >= 0 && lastResults[activeIdx]) {
+        copySnippet(lastResults[activeIdx].snippet);
+      }
       return;
     }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!lastResults.length) return;
+      const dir = e.key === 'ArrowDown' ? 1 : -1;
+      activeIdx = (activeIdx + dir + lastResults.length) % lastResults.length;
+      updateActive();
+      // scroll into view
+      const el = resEl.children[activeIdx + 1]; // +1 because index 0 might be status... but we render items only
+      const items = resEl.querySelectorAll('.item');
+      if (items[activeIdx]) items[activeIdx].scrollIntoView({ block: 'nearest' });
+    }
+  });
+
+  closeBtn.addEventListener('click', () => window.dshSearch.close());
+
+  // click outside the topbar closes (quick dismiss)
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#topbar') && !e.target.closest('.item')) window.dshSearch.close();
+  });
+
+  function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+
+  /** Highlight the query substring in result text. */
+  function highlight(text, q) {
+    const lower = text.toLowerCase();
+    const ql = q.toLowerCase();
+    const out = [];
+    let i = 0;
+    while (i < text.length) {
+      const idx = lower.indexOf(ql, i);
+      if (idx === -1) { out.push(esc(text.slice(i))); break; }
+      if (idx > i) out.push(esc(text.slice(i, idx)));
+      out.push('<mark>' + esc(text.slice(idx, idx + q.length)) + '</mark>');
+      i = idx + q.length;
+    }
+    return out.join('');
+  }
+
+  function copySnippet(text) {
+    navigator.clipboard.writeText(text).then(() => {
+      // brief feedback on the active item's copy button
+      const items = resEl.querySelectorAll('.item');
+      const btn = items[activeIdx] && items[activeIdx].querySelector('.copy-btn');
+      if (btn) {
+        const old = btn.textContent;
+        btn.textContent = L[lang].copied;
+        setTimeout(() => { btn.textContent = old; }, 1200);
+      }
+    }).catch(() => {});
+  }
+
+  function updateActive() {
+    resEl.querySelectorAll('.item').forEach((el, i) => {
+      el.classList.toggle('active', i === activeIdx);
+    });
+  }
+
+  function render(results) {
+    resEl.innerHTML = '';
+    activeIdx = -1;
+    if (!results || !results.length) {
+      setStatus(L[lang].empty, false);
+      return;
+    }
+    lastResults = results;
+    const q = qEl.value.trim();
     for (const r of results) {
       const item = document.createElement('div');
       item.className = 'item';
       const date = new Date(r.mtimeMs).toLocaleString();
-      const meta = `${r.cwd || '(unknown)'} · ${date} · ${r.matchCount} 处匹配`;
+      const metaText = `${r.cwd || '(unknown)'} · ${date} · ${r.matchCount} ${L[lang].hint}`;
       const btn = document.createElement('button');
+      btn.className = 'copy-btn';
       btn.textContent = L[lang].copy;
-      btn.addEventListener('click', async () => {
-        await navigator.clipboard.writeText(r.snippet);
-        btn.textContent = L[lang].copied;
-        setTimeout(() => { btn.textContent = L[lang].copy; }, 1200);
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        copySnippet(r.snippet);
       });
-      item.innerHTML = `<div class="snip">${esc(r.snippet)}</div><div class="meta">${esc(meta)}</div>`;
+      // highlight query in snippet
+      item.innerHTML = `<div class="snip">${highlight(r.snippet, q)}</div><div class="meta">${esc(metaText)}</div>`;
       item.insertBefore(btn, item.firstChild);
+      // click item copies its snippet
+      item.addEventListener('click', () => {
+        const idx = Array.from(resEl.querySelectorAll('.item')).indexOf(item);
+        activeIdx = idx;
+        updateActive();
+        copySnippet(r.snippet);
+      });
       resEl.appendChild(item);
     }
   }

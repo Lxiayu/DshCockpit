@@ -16,7 +16,7 @@ test('extractText pulls text from message blocks', () => {
   assert.ok(t.includes('fs_read'));
 });
 
-test('searchSessions finds substring across sessions', () => {
+test('searchSessions finds substring across sessions', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-search-'));
   const dir = path.join(home, 'sessions', 'proj', 'sess1');
   fs.mkdirSync(dir, { recursive: true });
@@ -24,19 +24,19 @@ test('searchSessions finds substring across sessions', () => {
   const ev = JSON.stringify({ type: 'assistant/message', data: { blocks: [{ type: 'text', text: 'the quick brown fox jumps over the lazy dog' }] } });
   fs.writeFileSync(path.join(dir, 'session.jsonl'), [header, ev].join('\n') + '\n');
 
-  const results = searchSessions(home, 'quick brown');
+  const results = await searchSessions(home, 'quick brown');
   assert.strictEqual(results.length, 1);
   assert.strictEqual(results[0].id, 'sess1');
   assert.strictEqual(results[0].cwd, 'C:\\proj');
   assert.ok(results[0].snippet.includes('quick brown'));
   assert.ok(results[0].matchCount >= 1);
 
-  assert.strictEqual(searchSessions(home, 'nonexistent').length, 0);
-  assert.strictEqual(searchSessions(home, '').length, 0);
+  assert.strictEqual((await searchSessions(home, 'nonexistent')).length, 0);
+  assert.strictEqual((await searchSessions(home, '')).length, 0);
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-test('searchSessions handles the real live log if present (zstd, small only)', () => {
+test('searchSessions handles the real live log if present (zstd, small only)', async () => {
   const root = path.join(os.homedir(), '.dsh', 'sessions');
   if (!fs.existsSync(root)) {
     console.log('  (skip: no real sessions)');
@@ -52,6 +52,6 @@ test('searchSessions handles the real live log if present (zstd, small only)', (
     console.log('  (skip: real session log too large for a unit test)');
     return;
   }
-  const results = searchSessions(os.homedir() + '/.dsh', 'the');
+  const results = await searchSessions(os.homedir() + '/.dsh', 'the');
   assert.ok(Array.isArray(results));
 });

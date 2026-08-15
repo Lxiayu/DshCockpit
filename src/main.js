@@ -18,6 +18,7 @@
 const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut } = require('electron');
 const { spawn, execFileSync } = require('node:child_process');
 const fs = require('node:fs');
+const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const http = require('node:http');
@@ -165,36 +166,51 @@ function firstLineOf(cmd, args) {
   }
 }
 
-/** Best system node; falls back to Electron's bundled node (production path). */
-function bestNodeBin() {
-  if (settings.effective().nodeBin) return { bin: settings.effective().nodeBin, runAsNode: false };
+// Module-level cache for the system node lookup. On Windows each `where.exe`
+// spawn is ~50-200ms (AV overhead) and these are called on every runtime
+// spawn, quick-ask, scheduled task and plugin run (perf P3). The cache is
+// keyed by the configured nodeBin (empty string when unset) and invalidated
+// only when settings change — which in practice means "resolve once per boot".
+let _nodeBinCache = null;
+let _nodeCandidatesCache = null;
+let _nodeLookupKey = undefined;
+
+function _resolveNodeFromPath() {
   const whereCmd = process.platform === 'win32' ? 'where.exe' : 'which';
   const fromPath = firstLineOf(whereCmd, ['node']);
-  if (fromPath && fs.existsSync(fromPath)) {
-    try { return { bin: fs.realpathSync(fromPath), runAsNode: false }; } catch { /* fall through */ }
-    return { bin: fromPath, runAsNode: false };
-  }
-  return { bin: process.execPath, runAsNode: true };
+  if (!fromPath) return null;
+  if (!fs.existsSync(fromPath)) return null;
+  try { return fs.realpathSync(fromPath); } catch { return fromPath; }
+}
+
+/** Best system node; falls back to Electron's bundled node (production path). */
+function bestNodeBin() {
+  const key = settings.effective().nodeBin || '';
+  if (_nodeLookupKey !== key) { _nodeLookupKey = key; _nodeBinCache = null; _nodeCandidatesCache = null; }
+  if (_nodeBinCache) return _nodeBinCache;
+  if (key) { _nodeBinCache = { bin: key, runAsNode: false }; return _nodeBinCache; }
+  const resolved = _resolveNodeFromPath();
+  _nodeBinCache = resolved ? { bin: resolved, runAsNode: false } : { bin: process.execPath, runAsNode: true };
+  return _nodeBinCache;
 }
 
 /** All node candidates, most robust first. */
 function nodeCandidates() {
+  const key = settings.effective().nodeBin || '';
+  if (_nodeLookupKey !== key) { _nodeLookupKey = key; _nodeBinCache = null; _nodeCandidatesCache = null; }
+  if (_nodeCandidatesCache) return _nodeCandidatesCache;
   const list = [];
   const push = (bin, runAsNode) => {
     if (bin && !list.some((c) => c.bin === bin && c.runAsNode === runAsNode)) list.push({ bin, runAsNode });
   };
-  const eff = settings.effective();
-  if (eff.nodeBin) {
-    push(eff.nodeBin, false);
+  if (key) {
+    push(key, false);
   } else {
-    const whereCmd = process.platform === 'win32' ? 'where.exe' : 'which';
-    const fromPath = firstLineOf(whereCmd, ['node']);
-    if (fromPath) {
-      try { push(fs.realpathSync(fromPath), false); } catch { /* keep going */ }
-      push(fromPath, false);
-    }
+    const resolved = _resolveNodeFromPath();
+    if (resolved) push(resolved, false);
     push(process.execPath, true);
   }
+  _nodeCandidatesCache = list;
   return list;
 }
 
@@ -828,8 +844,8 @@ function registerIpc() {
   });
   ipcMain.handle('shell:backup-info', () => backupInfo(backupDir()));
   ipcMain.handle('shell:set-workspace', (_e, ws) => setWorkspace(ws));
-  ipcMain.handle('shell:storage-info', () => storageInfo());
-  ipcMain.handle('shell:storage-cleanup', () => storageCleanup());
+  ipcMain.handle('shell:storage-info', async () => storageInfo());
+  ipcMain.handle('shell:storage-cleanup', async () => storageCleanup());
   ipcMain.handle('shell:plugins-list', async () => {
     try { return { ok: true, plugins: await fetchPlugins() }; }
     catch (e) { return { ok: false, reason: e.message }; }
@@ -882,7 +898,7 @@ function registerIpc() {
     startScheduler();
     return { ok: true };
   });
-  ipcMain.handle('search:query', (_e, q) => searchSessions(dshHomeOf(), q, 20));
+  ipcMain.handle('search:query', async (_e, q) => searchSessions(dshHomeOf(), q, 20));
   ipcMain.on('search:close', () => { if (searchWindow) searchWindow.close(); });
 
   // injected window chrome
@@ -912,31 +928,40 @@ function setWorkspace(ws) {
   return { ok: true, workspace: ws.trim() };
 }
 
-/** Total size of a directory tree in MB (rounded). */
-function dirSizeMB(p) {
+/** Total size of a directory tree in MB (rounded). Async — uses fsp so the
+ *  main thread is never blocked by AV scanning each statSync. */
+async function dirSizeMBAsync(p) {
   let total = 0;
-  try {
-    for (const f of fs.readdirSync(p, { recursive: true })) {
-      try { total += fs.statSync(path.join(p, f)).size; } catch { /* ignore */ }
-    }
-  } catch { /* ignore */ }
+  let entries;
+  try { entries = await fsp.readdir(p, { recursive: true }); } catch { return 0; }
+  for (const f of entries) {
+    try { const st = await fsp.stat(path.join(p, f)); total += st.size; } catch { /* ignore */ }
+  }
   return Math.round((total / 1e6) * 10) / 10;
 }
 
-function storageInfo() {
+async function storageInfo() {
   const ud = app.getPath('userData');
-  const items = [
-    { name: 'sessions', path: path.join(dshHomeOf(), 'sessions'), sizeMB: dirSizeMB(path.join(dshHomeOf(), 'sessions')) },
-    { name: 'backups', path: backupDir(), sizeMB: dirSizeMB(backupDir()) },
-    { name: 'runtimes', path: path.join(ud, 'runtime'), sizeMB: dirSizeMB(path.join(ud, 'runtime')) },
-    { name: 'logs', path: path.join(ud, 'logs'), sizeMB: dirSizeMB(path.join(ud, 'logs')) },
-    { name: 'npm-cache', path: path.join(ud, 'npm-cache'), sizeMB: dirSizeMB(path.join(ud, 'npm-cache')) },
+  const defs = [
+    { name: 'sessions', path: path.join(dshHomeOf(), 'sessions') },
+    { name: 'backups', path: backupDir() },
+    { name: 'runtimes', path: path.join(ud, 'runtime') },
+    { name: 'logs', path: path.join(ud, 'logs') },
+    { name: 'npm-cache', path: path.join(ud, 'npm-cache') },
   ];
+  // Compute sizes concurrently so the total wall time is one tree walk
+  // instead of N sequential ones (each is non-blocking anyway via fsp).
+  const sizes = await Promise.all(defs.map((d) => dirSizeMBAsync(d.path)));
+  const items = defs.map((d, i) => ({ name: d.name, path: d.path, sizeMB: sizes[i] }));
   return { items, totalMB: Math.round(items.reduce((a, i) => a + i.sizeMB, 0) * 10) / 10 };
 }
 
-function storageCleanup() {
-  const before = dirSizeMB(path.join(app.getPath('userData'), 'logs')) + dirSizeMB(backupDir());
+async function storageCleanup() {
+  const [logsBefore, backupsBefore] = await Promise.all([
+    dirSizeMBAsync(path.join(app.getPath('userData'), 'logs')),
+    dirSizeMBAsync(backupDir()),
+  ]);
+  const before = logsBefore + backupsBefore;
   pruneLogs(10);
   // prune backups beyond keep
   const keep = Math.max(1, settings.get().backupKeep || 5);
@@ -950,7 +975,11 @@ function storageCleanup() {
     const old = dirs.shift();
     try { fs.rmSync(path.join(backupDir(), old), { recursive: true, force: true }); } catch { /* ignore */ }
   }
-  const after = dirSizeMB(path.join(app.getPath('userData'), 'logs')) + dirSizeMB(backupDir());
+  const [logsAfter, backupsAfter] = await Promise.all([
+    dirSizeMBAsync(path.join(app.getPath('userData'), 'logs')),
+    dirSizeMBAsync(backupDir()),
+  ]);
+  const after = logsAfter + backupsAfter;
   return { ok: true, freedMB: Math.max(0, Math.round((before - after) * 10) / 10) };
 }
 

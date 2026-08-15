@@ -8,16 +8,17 @@
 // The web UI already shows a stats strip; this module gives the shell its own
 // widget source of truth. Zstd logs are decompressed with fzstd (pure JS).
 //
-// Performance notes:
-//   - collect() is async (uses fs.promises) and yields to the event loop
-//     between files so the Electron main thread never blocks on a large
-//     sessions tree. Callers must `await` it.
-//   - sumUsage() parses line-by-line via indexOf (no text.split('\n') which
-//     creates a giant array for MB-sized logs).
-//   - statSync is called once per file (parseSessionLog returns mtimeMs so
-//     callers don't need to re-stat).
-//   - walkSessionFiles reads each session dir once and picks the existing
-//     suffix (no double existsSync).
+// Performance notes (win-jank fix):
+//   - collect() is fully async and uses fs.promises everywhere — no
+//     readFileSync/statSync on the hot path. The Electron main thread is
+//     never pinned by token polling.
+//   - parseSessionLogAsync() reads via fsp.readFile (non-blocking).
+//   - Active sessions grow on every tick (cache miss → full re-read). To
+//     keep polling cheap on MB-sized active logs, we read the file and
+//     parse line-by-line via indexOf (no text.split('\n') giant array).
+//   - statSync is gone from the poll path; only the session-search path
+//     (user-triggered) still uses the sync walker/decode for simplicity.
+//   - parseCache keyed by (size, mtimeMs); capped at 100 entries.
 'use strict';
 
 const fs = require('node:fs');
@@ -28,7 +29,7 @@ const { decompress } = require('fzstd');
 const ZSTD = '.jsonl.zstd';
 const PLAIN = '.jsonl';
 
-// path -> { size, mtimeMs, result }
+// path -> { size, mtimeMs, result }  (result carries totals + meta + mtimeMs)
 const parseCache = new Map();
 
 function isEmptyTotals(r) {
@@ -51,7 +52,7 @@ function sumUsage(text) {
   let lines = 0;
   let start = 0;
   // Walk line-by-line via indexOf instead of text.split('\n') — avoids
-  // allocating a huge array for MB-sized session logs (perf fix #6).
+  // allocating a huge array for MB-sized session logs.
   while (start <= text.length) {
     const nl = text.indexOf('\n', start);
     const end = nl === -1 ? text.length : nl;
@@ -77,7 +78,8 @@ function sumUsage(text) {
   return { input, output, cacheRead, cacheWrite, lines };
 }
 
-function decodeLog(file) {
+/** Decode a session log file to text; null on failure. Used by session-search. */
+function decodeSessionLog(file) {
   const buf = fs.readFileSync(file);
   if (file.endsWith(ZSTD)) {
     try {
@@ -89,19 +91,29 @@ function decodeLog(file) {
   return buf.toString('utf8');
 }
 
-/** Decode a session log file to text; null on failure. Shared with session-search. */
-function decodeSessionLog(file) {
-  return decodeLog(file);
+/** Async decode: read file without blocking the main thread. */
+async function decodeSessionLogAsync(file) {
+  const buf = await fsp.readFile(file);
+  if (file.endsWith(ZSTD)) {
+    try {
+      return Buffer.from(decompress(new Uint8Array(buf))).toString('utf8');
+    } catch {
+      return null; // zstd frame errors (e.g. log mid-write) -> skip this poll
+    }
+  }
+  return buf.toString('utf8');
 }
 
-/** Parse one session log; cached by (size, mtimeMs). Returns {totals, meta, mtimeMs} or null. */
-function parseSessionLog(file) {
+/**
+ * Parse one session log; cached by (size, mtimeMs). Async + non-blocking.
+ * Returns {totals, meta, mtimeMs} or null.
+ */
+async function parseSessionLogAsync(file) {
   let st;
-  try { st = fs.statSync(file); } catch { return null; }
+  try { st = await fsp.stat(file); } catch { return null; }
   const hit = parseCache.get(file);
   if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) return hit.result;
-  const text = decodeLog(file);
-  // result carries mtimeMs so callers can reuse it without re-stat'ing (perf #2).
+  const text = await decodeSessionLogAsync(file);
   const result = text === null ? null : { totals: sumUsage(text), meta: parseHeader(text), mtimeMs: st.mtimeMs };
   if (result !== null) {
     if (parseCache.size > 100) { // cap the cache, drop the oldest
@@ -126,15 +138,14 @@ function walkSessionFiles(root) {
     for (const ses of sessions) {
       if (!ses.isDirectory()) continue;
       const sesDir = path.join(projDir, ses.name);
-      // Read the session directory once and pick whichever suffix exists,
-      // instead of two existsSync calls per session (perf #9).
-      let files;
-      try { files = fs.readdirSync(sesDir); } catch { continue; }
       let found = null;
-      for (const n of files) {
-        if (n === 'session.jsonl.zstd') { found = path.join(sesDir, n); break; }
-        if (n === 'session.jsonl') { found = path.join(sesDir, n); /* keep scanning for zstd */ }
-      }
+      try {
+        const files = fs.readdirSync(sesDir);
+        for (const n of files) {
+          if (n === 'session.jsonl.zstd') { found = path.join(sesDir, n); break; }
+          if (n === 'session.jsonl') { found = path.join(sesDir, n); }
+        }
+      } catch { /* ignore */ }
       if (found) out.push(found);
     }
   }
@@ -168,9 +179,9 @@ async function walkSessionFilesAsync(root) {
 }
 
 /**
- * Collect token usage across all sessions (async; yields between files).
- * @param {string} dshHome - the DSH_HOME directory.
-* @returns {Promise<{ current: Totals|null, totals: Totals, sessionCount: number, sessions: Array }>}
+ * Collect token usage across all sessions (fully async; never blocks main thread).
+ * @param {string} dshHome
+ * @returns {Promise<{ current: Totals|null, totals: Totals, sessionCount: number, sessions: Array }>}
  */
 async function collect(dshHome) {
   const root = path.join(dshHome, 'sessions');
@@ -181,19 +192,18 @@ async function collect(dshHome) {
   let latestMtime = 0;
   const files = await walkSessionFilesAsync(root);
   for (const file of files) {
-    // parseSessionLog stays sync (cheap with cache + avoids doubling code),
-    // but we yield to the event loop between files so a large sessions tree
-    // can never pin the main thread (perf fix #1).
-    const r = parseSessionLog(file);
+    const r = await parseSessionLogAsync(file);
     if (!r) continue;
     const usage = r.totals;
     sessionCount += 1;
     totals.input += usage.input; totals.output += usage.output;
     totals.cacheRead += usage.cacheRead; totals.cacheWrite += usage.cacheWrite;
-    // reuse the mtimeMs already fetched inside parseSessionLog (perf #2)
     const mtimeMs = r.mtimeMs || 0;
     sessions.push({ file, cwd: r.meta.cwd, usage, mtimeMs });
     if (mtimeMs > latestMtime) { latestMtime = mtimeMs; current = usage; }
+    // Yield between files so a large sessions tree can't pin the main thread.
+    // (parseSessionLogAsync already uses fsp so each file is non-blocking, but
+    // the yield keeps IPC responsive when there are many sessions.)
     await new Promise((resolve) => setImmediate(resolve));
   }
   return { current, totals, sessionCount, sessions };
@@ -206,4 +216,4 @@ function fmt(n) {
   return String(n);
 }
 
-module.exports = { collect, fmt, isEmptyTotals, decodeSessionLog, parseSessionLog, walkSessionFiles };
+module.exports = { collect, fmt, isEmptyTotals, decodeSessionLog, parseSessionLogAsync, walkSessionFiles };

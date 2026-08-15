@@ -1,37 +1,72 @@
 // src/session-search.js — full-text search over session logs.
 //
-// v1: substring search over decoded session text (case-insensitive), cached by
-// (size, mtime). Results carry a snippet around the first match and the
-// session's cwd/date. A future version can switch to an FTS index.
+// The heavy work (zstd decompress + toLowerCase + indexOf + split) runs in a
+// worker thread (search-worker.js) so the Electron main thread is never
+// pinned by MB-sized zstd logs. A fresh worker is spawned per query and
+// terminated when done — the ~30ms spawn cost is negligible next to the
+// 600ms input debounce, and it means no long-lived thread keeps tests
+// (or shutdown) hanging.
 'use strict';
 
-const fs = require('node:fs');
+const { Worker } = require('node:worker_threads');
+const fsp = require('node:fs/promises');
 const path = require('node:path');
-const { decodeSessionLog } = require('./token-stats');
 
-const cache = new Map(); // path -> { size, mtimeMs, text }
-
-function sessionFiles(root) {
+async function sessionFilesAsync(root) {
   const out = [];
   let projects;
-  try { projects = fs.readdirSync(root, { withFileTypes: true }); } catch { return out; }
+  try { projects = await fsp.readdir(root, { withFileTypes: true }); } catch { return out; }
   for (const proj of projects) {
     if (!proj.isDirectory()) continue;
     const projDir = path.join(root, proj.name);
     let sessions;
-    try { sessions = fs.readdirSync(projDir, { withFileTypes: true }); } catch { continue; }
+    try { sessions = await fsp.readdir(projDir, { withFileTypes: true }); } catch { continue; }
     for (const ses of sessions) {
       if (!ses.isDirectory()) continue;
-      for (const suffix of ['.jsonl.zstd', '.jsonl']) {
-        const f = path.join(projDir, ses.name, `session${suffix}`);
-        if (fs.existsSync(f)) { out.push(f); break; }
+      const sesDir = path.join(projDir, ses.name);
+      let files;
+      try { files = await fsp.readdir(sesDir); } catch { continue; }
+      let found = null;
+      for (const n of files) {
+        if (n === 'session.jsonl.zstd') { found = path.join(sesDir, n); break; }
+        if (n === 'session.jsonl') { found = path.join(sesDir, n); }
       }
+      if (found) out.push(found);
     }
   }
   return out;
 }
 
-/** Pull text out of a message event's blocks/content (best effort). */
+/**
+ * Search all sessions for `query` (case-insensitive substring). The heavy
+ * work runs in a worker thread — the main thread is never blocked.
+ * @param {string} dshHome
+ * @param {string} query
+ * @param {number} limit
+ * @returns {Promise<Array<{ file, id, cwd, mtimeMs, snippet, matchCount }>>}
+ */
+async function searchSessions(dshHome, query, limit = 20) {
+  const q = String(query || '').trim();
+  if (!q) return [];
+  const root = path.join(dshHome, 'sessions');
+  const files = await sessionFilesAsync(root);
+  if (files.length === 0) return [];
+  return new Promise((resolve, reject) => {
+    const w = new Worker(path.join(__dirname, 'search-worker.js'));
+    let settled = false;
+    const done = (fn, val) => {
+      if (settled) return;
+      settled = true;
+      fn(val);
+      w.terminate().catch(() => {});
+    };
+    w.on('message', ({ results }) => done(resolve, results || []));
+    w.on('error', (err) => done(reject, err));
+    w.postMessage({ id: 1, files, query: q, limit });
+  });
+}
+
+/** Pull text out of a message event's blocks/content (best effort; for tests). */
 function extractText(ev) {
   if (!ev || typeof ev !== 'object') return '';
   if (!/message$/.test(String(ev.type))) return '';
@@ -50,65 +85,6 @@ function extractText(ev) {
   };
   walk(source, 0);
   return parts.join(' ');
-}
-
-function snippetAround(text, idx, radius = 90) {
-  const start = Math.max(0, idx - radius);
-  const end = Math.min(text.length, idx + radius);
-  return (start > 0 ? '…' : '') + text.slice(start, end).replace(/\s+/g, ' ') + (end < text.length ? '…' : '');
-}
-
-/**
- * Search all sessions for `query` (case-insensitive substring).
- * @param {string} dshHome
- * @param {string} query
- * @param {number} limit
- * @returns {Array<{ file, id, cwd, mtimeMs, snippet, matchCount }>}
- */
-function searchSessions(dshHome, query, limit = 20) {
-  const q = String(query || '').trim().toLowerCase();
-  if (!q) return [];
-  const root = path.join(dshHome, 'sessions');
-  const results = [];
-  for (const file of sessionFiles(root)) {
-    let st;
-    try { st = fs.statSync(file); } catch { continue; }
-    let hit = cache.get(file);
-    if (!hit || hit.size !== st.size || hit.mtimeMs !== st.mtimeMs) {
-      const text = decodeSessionLog(file);
-      if (text === null) continue;
-      hit = { size: st.size, mtimeMs: st.mtimeMs, text };
-    if (cache.size > 50) { // cap the cache, drop the oldest
-      const first = cache.keys().next().value;
-      if (first !== undefined) cache.delete(first);
-    }
-    cache.set(file, hit);
-    }
-    // search only message-event text
-    const lowerText = hit.text.toLowerCase();
-    const idx = lowerText.indexOf(q);
-    if (idx === -1) continue;
-    const count = lowerText.split(q).length - 1; // O(n), avoids quadratic counting
-    let cwd = '';
-    let id = '';
-    const firstNl = hit.text.indexOf('\n');
-    try {
-      const meta = JSON.parse(firstNl === -1 ? hit.text : hit.text.slice(0, firstNl));
-      if (typeof meta.cwd === 'string') cwd = meta.cwd;
-      if (typeof meta.id === 'string') id = meta.id;
-    } catch { /* ignore */ }
-    results.push({
-      file,
-      id,
-      cwd,
-      mtimeMs: st.mtimeMs,
-      snippet: snippetAround(hit.text, idx),
-      matchCount: count,
-    });
-    if (results.length >= limit) break;
-  }
-  results.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  return results;
 }
 
 module.exports = { searchSessions, extractText };
