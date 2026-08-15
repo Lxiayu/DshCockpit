@@ -54,6 +54,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           name: win-x64
@@ -61,6 +63,6 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: .github/release-body.md
           files: |
             artifacts/DshCockpit-*-win-x64.zip

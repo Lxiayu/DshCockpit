@@ -1,8 +1,8 @@
-# Build & publish an arm64 macOS .dmg/.zip on tag push or manual run.
-# arm64-only: the bundled dsh runtime ships arch-specific native modules
-# (sharp), so universal merge fails. Single macos-latest (Apple Silicon)
-# runner — no Intel runner queue stalls. Unsigned for now; swap in
-# CSC_LINK / APPLE_* secrets later.
+# Build & publish macOS .dmg/.zip for both arm64 and x64 on tag push or manual run.
+# Two parallel runners: macos-latest (Apple Silicon) for arm64, macos-13 (Intel)
+# for x64 — each installs an arch-matching dsh runtime (the sharp native binary
+# differs per arch, so a universal merge is not viable). Unsigned for now; swap
+# in CSC_LINK / APPLE_* secrets later for signing + notarization.
 name: release-mac
 
 on:
@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-arm64:
     name: build arm64 mac
     runs-on: macos-latest
     steps:
@@ -28,14 +28,11 @@ jobs:
 
       - run: npm install
 
-      # Reuse the ~256MB bundled dsh runtime across runs when the seed script
-      # is unchanged — prepare-runtime.js skips the download if vendor/runtime
-      # already exists, cutting CI time sharply on repeat runs.
       - name: Cache bundled runtime
         uses: actions/cache@v4
         with:
           path: vendor/runtime
-          key: runtime-mac-${{ hashFiles('scripts/prepare-runtime.js') }}
+          key: runtime-mac-arm64-${{ hashFiles('scripts/prepare-runtime.js') }}
 
       - run: node scripts/prepare-runtime.js
 
@@ -49,22 +46,62 @@ jobs:
             dist/DshCockpit-*-mac-arm64.dmg
             dist/DshCockpit-*-mac-arm64.zip
 
+  build-x64:
+    name: build x64 mac
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm install
+
+      - name: Cache bundled runtime
+        uses: actions/cache@v4
+        with:
+          path: vendor/runtime
+          key: runtime-mac-x64-${{ hashFiles('scripts/prepare-runtime.js') }}
+
+      - run: node scripts/prepare-runtime.js
+
+      - run: node scripts/build.js --mac --x64 --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-x64
+          if-no-files-found: error
+          path: |
+            dist/DshCockpit-*-mac-x64.dmg
+            dist/DshCockpit-*-mac-x64.zip
+
   release:
     name: publish to GitHub Releases
-    needs: build
+    needs: [build-arm64, build-x64]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           name: mac-arm64
-          path: artifacts
+          path: artifacts/arm64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-x64
+          path: artifacts/x64
 
       - uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: .github/release-body.md
           files: |
-            artifacts/DshCockpit-*-mac-arm64.dmg
-            artifacts/DshCockpit-*-mac-arm64.zip
+            artifacts/arm64/DshCockpit-*-mac-arm64.dmg
+            artifacts/arm64/DshCockpit-*-mac-arm64.zip
+            artifacts/x64/DshCockpit-*-mac-x64.dmg
+            artifacts/x64/DshCockpit-*-mac-x64.zip

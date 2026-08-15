@@ -34,11 +34,10 @@ win:
 #   node scripts/build.js --win nsis
 mac:
   target:
-    # arm64 only. The bundled dsh runtime ships arch-specific native modules
-    # (sharp), so a universal merge fails — sharp-darwin-arm64 ends up present
-    # in both the x64 and arm64 builds. Intel Mac support needs a separate x64
-    # runtime seed on a macos-13 runner (heavy queue) — deferred until real
-    # demand appears. Apple Silicon covers ~all current Mac users.
+    # arm64 is the local default; x64 is built via CI on a macos-13 runner
+    # (see .github/workflows/release-mac.yml). The bundled dsh runtime ships
+    # arch-specific native modules (sharp), so a universal merge fails — each
+    # arch needs its own runtime seed on a matching runner.
     - target: zip
       arch:
         - arm64
