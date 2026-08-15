@@ -13,7 +13,7 @@
     border-radius: 8px; padding: 8px 10px; font: inherit; outline: none; }
   #q:focus { border-color: #2563eb; }
   #results { margin-top: 8px; max-height: 320px; overflow-y: auto; }
-  .item { padding: 8px 4px; border-bottom: 1px solid #2d333b; }
+  .item { padding: 8px 4px; border-bottom: 1px solid #2d333b; overflow: hidden; }
   .item .snip { color: #e6edf3; word-break: break-all; }
   .item .meta { color: #8b949e; font-size: 11px; margin-top: 3px; }
   .item button { float: right; background: #2d333b; color: #e6edf3; border: 0;
@@ -78,7 +78,7 @@
         setTimeout(() => { btn.textContent = L[lang].copy; }, 1200);
       });
       item.innerHTML = `<div class="snip">${esc(r.snippet)}</div><div class="meta">${esc(meta)}</div>`;
-      item.appendChild(btn);
+      item.insertBefore(btn, item.firstChild);
       resEl.appendChild(item);
     }
   }

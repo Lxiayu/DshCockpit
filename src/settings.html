@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
@@ -329,6 +329,22 @@
       plugins_loading: '正在从 GitHub 加载插件列表…', plugins_empty: '暂无插件。', plugins_error: '插件操作失败：',
       plugins_install: '安装', plugins_remove: '卸载', plugins_action_ok: '✅ 操作完成，运行时已重启。',
       storage: '存储占用', btn_cleanup: '清理（日志 / 旧备份）', cleanup_confirm: '确定清理旧日志和超出保留份数的备份吗？', cleanup_done: '✅ 清理完成，释放约 {mb} MB', storage_total: '合计：{mb} MB',
+      sec_cost: '用量与成本',
+      cost_inputRate: '输入 ¥/百万', cost_outputRate: '输出 ¥/百万',
+      cost_cacheReadRate: '缓存读 ¥/百万', cost_cacheWriteRate: '缓存写 ¥/百万',
+      cost_budget: '月度预算 ¥', cost_budgetHint: '0 = 不限制；达到 80% / 100% 时提醒',
+      cost_ratesHint: '费用按你配置的价格估算，仅供参考，不构成实际计费。',
+      cost_today: '今天', cost_week: '近 7 天', cost_month: '近 30 天', cost_perWorkspace: '按工作区：',
+      sec_schedule: '定时任务',
+      schedule_name: '任务名', schedule_prompt: '提示词', schedule_type: '类型',
+      schedule_every: '间隔', schedule_daily: '每天', schedule_seconds: '秒',
+      btn_schedAdd: '添加任务', schedule_note: '到点后会在后台用无头会话运行该提示词（需已配置 API Key），完成后系统通知。',
+      schedule_enabled: '启用', schedule_delete: '删除',
+      privacy_title: '隐私声明',
+      privacy_body: '本应用完全在本地运行。我们不会收集、上传或存储您的任何个人信息、API Key、会话内容或用量数据；所有数据仅保存在本机。仅在以下情况访问网络：更新检查（npm registry / GitHub Releases）、插件市场列表（GitHub）、运行时下载（npm registry）。费用估算基于您自行配置的价格参数，不构成计费依据。',
+      about_diagnostics: '崩溃诊断', about_diagnosticsCount: '{n} 次（可在诊断目录查看）', about_diagnosticsNone: '无',
+      btn_openDiagnostics: '打开诊断目录',
+      settings_contextWindow: '上下文窗口（估算）', settings_contextWindowHint: 'token 胶囊的「上下文压力」按此值估算；DeepSeek 模型通常 64k–128k',
     },
     en: {
       title: 'DshCockpit Settings', sec_update: 'Updates', sec_runtime: 'Runtime', sec_app: 'Application',
@@ -376,6 +392,22 @@
       plugins_loading: 'Loading plugins from GitHub…', plugins_empty: 'No plugins found.', plugins_error: 'Plugin error: ',
       plugins_install: 'Install', plugins_remove: 'Remove', plugins_action_ok: '✅ Done; runtime restarted.',
       storage: 'Storage usage', btn_cleanup: 'Clean up (logs / old backups)', cleanup_confirm: 'Delete old logs and backups beyond the keep count?', cleanup_done: '✅ Cleaned up, freed ~{mb} MB', storage_total: 'Total: {mb} MB',
+      sec_cost: 'Usage & Cost',
+      cost_inputRate: 'Input ¥/1M', cost_outputRate: 'Output ¥/1M',
+      cost_cacheReadRate: 'Cache read ¥/1M', cost_cacheWriteRate: 'Cache write ¥/1M',
+      cost_budget: 'Monthly budget ¥', cost_budgetHint: '0 = unlimited; alerts at 80% / 100%',
+      cost_ratesHint: 'Costs are estimated from the rates you configure; not a billing basis.',
+      cost_today: 'Today', cost_week: 'Last 7 days', cost_month: 'Last 30 days', cost_perWorkspace: 'By workspace:',
+      sec_schedule: 'Scheduled tasks',
+      schedule_name: 'Name', schedule_prompt: 'Prompt', schedule_type: 'Type',
+      schedule_every: 'Every', schedule_daily: 'Daily at', schedule_seconds: 'sec',
+      btn_schedAdd: 'Add task', schedule_note: 'Runs the prompt in a background headless session when due (requires an API key); you get a notification when done.',
+      schedule_enabled: 'Enabled', schedule_delete: 'Delete',
+      privacy_title: 'Privacy',
+      privacy_body: 'This app runs fully locally. We never collect, upload or store your personal information, API keys, conversation contents or usage data; everything stays on this machine. Network is only touched for: update checks (npm registry / GitHub Releases), plugin market listing (GitHub), runtime downloads (npm registry). Cost estimates use the rates you configure and are not a billing basis.',
+      about_diagnostics: 'Crash diagnostics', about_diagnosticsCount: '{n} (see diagnostics folder)', about_diagnosticsNone: 'none',
+      btn_openDiagnostics: 'Open diagnostics',
+      settings_contextWindow: 'Context window (estimate)', settings_contextWindowHint: 'The pill\'s "context pressure" is estimated against this value; DeepSeek models are typically 64k–128k',
     },
   };
 

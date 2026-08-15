@@ -27,7 +27,19 @@ function clamp(v, min, max) {
 function smartDefaultPos() {
   let maxBottom = 0;
   let found = 0;
-  const hits = document.querySelectorAll('button, [role="button"], a, [class*="action"], [class*="toolbar"]');
+  // Only inspect the top strip of the page. The old selector scanned the
+  // whole DOM for button/a/[role=button]/[class*=toolbar] every 700ms —
+  // on a large SPA like dsh web that's thousands of elements per tick
+  // and competes with the app's own rendering (perf #7). Restricting to
+  // header-ish containers keeps the query cheap and still finds the
+  // top-right toolbar we're trying to dodge.
+  const headerRoots = document.querySelectorAll(
+    'header, [role="toolbar"], [class*="header"], [class*="Header"], [class*="toolbar"], [class*="Toolbar"]'
+  );
+  let hits = [];
+  headerRoots.forEach((root) => {
+    root.querySelectorAll('button, [role="button"], a').forEach((el) => hits.push(el));
+  });
   for (const el of hits) {
     if (el.closest('#' + CHROME_ID)) continue;
     const r = el.getBoundingClientRect();

@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('dshShell', {
   storageCleanup: () => ipcRenderer.invoke('shell:storage-cleanup'),
   setWorkspace: (ws) => ipcRenderer.invoke('shell:set-workspace', ws),
   pluginsList: () => ipcRenderer.invoke('shell:plugins-list'),
+  openMarket: () => ipcRenderer.send('plugins:open'),
   pluginAction: (action, fullName) => ipcRenderer.invoke('shell:plugin-action', action, fullName),
   costInfo: () => ipcRenderer.invoke('shell:cost-info'),
   diagnosticsInfo: () => ipcRenderer.invoke('shell:diagnostics-info'),

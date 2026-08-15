@@ -24,9 +24,9 @@ const EVENTS = [
   { type: 'assistant/chunk', data: { chunk: { type: 'usage', usage: { inputTokens: 7, outputTokens: 3, cacheReadTokens: 1 } } } },
 ];
 
-test('sums usage from assistant/message and usage chunks', () => {
+test('sums usage from assistant/message and usage chunks', async () => {
   const home = makeSessionLog(EVENTS.map((e) => JSON.stringify(e)));
-  const r = ts.collect(home);
+  const r = await ts.collect(home);
   assert.strictEqual(r.sessionCount, 1);
   assert.strictEqual(r.current.input, 137);
   assert.strictEqual(r.current.output, 63);
@@ -38,31 +38,31 @@ test('sums usage from assistant/message and usage chunks', () => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-test('collect handles empty and malformed lines', () => {
+test('collect handles empty and malformed lines', async () => {
   const home = makeSessionLog(['not-json{', '', '{"type":"unknown"}', JSON.stringify(EVENTS[1])]);
-  const r = ts.collect(home);
+  const r = await ts.collect(home);
   assert.strictEqual(r.sessionCount, 1);
   assert.strictEqual(r.current.input, 100);
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-test('empty home yields zero totals', () => {
+test('empty home yields zero totals', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-token-empty-'));
-  const r = ts.collect(home);
+  const r = await ts.collect(home);
   assert.strictEqual(r.sessionCount, 0);
   assert.strictEqual(r.current, null);
   assert.strictEqual(r.totals.input, 0);
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-test('cache: re-collect does not double count and re-parses on change', () => {
+test('cache: re-collect does not double count and re-parses on change', async () => {
   const home = makeSessionLog(EVENTS.map((e) => JSON.stringify(e)));
-  const r1 = ts.collect(home);
-  const r2 = ts.collect(home);
+  const r1 = await ts.collect(home);
+  const r2 = await ts.collect(home);
   assert.strictEqual(r1.current.input, r2.current.input, 'cached identical result');
   // append one event -> size changes -> re-parse
   fs.appendFileSync(path.join(home, 'sessions', 'proj', 'sess1', 'session.jsonl'), JSON.stringify({ type: 'assistant/message', data: { usage: { inputTokens: 9, outputTokens: 1 } } }) + '\n');
-  const r3 = ts.collect(home);
+  const r3 = await ts.collect(home);
   assert.strictEqual(r3.current.input, 146);
   fs.rmSync(home, { recursive: true, force: true });
 });
@@ -74,7 +74,7 @@ test('fmt formats compactly', () => {
   assert.strictEqual(ts.fmt(1500000), '1.5M');
 });
 
-test('integration: parses the real live session log if present (zstd, small only)', () => {
+test('integration: parses the real live session log if present (zstd, small only)', async () => {
   const realHome = path.join(require('node:os').homedir(), '.dsh');
   const root = path.join(realHome, 'sessions');
   if (!fs.existsSync(root)) {
@@ -91,7 +91,7 @@ test('integration: parses the real live session log if present (zstd, small only
     console.log('  (skip: real session log too large for a unit test)');
     return;
   }
-  const r = ts.collect(realHome);
+  const r = await ts.collect(realHome);
   assert.ok(r.sessionCount >= 0);
   if (r.sessionCount > 0) {
     assert.ok(r.totals.input >= 0 && r.totals.output >= 0);

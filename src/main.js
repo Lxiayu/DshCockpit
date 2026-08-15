@@ -339,12 +339,20 @@ function spawnRuntime() {
   log(`[shell] runtime log: ${runtimeLogPath}`);
 
   // Tail the runtime log for the URL line (started once; survives retries).
+  // Skip the readFileSync when the file has not grown since the last poll
+  // (perf #8): on slow disks / long runtimes this avoids re-reading a
+  // multi-MB file every 500ms during the boot window.
   if (urlPollTimer) clearInterval(urlPollTimer);
+  let lastLogSize = -1;
+  let lastLogText = '';
   urlPollTimer = setInterval(() => {
     if (runtimeUrl) { clearInterval(urlPollTimer); urlPollTimer = null; return; }
-    let text = '';
-    try { text = fs.readFileSync(runtimeLogPath, 'utf8'); } catch { return; }
-    const m = text.match(URL_LINE_RE);
+    let st;
+    try { st = fs.statSync(runtimeLogPath); } catch { return; }
+    if (st.size === lastLogSize) return; // no new bytes since last poll
+    lastLogSize = st.size;
+    try { lastLogText = fs.readFileSync(runtimeLogPath, 'utf8'); } catch { return; }
+    const m = lastLogText.match(URL_LINE_RE);
     if (m) {
       runtimeUrl = m[1];
       crashCount = 0; // a healthy boot resets the auto-restart counter
@@ -819,7 +827,10 @@ function registerIpc() {
   ipcMain.on('plugins:close', () => { if (pluginMarketWindow) pluginMarketWindow.close(); });
   ipcMain.on('plugins:open', () => createPluginMarketWindow());
   ipcMain.handle('shell:plugin-action', (_e, action, fullName) => pluginAction(action, fullName));
-  ipcMain.handle('shell:cost-info', () => costSnapshot());
+  ipcMain.handle('shell:cost-info', async () => {
+    const stats = await tokenStats.collect(dshHomeOf());
+    return costSnapshot(stats);
+  });
   ipcMain.handle('shell:diagnostics-info', () => diagnosticsInfo());
   ipcMain.handle('shell:open-diagnostics', () => shell.openPath(diagnosticsDir()));
   ipcMain.handle('quickask:submit', (_e, prompt) => handleQuickAskSubmit(prompt));
@@ -862,7 +873,13 @@ function registerIpc() {
 
   // injected window chrome
   ipcMain.on('chrome:open-settings', () => createSettingsWindow());
-  ipcMain.on('chrome:refresh-tokens', () => pushTokens());
+  ipcMain.on('chrome:refresh-tokens', async () => {
+    try {
+      const stats = await tokenStats.collect(dshHomeOf());
+      pushTokens(stats);
+      costSnapshot(stats);
+    } catch (e) { log(`[shell] manual token refresh failed: ${e.message}`); }
+  });
   ipcMain.on('chrome:set-workspace', (_e, ws) => setWorkspace(ws));
   ipcMain.on('chrome:report', (_e, info) => {
     log(`[shell] chrome placed at top=${info.top} right=${info.right} (controls found: ${info.found}, saved pos: ${info.saved})`);
@@ -1038,17 +1055,24 @@ async function pluginAction(action, fullName) {
 }
 function pushTokens(stats) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  stats = stats || tokenStats.collect(dshHomeOf());
+  if (!stats) return; // async collect now drives all callers; no sync fallback
   if (!tokenWidgetLogged) {
     tokenWidgetLogged = true;
     log(`[shell] token widget: ${stats.sessionCount} session(s), current in=${stats.current ? stats.current.input : 0} out=${stats.current ? stats.current.output : 0}`);
   }
   const needsSetup = !fs.existsSync(path.join(dshHomeOf(), '.credentials.yaml'));
   const cur = stats.current;
+  const tot = stats.totals;
   const pressure = cur ? cur.input + cur.cacheRead + cur.cacheWrite : 0;
   const windowSize = Math.max(1024, settings.get().contextWindow || 128000);
   const pressurePct = Math.min(100, Math.round((pressure / windowSize) * 100));
-  mainWindow.webContents.send('chrome:tokens', { ...stats, lang: lang(), needsSetup, pressurePct });
+  // Send only what the pill needs — the full sessions array was being
+  // serialized + shipped every tick (perf #4).
+  mainWindow.webContents.send('chrome:tokens', {
+    sessionCount: stats.sessionCount,
+    current: cur, totals: tot,
+    lang: lang(), needsSetup, pressurePct,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1060,7 +1084,7 @@ function todayMonthKey() {
 }
 
 function costSnapshot(stats) {
-  stats = stats || tokenStats.collect(dshHomeOf());
+  if (!stats) return; // async collect now drives all callers; no sync fallback
   const cfg = settings.get();
   const rates = {
     inputPerM: cfg.costInputPerM || 0,
@@ -1232,6 +1256,8 @@ function createPluginMarketWindow() {
 // ---------------------------------------------------------------------------
 // guided first run (no runtime anywhere: install from the registry)
 // ---------------------------------------------------------------------------
+let pendingLoadingText = null;
+
 function createLoadingWindow() {
   if (loadingWindow && !loadingWindow.isDestroyed()) { loadingWindow.focus(); return loadingWindow; }
   loadingWindow = new BrowserWindow({
@@ -1249,12 +1275,20 @@ function createLoadingWindow() {
   });
   loadingWindow.loadFile(path.join(__dirname, 'loading.html'));
   loadingWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+  // re-send the latest text once the page is ready (setLoading may have been
+  // called before the renderer registered its IPC listener)
+  loadingWindow.webContents.once('did-finish-load', () => {
+    if (pendingLoadingText && loadingWindow && !loadingWindow.isDestroyed()) {
+      loadingWindow.webContents.send('loading:progress', pendingLoadingText);
+    }
+  });
   loadingWindow.once('ready-to-show', () => loadingWindow.show());
-  loadingWindow.on('closed', () => { loadingWindow = null; });
+  loadingWindow.on('closed', () => { loadingWindow = null; pendingLoadingText = null; });
   return loadingWindow;
 }
 
 function setLoading(text) {
+  pendingLoadingText = text;
   if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.webContents.send('loading:progress', text);
 }
 
@@ -1609,16 +1643,31 @@ if (!gotLock) {
     if (process.env.DSH_DESKTOP_OPEN_SETTINGS === '1') createSettingsWindow();
 
     // token widget: one collect per tick shared by the widget and the cost
-    // center (M7: avoid double full scans every 5s)
-    if (settings.get().tokenWidget) {
-      setInterval(() => {
-        const stats = tokenStats.collect(dshHomeOf());
+    // center (M7: avoid double full scans every 5s).
+    // Implemented as setTimeout recursion so a slow collect can never overlap
+    // with the next tick (perf #1 + #3); collect() is async and yields
+    // between files so the main thread is never pinned.
+    let tokenPollBusy = false;
+    const pollTokens = async () => {
+      if (tokenPollBusy || quitting) return;
+      tokenPollBusy = true;
+      try {
+        const stats = await tokenStats.collect(dshHomeOf());
         pushTokens(stats);
         costSnapshot(stats);
-      }, TOKEN_POLL_MS);
+      } catch (e) {
+        log(`[shell] token poll failed: ${e.message}`);
+      } finally {
+        tokenPollBusy = false;
+        if (!quitting) setTimeout(pollTokens, TOKEN_POLL_MS);
+      }
+    };
+    if (settings.get().tokenWidget) {
+      setTimeout(pollTokens, 2_000);
     }
-    setTimeout(() => {
-      costSnapshot();
+    setTimeout(async () => {
+      const stats = await tokenStats.collect(dshHomeOf());
+      costSnapshot(stats);
       const diag = diagnosticsInfo();
       if (diag.crashCount > 0) {
         notify(t(lang(), 'notify.crashReminder'), t(lang(), 'notify.crashReminderBody', { n: diag.crashCount }));

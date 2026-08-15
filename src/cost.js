@@ -9,6 +9,11 @@ const path = require('node:path');
 
 const HISTORY_MAX_DAYS = 90;
 
+// In-memory cache of the parsed history file so the 5s token poll does not
+// re-read + JSON.parse the whole file every tick (perf #5). Keyed by path;
+// invalidated by mtime. Cleared after updateHistory writes.
+const historyCache = new Map(); // file -> { mtimeMs, history }
+
 function todayKey() {
   const d = new Date();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -26,11 +31,23 @@ function costOf(usage, rates) {
 
 /** Load or create the daily history file (array of {date, input, output, cacheRead, cacheWrite, sessions, cost}). */
 function loadHistory(file) {
+  let st;
+  try { st = fs.statSync(file); } catch {
+    // file missing — drop any stale cache entry
+    historyCache.delete(file);
+    return [];
+  }
+  const hit = historyCache.get(file);
+  if (hit && hit.mtimeMs === st.mtimeMs) return hit.history;
+  let history = [];
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (Array.isArray(raw)) return raw;
+    if (Array.isArray(raw)) history = raw;
   } catch { /* first run / corrupt */ }
-  return [];
+  // keep a defensive copy so callers can't mutate the cached array
+  history = history.map((h) => ({ ...h }));
+  historyCache.set(file, { mtimeMs: st.mtimeMs, history });
+  return history;
 }
 
 /** Upsert today's entry; prune entries older than HISTORY_MAX_DAYS. */
@@ -51,6 +68,11 @@ function updateHistory(file, entry) {
     fs.writeFileSync(tmp, JSON.stringify(history, null, 2));
     fs.renameSync(tmp, file);
   } catch { /* ignore */ }
+  // refresh cache so the next loadHistory reuses the just-written data
+  try {
+    const st = fs.statSync(file);
+    historyCache.set(file, { mtimeMs: st.mtimeMs, history: history.map((h) => ({ ...h })) });
+  } catch { historyCache.delete(file); }
   return history;
 }
 
