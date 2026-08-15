@@ -1,3 +1,5 @@
+**[English](README.en.md)** | **简体中文**
+
 <div align="center">
 
 # 🛩️ DshCockpit
@@ -12,6 +14,8 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
 
 *让 `dsh web` 从"终端里的一个标签页"变成"双击即用、后台常驻、自动更新、会算账的桌面控制台"*
+
+**English TL;DR** — DshCockpit is an open-source desktop cockpit (Electron) for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`): real-time **token usage & context-pressure alerts**, a **cost tracking center** with per-day/week/month/workspace stats and **budget alarms**, runtime **auto-update with smoke-test guard & one-click rollback**, a global-hotkey **Quick Ask** window, **scheduled agent tasks**, `Ctrl+K` **full-text session search**, and a community **plugin marketplace**. Bundled runtime — no Node.js install needed. Windows portable zip + macOS dmg (arm64/x64). *Full English readme → [README.en.md](README.en.md)*
 
 </div>
 
@@ -121,11 +125,11 @@ npm start
 
 <div align="center">
 
-<img src="photo/preview-1.png" width="720" alt="DshCockpit 主界面" />
+<img src="photo/preview-1.png" width="720" alt="DshCockpit main window — DeepSeek Harness (dsh) desktop cockpit with token usage capsule" />
 
 <table><tr>
-<td><img src="photo/preview-2.png" width="280" alt="DshCockpit 功能预览" /></td>
-<td><img src="photo/preview-3.png" width="280" alt="DshCockpit 功能预览" /></td>
+<td><img src="photo/preview-2.png" width="280" alt="Cost center — token cost tracking & budget alerts" /></td>
+<td><img src="photo/preview-3.png" width="280" alt="Settings & plugin marketplace" /></td>
 </tr></table>
 
 </div>
