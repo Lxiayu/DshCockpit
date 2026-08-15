@@ -1,9 +1,7 @@
-# Build & publish an arm64 macOS .dmg/.zip on tag push or manual run.
-# arm64-only: the bundled dsh runtime ships arch-specific native modules
-# (sharp), so universal merge fails. Single macos-latest (Apple Silicon)
-# runner — no Intel runner queue stalls. Unsigned for now; swap in
-# CSC_LINK / APPLE_* secrets later.
-name: release-mac
+# Build & publish a Windows x64 portable .zip on tag push or manual run.
+# Portable zip (no installer, no admin) — extract and double-click
+# DshCockpit.exe. Unsigned for now; swap in CSC_LINK etc. for Authenticode later.
+name: release-win
 
 on:
   push:
@@ -16,8 +14,8 @@ permissions:
 
 jobs:
   build:
-    name: build arm64 mac
-    runs-on: macos-latest
+    name: build x64 win
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -29,25 +27,24 @@ jobs:
       - run: npm install
 
       # Reuse the ~256MB bundled dsh runtime across runs when the seed script
-      # is unchanged — prepare-runtime.js skips the download if vendor/runtime
-      # already exists, cutting CI time sharply on repeat runs.
+      # is unchanged. Key is platform-scoped (runtime-win-*) so it never
+      # collides with the mac workflow's cache (sharp binary differs per OS).
       - name: Cache bundled runtime
         uses: actions/cache@v4
         with:
           path: vendor/runtime
-          key: runtime-mac-${{ hashFiles('scripts/prepare-runtime.js') }}
+          key: runtime-win-${{ hashFiles('scripts/prepare-runtime.js') }}
 
       - run: node scripts/prepare-runtime.js
 
-      - run: node scripts/build.js --mac --arm64 --publish never
+      - run: node scripts/build.js --win --x64 --publish never
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mac-arm64
+          name: win-x64
           if-no-files-found: error
           path: |
-            dist/DshCockpit-*-mac-arm64.dmg
-            dist/DshCockpit-*-mac-arm64.zip
+            dist/DshCockpit-*-win-x64.zip
 
   release:
     name: publish to GitHub Releases
@@ -59,12 +56,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: mac-arm64
+          name: win-x64
           path: artifacts
 
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            artifacts/DshCockpit-*-mac-arm64.dmg
-            artifacts/DshCockpit-*-mac-arm64.zip
+            artifacts/DshCockpit-*-win-x64.zip
