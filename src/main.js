@@ -15,7 +15,7 @@
 //   DSH_DESKTOP_USER_DATA
 'use strict';
 
-const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut } = require('electron');
+const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut, safeStorage } = require('electron');
 const { spawn, execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
@@ -34,6 +34,7 @@ const cost = require('./cost');
 const { runHeadless } = require('./headless');
 const { Scheduler } = require('./scheduler');
 const { searchSessions } = require('./session-search');
+const { RemoteControl } = require('./remote-control');
 
 if (process.env.DSH_DESKTOP_USER_DATA) {
   // must happen before app is ready; keeps logs/state inside the workspace
@@ -69,6 +70,7 @@ let quickAskWindow = null;
 let quickAskRunning = false;
 let searchWindow = null;
 let scheduler = null;
+let remote = null; // phone remote-control gateway (constructed after app ready)
 let loadingWindow = null;
 let pluginMarketWindow = null;
 let guidedInstallInProgress = false;
@@ -373,6 +375,7 @@ function spawnRuntime() {
       runtimeUrl = m[1];
       crashCount = 0; // a healthy boot resets the auto-restart counter
       log(`[shell] runtime URL: ${runtimeUrl}`);
+      if (remote) remote.setRuntimeUrl(runtimeUrl); // phone gateway follows the runtime port
       waitForHealth(runtimeUrl).then((ok) => {
         if (!ok) return;
         startEventsFeed();
@@ -693,6 +696,7 @@ function restartRuntime() {
   eventsFeedLiveLogged = false;
   if (runtimeChild) { runtimeChild.kill(); runtimeChild = null; }
   runtimeUrl = null;
+  if (remote) remote.setRuntimeUrl(null); // gateway answers 503 until the new URL arrives
   spawnRuntime();
 }
 
@@ -805,6 +809,18 @@ async function doRollback() {
 // ---------------------------------------------------------------------------
 // IPC (settings window)
 // ---------------------------------------------------------------------------
+/** Restart/stop the phone gateway after its settings changed. */
+function applyRemoteSettings(saved) {
+  if (!remote) return;
+  remote.stop();
+  if (saved.remoteControl) {
+    remote.setRuntimeUrl(runtimeUrl);
+    remote.start({ port: saved.remotePort })
+      .then((s) => { if (!s.running) notify(t(lang(), 'notify.remoteFailed'), t(lang(), 'notify.remoteFailedBody')); })
+      .catch((e) => log(`[remote] start failed: ${e.message}`));
+  }
+}
+
 function registerIpc() {
   ipcMain.handle('shell:get-settings', () => ({
     ...settings.get(),
@@ -813,11 +829,15 @@ function registerIpc() {
     needsSetup: !fs.existsSync(path.join(dshHomeOf(), '.credentials.yaml')),
   }));
   ipcMain.handle('shell:save-settings', (_e, partial) => {
+    const before = settings.get();
     const saved = settings.patch(partial || {});
     app.setLoginItemSettings({ openAtLogin: !!saved.autoStart });
     // log only the changed keys, never values (M12: no prompts/secrets in logs)
     log(`[shell] settings saved keys: ${Object.keys(partial || {}).join(', ')}`);
     updateTray();
+    if (remote && (saved.remoteControl !== before.remoteControl || saved.remotePort !== before.remotePort)) {
+      applyRemoteSettings(saved);
+    }
     return saved;
   });
   ipcMain.handle('shell:pick-folder', async (_e, kind) => {
@@ -899,6 +919,18 @@ function registerIpc() {
     return { ok: true };
   });
   ipcMain.handle('search:query', async (_e, q) => searchSessions(dshHomeOf(), q, 20));
+
+  // phone remote-control gateway (settings window)
+  ipcMain.handle('remote:status', () => (remote ? remote.status() : { running: false, disabled: true }));
+  ipcMain.handle('remote:pairing', () => {
+    if (!remote) return null;
+    remote.refreshPairingCode();
+    return remote.status();
+  });
+  ipcMain.handle('remote:revoke', () => (remote ? remote.revokeToken() : null));
+  ipcMain.handle('remote:qr', async (_e, text) => (
+    remote && typeof text === 'string' && /^https:\/\/[A-Za-z0-9.:\\-]+$/.test(text) ? remote.qrDataUrl(text) : null
+  ));
   ipcMain.on('search:close', () => { if (searchWindow) searchWindow.close(); });
 
   // injected window chrome
@@ -1629,6 +1661,7 @@ function checkShellUpdate(notifyUser) {
 // teardown
 // ---------------------------------------------------------------------------
 function killRuntime() {
+  if (remote) remote.setRuntimeUrl(null);
   if (!runtimeChild || runtimeChild.killed) return;
   stopEventsFeed();
   const child = runtimeChild;
@@ -1666,6 +1699,16 @@ if (!gotLock) {
     openLog();
     if (!fs.existsSync(iconPath())) log('[shell] warning: resources/icon.png missing');
     registerIpc();
+    // Phone remote-control gateway: constructed here because safeStorage needs
+    // the app to be ready. The runtime URL may still be null while booting -
+    // setRuntimeUrl() below feeds it as soon as the URL line appears.
+    remote = new RemoteControl({ userDataDir: app.getPath('userData'), safeStorage, log });
+    if (settings.get().remoteControl) {
+      remote.setRuntimeUrl(runtimeUrl);
+      remote.start({ port: settings.get().remotePort })
+        .then((s) => { if (!s.running) notify(t(lang(), 'notify.remoteFailed'), t(lang(), 'notify.remoteFailedBody')); })
+        .catch((e) => log(`[remote] start failed: ${e.message}`));
+    }
     app.setLoginItemSettings({ openAtLogin: !!settings.get().autoStart });
     createTray();
     const runtimeReady = await ensureRuntimeWithGuide();
@@ -1761,6 +1804,7 @@ if (!gotLock) {
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
     if (scheduler) scheduler.stop();
+    if (remote) remote.stop();
     if (logStream) logStream.end();
   });
 }

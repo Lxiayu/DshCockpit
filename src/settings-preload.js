@@ -26,4 +26,8 @@ contextBridge.exposeInMainWorld('dshShell', {
   scheduledList: () => ipcRenderer.invoke('shell:scheduled-list'),
   scheduledUpsert: (task) => ipcRenderer.invoke('shell:scheduled-upsert', task),
   scheduledRemove: (id) => ipcRenderer.invoke('shell:scheduled-remove', id),
+  remoteStatus: () => ipcRenderer.invoke('remote:status'),
+  remotePairing: () => ipcRenderer.invoke('remote:pairing'),
+  remoteRevoke: () => ipcRenderer.invoke('remote:revoke'),
+  remoteQr: (url) => ipcRenderer.invoke('remote:qr', url),
 });

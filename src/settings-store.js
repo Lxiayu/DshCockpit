@@ -32,10 +32,12 @@ const DEFAULTS = {
   scheduledTasks: [],       // { id, name, prompt, kind, everySeconds?|dailyTime?, enabled, nextRunAt, lastRunAt }
   recentWorkspaces: [],     // last used workspace dirs (tray quick switch)
   installedPlugins: [],     // plugins installed via the shell plugin market
+  remoteControl: false,     // phone remote-control gateway (TLS proxy to the runtime)
+  remotePort: 31780,        // gateway listen port (auto-increments on conflict)
 };
 
-const NUMERIC_KEYS = ['keepVersions', 'port', 'contextWindow', 'costInputPerM', 'costOutputPerM', 'costCacheReadPerM', 'costCacheWritePerM', 'monthlyBudget', 'backupKeep'];
-const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'tokenWidget', 'shellAutoUpdate'];
+const NUMERIC_KEYS = ['keepVersions', 'port', 'contextWindow', 'costInputPerM', 'costOutputPerM', 'costCacheReadPerM', 'costCacheWritePerM', 'monthlyBudget', 'backupKeep', 'remotePort'];
+const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'tokenWidget', 'shellAutoUpdate', 'remoteControl'];
 const STRING_KEYS = ['channel', 'pinnedVersion', 'registry', 'workspace', 'dshHome', 'nodeBin', 'dshBin', 'language', 'quickAskHotkey'];
 const ARRAY_KEYS = ['recentWorkspaces', 'installedPlugins', 'scheduledTasks'];
 

@@ -383,3 +383,32 @@ preload（`src/preload.js`）向 dsh web 页面注入一个悬浮组件（暗色
 数据来源：壳每 5s 读取 `DSH_HOME/sessions/` 下的会话日志（`.jsonl.zstd` 用纯 JS 的 `fzstd` 解压），从 `assistant/message` / `assistant/chunk(usage)` 事件的 `data.usage`（`inputTokens/outputTokens/cacheReadTokens/cacheWriteTokens`）汇总，按 (size, mtime) 缓存避免重复解析。HTTP 层没有现成统计接口（token-meter 是运行时内部服务），这是壳自己的数据源。实测：真实会话日志解析正常（本仓库开发对话 9339 行 → 输入 29.2 万 / 输出 36 万 / 缓存读 3300 万 tokens）。
 
 **界面语言**：Electron 默认 File/Edit 菜单已移除（`Menu.setApplicationMenu(null)`），壳的托盘、通知、设置窗口、注入 chrome 全部走 `src/i18n.js` 的 zh/en 字典（`跟随系统` 用 `app.getLocale()` 判断），不再出现英文系统菜单。
+
+## 17. 手机远程控制（局域网安全网关，2026-08）
+
+**动机**：dsh 运行时的 HTTP/WS 面板**没有任何鉴权、TLS 或 origin 策略**（上游 `dsh-host-webserver` 明文声明这是单用户本地服务的设计前提），把它直接暴露到局域网等于交出完全控制权（建会话、跑 bash、读文件）。因此手机访问不采用「让运行时绑 0.0.0.0」的方案，而是**壳内加一层鉴权网关**（`src/remote-control.js`）：
+
+```
+手机浏览器 --HTTPS(自签)--> 壳网关 0.0.0.0:<remotePort>（默认 31780）
+                              ├─ 鉴权：一次性配对码 -> 长期 token cookie（HttpOnly/Secure/SameSite=Lax）
+                              ├─ HTTP 代理  -> http://127.0.0.1:<runtime port>（agent:false，逐请求新连接）
+                              └─ WS upgrade -> 原始 TCP 管道（帧对网关不透明；重写 Host、剥离网关 cookie）
+```
+
+**配对与凭据**：
+- 配对码 6 位数字，10 分钟内**一次性**有效（`/__dsh_pair?c=码`），成功后 302 到 `/` 并种长期 cookie；二维码编码的就是这个 URL（`qrcode` 生成 dataURL，经 IPC 给设置页展示）。
+- 长期 token 32 字节随机，经 Electron `safeStorage` 加密存 `userData/remote-token.bin`（不可用时降级 `plain:` 前缀并在日志警告一次）；**不进 settings.json、不进备份**（延续「备份不含凭据」原则）。校验用 `crypto.timingSafeEqual`。
+- 「撤销所有设备」重新生成 token，旧 cookie 全部失效，活跃管道立即断开。
+- 防爆破：同 IP 5 次配对失败锁 5 分钟（429）。
+
+**证书**：`node-forge` 生成 RSA-2048 + SHA-256 自签证书，有效期 397 天（低于部分移动浏览器 398 天上限），SAN 覆盖 localhost + 全部局域网 IPv4；缓存于 `remote-cert.json`，检测到 IP 集变化时重签。手机首次访问会有「不受信任」警告，引导用户继续（设置页与配对页均有说明）。
+
+**生命周期联动**：运行时 URL 行出现/重启/退出时 `setRuntimeUrl()` 跟随（端口变化即断开管道让手机端重连）；网关可在运行时未就绪时先行启动（此时返回 503）；更新管道切换运行时对手机端只是「断开-重连」。网关端口冲突自动 +1 重试（最多 10 次）。
+
+**安全边界**：
+- 运行时仍只绑 127.0.0.1；局域网流量只能到达网关，必须带有效 cookie；
+- 网关 cookie 在转发前被剥离，运行时永远看不到鉴权材料；
+- 日志不记录 token 与配对 query；`remote:qr` IPC 校验 URL 形态后才生成二维码；
+- 明确建议「勿在公共网络开启」，设置总闸默认关闭。
+
+**测试**：`test/remote-control.test.js`（6 项）：cookie 剥离、加密持久化与重载、401/配对/一次性/代理/WS 管道/撤销全链路、运行时未就绪 503、防爆破锁定、`setRuntimeUrl` 状态跟踪。全套 `npm test` 48 项通过。
