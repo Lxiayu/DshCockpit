@@ -33,7 +33,12 @@ const PAIR_LOCK_MS = 5 * 60 * 1000;
 const CERT_DAYS = 397; // stay under the 398-day ceiling some mobile browsers enforce
 const TOKEN_BYTES = 32; // 64 hex chars
 
-/** LAN IPv4 candidates (sorted, deduped; virtual adapters included - the user picks). */
+/**
+ * LAN IPv4 candidates, best-first: real home/LAN ranges (192.168, 172.16-31)
+ * before 10.x (often virtual overlays like ZeroTier/Tailscale), virtual CGNAT
+ * (100.64-127, Tailscale) last. Deduped; the user still sees the full list in
+ * settings, ordering only picks the default QR target.
+ */
 function lanAddresses() {
   const out = [];
   for (const list of Object.values(os.networkInterfaces())) {
@@ -42,7 +47,16 @@ function lanAddresses() {
       out.push(ni.address);
     }
   }
-  return [...new Set(out)].sort();
+  const rank = (ip) => {
+    const a = Number(ip.split('.')[0]);
+    const b = Number(ip.split('.')[1]);
+    if (ip.startsWith('192.168.')) return 0; // typical Wi-Fi/router LAN
+    if (a === 172 && b >= 16 && b <= 31) return 1; // private LAN
+    if (a === 10) return 2; // private, but also ZeroTier's favorite range
+    if (a === 100 && b >= 64 && b <= 127) return 3; // CGNAT (Tailscale)
+    return 1.5; // anything else (public/odd ranges) before overlays
+  };
+  return [...new Set(out)].sort((x, y) => rank(x) - rank(y) || x.localeCompare(y));
 }
 
 /** Remove one cookie from a Cookie header value; undefined when nothing remains. */
