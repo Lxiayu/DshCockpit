@@ -1,6 +1,6 @@
 {
   "name": "dsh-cockpit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Desktop shell for DeepSeek Harness (dsh web): double-click to launch, tray resident, embedded runtime",
   "main": "src/main.js",
   "scripts": {
