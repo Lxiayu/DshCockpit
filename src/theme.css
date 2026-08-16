@@ -1,0 +1,86 @@
+/* ================================================================
+   src/theme.css — 全部壳窗口（settings / loading / quickask / search）
+   共享的主题 token 唯一来源。
+   深色为默认（:root）；浅色通过 <html data-theme="light"> 覆盖。
+   各窗口以 <link rel="stylesheet" href="theme.css"> 引用，
+   页面级组件样式仍内联在各自 HTML 中，只消费这里的 token。
+   ================================================================ */
+
+/* ----------------------------------------------------------------
+   深色主题（默认）— UI-REDESIGN-RESEARCH.md §4
+   四层背景、白透明边框、单一强调色（三态）。
+   ---------------------------------------------------------------- */
+:root {
+  /* 四层背景 */
+  --bg-app: #0A0A0C;      /* 窗口底色 */
+  --bg-panel: #121216;    /* 卡片 / 侧栏 */
+  --bg-hover: #1A1A20;    /* 行 hover / 浮层 */
+  --bg-overlay: #202028;  /* 弹出层 / 菜单 */
+  --bg-input: #0E0E12;    /* 输入框井 */
+  /* 文本四级 */
+  --text-1: #F5F5F7;
+  --text-2: #C9C9CE;
+  --text-3: #8E8E93;
+  --text-4: #5A5A60;
+  /* 边框（白透明两级） */
+  --border-1: rgba(255,255,255,0.07);
+  --border-2: rgba(255,255,255,0.14);
+  /* 强调色三态 + 软底 */
+  --acc: #6366F1;  --acc-hover: #4F46E5;  --acc-active: #4338CA;
+  --acc-soft: rgba(99,102,241,0.12);
+  /* 语义色 */
+  --ok: #10B981;  --warn: #F59E0B;  --bad: #EF4444;  --info: #3B82F6;
+  /* 形状 / 动效 / 等宽字体 */
+  --radius: 10px;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --mono: "SF Mono", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  /* legacy 别名（供 JS 内联样式引用，如 renderSched 用 var(--line)/var(--dim)） */
+  --bg: #0A0A0C; --panel: #121216; --line: rgba(255,255,255,0.09);
+  --text: #E6EDF3; --dim: #8E8E93;
+}
+
+/* ----------------------------------------------------------------
+   浅色主题（<html data-theme="light"> 覆盖）
+   accent 三态与 --radius/--ease/--mono 沿用 :root，不重复定义。
+   ---------------------------------------------------------------- */
+[data-theme="light"] {
+  /* 四层背景 */
+  --bg-app: #F5F5F7;
+  --bg-panel: #FFFFFF;
+  --bg-hover: #EDEDF0;
+  --bg-overlay: #FFFFFF;
+  --bg-input: #F0F0F3;
+  /* 文本四级 */
+  --text-1: #17171A;
+  --text-2: #4A4A52;
+  --text-3: #6B6B73; /* was #75757D — darkened: cat-badge (10px on --bg-input) was 4.0:1, below AA */
+  --text-4: #9A9AA2;
+  /* 边框（黑透明两级） */
+  --border-1: rgba(0,0,0,0.08);
+  --border-2: rgba(0,0,0,0.14);
+  /* 软底 */
+  --acc-soft: rgba(99,102,241,0.10);
+  /* 语义色（浅色底上可读） */
+  --ok: #059669;  --warn: #D97706;  --bad: #DC2626;  --info: #2563EB;
+  /* legacy 别名（浅色） */
+  --bg: #F5F5F7; --panel: #FFFFFF; --line: rgba(0,0,0,0.10);
+  --text: #24242A; --dim: #6B6B73;
+}
+
+/* ----------------------------------------------------------------
+   主题切换过渡：html.theme-anim 存续期间（~400ms，由各窗口的
+   onTheme 回调挂上/摘除），颜色/背景/边框平滑过渡而不是瞬变。
+   ---------------------------------------------------------------- */
+html.theme-anim,
+html.theme-anim body,
+html.theme-anim *:not(kbd):not(.no-theme-anim) {
+  transition:
+    background-color 0.35s var(--ease),
+    color 0.35s var(--ease),
+    border-color 0.35s var(--ease),
+    box-shadow 0.35s var(--ease),
+    fill 0.35s var(--ease) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  html.theme-anim, html.theme-anim body, html.theme-anim * { transition: none !important; }
+}

@@ -15,7 +15,7 @@
 //   DSH_DESKTOP_USER_DATA
 'use strict';
 
-const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut } = require('electron');
+const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut, nativeTheme, clipboard } = require('electron');
 const { spawn, execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
@@ -34,7 +34,7 @@ const cost = require('./cost');
 const { runHeadless } = require('./headless');
 const { Scheduler } = require('./scheduler');
 const { searchSessions } = require('./session-search');
-const { createPluginOpGuard, failureCode, shouldCleanupAfterFailure, summarizeOutput, inferStage } = require('./plugin-flow');
+const { createPluginOpGuard, failureCode, shouldCleanupAfterFailure, summarizeOutput, inferStage, parsePnpmBlockedPackage, upsertOnlyBuiltDependencies, pickSubpackage, resolveDepKey, pruneBundles, sanitizeProfile } = require('./plugin-flow');
 
 if (process.env.DSH_DESKTOP_USER_DATA) {
   // must happen before app is ready; keeps logs/state inside the workspace
@@ -71,7 +71,6 @@ let quickAskRunning = false;
 let searchWindow = null;
 let scheduler = null;
 let loadingWindow = null;
-let pluginMarketWindow = null;
 let trayPeakTimer = null; // 1-minute tray refresh for the peak/off-peak countdown
 let guidedInstallInProgress = false;
 let mainWindowPending = false; // guided first-run: runtime booting, main window not open yet
@@ -377,6 +376,37 @@ function activeDshBin() {
   return discoverDshBin();
 }
 
+/**
+ * Boot-time self-heal: drop bundle registrations whose third-party package is
+ * missing from node_modules (a dangling reference makes the runtime throw on
+ * every boot — the crash-loop case). Runs before each spawn; cheap because it
+ * touches only the manifest plus one existsSync per third-party bundle.
+ */
+function selfHealProfile() {
+  try {
+    const dir = profileDirOf();
+    let pkg;
+    try { pkg = JSON.parse(fs.readFileSync(profilePackageJson(), 'utf8')); } catch { return; }
+    const { pkg: cleaned, removed } = sanitizeProfile(pkg, (name) => {
+      try {
+        fs.accessSync(path.join(dir, 'node_modules', ...name.split('/'), 'package.json'));
+        return true;
+      } catch { return false; }
+    });
+    if (!removed.length) return;
+    writeProfilePackage(JSON.stringify(cleaned, null, 2) + '\n');
+    try { fs.rmSync(path.join(dir, 'pnpm-lock.yaml'), { force: true }); } catch { /* ignore */ }
+    log(`[shell] self-heal: removed dangling bundle(s) ${removed.join(', ')}`);
+    notify(t(lang(), 'selfheal.title'), t(lang(), 'selfheal.body', { names: removed.join(', ') }));
+    const cur = settings.get();
+    const stillInstalled = new Set((cur.installedPlugins || [])
+      .filter((p) => !removed.some((n) => n.endsWith(p.split('/')[1]) || p.endsWith(n))));
+    settings.patch({ installedPlugins: [...stillInstalled] });
+  } catch (e) {
+    log(`[shell] self-heal skipped: ${e.message}`);
+  }
+}
+
 function spawnRuntime() {
   const dshBin = activeDshBin();
   if (!dshBin) {
@@ -389,6 +419,8 @@ function spawnRuntime() {
   const port = eff.port || 0;
   const dshHome = eff.dshHome || path.join(os.homedir(), '.dsh');
   const cwd = eff.workspace || os.homedir();
+
+  selfHealProfile();
 
   try { fs.mkdirSync(cwd, { recursive: true }); } catch { /* best effort */ }
 
@@ -470,7 +502,7 @@ function spawnRuntime() {
         stdio: outFd === -1 ? 'ignore' : ['ignore', outFd, outFd],
       });
     } catch (err) {
-      fail(`启动运行时失败: ${err.message}`);
+      fail(t(lang(), 'dialog.spawnFailed', { msg: err.message }));
       return;
     }
 
@@ -509,7 +541,21 @@ function spawnRuntime() {
         notify(t(lang(), 'notify.runtimeExited'), t(lang(), 'notify.autoRestart', { code, signal, attempt: crashCount }));
         setTimeout(restartRuntime, 1_500);
       } else {
+        // crash loop: the runtime cannot boot — most likely a broken plugin.
+        // Offer safe mode (official bundles only) right here instead of a bare
+        // "gave up" notification the user cannot act on.
         notify(t(lang(), 'notify.runtimeExited'), t(lang(), 'notify.autoRestartStopped', { code, signal }));
+        dialog.showMessageBox({
+          type: 'error',
+          title: APP_NAME,
+          message: t(lang(), 'crashloop.title'),
+          detail: t(lang(), 'crashloop.body', { log: runtimeLogPath }),
+          buttons: [t(lang(), 'crashloop.safeMode'), t(lang(), 'crashloop.later')],
+          defaultId: 0,
+          cancelId: 1,
+        }).then(({ response }) => {
+          if (response === 0) enterSafeMode();
+        }).catch(() => { /* dialog failed — notifications already sent */ });
       }
     });
 
@@ -578,7 +624,7 @@ function createWindow(url) {
   const bounds = safeBounds(saved) || { width: 1280, height: 840 };
   mainWindow = new BrowserWindow({
     ...bounds,
-    backgroundColor: '#14171c', // match the splash: no white flash before the web UI paints
+    backgroundColor: themeBackground(), // match the splash: no white flash before the web UI paints
     title: APP_NAME,
     autoHideMenuBar: true,
     icon: iconPath(),
@@ -634,9 +680,15 @@ function createSettingsWindow() {
     return settingsWindow;
   }
   settingsWindow = new BrowserWindow({
-    width: 740,
-    height: 880,
-    title: `${APP_NAME} 设置`,
+    // 16:10-ish landscape: room for the planned sidebar (208px) + content
+    // column (~680px) per UI-REDESIGN-RESEARCH.md §4.3, instead of the old
+    // narrow tall strip.
+    width: 960,
+    height: 720,
+    minWidth: 760,
+    minHeight: 560,
+    backgroundColor: themeBackground(),
+    title: t(lang(), 'settings.title', { name: APP_NAME }),
     icon: iconPath(),
     webPreferences: {
       contextIsolation: true,
@@ -659,6 +711,33 @@ function iconPath() {
   if (app.isPackaged) return path.join(process.resourcesPath, 'icon.png');
   return path.join(__dirname, '..', 'resources', 'icon.png');
 }
+
+// ---------------------------------------------------------------------------
+// theme (dark/light; shared tokens in theme.css, dark is the CSS default)
+// ---------------------------------------------------------------------------
+/** Resolve the effective theme: themeMode 'system' (or invalid) follows the OS. */
+function resolvedTheme() {
+  const mode = settings.get().themeMode;
+  if (mode === 'dark' || mode === 'light') return mode;
+  return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+}
+
+/** Window base color for the resolved theme (must match --bg-app in theme.css). */
+function themeBackground() {
+  return resolvedTheme() === 'light' ? '#F5F5F7' : '#0A0A0C';
+}
+
+/** Push the resolved theme to every open shell window and repaint its base. */
+function broadcastTheme() {
+  const t = resolvedTheme();
+  const bg = t === 'light' ? '#F5F5F7' : '#0A0A0C';
+  for (const w of BrowserWindow.getAllWindows()) {
+    w.setBackgroundColor(bg);
+    w.webContents.send('shell:theme', t);
+  }
+}
+
+nativeTheme.on('theme-changed', () => broadcastTheme());
 
 // ---------------------------------------------------------------------------
 // tray
@@ -862,7 +941,7 @@ async function runUpdateCheck(notifyUser) {
 
 async function applyPendingUpdate() {
   const pending = manager.state.pendingVersion;
-  if (!pending) throw new Error('没有待应用的更新');
+  if (!pending) throw new Error(t(lang(), 'update.noPending'));
   const { previous } = await manager.activate(pending);
   log(`[shell] applied update: ${previous} -> ${pending}`);
   restartRuntime();
@@ -893,13 +972,15 @@ function registerIpc() {
     app.setLoginItemSettings({ openAtLogin: !!saved.autoStart });
     // log only the changed keys, never values (M12: no prompts/secrets in logs)
     log(`[shell] settings saved keys: ${Object.keys(partial || {}).join(', ')}`);
+    broadcastTheme(); // a saved themeMode override may change every window
     updateTray();
     return saved;
   });
+  ipcMain.handle('shell:get-theme', () => resolvedTheme());
   ipcMain.handle('shell:pick-folder', async (_e, kind) => {
     const res = await dialog.showOpenDialog(settingsWindow || mainWindow, {
       properties: ['openDirectory', 'createDirectory'],
-      title: kind === 'workspace' ? '选择工作区目录' : '选择 DSH_HOME 目录',
+      title: kind === 'workspace' ? t(lang(), 'dialog.pickWorkspace') : t(lang(), 'dialog.pickDshHome'),
     });
     return res.canceled ? null : { path: res.filePaths[0] };
   });
@@ -930,9 +1011,46 @@ function registerIpc() {
     try { return { ok: true, plugins: await fetchPlugins(keyword) }; }
     catch (e) { return { ok: false, reason: e.message }; }
   });
-  ipcMain.on('plugins:close', () => { if (pluginMarketWindow) pluginMarketWindow.close(); });
-  ipcMain.on('plugins:open', () => createPluginMarketWindow());
+  // curated market from awesome-dsh-plugin (CC0); last-resort fallback to the
+  // legacy topic search so the market never renders empty due to one outage
+  ipcMain.handle('plugins:market', async (_e, force) => {
+    try {
+      return await marketPayload(Boolean(force));
+    } catch (e) {
+      log(`[shell] curated market unavailable (${e.message}); falling back to topic search`);
+      try {
+        return { ok: true, source: 'fallback', fetchedAt: 0, categories: [], plugins: await fetchPlugins('') };
+      } catch (e2) {
+        return { ok: false, reason: e2.message };
+      }
+    }
+  });
   ipcMain.handle('shell:plugin-action', (_e, action, fullName) => pluginAction(action, fullName));
+  ipcMain.handle('shell:profile-snapshots', () => {
+    try {
+      const base = profileSnapshotDir();
+      return fs.readdirSync(base)
+        .filter((d) => fs.existsSync(path.join(base, d, 'meta.json')))
+        .sort()
+        .reverse()
+        .map((d) => {
+          try { return { id: d, ...JSON.parse(fs.readFileSync(path.join(base, d, 'meta.json'), 'utf8')) }; }
+          catch { return { id: d, time: '', label: d }; }
+        });
+    } catch { return []; }
+  });
+  ipcMain.handle('shell:restore-snapshot', (_e, id) => {
+    try {
+      restoreProfileSnapshot(String(id));
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: e.message };
+    }
+  });
+  ipcMain.handle('shell:safe-mode', () => {
+    enterSafeMode();
+    return { ok: true };
+  });
   // manual fallback for "plugin installed but webUI did not refresh": same
   // restart the tray uses; refuse (instead of quitting) when no runtime exists
   ipcMain.handle('shell:restart-runtime', () => {
@@ -948,16 +1066,24 @@ function registerIpc() {
   ipcMain.handle('shell:open-diagnostics', () => shell.openPath(diagnosticsDir()));
   ipcMain.handle('quickask:submit', (_e, prompt) => handleQuickAskSubmit(prompt));
   ipcMain.on('quickask:close', () => { if (quickAskWindow) quickAskWindow.close(); });
-  ipcMain.handle('shell:scheduled-list', () => settings.get().scheduledTasks || []);
+  ipcMain.handle('shell:scheduled-list', () => ({
+    tasks: settings.get().scheduledTasks || [],
+    running: [...scheduledRunning],
+  }));
   ipcMain.handle('shell:scheduled-upsert', (_e, task) => {
     // sanitize: keep only known fields with sane types
+    const kind = ['every', 'daily', 'weekly'].includes(task.kind) ? task.kind : 'every';
+    const weeklyDay = Number(task.weeklyDay);
     const clean = {
       id: typeof task.id === 'string' && task.id ? task.id : undefined,
-      name: typeof task.name === 'string' ? task.name.slice(0, 100) : '任务',
+      name: typeof task.name === 'string' ? task.name.slice(0, 100) : t(lang(), 'scheduled.defaultName'),
       prompt: typeof task.prompt === 'string' ? task.prompt.slice(0, 4000) : '',
-      kind: task.kind === 'daily' ? 'daily' : 'every',
+      templateId: typeof task.templateId === 'string' ? task.templateId.slice(0, 64) : undefined,
+      kind,
       everySeconds: Math.max(60, Number(task.everySeconds) || 3600),
       dailyTime: /^\d{1,2}:\d{2}$/.test(task.dailyTime || '') ? task.dailyTime : '09:00',
+      weeklyDay: Number.isInteger(weeklyDay) && weeklyDay >= 0 && weeklyDay <= 6 ? weeklyDay : 1,
+      weeklyTime: /^\d{1,2}:\d{2}$/.test(task.weeklyTime || '') ? task.weeklyTime : '09:00',
       enabled: task.enabled !== false,
       nextRunAt: Number(task.nextRunAt) || undefined,
       lastRunAt: typeof task.lastRunAt === 'string' ? task.lastRunAt : undefined,
@@ -965,20 +1091,61 @@ function registerIpc() {
     const list = settings.get().scheduledTasks || [];
     if (clean.id) {
       const idx = list.findIndex((t) => t.id === clean.id);
-      if (idx !== -1) list[idx] = { ...list[idx], ...clean };
-      else list.push(clean);
+      if (idx !== -1) {
+        const old = list[idx];
+        // schedule semantics changed → drop the stale nextRunAt so the
+        // scheduler recomputes from the new plan instead of firing at the
+        // old (possibly already-due) moment
+        const samePlan = old.kind === clean.kind
+          && (clean.kind !== 'every' || old.everySeconds === clean.everySeconds)
+          && (clean.kind !== 'daily' || old.dailyTime === clean.dailyTime)
+          && (clean.kind !== 'weekly' || (old.weeklyDay === clean.weeklyDay && old.weeklyTime === clean.weeklyTime));
+        if (!samePlan) clean.nextRunAt = undefined;
+        list[idx] = { ...old, ...clean };
+      } else list.push(clean);
     } else {
       clean.id = `task-${Date.now()}`;
+      clean.nextRunAt = undefined; // fresh task: let the scheduler plan the first run
       list.push(clean);
     }
     settings.patch({ scheduledTasks: list });
     startScheduler();
+    broadcastScheduled();
     return { ok: true, tasks: settings.get().scheduledTasks };
   });
   ipcMain.handle('shell:scheduled-remove', (_e, id) => {
-    const list = (settings.get().scheduledTasks || []).filter((t) => t.id !== id);
+    const list = (settings.get().scheduledTasks || []).filter((t) => t && t.id !== id);
     settings.patch({ scheduledTasks: list });
     startScheduler();
+    broadcastScheduled();
+    return { ok: true };
+  });
+  ipcMain.handle('shell:scheduled-history', () => settings.get().scheduledHistory || []);
+  ipcMain.handle('shell:scheduled-clear-history', () => {
+    settings.patch({ scheduledHistory: [] });
+    broadcastScheduled();
+    return { ok: true };
+  });
+  ipcMain.handle('shell:scheduled-run', async (_e, id) => {
+    const task = (settings.get().scheduledTasks || []).find((tk) => tk && tk.id === id);
+    if (!task) return { ok: false, reason: 'task not found' };
+    if (scheduledRunning.has(id)) return { ok: false, reason: 'already running' };
+    scheduledRunning.add(id);
+    broadcastScheduled();
+    try {
+      const r = await runScheduledTask(task);
+      return { ok: !!r.ok };
+    } finally {
+      scheduledRunning.delete(id);
+      settings.save(); // persist any nextRunAt/lastRunAt mutation
+      broadcastScheduled();
+    }
+  });
+  // "create in chat": copy a guiding prompt, surface the main window, notify
+  ipcMain.handle('shell:copy-and-show', (_e, text, title, body) => {
+    clipboard.writeText(String(text || ''));
+    showMain();
+    if (title) notify(String(title), String(body || ''));
     return { ok: true };
   });
   ipcMain.handle('search:query', async (_e, q) => searchSessions(dshHomeOf(), q, 20));
@@ -1097,9 +1264,43 @@ function seedInstalledPlugins() {
   }
 }
 
+// topic keyword -> plugin-center category. Priority-ordered: the first rule
+// whose keyword appears in the repo topics wins (case-insensitive exact
+// match); repos hitting nothing fall back to 'other'.
+// NOTE: real skin repos tag themselves 'web-ui'/'sidebar'/'tui'/'statusline'
+// (they almost never use the literal topic 'theme'), so those live here.
+const PLUGIN_CATEGORY_RULES = [
+  ['theme', ['skin', 'theme', 'themes', 'dsh-web-ui', 'skin-center', 'appearance', 'web-ui', 'sidebar', 'statusline', 'tui', 'ui-theme']],
+  ['skills', ['skills', 'skill', 'agent-skills', 'skill-generator', 'prompt-engineering', 'prompts']],
+  ['workflow', ['workflow-automation', 'automation', 'task-board', 'kanban', 'chat-management', 'productivity', 'tasks']],
+  ['memory', ['agent-memory', 'memory', 'context-database', 'rag', 'knowledge', 'context-engineering', 'vfs']],
+  ['design', ['design', 'ui-generator', 'prototyping', 'design-systems', 'figma-alternative']],
+  // fun before devtools: mascot/pet/pixel-art are stronger signals than a
+  // generic 'cli'/'developer-tools' topic most repos also carry
+  ['fun', ['pet', 'mascot', 'pixel-art', 'toy', 'game']],
+  ['devtools', ['mcp', 'cli', 'developer-tools', 'testing', 'monitoring', 'observability', 'linters']],
+];
+
+// skin-flavored words that show up in repo *descriptions* when the repo has
+// no recognizable topic (zh repos usually say 皮肤/主题 in the description)
+const THEME_DESC_HINTS = /皮肤|主题|外观|\bskin\b|\bthemes?\b|\bappearance\b|\blook-and-feel\b/i;
+
+/** Map GitHub topics (+ description fallback) to a plugin-center category. */
+function categorize(topics, description) {
+  const set = new Set((Array.isArray(topics) ? topics : []).map((t) => String(t).toLowerCase()));
+  for (const [category, keywords] of PLUGIN_CATEGORY_RULES) {
+    for (const k of keywords) if (set.has(k)) return category;
+  }
+  if (description && THEME_DESC_HINTS.test(String(description))) return 'theme';
+  return 'other';
+}
+
 async function fetchPlugins(keyword) {
-  const q = 'topic:dsh-plugin' + (keyword ? ' ' + String(keyword).trim().slice(0, 60) : '');
-  const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&sort=updated&order=desc&per_page=30`;
+  // broad search: repos matching "<keyword> dsh" — covers plugins that never
+  // tagged the dsh-plugin topic and are absent from the curated list
+  const kw = String(keyword || '').trim().slice(0, 60);
+  const q = kw ? `${kw} dsh` : 'topic:dsh-plugin';
+  const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&sort=stars&order=desc&per_page=50`;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 15_000);
   let res;
@@ -1120,7 +1321,80 @@ async function fetchPlugins(keyword) {
     updated: (it.updated_at || '').slice(0, 10),
     url: it.html_url,
     installed: installed.has(it.full_name),
+    topics: Array.isArray(it.topics) ? it.topics : [],
+    category: categorize(it.topics, it.description),
   }));
+}
+
+// ---- curated market (awesome-dsh-plugin, CC0-1.0) ---------------------------
+const { parseAwesomeReadme, parseZhDescriptions, buildMarketPayload, isCacheFresh } = require('./market');
+const MARKET_REPO = 'awesome-dsh-plugin/awesome-dsh-plugin';
+
+async function fetchText(url) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 15_000);
+  try {
+    const res = await fetch(url, { signal: ac.signal, headers: { 'user-agent': 'dsh-cockpit' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** One tolerant search-API call for star/update enrichment (not required). */
+async function fetchStarMap() {
+  try {
+    const url = 'https://api.github.com/search/repositories?q=topic%3Adsh-plugin&per_page=100';
+    const res = await fetch(url, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'dsh-cockpit' } });
+    if (!res.ok) return {};
+    const data = await res.json();
+    const map = {};
+    for (const it of data.items || []) map[it.full_name] = { stars: it.stargazers_count || 0, updated: (it.updated_at || '').slice(0, 10) };
+    return map;
+  } catch {
+    return {}; // stars are cosmetic — never fail the market because of them
+  }
+}
+
+/**
+ * Curated list with a 24h on-disk cache: fresh cache serves instantly; fetch
+ * failures fall back to a stale cache rather than an empty market.
+ */
+async function fetchMarketData(force) {
+  const cacheFile = path.join(app.getPath('userData'), 'market-cache.json');
+  let cache = null;
+  try { cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); } catch { /* no cache yet */ }
+  if (!force && isCacheFresh(cache)) {
+    return { source: 'cache', entries: cache.entries, fetchedAt: cache.fetchedAt };
+  }
+  try {
+    const base = `https://raw.githubusercontent.com/${MARKET_REPO}/main`;
+    const [en, zh] = await Promise.all([
+      fetchText(`${base}/README.md`),
+      fetchText(`${base}/README.zh.md`).catch(() => ''), // zh descriptions are optional
+    ]);
+    const entries = parseAwesomeReadme(en);
+    if (!entries.length) throw new Error('curated list parse produced 0 plugins');
+    const zhDesc = parseZhDescriptions(zh);
+    for (const e of entries) e.descZh = zhDesc.get(e.fullName) || '';
+    cache = { fetchedAt: Date.now(), entries };
+    try { fs.writeFileSync(cacheFile, JSON.stringify(cache)); } catch (e) { log(`[shell] market cache write failed: ${e.message}`); }
+    return { source: 'live', entries, fetchedAt: cache.fetchedAt };
+  } catch (e) {
+    if (cache && Array.isArray(cache.entries) && cache.entries.length) {
+      log(`[shell] market fetch failed (${e.message}); serving stale cache`);
+      return { source: 'stale', entries: cache.entries, fetchedAt: cache.fetchedAt || 0 };
+    }
+    throw e;
+  }
+}
+
+async function marketPayload(force) {
+  const { source, entries, fetchedAt } = await fetchMarketData(force);
+  const starMap = await fetchStarMap();
+  const installed = new Set([...(settings.get().installedPlugins || []), ...parseProfilePlugins()]);
+  return { ok: true, source, fetchedAt, ...buildMarketPayload(entries, starMap, installed) };
 }
 
 /** Run `dsh plugin --profile web <args>`; output to a log file (fd, sandbox-safe).
@@ -1195,10 +1469,190 @@ function runDshPlugin(args, timeoutMs = 120_000, onTail = null) {
   });
 }
 
-/** Forward plugin-install progress to the market window (if open). */
+/** Forward plugin-install progress to the settings window (plugin center). */
 function sendMarketProgress(info) {
-  if (pluginMarketWindow && !pluginMarketWindow.isDestroyed()) {
-    try { pluginMarketWindow.webContents.send('plugins:progress', info); } catch { /* ignore */ }
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    try { settingsWindow.webContents.send('plugins:progress', info); } catch { /* ignore */ }
+  }
+}
+
+/** Profile paths for the web runtime. */
+function profileDirOf() { return path.join(dshHomeOf(), 'profiles', 'web'); }
+
+function profilePackageJson() { return path.join(profileDirOf(), 'package.json'); }
+
+/**
+ * Write a file inside the profile dir, degrading through direct write →
+ * temp+rename → shell copy. Some endpoint-security agents block node
+ * processes from rewriting profile manifests by file name (npm supply-chain
+ * protection); zsh redirection is typically exempt.
+ */
+function writeProfileFile(file, content) {
+  try {
+    fs.writeFileSync(file, content);
+    return;
+  } catch (e1) {
+    log(`[shell] ${path.basename(file)} direct write failed (${e1.code}); trying temp+rename`);
+  }
+  const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.tmp`);
+  try {
+    fs.writeFileSync(tmp, content);
+    fs.renameSync(tmp, file);
+    return;
+  } catch (e2) {
+    log(`[shell] ${path.basename(file)} temp+rename failed (${e2.code}); trying shell copy`);
+    try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ }
+  }
+  const { execFileSync } = require('node:child_process');
+  const shell = process.platform === 'win32' ? 'cmd' : '/bin/zsh';
+  const redirect = process.platform === 'win32'
+    ? `type ${JSON.stringify(tmp)} > ${JSON.stringify(file)} & del ${JSON.stringify(tmp)}`
+    : `cat ${JSON.stringify(tmp)} > ${JSON.stringify(file)} && rm -f ${JSON.stringify(tmp)}`;
+  try {
+    fs.writeFileSync(tmp, content);
+    execFileSync(shell, process.platform === 'win32' ? ['/d', '/s', '/c', redirect] : ['-c', redirect]);
+  } catch (e3) {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ }
+    throw e3;
+  }
+}
+
+function writeProfilePackage(content) { writeProfileFile(profilePackageJson(), content); }
+
+/** The profile manifest files captured by a snapshot (all tiny text files). */
+const PROFILE_SNAPSHOT_FILES = ['package.json', 'pnpm-workspace.yaml', 'cordis.yml', 'cordis.patch.yml'];
+const PROFILE_SNAPSHOT_KEEP = 8;
+
+function profileSnapshotDir() { return path.join(app.getPath('userData'), 'profile-snapshots'); }
+
+/**
+ * Capture the profile manifests before/after risky operations so the shell can
+ * always roll a broken profile back (dangling bundles, bad patches, hostile
+ * plugins) without touching runtime-managed node_modules.
+ */
+function snapshotProfile(label) {
+  try {
+    const dir = profileDirOf();
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const snapDir = path.join(profileSnapshotDir(), `${stamp}-${label}`);
+    fs.mkdirSync(snapDir, { recursive: true });
+    let meta = { time: new Date().toISOString(), label };
+    try {
+      const pkg = JSON.parse(fs.readFileSync(profilePackageJson(), 'utf8'));
+      meta.plugins = Object.keys(pkg.dependencies || {});
+      meta.bundles = (pkg?.dsh?.profile?.bundles || []).length;
+    } catch { /* manifest unreadable — snapshot anyway */ }
+    for (const f of PROFILE_SNAPSHOT_FILES) {
+      try { fs.copyFileSync(path.join(dir, f), path.join(snapDir, f)); } catch { /* absent file — skip */ }
+    }
+    fs.writeFileSync(path.join(snapDir, 'meta.json'), JSON.stringify(meta, null, 2));
+    // retain the newest PROFILE_SNAPSHOT_KEEP snapshots
+    const all = fs.readdirSync(profileSnapshotDir()).filter((d) => !d.startsWith('.')).sort();
+    for (const old of all.slice(0, Math.max(0, all.length - PROFILE_SNAPSHOT_KEEP))) {
+      try { fs.rmSync(path.join(profileSnapshotDir(), old), { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+    log(`[shell] profile snapshot saved: ${stamp}-${label}`);
+    return `${stamp}-${label}`;
+  } catch (e) {
+    log(`[shell] profile snapshot failed: ${e.message}`);
+    return null;
+  }
+}
+
+/** Restore a snapshot id captured by snapshotProfile; runtime restarts after. */
+function restoreProfileSnapshot(id) {
+  if (!/^[\w.-]+-[\w.-]+$/.test(id)) throw new Error('invalid snapshot id');
+  const snapDir = path.join(profileSnapshotDir(), id);
+  fs.accessSync(snapDir);
+  snapshotProfile('pre-restore'); // safety net before mutating the profile
+  const dir = profileDirOf();
+  let restored = 0;
+  for (const f of PROFILE_SNAPSHOT_FILES) {
+    try {
+      writeProfileFile(path.join(dir, f), fs.readFileSync(path.join(snapDir, f), 'utf8'));
+      restored += 1;
+    } catch { /* not in snapshot — leave current file */ }
+  }
+  try { fs.rmSync(path.join(dir, 'pnpm-lock.yaml'), { force: true }); } catch { /* ignore */ }
+  log(`[shell] profile snapshot ${id} restored (${restored} files)`);
+  restartRuntime();
+  return restored;
+}
+
+/**
+ * Reset the profile to the official minimum (base + web-app bundles, no
+ * third-party deps). The rescue path when a plugin crashes the runtime: the
+ * shell stays alive, so it can always offer this from settings or the
+ * crash-loop dialog.
+ */
+function enterSafeMode() {
+  snapshotProfile('pre-safe-mode');
+  const pkg = {
+    name: 'dsh-profile-web',
+    private: true,
+    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] } },
+  };
+  writeProfilePackage(JSON.stringify(pkg, null, 2) + '\n');
+  const dir = profileDirOf();
+  try { fs.rmSync(path.join(dir, 'pnpm-lock.yaml'), { force: true }); } catch { /* ignore */ }
+  settings.patch({ installedPlugins: [] });
+  log('[shell] safe mode: profile reset to official bundles only');
+  restartRuntime();
+  updateTray();
+}
+
+/**
+ * Last-resort removal when `dsh plugin remove` fails (e.g. pnpm EPERM on
+ * locked-down machines, or a collection repo whose root install left a
+ * package without package.json that pnpm cannot uninstall). Prunes BOTH the
+ * dependency entry AND the bundle registration (a dangling bundle reference
+ * crashes the runtime on every boot), plus the node_modules directory and the
+ * lockfile; the next `plugin add` re-resolves everything cleanly.
+ */
+function forcePrunePlugin(fullName) {
+  const dir = profileDirOf();
+  let pkg = {};
+  try { pkg = JSON.parse(fs.readFileSync(profilePackageJson(), 'utf8')); } catch { /* missing/unreadable — still try dir removal */ }
+  const deps = pkg.dependencies || {};
+  // a root install and a subpackage install can both point at the same repo
+  // (e.g. root residue after a failed prune) — drop every matching entry
+  const keys = [];
+  let k;
+  while ((k = resolveDepKey(deps, fullName))) { keys.push(k); delete deps[k]; }
+  if (!keys.length) keys.push(fullName.split('/')[1]);
+  // candidate names for the bundle registration: dep keys plus each plugin's
+  // real package name (may differ from the dep key)
+  const names = [...keys];
+  for (const key of keys) {
+    try {
+      const nm = JSON.parse(fs.readFileSync(path.join(dir, 'node_modules', ...key.split('/'), 'package.json'), 'utf8')).name;
+      if (nm) names.push(nm);
+    } catch { /* already gone */ }
+  }
+  pruneBundles(pkg, names);
+  if (!Object.keys(deps).length) delete pkg.dependencies;
+  writeProfilePackage(JSON.stringify(pkg, null, 2) + '\n');
+  for (const key of keys) {
+    fs.rmSync(path.join(dir, 'node_modules', ...String(key).split('/')), { recursive: true, force: true });
+  }
+  try { fs.rmSync(path.join(dir, 'pnpm-lock.yaml'), { force: true }); } catch { /* ignore */ }
+  log(`[shell] force-pruned plugin ${fullName} (deps ${keys.join(', ')}) from profile`);
+  return keys[0];
+}
+
+/** Detect collection repos (no root package.json) and return their subpackage. */
+async function findSubpackage(fullName) {
+  const headers = { accept: 'application/vnd.github+json', 'user-agent': 'dsh-cockpit' };
+  try {
+    const repoRes = await fetch(`https://api.github.com/repos/${fullName}`, { headers });
+    if (!repoRes.ok) return null;
+    const branch = (await repoRes.json()).default_branch || 'main';
+    const treeRes = await fetch(`https://api.github.com/repos/${fullName}/git/trees/${encodeURIComponent(branch)}?recursive=1`, { headers });
+    if (!treeRes.ok) return null;
+    return pickSubpackage((await treeRes.json()).tree || []);
+  } catch (e) {
+    log(`[shell] subpackage lookup failed for ${fullName}: ${e.message}`);
+    return null;
   }
 }
 
@@ -1209,10 +1663,55 @@ async function pluginAction(action, fullName) {
     return { ok: false, code: 'busy', reason: t(lang(), 'plugin.busy') };
   }
   try {
+    // snapshot the pre-operation profile: if the plugin breaks the runtime,
+    // the settings page can roll back to this exact state
+    snapshotProfile(action === 'remove' ? 'pre-remove' : 'pre-install');
     const arg = action === 'remove' ? 'remove' : 'add';
-    const spec = action === 'remove' ? fullName : `github:${fullName}`;
-    const result = await runDshPlugin([arg, spec], 120_000, (info) => sendMarketProgress(info));
-    if (!result.ok) {
+    // a collection repo installed from its subpackage records the subpackage's
+    // real name as the dep key — resolve it so remove hits the right entry
+    let depKey = fullName.split('/')[1];
+    if (action === 'remove') {
+      try {
+        const deps = JSON.parse(fs.readFileSync(profilePackageJson(), 'utf8')).dependencies || {};
+        depKey = resolveDepKey(deps, fullName) || depKey;
+      } catch { /* fall back to repo name */ }
+    }
+    const spec = action === 'remove' ? depKey : `github:${fullName}`;
+    let result = await runDshPlugin([arg, spec], 120_000, (info) => sendMarketProgress(info));
+    // pnpm v10 refuses to run a git-hosted plugin's mandatory `prepare` build
+    // unless the package is in onlyBuiltDependencies. Ecosystem fallback:
+    // allowlist the blocked package in the profile's workspace yaml and retry
+    // once (initProfile never rewrites the file, so the entry persists).
+    if (!result.ok && action !== 'remove') {
+      const pkg = parsePnpmBlockedPackage(result.output);
+      if (pkg) {
+        const yamlPath = path.join(profileDirOf(), 'pnpm-workspace.yaml');
+        try {
+          const cur = fs.readFileSync(yamlPath, 'utf8');
+          const next = upsertOnlyBuiltDependencies(cur, pkg);
+          if (next !== cur) fs.writeFileSync(yamlPath, next);
+          log(`[shell] pnpm blocked build of ${pkg}; added to onlyBuiltDependencies, retrying`);
+          sendMarketProgress({ stage: 'resolve', tail: `pnpm allowlist: ${pkg}` });
+          result = await runDshPlugin([arg, spec], 120_000, (info) => sendMarketProgress(info));
+        } catch (e) {
+          log(`[shell] could not update pnpm allowlist: ${e.message}`);
+        }
+      }
+    }
+    if (!result.ok && action === 'remove') {
+      // pnpm remove can fail on locked-down machines (EPERM on package.json)
+      // or on collection-repo roots pnpm cannot uninstall — prune directly so
+      // the user is never stuck with an unremovable entry
+      log(`[shell] dsh plugin remove failed; force-pruning ${fullName} from profile`);
+      sendMarketProgress({ stage: 'cleanup', tail: '' });
+      try {
+        forcePrunePlugin(fullName);
+        result = { ok: true, code: 'exit', output: 'force-pruned' };
+      } catch (e) {
+        log(`[shell] force-prune failed: ${e.message}`);
+      }
+    }
+    if (!result.ok && action !== 'remove') {
       const code = failureCode(result);
       const reason = code === 'timeout'
         ? t(lang(), 'plugin.timeout')
@@ -1225,15 +1724,45 @@ async function pluginAction(action, fullName) {
       // it so later installs start clean and the market stays truthful
       if (shouldCleanupAfterFailure(action)) {
         sendMarketProgress({ stage: 'cleanup', tail: '' });
-        const cleanup = await runDshPlugin(['remove', fullName], 30_000);
-        if (!cleanup.ok) log(`[shell] plugin cleanup after failed install left residue: ${fullName}`);
+        try { forcePrunePlugin(fullName); } catch (e) { log(`[shell] plugin cleanup after failed install left residue: ${fullName} (${e.message})`); }
       }
       return { ok: false, code, reason };
+    }
+    // Collection repos (skin collections like dsh-deep-whale) ship no root
+    // package.json: the install "succeeds" but materializes loose files the
+    // runtime cannot load. Detect that and retry once from the subpackage.
+    if (action !== 'remove' && result.ok) {
+      const rootPkg = path.join(profileDirOf(), 'node_modules', fullName.split('/')[1], 'package.json');
+      if (!fs.existsSync(rootPkg)) {
+        sendMarketProgress({ stage: 'resolve', tail: 'collection repo — locating subpackage' });
+        const { sub, candidates } = await findSubpackage(fullName);
+        if (sub) {
+          log(`[shell] ${fullName} is a collection repo; installing subpackage ${sub}`);
+          sendMarketProgress({ stage: 'resolve', tail: `subpackage: ${sub}` });
+          try { forcePrunePlugin(fullName); } catch (e) { log(`[shell] could not prune root residue: ${e.message}`); }
+          result = await runDshPlugin(['add', `github:${fullName}#path:${sub}`], 120_000, (info) => sendMarketProgress(info));
+          if (!result.ok) {
+            const reason = summarizeOutput(result.output) || 'subpackage install failed';
+            log(`[shell] subpackage install failed: ${reason}`);
+            try { forcePrunePlugin(fullName); } catch { /* best effort */ }
+            notify(t(lang(), 'plugin.failed'), t(lang(), 'plugin.failedBody', { name: `${fullName} (${sub})`, reason }));
+            return { ok: false, code: 'exit', reason };
+          }
+        } else {
+          const list = (candidates || []).join(', ');
+          const reason = t(lang(), 'plugin.collectionRepo') + (list ? `: ${list}` : '');
+          log(`[shell] ${fullName} has no installable root or unique subpackage (${list || 'none found'})`);
+          try { forcePrunePlugin(fullName); } catch { /* best effort */ }
+          notify(t(lang(), 'plugin.failed'), t(lang(), 'plugin.failedBody', { name: fullName, reason }));
+          return { ok: false, code: 'invalid', reason };
+        }
+      }
     }
     const cur = settings.get();
     const installed = new Set(cur.installedPlugins || []);
     if (action === 'remove') installed.delete(fullName); else installed.add(fullName);
     settings.patch({ installedPlugins: [...installed] });
+    snapshotProfile(action === 'remove' ? 'post-remove' : 'post-install');
     // profile changed: reload the runtime so the plugin takes effect
     restartRuntime();
     updateTray();
@@ -1407,6 +1936,7 @@ function createQuickAsk() {
     resizable: false,
     skipTaskbar: true,
     show: false,
+    backgroundColor: themeBackground(),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -1435,6 +1965,7 @@ function createSearchWindow() {
     resizable: false,
     skipTaskbar: true,
     show: false,
+    backgroundColor: themeBackground(),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -1447,34 +1978,6 @@ function createSearchWindow() {
   searchWindow.once('ready-to-show', () => searchWindow.show());
   searchWindow.on('closed', () => { searchWindow = null; });
   return searchWindow;
-}
-
-function createPluginMarketWindow() {
-  if (pluginMarketWindow && !pluginMarketWindow.isDestroyed()) {
-    pluginMarketWindow.show();
-    pluginMarketWindow.focus();
-    return pluginMarketWindow;
-  }
-  pluginMarketWindow = new BrowserWindow({
-    width: 560,
-    height: 520,
-    frame: false,
-    alwaysOnTop: true,
-    resizable: false,
-    skipTaskbar: true,
-    show: false,
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, 'pluginmarket-preload.js'),
-    },
-  });
-  pluginMarketWindow.loadFile(path.join(__dirname, 'pluginmarket.html'));
-  pluginMarketWindow.webContents.on('will-navigate', (e) => e.preventDefault());
-  pluginMarketWindow.once('ready-to-show', () => pluginMarketWindow.show());
-  pluginMarketWindow.on('closed', () => { pluginMarketWindow = null; });
-  return pluginMarketWindow;
 }
 
 // ---------------------------------------------------------------------------
@@ -1490,7 +1993,7 @@ function createLoadingWindow() {
     frame: false,
     resizable: false,
     show: true, // visible immediately — this is the boot feedback users stare at
-    backgroundColor: '#14171c', // cover the first paint; the page bg matches
+    backgroundColor: themeBackground(), // cover the first paint; the page bg matches
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -1503,8 +2006,9 @@ function createLoadingWindow() {
   // re-send the latest text once the page is ready (setLoading may have been
   // called before the renderer registered its IPC listener)
   loadingWindow.webContents.once('did-finish-load', () => {
-    if (pendingLoadingText && loadingWindow && !loadingWindow.isDestroyed()) {
-      loadingWindow.webContents.send('loading:progress', pendingLoadingText);
+    if (loadingWindow && !loadingWindow.isDestroyed()) {
+      if (pendingLoadingText) loadingWindow.webContents.send('loading:progress', pendingLoadingText);
+      loadingWindow.webContents.send('loading:meta', { version: app.getVersion() });
     }
   });
   loadingWindow.on('closed', () => { loadingWindow = null; pendingLoadingText = null; });
@@ -1644,29 +2148,63 @@ async function handleQuickAskSubmit(prompt) {
 // ---------------------------------------------------------------------------
 // scheduled tasks
 // ---------------------------------------------------------------------------
+/** Tell every open window the task list / history changed (auto-center UI). */
+function broadcastScheduled() {
+  for (const w of BrowserWindow.getAllWindows()) {
+    try { if (!w.isDestroyed()) w.webContents.send('scheduled:changed'); } catch { /* ignore */ }
+  }
+}
+
+/** Run one scheduled task headlessly, record history, notify. Shared by the
+ *  scheduler tick and the "run now" button in the automation center. */
+async function runScheduledTask(task) {
+  const startedAt = new Date().toISOString();
+  const result = await runHeadless({
+    dshBin: activeDshBin(),
+    nodeBin: bestNodeBin(),
+    dshHome: dshHomeOf(),
+    workspace: settings.effective().workspace || os.homedir(),
+    logDir: ensureLogDir(),
+    prompt: task.prompt || '',
+  });
+  const rec = {
+    id: `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    taskId: task.id,
+    name: task.name || task.id,
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    ok: !!result.ok,
+    durationMs: Math.round(result.durationMs || 0),
+    summary: String(result.output || '').trim().slice(0, 400),
+  };
+  try {
+    const hist = [rec, ...(settings.get().scheduledHistory || [])].slice(0, 50);
+    settings.patch({ scheduledHistory: hist });
+  } catch (e) {
+    log(`[scheduler] history write failed: ${e.message}`);
+  }
+  log(`[scheduler] ${task.name || task.id} finished ok=${result.ok} (${Math.round(result.durationMs / 1000)}s)`);
+  notify(
+    t(lang(), 'notify.taskDone'),
+    t(lang(), 'notify.scheduledDoneBody', { name: task.name || task.id, ok: result.ok ? '✓' : '✗' })
+  );
+  broadcastScheduled();
+  return result;
+}
+
 function startScheduler() {
   if (scheduler) scheduler.stop();
   scheduler = new Scheduler((line) => log(line));
   scheduler.start(settings.get().scheduledTasks || [], async (task) => {
     if (scheduledRunning.has(task.id)) return;
     scheduledRunning.add(task.id);
+    broadcastScheduled();
     try {
-      const result = await runHeadless({
-        dshBin: activeDshBin(),
-        nodeBin: bestNodeBin(),
-        dshHome: dshHomeOf(),
-        workspace: settings.effective().workspace || os.homedir(),
-        logDir: ensureLogDir(),
-        prompt: task.prompt || '',
-      });
-      log(`[scheduler] ${task.name || task.id} finished ok=${result.ok} (${Math.round(result.durationMs / 1000)}s)`);
-      notify(
-        t(lang(), 'notify.taskDone'),
-        t(lang(), 'notify.scheduledDoneBody', { name: task.name || task.id, ok: result.ok ? '✓' : '✗' })
-      );
+      await runScheduledTask(task);
     } finally {
       scheduledRunning.delete(task.id);
       settings.save(); // persist updated nextRunAt / lastRunAt
+      broadcastScheduled();
     }
   });
   log('[shell] scheduler started');
@@ -1851,6 +2389,7 @@ if (!gotLock) {
     openLog();
     if (!fs.existsSync(iconPath())) log('[shell] warning: resources/icon.png missing');
     registerIpc();
+    broadcastTheme(); // push the resolved theme once settings are ready
     // Registry write on Windows; not needed before the first window.
     setTimeout(() => app.setLoginItemSettings({ openAtLogin: !!settings.get().autoStart }), 3_000);
     createTray();

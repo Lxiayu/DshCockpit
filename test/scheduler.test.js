@@ -39,6 +39,41 @@ test('daily tasks schedule today or tomorrow at HH:MM (local time)', () => {
   assert.strictEqual(next2, local('2026-01-01T12:00:00Z', 0, 1) + 86_400_000);
 });
 
+test('weekly tasks schedule the next occurrence of the target weekday (local time)', () => {
+  // 2026-01-01 is a Thursday; base = Thu 10:00 local. All arithmetic is done
+  // on local Date objects, so the test is timezone-agnostic.
+  const base = new Date(2026, 0, 1, 10, 0, 0).getTime();
+  const at = (plusDays, h, min) => {
+    const d = new Date(2026, 0, 1, 10, 0, 0);
+    d.setDate(d.getDate() + plusDays);
+    d.setHours(h, min, 0, 0);
+    return d.getTime();
+  };
+  // same weekday, slot still ahead today
+  assert.strictEqual(ensureNextRun({ kind: 'weekly', weeklyDay: 4, weeklyTime: '11:00' }, base), at(0, 11, 0));
+  // same weekday, slot already past → next week
+  assert.strictEqual(ensureNextRun({ kind: 'weekly', weeklyDay: 4, weeklyTime: '09:00' }, base), at(7, 9, 0));
+  // later weekday this week (Thu → Sat)
+  assert.strictEqual(ensureNextRun({ kind: 'weekly', weeklyDay: 6, weeklyTime: '09:00' }, base), at(2, 9, 0));
+  // earlier weekday this week (Thu → next Mon)
+  assert.strictEqual(ensureNextRun({ kind: 'weekly', weeklyDay: 1, weeklyTime: '09:00' }, base), at(4, 9, 0));
+  // a valid nextRunAt within one week is kept stable (no drift on re-check)
+  const task = { kind: 'weekly', weeklyDay: 4, weeklyTime: '09:00', nextRunAt: at(7, 9, 0) };
+  assert.strictEqual(ensureNextRun(task, base), at(7, 9, 0));
+  // a stale nextRunAt (older than a week, e.g. app closed) is recomputed
+  const stale = { kind: 'weekly', weeklyDay: 4, weeklyTime: '09:00', nextRunAt: at(-14, 9, 0) };
+  assert.strictEqual(ensureNextRun(stale, base), at(7, 9, 0));
+});
+
+test('weekly tasks reject an invalid weekday or time', () => {
+  const now = Date.now();
+  assert.strictEqual(ensureNextRun({ kind: 'weekly', weeklyDay: 7, weeklyTime: '09:00' }, now), null);
+  assert.strictEqual(ensureNextRun({ kind: 'weekly', weeklyDay: -1, weeklyTime: '09:00' }, now), null);
+  assert.strictEqual(ensureNextRun({ kind: 'weekly', weeklyDay: 1.5, weeklyTime: '09:00' }, now), null);
+  assert.strictEqual(ensureNextRun({ kind: 'weekly', weeklyDay: 1, weeklyTime: '99:00' }, now), null);
+  assert.strictEqual(ensureNextRun({ kind: 'weekly', weeklyDay: 1, weeklyTime: 'abc' }, now), null);
+});
+
 test('Scheduler dispatches due tasks and recomputes nextRunAt', () => {
   const s = new Scheduler(() => {});
   try {

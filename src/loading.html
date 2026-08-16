@@ -2,27 +2,83 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'unsafe-inline'" />
 <title>准备中</title>
+<link rel="stylesheet" href="theme.css" />
 <style>
   * { box-sizing: border-box; }
-  body { margin: 0; background: #14171c; color: #e6edf3; display: flex; align-items: center;
-    justify-content: center; height: 100vh; font: 13px/1.6 "Segoe UI","Microsoft YaHei",system-ui,sans-serif; }
-  #box { text-align: center; padding: 20px; max-width: 420px; }
-  .spinner { width: 34px; height: 34px; margin: 0 auto 14px; border: 3px solid #2d333b;
-    border-top-color: #2563eb; border-radius: 50%; animation: spin 1s linear infinite; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg-app); color: var(--text-1); display: flex;
+    flex-direction: column; overflow: hidden;
+    font: 13px/1.6 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    animation: fadeIn 160ms var(--ease); }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  /* brand block: icon + name + version */
+  #brand { display: flex; flex-direction: column; align-items: center; gap: 5px;
+    margin-top: 44px; flex-shrink: 0; }
+  #brand img { width: 44px; height: 44px; border-radius: 10px; }
+  #brand h1 { font-size: 15px; font-weight: 600; margin: 0; color: var(--text-1); }
+  #brand #ver { color: var(--text-3); font-size: 12px; font-family: var(--mono);
+    min-height: 1em; }
+
+  /* status: spinner + text */
+  #mid { flex: 1; display: flex; align-items: center; justify-content: center;
+    gap: 10px; padding: 0 24px; min-height: 0; }
+  .spinner { width: 20px; height: 20px; border: 2px solid var(--border-2);
+    border-top-color: var(--acc); border-radius: 50%; flex-shrink: 0;
+    animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  #status { color: #8b949e; white-space: pre-wrap; word-break: break-word; }
+  #status { color: var(--text-3); white-space: pre-wrap; word-break: break-word;
+    text-align: center; }
+
+  /* bottom 3px indeterminate progress track */
+  #track { position: relative; height: 3px; flex-shrink: 0; overflow: hidden;
+    background: var(--border-1); }
+  #track::before { content: ''; position: absolute; top: 0; left: 0; width: 20%;
+    height: 100%; border-radius: 9999px; background: var(--acc);
+    animation: slide 1.6s var(--ease) infinite; }
+  @keyframes slide {
+    0% { transform: translateX(-100%); }
+    50% { transform: translateX(400%); }
+    100% { transform: translateX(-100%); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    body { animation: none; }
+    .spinner { animation: none; }
+    #track::before { animation: none; opacity: 0.3; transform: translateX(200%); }
+  }
 </style>
 </head>
 <body>
-<div id="box">
+<div id="brand">
+  <img src="../resources/icon.png" alt="" onerror="this.style.display='none'" />
+  <h1>DshCockpit</h1>
+  <div id="ver"></div>
+</div>
+<div id="mid">
   <div class="spinner"></div>
   <div id="status"></div>
 </div>
+<div id="track"></div>
 <script>
   const status = document.getElementById('status');
   window.dshLoading.onProgress((text) => { status.textContent = text; });
+  if (window.dshLoading.onMeta) {
+    window.dshLoading.onMeta((m) => {
+      if (m && m.version) document.getElementById('ver').textContent = 'v' + m.version;
+    });
+  }
+  (async () => {
+    try { document.documentElement.dataset.theme = await window.dshLoading.getTheme(); } catch { /* dark default */ }
+    window.dshLoading.onTheme((t) => {
+      const root = document.documentElement;
+      root.classList.add('theme-anim');
+      root.dataset.theme = t;
+      setTimeout(() => root.classList.remove('theme-anim'), 420);
+    });
+  })();
 </script>
 </body>
 </html>

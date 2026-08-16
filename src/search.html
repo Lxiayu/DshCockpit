@@ -2,45 +2,63 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'unsafe-inline'" />
 <title>搜索会话</title>
+<link rel="stylesheet" href="theme.css" />
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
-  body { background: #14171c; color: #e6edf3;
+  body { background: var(--bg-app); color: var(--text-1);
     font: 13px/1.5 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;
     display: flex; flex-direction: column; overflow: hidden; }
 
   /* top bar: input + close button */
-  #topbar { display: flex; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #2d333b; }
-  #q { flex: 1; background: #1c2128; color: #e6edf3; border: 1px solid #2d333b;
-    border-radius: 8px; padding: 8px 10px; font: inherit; outline: none; }
-  #q:focus { border-color: #2563eb; }
-  #close { width: 30px; height: 30px; flex-shrink: 0; background: #2d333b; color: #8b949e;
+  #topbar { display: flex; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border-1); }
+  #q { flex: 1; background: var(--bg-panel); color: var(--text-1); border: 1px solid var(--border-1);
+    border-radius: 8px; padding: 8px 10px; font: inherit; outline: none;
+    transition: border-color 150ms var(--ease), box-shadow 150ms var(--ease); }
+  #q:focus { border-color: var(--acc); box-shadow: 0 0 0 3px var(--acc-soft); }
+  #close { width: 30px; height: 30px; flex-shrink: 0; background: var(--border-1); color: var(--text-3);
     border: 0; border-radius: 8px; cursor: pointer; font-size: 16px; line-height: 1;
-    display: flex; align-items: center; justify-content: center; }
-  #close:hover { background: #f85149; color: #fff; }
+    display: flex; align-items: center; justify-content: center;
+    transition: background 120ms var(--ease), color 120ms var(--ease), transform 120ms var(--ease); }
+  #close:hover { background: var(--bad); color: #fff; }
+  #close:active { transform: translateY(0.5px); }
 
   /* results */
   #results { flex: 1; overflow-y: auto; padding: 4px 12px; }
-  .item { padding: 8px 4px; border-bottom: 1px solid #2d333b; overflow: hidden; cursor: pointer; border-radius: 4px; }
-  .item:hover { background: rgba(37,99,235,.08); }
-  .item.active { background: rgba(37,99,235,.16); }
-  .item .snip { color: #e6edf3; word-break: break-all; }
-  .item .snip mark { background: rgba(210,153,34,.3); color: #d29922; border-radius: 2px; padding: 0 1px; }
-  .item .meta { color: #8b949e; font-size: 11px; margin-top: 3px; display: flex; align-items: center; gap: 8px; }
-  .item .copy-btn { margin-left: auto; background: #2d333b; color: #e6edf3; border: 0;
-    border-radius: 5px; padding: 2px 8px; cursor: pointer; font-size: 11px; }
-  .item .copy-btn:hover { background: #3d444b; }
+  .item { padding: 8px 4px; border-bottom: 1px solid var(--border-1); overflow: hidden; cursor: pointer; border-radius: 4px; }
+  .item:hover { background: color-mix(in srgb, var(--bg-hover) 80%, transparent); }
+  .item.active { background: var(--acc-soft); }
+  .item .snip { color: var(--text-1); word-break: break-all; }
+  .item .snip mark { background: color-mix(in srgb, var(--warn) 22%, transparent); color: inherit;
+    border-radius: 3px; padding: 0 1px; }
+  .item .meta { color: var(--text-3); font-size: 11px; margin-top: 3px; display: flex; align-items: center; gap: 8px; }
+  .item .copy-btn { margin-left: auto; background: var(--border-1); color: var(--text-1); border: 0;
+    border-radius: 5px; padding: 2px 8px; cursor: pointer; font-size: 11px;
+    transition: background 120ms var(--ease), transform 120ms var(--ease); }
+  .item .copy-btn:hover { background: var(--border-2); }
+  .item .copy-btn:active { transform: translateY(0.5px); }
 
-  #status { color: #8b949e; padding: 12px 4px; font-size: 12px; }
+  #status { color: var(--text-3); padding: 12px 4px; font-size: 12px; }
   #status.loading::before { content: ''; display: inline-block; width: 10px; height: 10px;
-    margin-right: 6px; border: 2px solid #2d333b; border-top-color: #2563eb; border-radius: 50%;
+    margin-right: 6px; border: 2px solid var(--border-1); border-top-color: var(--acc); border-radius: 50%;
     animation: spin .7s linear infinite; vertical-align: -1px; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .hint { color: #6e7681; font-size: 11px; padding: 6px 12px; border-top: 1px solid #2d333b; }
-  kbd { background: #2d333b; border-radius: 3px; padding: 0 4px; font-size: 10px; }
+  .hint { color: var(--text-4); font-size: 11px; padding: 6px 12px; border-top: 1px solid var(--border-1); }
+  kbd { background: var(--border-1); border-radius: 3px; padding: 0 4px; font-size: 10px; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text-4) 40%, transparent);
+    border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--text-4) 60%, transparent); }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  @media (prefers-reduced-motion: reduce) {
+    #status.loading::before { animation: none; }
+    #q, #close, .item .copy-btn { transition-duration: 0.01ms; }
+  }
 </style>
 </head>
 <body>
@@ -57,13 +75,31 @@
   const resEl = document.getElementById('results');
   const closeBtn = document.getElementById('close');
   const L = {
-    zh: { ph: '搜索历史会话…', empty: '无结果', loading: '搜索中…', copy: '复制', copied: '已复制', hint: '处匹配' },
-    en: { ph: 'Search session history…', empty: 'No results', loading: 'Searching…', copy: 'Copy', copied: 'Copied', hint: 'matches' },
+    zh: {
+      ph: '搜索历史会话…', empty: '无结果', loading: '搜索中…', copy: '复制', copied: '已复制', hint: '处匹配',
+      title: '搜索会话', close: '关闭 (Esc)',
+      bar: '<kbd>↑</kbd><kbd>↓</kbd> 选择 · <kbd>Enter</kbd> 复制 · <kbd>Esc</kbd> 关闭',
+    },
+    en: {
+      ph: 'Search session history…', empty: 'No results', loading: 'Searching…', copy: 'Copy', copied: 'Copied', hint: 'matches',
+      title: 'Search sessions', close: 'Close (Esc)',
+      bar: '<kbd>↑</kbd><kbd>↓</kbd> Navigate · <kbd>Enter</kbd> Copy · <kbd>Esc</kbd> Close',
+    },
   };
   let lang = 'zh';
   (async () => {
+    try { document.documentElement.dataset.theme = await window.dshSearch.getTheme(); } catch { /* dark default */ }
+    window.dshSearch.onTheme((t) => {
+      const root = document.documentElement;
+      root.classList.add('theme-anim');
+      root.dataset.theme = t;
+      setTimeout(() => root.classList.remove('theme-anim'), 420);
+    });
     try { const s = await window.dshSearch.getSettings(); lang = s.resolvedLanguage === 'en' ? 'en' : 'zh'; } catch {}
     qEl.placeholder = L[lang].ph;
+    document.title = L[lang].title;
+    closeBtn.title = L[lang].close;
+    document.querySelector('.hint').innerHTML = L[lang].bar;
     qEl.focus();
   })();
 
