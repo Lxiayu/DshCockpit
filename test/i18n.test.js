@@ -40,3 +40,15 @@ test('zh/en dictionaries cover the same keys', () => {
   const enKeys = Object.keys(STRINGS.en).sort();
   assert.deepStrictEqual(zhKeys, enKeys, 'zh and en key sets must match');
 });
+
+test('plugin.* market strings exist in both languages', () => {
+  const keys = ['plugin.busy', 'plugin.timeout', 'plugin.spawnFailed',
+    'plugin.installed', 'plugin.installedBody', 'plugin.removed', 'plugin.removedBody',
+    'plugin.failed', 'plugin.failedBody'];
+  for (const k of keys) {
+    assert.ok(t('zh', k), `zh missing ${k}`);
+    assert.ok(t('en', k), `en missing ${k}`);
+  }
+  assert.strictEqual(t('zh', 'plugin.failedBody', { name: 'a/b', reason: 'x' }), 'a/b：x');
+  assert.strictEqual(t('en', 'plugin.failedBody', { name: 'a/b', reason: 'x' }), 'a/b: x');
+});

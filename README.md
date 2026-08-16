@@ -1,3 +1,5 @@
+**[English](README.en.md)** | **简体中文**
+
 <div align="center">
 
 # 🛩️ DshCockpit
@@ -12,6 +14,8 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
 
 *让 `dsh web` 从"终端里的一个标签页"变成"双击即用、后台常驻、自动更新、会算账的桌面控制台"*
+
+**English TL;DR** — DshCockpit is an open-source desktop cockpit (Electron) for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`): real-time **token usage & context-pressure alerts**, a **cost tracking center** with per-day/week/month/workspace stats and **budget alarms**, runtime **auto-update with smoke-test guard & one-click rollback**, a global-hotkey **Quick Ask** window, **scheduled agent tasks**, `Ctrl+K` **full-text session search**, and a community **plugin marketplace**. Bundled runtime — no Node.js install needed. Windows portable zip + macOS dmg (arm64/x64). *Full English readme → [README.en.md](README.en.md)*
 
 </div>
 
@@ -87,11 +91,11 @@
 > 若内置运行时被解压工具截断（极少见），应用会自动尝试从 npm registry 安装兜底，并按提示用 7-Zip 重新解压。
 
 ### 方式二：macOS 安装包（.dmg）
-从 [Releases](https://github.com/Lxiayu/DshCockpit/releases) 下载 `DshCockpit-<version>-mac-arm64.dmg`（仅支持 Apple Silicon：M1/M2/M3/M4）。
+从 [Releases](https://github.com/Lxiayu/DshCockpit/releases) 下载对应架构的 `.dmg`：
+- **Apple Silicon（M1/M2/M3/M4）**：`DshCockpit-<version>-mac-arm64.dmg`
+- **Intel Mac**：`DshCockpit-<version>-mac-x64.dmg`
 
 双击挂载 → 把 `DshCockpit` 拖进「应用程序」→ 在启动台/访达双击启动。
-
-> Intel Mac 暂不支持：内置 dsh 运行时的图像模块（sharp）为 arm64 专用二进制，后续按需求再单独提供 x64 包。
 
 > ⚠️ **首次打开会提示「已损坏」或「无法验证开发者」**：当前 macOS 包**尚未签名公证**（暂无 Apple Developer 证书），这是 Gatekeeper 的正常拦截，应用本身没坏。任选其一放行即可：
 > - **图形界面**：先双击一次（弹出警告点取消）→「系统设置 → 隐私与安全性」→ 滚到底部点「仍要打开」→ 再点「打开」。
@@ -120,7 +124,16 @@ npm start
 
 ## 📸 界面预览
 
-*（截图待补充：主窗口 / 成本中心 / 插件市场 / Quick Ask / 会话搜索）*
+<div align="center">
+
+<img src="photo/preview-1.png" width="720" alt="DshCockpit main window — DeepSeek Harness (dsh) desktop cockpit with token usage capsule" />
+
+<table><tr>
+<td><img src="photo/preview-2.png" width="280" alt="Cost center — token cost tracking & budget alerts" /></td>
+<td><img src="photo/preview-3.png" width="280" alt="Settings & plugin marketplace" /></td>
+</tr></table>
+
+</div>
 
 ---
 
@@ -147,12 +160,12 @@ DshCockpit (Electron)
 - [x] Quick Ask + 定时任务 + 任务/审批通知
 - [x] 会话全文检索 + 自动备份 + 隐私声明
 - [x] 插件市场 + 三语界面 + 便携打包（内置运行时）
-- [x] macOS 构建（CI 自动产出 Universal 包）
+- [x] macOS 构建（CI 自动产出 arm64 + x64 包）
 - [x] 手机远程控制（局域网安全网关：配对 + 审批 + 会话）
 - [ ] macOS 代码签名与公证
 - [ ] 代码签名（Windows Authenticode）
 - [ ] 系统钥匙串集成（凭据加密）
-- [ ] 手机远程控制 / 更多工作流
+- [ ] 更多工作流
 
 ---
 

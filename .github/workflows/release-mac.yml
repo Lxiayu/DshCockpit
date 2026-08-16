@@ -3,6 +3,10 @@
 # for x64 — each installs an arch-matching dsh runtime (the sharp native binary
 # differs per arch, so a universal merge is not viable). Unsigned for now; swap
 # in CSC_LINK / APPLE_* secrets later for signing + notarization.
+#
+# release depends only on arm64 so the Release goes live the moment the fast
+# arm64 build finishes; the x64 build (macos-13 queue can stall) attaches its
+# artifacts independently via upload-x64 without blocking the Release.
 name: release-mac
 
 on:
@@ -79,7 +83,7 @@ jobs:
 
   release:
     name: publish to GitHub Releases
-    needs: [build-arm64, build-x64]
+    needs: [build-arm64]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
@@ -90,18 +94,30 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: mac-arm64
-          path: artifacts/arm64
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: mac-x64
-          path: artifacts/x64
+          path: artifacts
 
       - uses: softprops/action-gh-release@v2
         with:
           body_path: .github/release-body.md
           files: |
-            artifacts/arm64/DshCockpit-*-mac-arm64.dmg
-            artifacts/arm64/DshCockpit-*-mac-arm64.zip
-            artifacts/x64/DshCockpit-*-mac-x64.dmg
-            artifacts/x64/DshCockpit-*-mac-x64.zip
+            artifacts/DshCockpit-*-mac-arm64.dmg
+            artifacts/DshCockpit-*-mac-arm64.zip
+
+  upload-x64:
+    name: attach x64 build to release
+    needs: [build-x64]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-x64
+          path: artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/DshCockpit-*-mac-x64.dmg
+            artifacts/DshCockpit-*-mac-x64.zip

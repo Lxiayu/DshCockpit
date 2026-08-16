@@ -35,6 +35,7 @@ const { runHeadless } = require('./headless');
 const { Scheduler } = require('./scheduler');
 const { searchSessions } = require('./session-search');
 const { RemoteControl } = require('./remote-control');
+const { createPluginOpGuard, failureCode, shouldCleanupAfterFailure, summarizeOutput, inferStage } = require('./plugin-flow');
 
 if (process.env.DSH_DESKTOP_USER_DATA) {
   // must happen before app is ready; keeps logs/state inside the workspace
@@ -73,8 +74,10 @@ let scheduler = null;
 let remote = null; // phone remote-control gateway (constructed after app ready)
 let loadingWindow = null;
 let pluginMarketWindow = null;
+let trayPeakTimer = null; // 1-minute tray refresh for the peak/off-peak countdown
 let guidedInstallInProgress = false;
 let mainWindowPending = false; // guided first-run: runtime booting, main window not open yet
+const pluginGuard = createPluginOpGuard(); // one dsh plugin op at a time (profile safety)
 const scheduledRunning = new Set();
 const budgetNotified = new Set();
 const materializing = new Set();
@@ -88,6 +91,20 @@ const windowStateFile = () => path.join(app.getPath('userData'), 'window-state.j
 const costHistoryFile = () => path.join(app.getPath('userData'), 'cost-history.json');
 const diagnosticsDir = () => path.join(app.getPath('userData'), 'diagnostics');
 const TOKEN_POLL_MS = 5_000;
+
+/** Parsed peak windows when peak pricing is enabled; null otherwise.
+ * An invalid user string falls back to the DeepSeek default windows. */
+function peakWindowsOf(cfg) {
+  if (!cfg || !cfg.costPeakEnabled) return null;
+  return cost.parseWindows(cfg.costPeakWindows) || cost.DEFAULT_WINDOWS;
+}
+
+/** One collect shared by the 5s poll, manual refresh and cost-info IPC —
+ * peak/off-peak bucketing is applied whenever peak pricing is enabled. */
+async function collectStats() {
+  const windows = peakWindowsOf(settings.get());
+  return windows ? tokenStats.collect(dshHomeOf(), { windows }) : tokenStats.collect(dshHomeOf());
+}
 
 const manager = new RuntimeManager({
   userDataDir: app.getPath('userData'),
@@ -109,7 +126,9 @@ function openLog() {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const file = path.join(ensureLogDir(), `runtime-${stamp}.log`);
   logStream = fs.createWriteStream(file, { flags: 'a' });
-  pruneLogs();
+  // Log rotation stats every file under logs/ — under Windows AV each stat is
+  // amplified; it is housekeeping, so keep it off the boot path.
+  setTimeout(pruneLogs, 10_000);
   log(`[shell] log file: ${file}`);
 }
 
@@ -160,7 +179,9 @@ function notify(title, body) {
 // ---------------------------------------------------------------------------
 function firstLineOf(cmd, args) {
   try {
-    const out = execFileSync(cmd, args, { encoding: 'utf8', windowsHide: true });
+    // Hard timeout: `where.exe` under Windows AV can stall for seconds (each
+    // PATH entry is a scanned directory); boot must never wait on it.
+    const out = execFileSync(cmd, args, { encoding: 'utf8', windowsHide: true, timeout: 3_000 });
     const line = out.split(/\r?\n/).map((s) => s.trim()).find(Boolean);
     return line || null;
   } catch {
@@ -178,11 +199,42 @@ let _nodeCandidatesCache = null;
 let _nodeLookupKey = undefined;
 
 function _resolveNodeFromPath() {
+  // Disk cache short-circuits the `where.exe` spawn entirely: one existsSync
+  // (µs) vs. a process spawn (50-500ms under Windows AV). Entries are
+  // validated before use and rewritten only after a live probe succeeds.
+  const cached = _loadNodeDiskCache();
+  if (cached && cached.bin && fs.existsSync(cached.bin)) return cached.bin;
   const whereCmd = process.platform === 'win32' ? 'where.exe' : 'which';
   const fromPath = firstLineOf(whereCmd, ['node']);
   if (!fromPath) return null;
   if (!fs.existsSync(fromPath)) return null;
-  try { return fs.realpathSync(fromPath); } catch { return fromPath; }
+  let resolved;
+  try { resolved = fs.realpathSync(fromPath); } catch { resolved = fromPath; }
+  _saveNodeDiskCache(resolved);
+  return resolved;
+}
+
+function nodeCacheFile() {
+  return path.join(app.getPath('userData'), 'node-cache.json');
+}
+
+let _nodeDiskCache; // undefined = not loaded; null = absent/corrupt
+
+function _loadNodeDiskCache() {
+  if (_nodeDiskCache !== undefined) return _nodeDiskCache;
+  try {
+    const raw = JSON.parse(fs.readFileSync(nodeCacheFile(), 'utf8'));
+    _nodeDiskCache = raw && typeof raw.bin === 'string' && raw.bin ? raw : null;
+  } catch { _nodeDiskCache = null; }
+  return _nodeDiskCache;
+}
+
+function _saveNodeDiskCache(bin) {
+  _nodeDiskCache = { bin, ts: Date.now() };
+  try {
+    fs.mkdirSync(path.dirname(nodeCacheFile()), { recursive: true });
+    fs.writeFileSync(nodeCacheFile(), JSON.stringify(_nodeDiskCache));
+  } catch { /* best effort */ }
 }
 
 /** Best system node; falls back to Electron's bundled node (production path). */
@@ -255,8 +307,11 @@ function ensureRuntimeRegistered() {
   manager.revalidate(); // drop entries pointing at moved/deleted installs
   const info = manager.getInfo();
   if (info.activeVersion && manager.entry(info.activeVersion)) {
-    registerBundledRuntime(); // prefer the bundle when present (managed wins inside entry())
-    materializeIfNeeded();
+    // The active entry is already live, so bundle re-registration (reads
+    // resources/ + the seed package.json — expensive under Windows AV) and
+    // background materialization are not needed to boot; keep them off the
+    // first-window path. Managed still wins inside entry() when it lands.
+    setTimeout(() => { registerBundledRuntime(); materializeIfNeeded(); }, 1_000);
     return true;
   }
   // nothing active: bundled seed first (instant), then discovered install
@@ -520,10 +575,13 @@ function waitForHealth(url, timeoutMs = HEALTH_TIMEOUT_MS) {
 // ---------------------------------------------------------------------------
 function createWindow(url) {
   mainWindowPending = false; // the main window is (about to be) open
+  // The splash has served its purpose; close it as the real window appears.
+  if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.close();
   const saved = windowState.load(windowStateFile());
   const bounds = safeBounds(saved) || { width: 1280, height: 840 };
   mainWindow = new BrowserWindow({
     ...bounds,
+    backgroundColor: '#14171c', // match the splash: no white flash before the web UI paints
     title: APP_NAME,
     autoHideMenuBar: true,
     icon: iconPath(),
@@ -614,8 +672,26 @@ function updateTray() {
   const info = manager.getInfo();
   const pending = info.pendingVersion;
   const canRollback = info.installed && info.installed.length > 1;
+  // peak/off-peak status line (only when split pricing is enabled)
+  const cfg = settings.get();
+  const windows = peakWindowsOf(cfg);
+  const peakItems = [];
+  if (windows) {
+    const ps = cost.peakStatus(Date.now(), windows);
+    const flatOut = cfg.costOutputPerM || 0;
+    const peakOut = cfg.costPeakOutputPerM || 0;
+    const hasPeakRate = !!(cfg.costPeakInputPerM || cfg.costPeakOutputPerM || cfg.costPeakCacheReadPerM || cfg.costPeakCacheWritePerM);
+    const rate = ps.peak ? (hasPeakRate ? peakOut : flatOut) : flatOut;
+    peakItems.push({
+      label: ps.peak
+        ? t(L, 'tray.peakOn', { r: rate, m: ps.nextChangeInMin })
+        : t(L, 'tray.peakOff', { r: rate, m: ps.nextChangeInMin }),
+      enabled: false,
+    });
+  }
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: t(L, 'tray.open'), click: () => showMain() },
+    ...peakItems,
     { label: t(L, 'tray.settings'), click: () => createSettingsWindow() },
     { label: t(L, 'tray.quickAsk'), accelerator: settings.get().quickAskHotkey || '', click: () => createQuickAsk() },
     { type: 'separator' },
@@ -877,8 +953,15 @@ function registerIpc() {
   ipcMain.on('plugins:close', () => { if (pluginMarketWindow) pluginMarketWindow.close(); });
   ipcMain.on('plugins:open', () => createPluginMarketWindow());
   ipcMain.handle('shell:plugin-action', (_e, action, fullName) => pluginAction(action, fullName));
+  // manual fallback for "plugin installed but webUI did not refresh": same
+  // restart the tray uses; refuse (instead of quitting) when no runtime exists
+  ipcMain.handle('shell:restart-runtime', () => {
+    if (!activeDshBin()) return { ok: false, reason: 'no runtime found' };
+    restartRuntime();
+    return { ok: true };
+  });
   ipcMain.handle('shell:cost-info', async () => {
-    const stats = await tokenStats.collect(dshHomeOf());
+    const stats = await collectStats();
     return costSnapshot(stats);
   });
   ipcMain.handle('shell:diagnostics-info', () => diagnosticsInfo());
@@ -937,7 +1020,7 @@ function registerIpc() {
   ipcMain.on('chrome:open-settings', () => createSettingsWindow());
   ipcMain.on('chrome:refresh-tokens', async () => {
     try {
-      const stats = await tokenStats.collect(dshHomeOf());
+      const stats = await collectStats();
       pushTokens(stats);
       costSnapshot(stats);
     } catch (e) { log(`[shell] manual token refresh failed: ${e.message}`); }
@@ -1072,14 +1155,22 @@ async function fetchPlugins(keyword) {
   }));
 }
 
-/** Run `dsh plugin --profile web <args>`; output to a log file (fd, sandbox-safe). */
-function runDshPlugin(args, timeoutMs = 300_000) {
+/** Run `dsh plugin --profile web <args>`; output to a log file (fd, sandbox-safe).
+ * Resolves { ok, code: 'exit'|'timeout'|'spawn', output }. `onTail({stage,tail})`
+ * streams incremental child output so the market UI can show live progress. */
+function runDshPlugin(args, timeoutMs = 120_000, onTail = null) {
   const node = bestNodeBin();
   const binJs = activeDshBin();
   const dshHome = dshHomeOf();
   const outFile = path.join(ensureLogDir(), `plugin-${Date.now()}.out`);
   let fd = -1;
   try { fd = fs.openSync(outFile, 'a'); } catch { /* ignore */ }
+  let fdOpen = fd !== -1;
+  const closeFd = () => {
+    if (!fdOpen) return;
+    fdOpen = false;
+    try { fs.closeSync(fd); } catch { /* ignore */ }
+  };
   return new Promise((resolve) => {
     const env = { ...process.env, DSH_HOME: dshHome };
     if (node.runAsNode) env.ELECTRON_RUN_AS_NODE = '1';
@@ -1089,44 +1180,104 @@ function runDshPlugin(args, timeoutMs = 300_000) {
         env, cwd: dshHome, windowsHide: true, stdio: fd === -1 ? 'ignore' : ['ignore', fd, fd],
       });
     } catch (e) {
-      if (fd !== -1) { try { fs.closeSync(fd); } catch { /* ignore */ } }
-      resolve({ ok: false, output: e.message });
+      closeFd();
+      resolve({ ok: false, code: 'spawn', output: e.message });
       return;
+    }
+    // incremental tail of the output file -> progress events for the market UI
+    let tailBytes = 0;
+    let tailTimer = null;
+    const stopTail = () => { if (tailTimer) { clearInterval(tailTimer); tailTimer = null; } };
+    if (onTail) {
+      tailTimer = setInterval(() => {
+        try {
+          const buf = fs.readFileSync(outFile);
+          if (buf.length > tailBytes) {
+            const chunk = buf.slice(tailBytes).toString('utf8');
+            tailBytes = buf.length;
+            const lines = chunk.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+            onTail({ stage: inferStage(chunk), tail: lines.length ? lines[lines.length - 1].slice(0, 200) : '' });
+          }
+        } catch { /* file may not exist yet */ }
+      }, 800);
     }
     const timer = setTimeout(() => {
       try { child.kill(); } catch { /* ignore */ }
-      resolve({ ok: false, output: 'timeout' });
+      // escalate if the child tree ignores SIGTERM (stuck git/npm)
+      setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* ignore */ } }, 2_000);
+      stopTail();
+      closeFd();
+      resolve({ ok: false, code: 'timeout', output: 'timeout' });
     }, timeoutMs);
     child.on('error', (e) => {
       clearTimeout(timer);
-      if (fd !== -1) { try { fs.closeSync(fd); } catch { /* ignore */ } }
-      resolve({ ok: false, output: e.message });
+      stopTail();
+      closeFd();
+      resolve({ ok: false, code: 'spawn', output: e.message });
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      if (fd !== -1) { try { fs.closeSync(fd); } catch { /* ignore */ } }
+      stopTail();
+      closeFd();
       let out = '';
       try { out = fs.readFileSync(outFile, 'utf8'); } catch { /* ignore */ }
       log(`[shell] dsh plugin ${args.join(' ')} -> exit ${code}`);
-      resolve({ ok: code === 0, output: out.slice(-2000) });
+      resolve({ ok: code === 0, code: 'exit', output: out.slice(-2000) });
     });
   });
 }
 
+/** Forward plugin-install progress to the market window (if open). */
+function sendMarketProgress(info) {
+  if (pluginMarketWindow && !pluginMarketWindow.isDestroyed()) {
+    try { pluginMarketWindow.webContents.send('plugins:progress', info); } catch { /* ignore */ }
+  }
+}
+
 async function pluginAction(action, fullName) {
-  if (!/^[\w.-]+\/[\w.-]+$/.test(fullName)) return { ok: false, reason: 'invalid repo name' };
-  const arg = action === 'remove' ? 'remove' : 'add';
-  const spec = action === 'remove' ? fullName : `github:${fullName}`;
-  const result = await runDshPlugin([arg, spec]);
-  if (!result.ok) return { ok: false, reason: result.output || 'plugin command failed' };
-  const cur = settings.get();
-  const installed = new Set(cur.installedPlugins || []);
-  if (action === 'remove') installed.delete(fullName); else installed.add(fullName);
-  settings.patch({ installedPlugins: [...installed] });
-  // profile changed: reload the runtime so the plugin takes effect
-  restartRuntime();
-  updateTray();
-  return { ok: true };
+  if (!/^[\w.-]+\/[\w.-]+$/.test(fullName)) return { ok: false, code: 'invalid', reason: 'invalid repo name' };
+  // serialize: two concurrent dsh plugin ops would corrupt the web profile
+  if (!pluginGuard.tryBegin(action, fullName)) {
+    return { ok: false, code: 'busy', reason: t(lang(), 'plugin.busy') };
+  }
+  try {
+    const arg = action === 'remove' ? 'remove' : 'add';
+    const spec = action === 'remove' ? fullName : `github:${fullName}`;
+    const result = await runDshPlugin([arg, spec], 120_000, (info) => sendMarketProgress(info));
+    if (!result.ok) {
+      const code = failureCode(result);
+      const reason = code === 'timeout'
+        ? t(lang(), 'plugin.timeout')
+        : code === 'spawn'
+          ? t(lang(), 'plugin.spawnFailed', { msg: result.output || '' })
+          : (summarizeOutput(result.output) || 'plugin command failed');
+      log(`[shell] plugin ${action} ${fullName} failed (${code}): ${reason}`);
+      notify(t(lang(), 'plugin.failed'), t(lang(), 'plugin.failedBody', { name: fullName, reason }));
+      // a failed install may leave a half-applied spec in the profile — remove
+      // it so later installs start clean and the market stays truthful
+      if (shouldCleanupAfterFailure(action)) {
+        sendMarketProgress({ stage: 'cleanup', tail: '' });
+        const cleanup = await runDshPlugin(['remove', fullName], 30_000);
+        if (!cleanup.ok) log(`[shell] plugin cleanup after failed install left residue: ${fullName}`);
+      }
+      return { ok: false, code, reason };
+    }
+    const cur = settings.get();
+    const installed = new Set(cur.installedPlugins || []);
+    if (action === 'remove') installed.delete(fullName); else installed.add(fullName);
+    settings.patch({ installedPlugins: [...installed] });
+    // profile changed: reload the runtime so the plugin takes effect
+    restartRuntime();
+    updateTray();
+    if (action === 'remove') {
+      notify(t(lang(), 'plugin.removed'), t(lang(), 'plugin.removedBody', { name: fullName }));
+    } else {
+      notify(t(lang(), 'plugin.installed'), t(lang(), 'plugin.installedBody', { name: fullName }));
+    }
+    return { ok: true, restarted: true };
+  } finally {
+    pluginGuard.release();
+  }
 }
 function pushTokens(stats) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -1167,16 +1318,37 @@ function costSnapshot(stats) {
     cacheReadPerM: cfg.costCacheReadPerM || 0,
     cacheWritePerM: cfg.costCacheWritePerM || 0,
   };
+  const peakEnabled = !!cfg.costPeakEnabled;
+  const peakRaw = peakEnabled ? {
+    inputPerM: cfg.costPeakInputPerM || 0,
+    outputPerM: cfg.costPeakOutputPerM || 0,
+    cacheReadPerM: cfg.costPeakCacheReadPerM || 0,
+    cacheWritePerM: cfg.costPeakCacheWritePerM || 0,
+  } : null;
+  // an all-zero peak rate set degrades to the flat rates (costOfSplit semantics)
+  const hasPeakRate = !!(peakRaw && (peakRaw.inputPerM || peakRaw.outputPerM || peakRaw.cacheReadPerM || peakRaw.cacheWritePerM));
+  const peakRates = hasPeakRate ? peakRaw : rates;
+  const totalCost = peakEnabled
+    ? cost.costOfSplit(stats.totals, rates, peakRates).total
+    : cost.costOf(stats.totals, rates);
+  const peakCostTotal = peakEnabled && stats.totals.peak ? cost.costOf(stats.totals.peak, peakRates) : 0;
   const perWorkspace = new Map();
   for (const s of stats.sessions) {
     const key = s.cwd || '(unknown)';
-    if (!perWorkspace.has(key)) perWorkspace.set(key, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, sessions: 0 });
+    if (!perWorkspace.has(key)) perWorkspace.set(key, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, peakCost: 0, sessions: 0 });
     const w = perWorkspace.get(key);
     w.input += s.usage.input; w.output += s.usage.output;
     w.cacheRead += s.usage.cacheRead; w.cacheWrite += s.usage.cacheWrite;
-    w.cost += cost.costOf(s.usage, rates); w.sessions += 1;
+    // peak-aware per-workspace cost: same costOfSplit basis as the total so the
+    // workspace rows reconcile with the today/week/month rows (review A-1)
+    if (peakEnabled && s.usage.peak) {
+      const sp = cost.costOfSplit(s.usage, rates, peakRates);
+      w.cost += sp.total; w.peakCost += sp.peak;
+    } else {
+      w.cost += cost.costOf(s.usage, rates);
+    }
+    w.sessions += 1;
   }
-  const totalCost = cost.costOf(stats.totals, rates);
   const now = Date.now();
   if (now - lastCostUpdateAt > 10 * 60 * 1000) {
     lastCostUpdateAt = now;
@@ -1184,11 +1356,14 @@ function costSnapshot(stats) {
       input: stats.totals.input, output: stats.totals.output,
       cacheRead: stats.totals.cacheRead, cacheWrite: stats.totals.cacheWrite,
       sessions: stats.sessionCount, cost: totalCost,
+      peakCost: peakCostTotal,
     });
   }
   const history = cost.loadHistory(costHistoryFile());
   const month = cost.summarize(history, 30);
   checkBudget(month.cost);
+  const windows = peakWindowsOf(cfg);
+  const ps = windows ? cost.peakStatus(Date.now(), windows) : null;
   return {
     today: cost.summarize(history, 1),
     week: cost.summarize(history, 7),
@@ -1196,6 +1371,12 @@ function costSnapshot(stats) {
     perWorkspace: [...perWorkspace.entries()].map(([cwd, v]) => ({ cwd, ...v })).sort((a, b) => b.cost - a.cost),
     currency: '¥',
     rates,
+    peak: {
+      enabled: peakEnabled,
+      isPeak: ps ? ps.peak : false,
+      nextChangeInMin: ps ? ps.nextChangeInMin : 0,
+      outputRate: peakEnabled && ps && ps.peak ? peakRates.outputPerM : rates.outputPerM,
+    },
   };
 }
 
@@ -1340,7 +1521,8 @@ function createLoadingWindow() {
     height: 260,
     frame: false,
     resizable: false,
-    show: false,
+    show: true, // visible immediately — this is the boot feedback users stare at
+    backgroundColor: '#14171c', // cover the first paint; the page bg matches
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -1357,7 +1539,6 @@ function createLoadingWindow() {
       loadingWindow.webContents.send('loading:progress', pendingLoadingText);
     }
   });
-  loadingWindow.once('ready-to-show', () => loadingWindow.show());
   loadingWindow.on('closed', () => { loadingWindow = null; pendingLoadingText = null; });
   return loadingWindow;
 }
@@ -1590,8 +1771,11 @@ function onQuestionRequested() {
 // shell self-update (electron-updater; packaged builds only)
 // ---------------------------------------------------------------------------
 let autoUpdater = null;
+let _updaterInitTried = false;
 
 function initAutoUpdater() {
+  if (_updaterInitTried) return;
+  _updaterInitTried = true;
   if (!app.isPackaged) {
     log('[shell] updater: dev mode, skipping');
     return;
@@ -1647,6 +1831,7 @@ async function promptInstallShellUpdate(info) {
 }
 
 function checkShellUpdate(notifyUser) {
+  if (!autoUpdater) initAutoUpdater(); // lazy: tray click before the deferred init
   if (!autoUpdater) {
     if (notifyUser) notify(t(lang(), 'notify.updateFailed'), 'updater unavailable');
     return;
@@ -1709,14 +1894,28 @@ if (!gotLock) {
         .then((s) => { if (!s.running) notify(t(lang(), 'notify.remoteFailed'), t(lang(), 'notify.remoteFailedBody')); })
         .catch((e) => log(`[remote] start failed: ${e.message}`));
     }
-    app.setLoginItemSettings({ openAtLogin: !!settings.get().autoStart });
+    // Registry write on Windows; not needed before the first window.
+    setTimeout(() => app.setLoginItemSettings({ openAtLogin: !!settings.get().autoStart }), 3_000);
     createTray();
+    // refresh the tray's peak/off-peak countdown line once a minute (the
+    // menu is only rebuilt when split pricing is actually enabled)
+    trayPeakTimer = setInterval(() => {
+      if (quitting || !tray || tray.isDestroyed()) return;
+      if (settings.get().costPeakEnabled) updateTray();
+    }, 60_000);
+    // Splash on EVERY boot, not just guided first-run: without it Windows
+    // users stare at a blank screen for the whole runtime boot (AV scans the
+    // runtime's thousands of files). It closes in createWindow().
+    try { createLoadingWindow(); } catch (err) { log('[shell] loading window failed: ' + err.message); }
+    setLoading(t(lang(), 'loading.boot'));
     const runtimeReady = await ensureRuntimeWithGuide();
     // The guided flow may have quit the app (user choice / fatal error);
     // never continue a torn-down app (write-after-end crashes).
     if (quitting) return;
     if (runtimeReady) {
-      seedInstalledPlugins();
+      // Reads the web profile's package.json (and may write settings) —
+      // housekeeping, keep it off the first-window path.
+      setTimeout(seedInstalledPlugins, 2_000);
       // The guided flow may have just closed its loading window; with no main
       // window open yet, window-all-closed would otherwise quit the app while
       // the runtime is still booting (M15). Hold quit until the window opens.
@@ -1725,7 +1924,10 @@ if (!gotLock) {
     }
     registerQuickAskHotkey();
     startScheduler();
-    initAutoUpdater();
+    // require('electron-updater') pulls a large dependency tree out of the
+    // asar (hundreds of files, each an AV scan on Windows) — defer it well
+    // past the first window; checkShellUpdate() lazy-inits if user is faster.
+    setTimeout(initAutoUpdater, 5_000);
     if (process.env.DSH_DESKTOP_OPEN_SETTINGS === '1') createSettingsWindow();
 
     // token widget: one collect per tick shared by the widget and the cost
@@ -1738,7 +1940,7 @@ if (!gotLock) {
       if (tokenPollBusy || quitting) return;
       tokenPollBusy = true;
       try {
-        const stats = await tokenStats.collect(dshHomeOf());
+        const stats = await collectStats();
         pushTokens(stats);
         costSnapshot(stats);
       } catch (e) {
@@ -1752,7 +1954,7 @@ if (!gotLock) {
       setTimeout(pollTokens, 2_000);
     }
     setTimeout(async () => {
-      const stats = await tokenStats.collect(dshHomeOf());
+      const stats = await collectStats();
       costSnapshot(stats);
       const diag = diagnosticsInfo();
       if (diag.crashCount > 0) {
@@ -1802,6 +2004,7 @@ if (!gotLock) {
   });
 
   app.on('will-quit', () => {
+    if (trayPeakTimer) { clearInterval(trayPeakTimer); trayPeakTimer = null; }
     globalShortcut.unregisterAll();
     if (scheduler) scheduler.stop();
     if (remote) remote.stop();

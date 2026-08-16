@@ -25,11 +25,15 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { decompress } = require('fzstd');
+const { isPeakTime } = require('./cost');
 
 const ZSTD = '.jsonl.zstd';
 const PLAIN = '.jsonl';
 
-// path -> { size, mtimeMs, result }  (result carries totals + meta + mtimeMs)
+// path -> { size, mtimeMs, result, offset?, wkey }  (result carries totals +
+// meta + mtimeMs; offset is the consumed byte boundary of a plain log —
+// everything up to and including its last '\n'; wkey identifies the
+// peak/off-peak bucketing the cached result was computed with).
 const parseCache = new Map();
 
 function isEmptyTotals(r) {
@@ -46,9 +50,16 @@ function parseHeader(text) {
   } catch { return {}; }
 }
 
-/** Sum usage buckets over every event line of a decoded session log. */
-function sumUsage(text) {
+/** Sum usage buckets over every event line of a decoded session log.
+ * With `windows` (peak hour ranges, Beijing time), each usage event is also
+ * bucketed into peak/offPeak by its `time` field (events without a time go
+ * to offPeak); without windows both buckets stay zero and totals are
+ * identical to the legacy behavior. */
+function sumUsage(text, windows) {
   let input = 0, output = 0, cacheRead = 0, cacheWrite = 0;
+  const peak = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  const offPeak = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  const bucketed = !!(windows && windows.length);
   let lines = 0;
   let start = 0;
   // Walk line-by-line via indexOf instead of text.split('\n') — avoids
@@ -69,13 +80,16 @@ function sumUsage(text) {
     if (ev && ev.type === 'assistant/message' && ev.data && ev.data.usage) usage = ev.data.usage;
     else if (ev && ev.type === 'assistant/chunk' && ev.data && ev.data.chunk && ev.data.chunk.type === 'usage') usage = ev.data.chunk.usage;
     if (!usage) continue;
-    input += usage.inputTokens || 0;
-    output += usage.outputTokens || 0;
-    cacheRead += usage.cacheReadTokens || 0;
-    cacheWrite += usage.cacheWriteTokens || 0;
+    const ui = usage.inputTokens || 0, uo = usage.outputTokens || 0;
+    const ucr = usage.cacheReadTokens || 0, ucw = usage.cacheWriteTokens || 0;
+    input += ui; output += uo; cacheRead += ucr; cacheWrite += ucw;
+    if (bucketed) {
+      const dst = (typeof ev.time === 'number' && isPeakTime(ev.time, windows)) ? peak : offPeak;
+      dst.input += ui; dst.output += uo; dst.cacheRead += ucr; dst.cacheWrite += ucw;
+    }
     if (nl === -1) break;
   }
-  return { input, output, cacheRead, cacheWrite, lines };
+  return { input, output, cacheRead, cacheWrite, lines, peak, offPeak };
 }
 
 /** Decode a session log file to text; null on failure. Used by session-search. */
@@ -104,23 +118,86 @@ async function decodeSessionLogAsync(file) {
   return buf.toString('utf8');
 }
 
+/** Stable key identifying the bucketing mode a cached result was built with. */
+function windowsKey(windows) {
+  return windows && windows.length ? JSON.stringify(windows) : '';
+}
+
+/** Read `length` bytes starting at `start` without loading the whole file. */
+async function readFileRange(file, start, length) {
+  const fh = await fsp.open(file, 'r');
+  try {
+    const buf = Buffer.alloc(length);
+    const { bytesRead } = await fh.read(buf, 0, length, start);
+    return buf.toString('utf8', 0, bytesRead);
+  } finally {
+    await fh.close();
+  }
+}
+
 /**
- * Parse one session log; cached by (size, mtimeMs). Async + non-blocking.
+ * Parse one session log; cached by (size, mtimeMs, bucketing). Async + non-blocking.
+ * Plain .jsonl logs that only grew since the last parse are parsed
+ * incrementally: only the new bytes are read and the newly completed lines
+ * are summed on top of the cached totals (offset always sits just past the
+ * last complete '\n', so a mid-write trailing line is picked up next tick).
+ * Zstd logs and truncated/rewritten files are fully re-parsed.
  * Returns {totals, meta, mtimeMs} or null.
  */
-async function parseSessionLogAsync(file) {
+async function parseSessionLogAsync(file, windows) {
   let st;
   try { st = await fsp.stat(file); } catch { return null; }
+  const wkey = windowsKey(windows);
   const hit = parseCache.get(file);
-  if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) return hit.result;
-  const text = await decodeSessionLogAsync(file);
-  const result = text === null ? null : { totals: sumUsage(text), meta: parseHeader(text), mtimeMs: st.mtimeMs };
+  if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs && hit.wkey === wkey) return hit.result;
+  const isPlain = !file.endsWith(ZSTD);
+  if (isPlain && hit && typeof hit.offset === 'number'
+    && st.size > hit.size && st.size > hit.offset && hit.wkey === wkey) {
+    try {
+      const grown = await readFileRange(file, hit.offset, st.size - hit.offset);
+      const lastNl = grown.lastIndexOf('\n');
+      if (lastNl === -1) {
+        // only a partial line was appended; keep the old result and offset
+        const result = { ...hit.result, mtimeMs: st.mtimeMs };
+        parseCache.set(file, { size: st.size, mtimeMs: st.mtimeMs, result, offset: hit.offset, wkey });
+        return result;
+      }
+      const fresh = grown.slice(0, lastNl + 1); // complete lines only
+      const inc = sumUsage(fresh, windows);
+      const t = hit.result.totals;
+      t.input += inc.input; t.output += inc.output;
+      t.cacheRead += inc.cacheRead; t.cacheWrite += inc.cacheWrite;
+      t.lines += inc.lines;
+      if (t.peak && t.offPeak) {
+        t.peak.input += inc.peak.input; t.peak.output += inc.peak.output;
+        t.peak.cacheRead += inc.peak.cacheRead; t.peak.cacheWrite += inc.peak.cacheWrite;
+        t.offPeak.input += inc.offPeak.input; t.offPeak.output += inc.offPeak.output;
+        t.offPeak.cacheRead += inc.offPeak.cacheRead; t.offPeak.cacheWrite += inc.offPeak.cacheWrite;
+      }
+      const result = { totals: t, meta: hit.result.meta, mtimeMs: st.mtimeMs };
+      // byte length (not char length) keeps the offset valid for multi-byte logs
+      parseCache.set(file, { size: st.size, mtimeMs: st.mtimeMs, result, offset: hit.offset + Buffer.byteLength(fresh, 'utf8'), wkey });
+      return result;
+    } catch { /* reader raced a rewrite; fall through to a full re-parse */ }
+  }
+  let text;
+  let offset;
+  if (isPlain) {
+    const buf = await fsp.readFile(file);
+    text = buf.toString('utf8');
+    const lastNl = buf.lastIndexOf(0x0a);
+    offset = lastNl === -1 ? 0 : lastNl + 1;
+  } else {
+    text = await decodeSessionLogAsync(file);
+    offset = undefined;
+  }
+  const result = text === null ? null : { totals: sumUsage(text, windows), meta: parseHeader(text), mtimeMs: st.mtimeMs };
   if (result !== null) {
     if (parseCache.size > 100) { // cap the cache, drop the oldest
       const first = parseCache.keys().next().value;
       if (first !== undefined) parseCache.delete(first);
     }
-    parseCache.set(file, { size: st.size, mtimeMs: st.mtimeMs, result });
+    parseCache.set(file, { size: st.size, mtimeMs: st.mtimeMs, result, offset, wkey });
   }
   return result;
 }
@@ -152,8 +229,14 @@ function walkSessionFiles(root) {
   return out;
 }
 
-/** Async walker — used by collect() so the main thread is not blocked on IO. */
+/** Async walker — used by collect() so the main thread is not blocked on IO.
+ * Cached per root for 5s: collect runs every 5s, so a brand-new session
+ * shows up within ~10s worst case, and a quiet tick does zero directory IO. */
+const WALK_TTL_MS = 5_000;
+let walkCache = null; // { root, list, expiresAt }
+
 async function walkSessionFilesAsync(root) {
+  if (walkCache && walkCache.root === root && walkCache.expiresAt > Date.now()) return walkCache.list;
   const out = [];
   let projects;
   try { projects = await fsp.readdir(root, { withFileTypes: true }); } catch { return out; }
@@ -175,29 +258,45 @@ async function walkSessionFilesAsync(root) {
       if (found) out.push(found);
     }
   }
+  walkCache = { root, list: out, expiresAt: Date.now() + WALK_TTL_MS };
   return out;
 }
 
 /**
  * Collect token usage across all sessions (fully async; never blocks main thread).
  * @param {string} dshHome
+ * @param {{ windows?: Array<[number, number]> }} [opts] — peak windows; when
+ *   given, totals and each session's usage also carry peak/offPeak buckets.
  * @returns {Promise<{ current: Totals|null, totals: Totals, sessionCount: number, sessions: Array }>}
  */
-async function collect(dshHome) {
+async function collect(dshHome, opts) {
+  const windows = opts && opts.windows && opts.windows.length ? opts.windows : null;
   const root = path.join(dshHome, 'sessions');
-  const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  const totals = {
+    input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
+    peak: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    offPeak: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  };
   const sessions = [];
   let sessionCount = 0;
   let current = null;
   let latestMtime = 0;
   const files = await walkSessionFilesAsync(root);
   for (const file of files) {
-    const r = await parseSessionLogAsync(file);
+    const r = await parseSessionLogAsync(file, windows);
     if (!r) continue;
     const usage = r.totals;
     sessionCount += 1;
     totals.input += usage.input; totals.output += usage.output;
     totals.cacheRead += usage.cacheRead; totals.cacheWrite += usage.cacheWrite;
+    if (usage.peak) {
+      totals.peak.input += usage.peak.input || 0; totals.peak.output += usage.peak.output || 0;
+      totals.peak.cacheRead += usage.peak.cacheRead || 0; totals.peak.cacheWrite += usage.peak.cacheWrite || 0;
+    }
+    if (usage.offPeak) {
+      totals.offPeak.input += usage.offPeak.input || 0; totals.offPeak.output += usage.offPeak.output || 0;
+      totals.offPeak.cacheRead += usage.offPeak.cacheRead || 0; totals.offPeak.cacheWrite += usage.offPeak.cacheWrite || 0;
+    }
     const mtimeMs = r.mtimeMs || 0;
     sessions.push({ file, cwd: r.meta.cwd, usage, mtimeMs });
     if (mtimeMs > latestMtime) { latestMtime = mtimeMs; current = usage; }
