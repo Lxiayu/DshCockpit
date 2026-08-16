@@ -252,6 +252,31 @@
       <input type="number" id="monthlyBudget" min="0" step="1" />
       <span class="hint" style="margin-left:0" data-i18n="cost.budgetHint">0 = 不限制；达到 80% / 100% 时提醒</span>
     </div>
+    <div class="row">
+      <label data-i18n="cost.peakEnabled">峰谷分时计价</label>
+      <input type="checkbox" id="costPeakEnabled" />
+    </div>
+    <div class="row">
+      <label data-i18n="cost.peakWindows">峰时时段（北京时间）</label>
+      <input type="text" id="costPeakWindows" placeholder="9-12,14-18" />
+    </div>
+    <div class="hint" data-i18n="cost.peakWindowsHint">格式如 9-12,14-18；峰时事件按峰时费率估算</div>
+    <div class="row">
+      <label data-i18n="cost.peakInputRate">峰时输入 ¥/百万</label>
+      <input type="number" id="costPeakInputPerM" min="0" step="0.1" />
+    </div>
+    <div class="row">
+      <label data-i18n="cost.peakOutputRate">峰时输出 ¥/百万</label>
+      <input type="number" id="costPeakOutputPerM" min="0" step="0.1" />
+    </div>
+    <div class="row">
+      <label data-i18n="cost.peakCacheReadRate">峰时缓存读 ¥/百万</label>
+      <input type="number" id="costPeakCacheReadPerM" min="0" step="0.1" />
+    </div>
+    <div class="row">
+      <label data-i18n="cost.peakCacheWriteRate">峰时缓存写 ¥/百万</label>
+      <input type="number" id="costPeakCacheWritePerM" min="0" step="0.1" />
+    </div>
     <div class="status" id="cost-status"></div>
     <div class="note" data-i18n="cost.ratesHint">费用按你配置的价格估算，仅供参考，不构成实际计费。</div>
   </section>
@@ -333,6 +358,10 @@
       cost_inputRate: '输入 ¥/百万', cost_outputRate: '输出 ¥/百万',
       cost_cacheReadRate: '缓存读 ¥/百万', cost_cacheWriteRate: '缓存写 ¥/百万',
       cost_budget: '月度预算 ¥', cost_budgetHint: '0 = 不限制；达到 80% / 100% 时提醒',
+      cost_peakEnabled: '峰谷分时计价', cost_peakWindows: '峰时时段（北京时间）',
+      cost_peakWindowsHint: '北京时间，格式如 9-12,14-18（不支持跨零点时段）；填写无效时按默认 9-12,14-18 估算',
+      cost_peakInputRate: '峰时输入 ¥/百万', cost_peakOutputRate: '峰时输出 ¥/百万',
+      cost_peakCacheReadRate: '峰时缓存读 ¥/百万', cost_peakCacheWriteRate: '峰时缓存写 ¥/百万',
       cost_ratesHint: '费用按你配置的价格估算，仅供参考，不构成实际计费。',
       cost_today: '今天', cost_week: '近 7 天', cost_month: '近 30 天', cost_perWorkspace: '按工作区：',
       sec_schedule: '定时任务',
@@ -396,6 +425,10 @@
       cost_inputRate: 'Input ¥/1M', cost_outputRate: 'Output ¥/1M',
       cost_cacheReadRate: 'Cache read ¥/1M', cost_cacheWriteRate: 'Cache write ¥/1M',
       cost_budget: 'Monthly budget ¥', cost_budgetHint: '0 = unlimited; alerts at 80% / 100%',
+      cost_peakEnabled: 'Peak & off-peak pricing', cost_peakWindows: 'Peak hours (Beijing time)',
+      cost_peakWindowsHint: 'Beijing time, e.g. 9-12,14-18 (cross-midnight ranges not supported); invalid input falls back to the default 9-12,14-18',
+      cost_peakInputRate: 'Peak input ¥/1M', cost_peakOutputRate: 'Peak output ¥/1M',
+      cost_peakCacheReadRate: 'Peak cache read ¥/1M', cost_peakCacheWriteRate: 'Peak cache write ¥/1M',
       cost_ratesHint: 'Costs are estimated from the rates you configure; not a billing basis.',
       cost_today: 'Today', cost_week: 'Last 7 days', cost_month: 'Last 30 days', cost_perWorkspace: 'By workspace:',
       sec_schedule: 'Scheduled tasks',
@@ -488,6 +521,12 @@
     $('costCacheReadPerM').value = s.costCacheReadPerM;
     $('costCacheWritePerM').value = s.costCacheWritePerM;
     $('monthlyBudget').value = s.monthlyBudget;
+    $('costPeakEnabled').checked = !!s.costPeakEnabled;
+    $('costPeakWindows').value = s.costPeakWindows || '9-12,14-18';
+    $('costPeakInputPerM').value = s.costPeakInputPerM;
+    $('costPeakOutputPerM').value = s.costPeakOutputPerM;
+    $('costPeakCacheReadPerM').value = s.costPeakCacheReadPerM;
+    $('costPeakCacheWritePerM').value = s.costPeakCacheWritePerM;
     $('row-pinned').style.display = s.channel === 'pinned' ? '' : 'none';
     $('about-shell').textContent = s.shellVersion || '';
     $('about-dshHome').textContent = s.dshHome || '(~/.dsh)';
@@ -519,6 +558,12 @@
       costCacheReadPerM: Math.max(0, Number($('costCacheReadPerM').value) || 0),
       costCacheWritePerM: Math.max(0, Number($('costCacheWritePerM').value) || 0),
       monthlyBudget: Math.max(0, Number($('monthlyBudget').value) || 0),
+      costPeakEnabled: $('costPeakEnabled').checked,
+      costPeakWindows: $('costPeakWindows').value.trim(),
+      costPeakInputPerM: Math.max(0, Number($('costPeakInputPerM').value) || 0),
+      costPeakOutputPerM: Math.max(0, Number($('costPeakOutputPerM').value) || 0),
+      costPeakCacheReadPerM: Math.max(0, Number($('costPeakCacheReadPerM').value) || 0),
+      costPeakCacheWritePerM: Math.max(0, Number($('costPeakCacheWritePerM').value) || 0),
     };
   }
 
@@ -700,7 +745,8 @@
   function renderCost(info) {
     if (!info) return;
     const fmtTok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n));
-    const row = (label, d) => `${label}: ${fmtTok(d.input)}/${fmtTok(d.output)} tok · ${info.currency}${d.cost.toFixed(2)}`;
+    const row = (label, d) => `${label}: ${fmtTok(d.input)}/${fmtTok(d.output)} tok · ${info.currency}${d.cost.toFixed(2)}`
+      + (info.peak && info.peak.enabled && d.peakCost > 0 ? `（峰 ¥${d.peakCost.toFixed(2)}）` : '');
     const lines = [
       row(tr('cost.today'), info.today),
       row(tr('cost.week'), info.week),

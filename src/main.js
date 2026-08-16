@@ -72,6 +72,7 @@ let searchWindow = null;
 let scheduler = null;
 let loadingWindow = null;
 let pluginMarketWindow = null;
+let trayPeakTimer = null; // 1-minute tray refresh for the peak/off-peak countdown
 let guidedInstallInProgress = false;
 let mainWindowPending = false; // guided first-run: runtime booting, main window not open yet
 const pluginGuard = createPluginOpGuard(); // one dsh plugin op at a time (profile safety)
@@ -88,6 +89,20 @@ const windowStateFile = () => path.join(app.getPath('userData'), 'window-state.j
 const costHistoryFile = () => path.join(app.getPath('userData'), 'cost-history.json');
 const diagnosticsDir = () => path.join(app.getPath('userData'), 'diagnostics');
 const TOKEN_POLL_MS = 5_000;
+
+/** Parsed peak windows when peak pricing is enabled; null otherwise.
+ * An invalid user string falls back to the DeepSeek default windows. */
+function peakWindowsOf(cfg) {
+  if (!cfg || !cfg.costPeakEnabled) return null;
+  return cost.parseWindows(cfg.costPeakWindows) || cost.DEFAULT_WINDOWS;
+}
+
+/** One collect shared by the 5s poll, manual refresh and cost-info IPC —
+ * peak/off-peak bucketing is applied whenever peak pricing is enabled. */
+async function collectStats() {
+  const windows = peakWindowsOf(settings.get());
+  return windows ? tokenStats.collect(dshHomeOf(), { windows }) : tokenStats.collect(dshHomeOf());
+}
 
 const manager = new RuntimeManager({
   userDataDir: app.getPath('userData'),
@@ -654,8 +669,26 @@ function updateTray() {
   const info = manager.getInfo();
   const pending = info.pendingVersion;
   const canRollback = info.installed && info.installed.length > 1;
+  // peak/off-peak status line (only when split pricing is enabled)
+  const cfg = settings.get();
+  const windows = peakWindowsOf(cfg);
+  const peakItems = [];
+  if (windows) {
+    const ps = cost.peakStatus(Date.now(), windows);
+    const flatOut = cfg.costOutputPerM || 0;
+    const peakOut = cfg.costPeakOutputPerM || 0;
+    const hasPeakRate = !!(cfg.costPeakInputPerM || cfg.costPeakOutputPerM || cfg.costPeakCacheReadPerM || cfg.costPeakCacheWritePerM);
+    const rate = ps.peak ? (hasPeakRate ? peakOut : flatOut) : flatOut;
+    peakItems.push({
+      label: ps.peak
+        ? t(L, 'tray.peakOn', { r: rate, m: ps.nextChangeInMin })
+        : t(L, 'tray.peakOff', { r: rate, m: ps.nextChangeInMin }),
+      enabled: false,
+    });
+  }
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: t(L, 'tray.open'), click: () => showMain() },
+    ...peakItems,
     { label: t(L, 'tray.settings'), click: () => createSettingsWindow() },
     { label: t(L, 'tray.quickAsk'), accelerator: settings.get().quickAskHotkey || '', click: () => createQuickAsk() },
     { type: 'separator' },
@@ -908,7 +941,7 @@ function registerIpc() {
     return { ok: true };
   });
   ipcMain.handle('shell:cost-info', async () => {
-    const stats = await tokenStats.collect(dshHomeOf());
+    const stats = await collectStats();
     return costSnapshot(stats);
   });
   ipcMain.handle('shell:diagnostics-info', () => diagnosticsInfo());
@@ -955,7 +988,7 @@ function registerIpc() {
   ipcMain.on('chrome:open-settings', () => createSettingsWindow());
   ipcMain.on('chrome:refresh-tokens', async () => {
     try {
-      const stats = await tokenStats.collect(dshHomeOf());
+      const stats = await collectStats();
       pushTokens(stats);
       costSnapshot(stats);
     } catch (e) { log(`[shell] manual token refresh failed: ${e.message}`); }
@@ -1253,16 +1286,37 @@ function costSnapshot(stats) {
     cacheReadPerM: cfg.costCacheReadPerM || 0,
     cacheWritePerM: cfg.costCacheWritePerM || 0,
   };
+  const peakEnabled = !!cfg.costPeakEnabled;
+  const peakRaw = peakEnabled ? {
+    inputPerM: cfg.costPeakInputPerM || 0,
+    outputPerM: cfg.costPeakOutputPerM || 0,
+    cacheReadPerM: cfg.costPeakCacheReadPerM || 0,
+    cacheWritePerM: cfg.costPeakCacheWritePerM || 0,
+  } : null;
+  // an all-zero peak rate set degrades to the flat rates (costOfSplit semantics)
+  const hasPeakRate = !!(peakRaw && (peakRaw.inputPerM || peakRaw.outputPerM || peakRaw.cacheReadPerM || peakRaw.cacheWritePerM));
+  const peakRates = hasPeakRate ? peakRaw : rates;
+  const totalCost = peakEnabled
+    ? cost.costOfSplit(stats.totals, rates, peakRates).total
+    : cost.costOf(stats.totals, rates);
+  const peakCostTotal = peakEnabled && stats.totals.peak ? cost.costOf(stats.totals.peak, peakRates) : 0;
   const perWorkspace = new Map();
   for (const s of stats.sessions) {
     const key = s.cwd || '(unknown)';
-    if (!perWorkspace.has(key)) perWorkspace.set(key, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, sessions: 0 });
+    if (!perWorkspace.has(key)) perWorkspace.set(key, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, peakCost: 0, sessions: 0 });
     const w = perWorkspace.get(key);
     w.input += s.usage.input; w.output += s.usage.output;
     w.cacheRead += s.usage.cacheRead; w.cacheWrite += s.usage.cacheWrite;
-    w.cost += cost.costOf(s.usage, rates); w.sessions += 1;
+    // peak-aware per-workspace cost: same costOfSplit basis as the total so the
+    // workspace rows reconcile with the today/week/month rows (review A-1)
+    if (peakEnabled && s.usage.peak) {
+      const sp = cost.costOfSplit(s.usage, rates, peakRates);
+      w.cost += sp.total; w.peakCost += sp.peak;
+    } else {
+      w.cost += cost.costOf(s.usage, rates);
+    }
+    w.sessions += 1;
   }
-  const totalCost = cost.costOf(stats.totals, rates);
   const now = Date.now();
   if (now - lastCostUpdateAt > 10 * 60 * 1000) {
     lastCostUpdateAt = now;
@@ -1270,11 +1324,14 @@ function costSnapshot(stats) {
       input: stats.totals.input, output: stats.totals.output,
       cacheRead: stats.totals.cacheRead, cacheWrite: stats.totals.cacheWrite,
       sessions: stats.sessionCount, cost: totalCost,
+      peakCost: peakCostTotal,
     });
   }
   const history = cost.loadHistory(costHistoryFile());
   const month = cost.summarize(history, 30);
   checkBudget(month.cost);
+  const windows = peakWindowsOf(cfg);
+  const ps = windows ? cost.peakStatus(Date.now(), windows) : null;
   return {
     today: cost.summarize(history, 1),
     week: cost.summarize(history, 7),
@@ -1282,6 +1339,12 @@ function costSnapshot(stats) {
     perWorkspace: [...perWorkspace.entries()].map(([cwd, v]) => ({ cwd, ...v })).sort((a, b) => b.cost - a.cost),
     currency: '¥',
     rates,
+    peak: {
+      enabled: peakEnabled,
+      isPeak: ps ? ps.peak : false,
+      nextChangeInMin: ps ? ps.nextChangeInMin : 0,
+      outputRate: peakEnabled && ps && ps.peak ? peakRates.outputPerM : rates.outputPerM,
+    },
   };
 }
 
@@ -1791,6 +1854,12 @@ if (!gotLock) {
     // Registry write on Windows; not needed before the first window.
     setTimeout(() => app.setLoginItemSettings({ openAtLogin: !!settings.get().autoStart }), 3_000);
     createTray();
+    // refresh the tray's peak/off-peak countdown line once a minute (the
+    // menu is only rebuilt when split pricing is actually enabled)
+    trayPeakTimer = setInterval(() => {
+      if (quitting || !tray || tray.isDestroyed()) return;
+      if (settings.get().costPeakEnabled) updateTray();
+    }, 60_000);
     // Splash on EVERY boot, not just guided first-run: without it Windows
     // users stare at a blank screen for the whole runtime boot (AV scans the
     // runtime's thousands of files). It closes in createWindow().
@@ -1828,7 +1897,7 @@ if (!gotLock) {
       if (tokenPollBusy || quitting) return;
       tokenPollBusy = true;
       try {
-        const stats = await tokenStats.collect(dshHomeOf());
+        const stats = await collectStats();
         pushTokens(stats);
         costSnapshot(stats);
       } catch (e) {
@@ -1842,7 +1911,7 @@ if (!gotLock) {
       setTimeout(pollTokens, 2_000);
     }
     setTimeout(async () => {
-      const stats = await tokenStats.collect(dshHomeOf());
+      const stats = await collectStats();
       costSnapshot(stats);
       const diag = diagnosticsInfo();
       if (diag.crashCount > 0) {
@@ -1892,6 +1961,7 @@ if (!gotLock) {
   });
 
   app.on('will-quit', () => {
+    if (trayPeakTimer) { clearInterval(trayPeakTimer); trayPeakTimer = null; }
     globalShortcut.unregisterAll();
     if (scheduler) scheduler.stop();
     if (logStream) logStream.end();

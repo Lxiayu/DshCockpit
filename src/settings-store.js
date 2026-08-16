@@ -27,6 +27,12 @@ const DEFAULTS = {
   costOutputPerM: 8,        // ¥ per 1M output tokens
   costCacheReadPerM: 0.5,   // ¥ per 1M cache-read tokens
   costCacheWritePerM: 2,    // ¥ per 1M cache-write tokens
+  costPeakEnabled: false,   // split pricing by peak/off-peak event time
+  costPeakWindows: '9-12,14-18', // peak hour ranges, Beijing time
+  costPeakInputPerM: 4,     // peak ¥ per 1M input tokens (default = 2x off-peak)
+  costPeakOutputPerM: 16,   // peak ¥ per 1M output tokens
+  costPeakCacheReadPerM: 1, // peak ¥ per 1M cache-read tokens
+  costPeakCacheWritePerM: 4,// peak ¥ per 1M cache-write tokens
   monthlyBudget: 0,         // ¥/month budget; 0 = disabled
   quickAskHotkey: 'CommandOrControl+Alt+Space',
   scheduledTasks: [],       // { id, name, prompt, kind, everySeconds?|dailyTime?, enabled, nextRunAt, lastRunAt }
@@ -34,9 +40,9 @@ const DEFAULTS = {
   installedPlugins: [],     // plugins installed via the shell plugin market
 };
 
-const NUMERIC_KEYS = ['keepVersions', 'port', 'contextWindow', 'costInputPerM', 'costOutputPerM', 'costCacheReadPerM', 'costCacheWritePerM', 'monthlyBudget', 'backupKeep'];
-const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'tokenWidget', 'shellAutoUpdate'];
-const STRING_KEYS = ['channel', 'pinnedVersion', 'registry', 'workspace', 'dshHome', 'nodeBin', 'dshBin', 'language', 'quickAskHotkey'];
+const NUMERIC_KEYS = ['keepVersions', 'port', 'contextWindow', 'costInputPerM', 'costOutputPerM', 'costCacheReadPerM', 'costCacheWritePerM', 'costPeakInputPerM', 'costPeakOutputPerM', 'costPeakCacheReadPerM', 'costPeakCacheWritePerM', 'monthlyBudget', 'backupKeep'];
+const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'tokenWidget', 'shellAutoUpdate', 'costPeakEnabled'];
+const STRING_KEYS = ['channel', 'pinnedVersion', 'registry', 'workspace', 'dshHome', 'nodeBin', 'dshBin', 'language', 'quickAskHotkey', 'costPeakWindows'];
 const ARRAY_KEYS = ['recentWorkspaces', 'installedPlugins', 'scheduledTasks'];
 
 class SettingsStore {
