@@ -113,11 +113,11 @@ After first launch:
 
 <div align="center">
 
-<img src="photo/preview-1.png" width="720" alt="DshCockpit main window — DeepSeek Harness (dsh) desktop cockpit with token usage capsule" />
+<img src="photo/preview-1.png?v=0.2.3" width="720" alt="DshCockpit main window — DeepSeek Harness (dsh) desktop cockpit with token usage capsule" />
 
 <table><tr>
-<td><img src="photo/preview-2.png" width="280" alt="Cost center — token cost tracking & budget alerts" /></td>
-<td><img src="photo/preview-3.png" width="280" alt="Settings & plugin marketplace" /></td>
+<td><img src="photo/preview-2.png?v=0.2.3" width="280" alt="Cost center — token cost tracking & budget alerts" /></td>
+<td><img src="photo/preview-3.png?v=0.2.3" width="280" alt="Settings & plugin marketplace" /></td>
 </tr></table>
 
 </div>
