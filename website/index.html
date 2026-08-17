@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DshCockpit — 把 DeepSeek Harness 变成常驻后台的 Agent 驾驶舱</title>
+  <meta name="description" content="开源桌面驾驶舱：Token 实时监控与上下文压力预警、成本控制中心与预算报警、冒烟守卫自动更新与一键回滚、全局热键 Quick Ask、定时任务、Ctrl+K 全文检索、插件市场。完全本地运行，MIT 开源。" />
+  <link rel="icon" type="image/png" href="./favicon.png" />
+  <meta property="og:title" content="DshCockpit — Agent 驾驶舱" />
+  <meta property="og:description" content="把 DeepSeek Harness 变成常驻后台的 Agent 驾驶舱：成本控制 · 用量监控 · 自动更新 · 定时任务" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://dshcockpit.site/" />
+  <meta property="og:image" content="./img/preview-1.png" />
+  <meta name="theme-color" content="#06070b" />
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <div class="atmosphere" aria-hidden="true"></div>
+
+  <!-- ================= NAV ================= -->
+  <header class="nav" id="nav">
+    <div class="nav-inner">
+      <a class="brand" href="#top">
+        <img src="./img/logo-96.png" alt="DshCockpit logo" />
+        <span>DshCockpit</span>
+        <span class="ver">v0.2.2</span>
+      </a>
+      <nav class="nav-links" id="navLinks">
+        <a href="#features" data-i18n="nav.features">功能</a>
+        <a href="#compare" data-i18n="nav.compare">对比</a>
+        <a href="#download" data-i18n="nav.download">下载</a>
+        <a href="#faq" data-i18n="nav.faq">常见问题</a>
+      </nav>
+      <div class="nav-actions">
+        <a class="github-star" href="https://github.com/Lxiayu/DshCockpit" target="_blank" rel="noopener">
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          <span>GitHub</span>
+        </a>
+        <button class="lang-switch" id="langBtn" aria-label="Switch language">EN</button>
+        <a class="btn btn-primary nav-download" href="#download" data-i18n="nav.downloadBtn">下载</a>
+        <button class="nav-burger" id="burger" aria-label="Menu"><span></span><span></span><span></span></button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= HERO ================= -->
+  <section class="hero" id="top">
+    <div class="container">
+      <div class="hero-eyebrow reveal"><span class="lamp"></span><span data-i18n="hero.eyebrow">开源 · MIT 许可 · 仪表全部在线</span></div>
+      <h1 class="reveal" style="--d:.08s">
+        <span data-i18n="hero.h1a">把 DeepSeek Harness 变成</span><br />
+        <span data-i18n="hero.h1b">常驻后台的 <i class="accent">Agent 驾驶舱</i></span>
+      </h1>
+      <div class="hero-sub reveal" style="--d:.16s">
+        <p data-i18n="hero.sub">DshCockpit 把 DeepSeek Harness 变成一台常驻后台、为你持续飞行的桌面服务——成本控制、用量监控、自动更新、定时任务、快捷问询、数据安全，开箱即得。</p>
+        <div class="pill-row">
+          <span class="pill" data-i18n="hero.pill1">成本控制</span>
+          <span class="pill" data-i18n="hero.pill2">用量监控</span>
+          <span class="pill" data-i18n="hero.pill3">自动更新</span>
+          <span class="pill" data-i18n="hero.pill4">定时任务</span>
+          <span class="pill" data-i18n="hero.pill5">快捷问询</span>
+          <span class="pill" data-i18n="hero.pill6">数据安全</span>
+        </div>
+      </div>
+      <div class="hero-cta reveal" style="--d:.24s">
+        <a class="btn btn-primary" id="heroDl" href="#download">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span id="heroDlText">下载 macOS 版</span>
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/Lxiayu/DshCockpit" target="_blank" rel="noopener">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          <span data-i18n="hero.ctaGH">GitHub 加星</span>
+        </a>
+      </div>
+      <p class="hero-micro reveal" style="--d:.3s" data-i18n="hero.micro">Windows 便携版 · macOS dmg（arm64 / x64）· 内置运行时，无需安装 Node.js</p>
+
+      <!-- 主截图：通栏全宽，保持原始比例 -->
+      <div class="hero-deck reveal" style="--d:.34s">
+        <div class="hero-fullimg">
+          <img src="./img/preview-1.png" alt="DshCockpit 主窗口 — DeepSeek Harness 桌面驾驶舱与 Token 用量胶囊" width="2000" height="1246" />
+          <div class="win-fade" aria-hidden="true"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 数据带 ================= -->
+  <div class="stats-band">
+    <div class="container">
+      <div class="stats-inner">
+        <div class="stat reveal">
+          <div class="num"><em data-i18n="stat.1n">92+</em></div>
+          <div class="label" data-i18n="stat.1l">单元测试守护每次发布</div>
+        </div>
+        <div class="stat reveal" style="--d:.08s">
+          <div class="num"><em data-i18n="stat.2n">2,000+</em></div>
+          <div class="label" data-i18n="stat.2l">插件市场社区插件生态</div>
+        </div>
+        <div class="stat reveal" style="--d:.16s">
+          <div class="num"><em data-i18n="stat.3n">3</em></div>
+          <div class="label" data-i18n="stat.3l">界面语言完整本地化</div>
+        </div>
+        <div class="stat reveal" style="--d:.24s">
+          <div class="num"><em data-i18n="stat.4n">100%</em></div>
+          <div class="label" data-i18n="stat.4l">本地运行 · 零云端上传</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 四大王牌 BENTO ================= -->
+  <section class="section" id="features">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="sys-tag" data-i18n="bento.tag">// 飞行系统 · 核心差异化</span>
+        <h2 data-i18n="bento.h2">四套王牌系统，撑起整台驾驶舱</h2>
+        <p data-i18n="bento.sub">一套在你专注别处时仍持续工作的仪表——任务、监控、提醒，后台照常运转。</p>
+      </div>
+
+      <div class="bento">
+        <!-- SYS.01 Token 监控 -->
+        <div class="card cell-7 reveal">
+          <span class="sys-tag" data-i18n="b1.tag">SYS.01 · TOKEN 监控</span>
+          <h3 data-i18n="b1.h">Token 实时胶囊 + 上下文压力预警</h3>
+          <p data-i18n="b1.p">窗口右上角常驻胶囊，实时显示当前会话 输入→输出 tokens，悬停看明细（当前/全部会话、缓存）。上下文压力达 60% 变黄、85% 变红——温柔提醒你：该开新会话了。</p>
+          <div class="demo capsule-demo">
+            <div class="capsule" aria-hidden="true">
+              <span class="dot"></span>
+              <span class="io">IN <b id="capIn">12,480</b></span>
+              <span class="io">→ OUT <b id="capOut">3,102</b></span>
+            </div>
+            <div class="pressure" id="pressure">
+              <div class="row"><span data-i18n="b1.ctxLabel">上下文压力</span><span id="pressureVal">42%</span></div>
+              <div class="bar"><div class="fill" id="pressureFill"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SYS.02 成本中心 -->
+        <div class="card cell-5 reveal" style="--d:.08s">
+          <span class="sys-tag" data-i18n="b2.tag">SYS.02 · 成本中心</span>
+          <h3 data-i18n="b2.h">成本控制中心 + 预算报警</h3>
+          <p data-i18n="b2.p">按天/周/月统计 token 与估算费用（单价可配），按工作区看谁在烧钱；月度预算 80%/100% 双级报警，月底不再收到吓人的账单。</p>
+          <div class="demo" aria-hidden="true">
+            <div class="cost-demo" id="costDemo">
+              <div class="col"><span class="val">¥2.1</span><div class="bar-v" data-h="22%"></div><span>MON</span></div>
+              <div class="col"><span class="val">¥3.4</span><div class="bar-v" data-h="36%"></div><span>TUE</span></div>
+              <div class="col"><span class="val">¥1.8</span><div class="bar-v" data-h="19%"></div><span>WED</span></div>
+              <div class="col"><span class="val">¥4.9</span><div class="bar-v" data-h="52%"></div><span>THU</span></div>
+              <div class="col over"><span class="val">¥8.2</span><div class="bar-v" data-h="87%"></div><span>FRI</span></div>
+              <div class="col"><span class="val">¥1.2</span><div class="bar-v" data-h="13%"></div><span>SAT</span></div>
+              <div class="col"><span class="val">¥0.6</span><div class="bar-v" data-h="6%"></div><span>SUN</span></div>
+            </div>
+            <div class="budget-note">
+              <span data-i18n="b2.budget">月度预算 ¥50.00</span>
+              <span class="warn-t" data-i18n="b2.over">⚠ 80% 预警线</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- SYS.03 更新管道 -->
+        <div class="card cell-7 reveal">
+          <span class="sys-tag" data-i18n="b3.tag">SYS.03 · 更新管道</span>
+          <h3 data-i18n="b3.h">自动更新 + 冒烟守卫 + 一键回滚</h3>
+          <p data-i18n="b3.p">registry 检查 → 安装 → <code style="font-family:var(--font-mono);font-size:.85em;color:var(--accent-bright)">--dump-config</code> 冒烟测试 → 待应用 → 切换。坏版本绝不激活；一键回滚 + DSH_HOME 自动快照，预览版快速迭代期的最强稳定性保障。</p>
+          <div class="demo pipeline" id="pipeline" aria-hidden="true">
+            <div class="pipe-step"><div class="ic">◎</div><span data-i18n="b3.s1">检查</span></div>
+            <div class="pipe-arrow"></div>
+            <div class="pipe-step"><div class="ic">↓</div><span data-i18n="b3.s2">安装</span></div>
+            <div class="pipe-arrow"></div>
+            <div class="pipe-step"><div class="ic">☣</div><span data-i18n="b3.s3">冒烟</span></div>
+            <div class="pipe-arrow"></div>
+            <div class="pipe-step"><div class="ic">◷</div><span data-i18n="b3.s4">待应用</span></div>
+            <div class="pipe-arrow"></div>
+            <div class="pipe-step"><div class="ic">✓</div><span data-i18n="b3.s5">上线</span></div>
+          </div>
+        </div>
+
+        <!-- SYS.04 Quick Ask -->
+        <div class="card cell-5 reveal" style="--d:.08s">
+          <span class="sys-tag" data-i18n="b4.tag">SYS.04 · QUICK ASK</span>
+          <h3 data-i18n="b4.h">全局热键快捷问询</h3>
+          <p data-i18n="b4.p">任何界面按 <b style="color:var(--ink)">Ctrl+Alt+Space</b> 弹出小窗，随手提问 → 后台无头会话运行 → 完成系统通知。写代码时不用切窗口就能问。</p>
+          <div class="demo quickask-demo" id="quickask" aria-hidden="true">
+            <div class="hotkey"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>Space</kbd></div>
+            <div class="hint" data-i18n="b4.hint">按下即唤出 · 后台运行 · 完成即通知</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 对比表 ================= -->
+  <section class="section" id="compare" style="padding-top:20px">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="sys-tag" data-i18n="cmp.tag">// 雷达对比 · 为什么是这台驾驶舱</span>
+        <h2 data-i18n="cmp.h2">从「窗口」，到「控制台」</h2>
+        <p data-i18n="cmp.sub">DshCockpit 与浏览器版、其他桌面壳的客观对照。</p>
+      </div>
+      <div class="compare-wrap reveal">
+        <table class="compare">
+          <thead>
+            <tr>
+              <th data-i18n="cmp.col1">能力</th>
+              <th data-i18n="cmp.col2">浏览器版 dsh web</th>
+              <th data-i18n="cmp.col3">其他桌面壳</th>
+              <th class="ours">★ DshCockpit</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td data-i18n="cmp.r1">关闭窗口后</td><td class="no" data-i18n="cmp.r1a">会话就断</td><td class="no" data-i18n="cmp.r1b">托盘常驻</td><td class="ours yes" data-i18n="cmp.r1c">托盘常驻 + 后台任务照跑</td></tr>
+            <tr><td data-i18n="cmp.r2">运行时更新</td><td class="no" data-i18n="cmp.r2a">手动 npm</td><td class="no" data-i18n="cmp.r2b">无</td><td class="ours yes" data-i18n="cmp.r2c">自动管道 + 冒烟守卫 + 一键回滚</td></tr>
+            <tr><td data-i18n="cmp.r3">Token 用量</td><td class="no" data-i18n="cmp.r3a">只闪一下</td><td class="no" data-i18n="cmp.r3b">无</td><td class="ours yes" data-i18n="cmp.r3c">实时胶囊 + 上下文压力预警</td></tr>
+            <tr><td data-i18n="cmp.r4">花费多少</td><td class="no" data-i18n="cmp.r4a">不知道</td><td class="no" data-i18n="cmp.r4b">无</td><td class="ours yes" data-i18n="cmp.r4c">成本中心：天/周/月/工作区 + 预算报警</td></tr>
+            <tr><td data-i18n="cmp.r5">随手提问</td><td class="no" data-i18n="cmp.r5a">要开浏览器</td><td class="no" data-i18n="cmp.r5b">无</td><td class="ours yes" data-i18n="cmp.r5c">全局热键 Quick Ask（后台运行）</td></tr>
+            <tr><td data-i18n="cmp.r6">定时任务</td><td class="no" data-i18n="cmp.r6a">无</td><td class="no" data-i18n="cmp.r6b">无</td><td class="ours yes" data-i18n="cmp.r6c">间隔/每天 Agent 任务 + 通知</td></tr>
+            <tr><td data-i18n="cmp.r7">历史检索</td><td class="no" data-i18n="cmp.r7a">手动翻</td><td class="no" data-i18n="cmp.r7b">无</td><td class="ours yes" data-i18n="cmp.r7c">Ctrl+K 全文搜索全部会话</td></tr>
+            <tr><td data-i18n="cmp.r8">数据安全</td><td class="no" data-i18n="cmp.r8a">本地</td><td class="no" data-i18n="cmp.r8b">本地</td><td class="ours yes" data-i18n="cmp.r8c">本地 + 自动备份 + 隐私声明 + 备份不含密钥</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 更多能力 ================= -->
+  <section class="section" style="padding-top:20px">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="sys-tag" data-i18n="more.tag">// 仪表集群 · 更多机载能力</span>
+        <h2 data-i18n="more.h2">一台常驻 Agent 服务的全部配备</h2>
+        <p data-i18n="more.sub">决定日常体验的那部分细节，一样不少。</p>
+      </div>
+      <div class="feature-grid">
+        <div class="card reveal">
+          <div class="f-ico">⏱</div>
+          <h3 data-i18n="m1.h">定时任务</h3>
+          <p data-i18n="m1.p">每天/每间隔执行固定提示词——日报、周报、清理例行公事。到点自动执行 + 系统通知。</p>
+        </div>
+        <div class="card reveal" style="--d:.06s">
+          <div class="f-ico">⌕</div>
+          <h3 data-i18n="m2.h">Ctrl+K 全文检索</h3>
+          <p data-i18n="m2.p">跨全部历史会话关键词搜索，片段高亮 + 一键复制。对话历史变成可检索的档案库。</p>
+        </div>
+        <div class="card reveal" style="--d:.12s">
+          <div class="f-ico">🧩</div>
+          <h3 data-i18n="m3.h">插件市场</h3>
+          <p data-i18n="m3.p">浏览 GitHub「dsh-plugin」话题 2,000+ 社区插件，一键安装/卸载，自动重启生效。</p>
+        </div>
+        <div class="card reveal">
+          <div class="f-ico">🌐</div>
+          <h3 data-i18n="m4.h">三语界面</h3>
+          <p data-i18n="m4.p">中文 / English / 跟随系统，托盘、通知、设置全本地化；首次运行引导 + API Key 红点提示。</p>
+        </div>
+        <div class="card reveal" style="--d:.06s">
+          <div class="f-ico">🛡</div>
+          <h3 data-i18n="m5.h">隐私优先</h3>
+          <p data-i18n="m5.p">完全本地：不收集、不上传、不存储个人信息、API Key、会话与用量；备份刻意不含凭据，运行时下载全程 sha512 校验。</p>
+        </div>
+        <div class="card reveal" style="--d:.12s">
+          <div class="f-ico">⚙</div>
+          <h3 data-i18n="m6.h">久经考验的工程</h3>
+          <p data-i18n="m6.p">崩溃自动重启（60 秒 3 次防循环）、孤儿进程看门狗、窗口位置记忆、存储一键清理、92+ 单元测试。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 截图 ================= -->
+  <section class="section" style="padding-top:20px">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="sys-tag" data-i18n="shot.tag">// 界面预览 · 所见即所得</span>
+        <h2 data-i18n="shot.h2">真实界面，一览</h2>
+        <p data-i18n="shot.sub">主窗口、功能面板与设置中心的实际运行画面。</p>
+      </div>
+      <div class="shots">
+        <div class="shot reveal"><img src="./img/preview-2.png" alt="DshCockpit 界面截图 — 功能视图" loading="lazy" width="1600" height="1123" /></div>
+        <div class="side">
+          <div class="shot reveal" style="--d:.08s"><img src="./img/preview-3.png" alt="DshCockpit 界面截图 — 设置与插件中心" loading="lazy" width="1600" height="1123" /></div>
+          <div class="shot reveal" style="--d:.16s"><img src="./img/preview-1.png" alt="DshCockpit 主窗口与会话界面" loading="lazy" width="2000" height="1246" /></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 下载 ================= -->
+  <section class="section" id="download" style="padding-top:20px">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="sys-tag" data-i18n="dl.tag">// 任务就绪 · 登机</span>
+        <h2 data-i18n="dl.h2">下载，起飞</h2>
+        <p data-i18n="dl.sub">内置运行时——无需安装 Node.js、无需 dsh、首次运行无需联网下载。约 9 秒开窗。</p>
+      </div>
+      <div class="dl-grid">
+        <div class="card dl-card reveal">
+          <div class="os"><span class="ico">🪟</span><span data-i18n="dl.win.os">Windows 便携版</span></div>
+          <div class="arch" data-i18n="dl.win.arch">WIN-X64 · ZIP 便携包</div>
+          <p class="desc" data-i18n="dl.win.desc">用 7-Zip / WinRAR 解压，双击根目录 DshCockpit.exe 即用。完全便携，可装进 U 盘。</p>
+          <a class="btn btn-primary" href="https://github.com/Lxiayu/DshCockpit/releases/latest" target="_blank" rel="noopener" data-i18n="dl.win.btn">下载 .zip</a>
+        </div>
+        <div class="card dl-card reveal" style="--d:.08s">
+          <div class="os"><span class="ico"></span><span data-i18n="dl.mac.arm.os">macOS Apple Silicon</span></div>
+          <div class="arch" data-i18n="dl.mac.arm.arch">MAC-ARM64 · M1/M2/M3/M4 · DMG</div>
+          <p class="desc" data-i18n="dl.mac.arm.desc">双击挂载，拖入「应用程序」启动。适用于搭载 Apple 芯片的 MacBook / Mac mini / Studio。</p>
+          <a class="btn btn-primary" href="https://github.com/Lxiayu/DshCockpit/releases/latest" target="_blank" rel="noopener" data-i18n="dl.mac.btn">下载 .dmg</a>
+        </div>
+        <div class="card dl-card reveal" style="--d:.16s">
+          <div class="os"><span class="ico">💻</span><span data-i18n="dl.mac.x64.os">macOS Intel</span></div>
+          <div class="arch" data-i18n="dl.mac.x64.arch">MAC-X64 · INTEL · DMG</div>
+          <p class="desc" data-i18n="dl.mac.x64.desc">双击挂载，拖入「应用程序」启动。适用于 Intel 芯片的 Mac。</p>
+          <a class="btn btn-primary" href="https://github.com/Lxiayu/DshCockpit/releases/latest" target="_blank" rel="noopener" data-i18n="dl.mac.btn2">下载 .dmg</a>
+        </div>
+      </div>
+
+      <div class="gatekeeper reveal">
+        <span class="ico">⚠️</span>
+        <p>
+          <b data-i18n="dl.gk.t">macOS 提示「已损坏 / 无法验证开发者」？正常现象。</b><br />
+          <span data-i18n="dl.gk.p">当前安装包尚未签名公证（暂无 Apple Developer 证书），这是 Gatekeeper 的正常拦截，应用本身没坏。最快放行方式——终端一行：</span>
+          <code id="xattrCmd">xattr -dr com.apple.quarantine /Applications/DshCockpit.app</code>
+          <button id="copyXattr" style="background:none;border:1px solid rgba(255,178,36,.35);color:var(--amber);font-family:var(--font-mono);font-size:11px;border-radius:6px;padding:2px 10px;margin-left:8px;cursor:pointer">COPY</button>
+          <br /><span data-i18n="dl.gk.after">放行一次后即可永久正常启动；接入签名公证后此提示会消失。</span>
+        </p>
+      </div>
+
+      <p class="source-run reveal">
+        <span data-i18n="dl.src">从源码运行（开发者）：</span>
+        <code>git clone https://github.com/Lxiayu/DshCockpit.git</code>
+        <code>npm install && npm start</code>
+        <span style="color:var(--ink-faint)" data-i18n="dl.srcHint">· 需 Node.js ≥ 22</span>
+      </p>
+    </div>
+  </section>
+
+  <!-- ================= 路线图 ================= -->
+  <section class="section" style="padding-top:20px">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="sys-tag" data-i18n="rm.tag">// 飞行计划 · 下一航向</span>
+        <h2 data-i18n="rm.h2">路线图</h2>
+      </div>
+      <div class="roadmap">
+        <div class="card done reveal">
+          <h3><span class="lamp"></span><span data-i18n="rm.done.h">已交付</span></h3>
+          <ul>
+            <li><span class="mk">[✓]</span><span data-i18n="rm.d1">运行时/壳双层自动更新 + 回滚</span></li>
+            <li><span class="mk">[✓]</span><span data-i18n="rm.d2">Token 监控 + 成本中心 + 预算报警</span></li>
+            <li><span class="mk">[✓]</span><span data-i18n="rm.d3">Quick Ask + 定时任务 + 完成通知</span></li>
+            <li><span class="mk">[✓]</span><span data-i18n="rm.d4">全文检索 + 自动备份 + 隐私声明</span></li>
+            <li><span class="mk">[✓]</span><span data-i18n="rm.d5">插件市场 + 三语界面 + 便携打包</span></li>
+            <li><span class="mk">[✓]</span><span data-i18n="rm.d6">macOS 构建（CI 产出 arm64 + x64）</span></li>
+          </ul>
+        </div>
+        <div class="card plan reveal" style="--d:.08s">
+          <h3><span class="mk" style="color:var(--accent-bright)">◈</span><span data-i18n="rm.plan.h">计划中</span></h3>
+          <ul>
+            <li><span class="mk">[ ]</span><span data-i18n="rm.p1">macOS 代码签名与公证</span></li>
+            <li><span class="mk">[ ]</span><span data-i18n="rm.p2">Windows Authenticode 代码签名</span></li>
+            <li><span class="mk">[ ]</span><span data-i18n="rm.p3">系统钥匙串集成（凭据加密）</span></li>
+            <li><span class="mk">[ ]</span><span data-i18n="rm.p4">手机远程控制 / 更多工作流</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= FAQ ================= -->
+  <section class="section" id="faq" style="padding-top:20px">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="sys-tag" data-i18n="faq.tag">// 通讯频道 · 塔台提问</span>
+        <h2 data-i18n="faq.h2">常见问题</h2>
+      </div>
+      <div class="faq">
+        <details class="reveal">
+          <summary data-i18n="q1">DshCockpit 收费吗？</summary>
+          <div class="answer" data-i18n="a1">完全免费，MIT 开源。全部代码在 GitHub 公开，可审计、可自建、可二开。</div>
+        </details>
+        <details class="reveal" style="--d:.05s">
+          <summary data-i18n="q2">我的数据安全吗？</summary>
+          <div class="answer" data-i18n="a2">完全本地运行：不收集、不上传、不存储你的个人信息、API Key、会话内容与用量数据。备份刻意不含 API 凭据（防明文密钥扩散），运行时下载全程 sha512 校验，harness 的文件沙箱与审批机制原样保留。</div>
+        </details>
+        <details class="reveal" style="--d:.1s">
+          <summary data-i18n="q3">需要预装 Node.js 或 dsh 吗？</summary>
+          <div class="answer" data-i18n="a3">不需要。官方安装包内置运行时，双击即用、无需联网下载。从源码运行才需要 Node.js ≥ 22（本机未装 dsh 时首次启动会自动下载）。</div>
+        </details>
+        <details class="reveal" style="--d:.15s">
+          <summary data-i18n="q4">macOS 提示应用「已损坏」？</summary>
+          <div class="answer"><span data-i18n="a4">安装包尚未公证，Gatekeeper 会拦截。在终端执行一次</span> <code>xattr -dr com.apple.quarantine /Applications/DshCockpit.app</code> <span data-i18n="a4b">即可正常启动；接入签名公证后此提示会消失。</span></div>
+        </details>
+        <details class="reveal" style="--d:.2s">
+          <summary data-i18n="q5">更新是怎么工作的？</summary>
+          <div class="answer" data-i18n="a5">双层解耦：壳自身启动时 + 每 4 小时自动检查（带更新说明对话框）；运行时走更新管道——冒烟测试守卫确保坏版本绝不激活，一键回滚到上一版本。</div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 交流群（大模块） ================= -->
+  <section class="section community" id="community" style="padding-top:20px">
+    <div class="container">
+      <div class="community-card reveal">
+        <div class="community-text">
+          <span class="sys-tag" data-i18n="com.tag">// COMM · 塔台通讯频道</span>
+          <h2 data-i18n="com.h">加入交流群，一起飞</h2>
+          <p data-i18n="com.p">扫码进群，和开发者直接对话——使用问题、反馈建议，或者聊聊 Agent 桌面化还能怎么玩。</p>
+          <ul class="com-list">
+            <li><span class="lamp"></span><span data-i18n="com.i1">新版本发布第一时间群内通知</span></li>
+            <li><span class="lamp"></span><span data-i18n="com.i2">使用问题与疑难杂症快速排查</span></li>
+            <li><span class="lamp"></span><span data-i18n="com.i3">功能建议直达开发者，影响路线图</span></li>
+            <li><span class="lamp"></span><span data-i18n="com.i4">插件作者与高级玩家聚集地</span></li>
+          </ul>
+          <div class="com-alt">
+            <a href="https://github.com/Lxiayu/DshCockpit/issues" target="_blank" rel="noopener">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+              <span>GitHub Issues</span>
+            </a>
+            <a href="https://github.com/Lxiayu/DshCockpit/discussions" target="_blank" rel="noopener">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+              <span>GitHub Discussions</span>
+            </a>
+          </div>
+        </div>
+        <div class="community-qr">
+          <div class="qr-frame hud">
+            <img src="./img/qrcode-group.png" alt="DshCockpit 交流群二维码" width="811" height="803" loading="lazy" />
+          </div>
+          <span class="qr-hint"><span class="lamp"></span><span data-i18n="com.scan">微信扫码进群</span></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 最终 CTA ================= -->
+  <section class="section" style="padding-top:20px;padding-bottom:40px">
+    <div class="container">
+      <div class="final-cta reveal">
+        <h2 data-i18n="cta.h">准备起飞了吗？</h2>
+        <p data-i18n="cta.p">下载，配好 API Key，拖入工作区文件夹——让你的 Agent 常驻飞行。</p>
+        <div class="hero-cta" style="margin-top:8px">
+          <a class="btn btn-primary" href="#download" data-i18n="cta.btn">立即下载</a>
+          <a class="btn btn-ghost" href="https://github.com/Lxiayu/DshCockpit" target="_blank" rel="noopener" data-i18n="cta.btn2">查看源码</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= FOOTER ================= -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="#top">
+            <img src="./img/logo-96.png" alt="" />
+            <span>DshCockpit</span>
+          </a>
+          <p data-i18n="foot.desc">把 DeepSeek Harness 变成常驻后台 Agent 服务的开源桌面驾驶舱——开源、免费，让 Agent 常驻飞行。</p>
+        </div>
+        <div>
+          <h4 data-i18n="foot.res">资源</h4>
+          <ul>
+            <li><a href="https://github.com/Lxiayu/DshCockpit" target="_blank" rel="noopener" data-i18n="foot.res1">GitHub 仓库</a></li>
+            <li><a href="https://github.com/Lxiayu/DshCockpit/releases" target="_blank" rel="noopener" data-i18n="foot.res2">发布与更新日志</a></li>
+            <li><a href="https://github.com/Lxiayu/DshCockpit/blob/main/DESIGN.md" target="_blank" rel="noopener" data-i18n="foot.res3">设计文档 DESIGN.md</a></li>
+            <li><a href="https://github.com/Lxiayu/DshCockpit/blob/main/FEATURES.md" target="_blank" rel="noopener" data-i18n="foot.res4">功能清单 FEATURES.md</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4 data-i18n="foot.eco">生态</h4>
+          <ul>
+            <li><a href="https://github.com/deepseek-ai/deepseek-harness" target="_blank" rel="noopener" data-i18n="foot.eco1">DeepSeek Harness</a></li>
+            <li><a href="https://github.com/topics/dsh-plugin" target="_blank" rel="noopener" data-i18n="foot.eco3">dsh-plugin 话题</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4 data-i18n="foot.group">社区</h4>
+          <ul>
+            <li><a href="#community" data-i18n="foot.join">扫码加入交流群</a></li>
+            <li><a href="https://github.com/Lxiayu/DshCockpit/issues" target="_blank" rel="noopener">GitHub Issues</a></li>
+            <li><a href="https://github.com/Lxiayu/DshCockpit/pulls" target="_blank" rel="noopener">Pull Requests</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span data-i18n="foot.rights">© 2026 Lxiayu · MIT License</span>
+        <span data-i18n="foot.made">Built for DeepSeek Harness · dshcockpit.site</span>
+        <!-- 备案完成后替换为真实备案号并链接至 beian.miit.gov.cn -->
+        <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener" id="icp" style="display:none">粤ICP备XXXXXXXX号</a>
+      </div>
+    </div>
+  </footer>
+
+  <div class="toast" id="toast" aria-live="polite"></div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
