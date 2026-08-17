@@ -309,6 +309,7 @@
       <button class="nav-item" data-page="runtime"><span class="ico">⚙️</span><span class="txt" data-i18n="nav.runtime">运行时</span></button>
       <button class="nav-item" data-page="plugins"><span class="ico">🧩</span><span class="txt" data-i18n="nav.plugins">插件</span></button>
       <button class="nav-item" data-page="tasks"><span class="ico">⏰</span><span class="txt" data-i18n="nav.tasks">任务与自动化</span></button>
+      <button class="nav-item" data-page="remote"><span class="ico">📱</span><span class="txt" data-i18n="nav.remote">手机远程</span></button>
       <div class="group-label" data-i18n="group.system">系统</div>
       <button class="nav-item" data-page="data"><span class="ico">💾</span><span class="txt" data-i18n="nav.data">数据与备份</span></button>
       <button class="nav-item" data-page="update"><span class="ico">⬆️</span><span class="txt" data-i18n="nav.update">更新</span></button>
@@ -576,6 +577,46 @@
           <div class="auto-grid" id="auto-tpl"></div>
         </div>
         <div class="note" data-i18n="auto.note">到点后会在后台用无头会话运行该任务的提示词（需已配置 API Key），完成后系统通知并记录到执行历史。</div>
+      </div>
+
+      <!-- ------------------------- page: remote (手机远程控制) -->
+      <div class="page" id="page-remote">
+        <div class="page-head">
+          <h2 data-i18n="nav.remote">手机远程</h2>
+          <p data-i18n="page.remote.d">在手机浏览器中安全使用本机会话</p>
+        </div>
+        <div class="card">
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="remote.enable">启用手机控制</label>
+            </div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="remoteControl" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="remote.port">网关端口</label></div>
+            <div class="setting-ctrl"><input type="number" id="remotePort" min="1024" max="65535" style="width:110px" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="remote.compat">微信/抖音打开兼容模式（HTTP）</label>
+              <div class="note" data-i18n="remote.compatHint">开启后走明文 HTTP：微信、抖音内置浏览器可直接打开链接；关闭则恢复自签名 HTTPS（系统浏览器需点「继续访问」）。局域网内明文传输，请勿在公共网络开启。</div>
+            </div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="remoteCompat" /></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="note" data-i18n="remote.hint">手机与本机连同一 Wi-Fi；开关与端口改动即存即生效，再把下方配对链接发到手机、用浏览器打开，之后可完整使用会话、审批、提问</div>
+          <div class="btnrow">
+            <button class="secondary" id="btn-remote-pair" data-i18n="remote.btnPair">刷新配对码</button>
+            <button class="danger" id="btn-remote-revoke" data-i18n="remote.btnRevoke">撤销所有设备</button>
+          </div>
+          <div class="status" id="remote-status"></div>
+          <div id="remote-link-row" style="display:none; align-items:center; gap:8px; margin-top:8px">
+            <span id="remote-link" style="flex:1; word-break:break-all; user-select:all; font-family:ui-monospace,Consolas,monospace; font-size:12px"></span>
+            <button class="secondary" id="btn-remote-copy" data-i18n="remote.copy">复制</button>
+          </div>
+        </div>
+        <div class="note" data-i18n="remote.note">安全说明：默认开启「微信/抖音打开兼容模式」时网关走明文 HTTP，配对码与长期令牌在局域网内明文传输（微信、抖音内置浏览器无法打开自签名 HTTPS，故提供此模式）；关闭兼容模式后为自签名 HTTPS，手机首次访问会提示「不受信任」，系统浏览器选择继续访问即可。配对码 10 分钟内一次性有效；长期令牌经系统加密存储、不进入设置与备份。运行时本身仍只监听 127.0.0.1，局域网只能到达此网关。请勿在公共网络下开启。</div>
       </div>
 
       <!-- ------------------------- page: data (was 数据与安全) -->
@@ -874,9 +915,26 @@
       cost_today: '今天', cost_week: '近 7 天', cost_month: '近 30 天', cost_perWorkspace: '按工作区：',
       schedule_name: '任务名', schedule_prompt: '提示词', schedule_type: '类型',
       schedule_every: '间隔', schedule_daily: '每天', schedule_seconds: '秒',
+      btn_schedAdd: '添加任务', schedule_note: '到点后会在后台用无头会话运行该提示词（需已配置 API Key），完成后系统通知。',
       schedule_weekly: '每周', schedule_at: '时间', schedule_day: '星期', schedule_interval: '间隔秒数',
       schedule_day0: '周日', schedule_day1: '周一', schedule_day2: '周二', schedule_day3: '周三',
       schedule_day4: '周四', schedule_day5: '周五', schedule_day6: '周六',
+      nav_remote: '手机远程',
+      sec_remote: '手机远程控制', remote_enable: '启用手机控制', remote_port: '网关端口',
+      remote_compat: '微信/抖音打开兼容模式（HTTP）',
+      remote_compatHint: '开启后走明文 HTTP：微信、抖音内置浏览器可直接打开链接；关闭则恢复自签名 HTTPS（系统浏览器需点「继续访问」）。局域网内明文传输，请勿在公共网络开启。',
+      remote_hint: '手机与本机连同一 Wi-Fi；先保存设置，再把下方配对链接发到手机、用浏览器打开，之后可完整使用会话、审批、提问',
+      remote_btnPair: '刷新配对码', remote_btnRevoke: '撤销所有设备',
+      remote_copy: '复制', remote_copied: '已复制',
+      remote_note: '安全说明：默认开启「微信/抖音打开兼容模式」时网关走明文 HTTP，配对码与长期令牌在局域网内明文传输（微信、抖音内置浏览器无法打开自签名 HTTPS，故提供此模式）；关闭兼容模式后为自签名 HTTPS，手机首次访问会提示「不受信任」，系统浏览器选择继续访问即可。配对码 10 分钟内一次性有效；长期令牌经系统加密存储、不进入设置与备份。运行时本身仍只监听 127.0.0.1，局域网只能到达此网关。请勿在公共网络下开启。',
+      remote_state_off: '未启用（保存后生效）',
+      remote_state_starting: '未运行（运行时尚未就绪也先启动网关）',
+      remote_state_on: '运行中 @ {port}（运行时{rt}）',
+      remote_rt_ready: '已连接', remote_rt_wait: '等待启动',
+      remote_no_lan: '未检测到局域网 IPv4 地址（或网关未运行）',
+      remote_pairing_none: '当前没有有效配对码，点击「刷新配对码」',
+      remote_pairing_fmt: '配对码：{code}（{min} 分钟内有效，一次性）',
+      remote_revoke_confirm: '确定撤销所有已配对设备？所有手机需要重新配对。',
       schedule_enabled: '启用', schedule_delete: '删除',
       btn_cancel: '取消', btn_saveTask: '保存任务',
       auto_manualNew: '手动新建', auto_askCreate: '在对话中创建',
@@ -929,6 +987,7 @@
       group_general: '常规', group_workspace: '工作', group_system: '系统',
       nav_general: '通用', nav_cost: '用量与成本', nav_runtime: '运行时', nav_plugins: '插件',
       nav_tasks: '自动化', nav_data: '数据与备份', nav_update: '更新', nav_about: '关于',
+      page_remote_d: '在手机浏览器中安全使用本机会话',
       page_general_d: '壳的界面与启动偏好', page_cost_d: 'API 费率、峰谷分时与预算',
       page_runtime_d: '工作区、端口与可执行文件路径', page_plugins_d: '发现与管理 dsh 插件',
       page_tasks_d: '配置和管理自动化任务，让 AI 按计划执行工作流。', page_data_d: '备份、存储与隐私',
@@ -1028,9 +1087,26 @@
       cost_today: 'Today', cost_week: 'Last 7 days', cost_month: 'Last 30 days', cost_perWorkspace: 'By workspace:',
       schedule_name: 'Task name', schedule_prompt: 'Prompt', schedule_type: 'Type',
       schedule_every: 'Every', schedule_daily: 'Daily at', schedule_seconds: 'sec',
+      btn_schedAdd: 'Add task', schedule_note: 'Runs the prompt in a background headless session when due (requires an API key); you get a notification when done.',
       schedule_weekly: 'Weekly on', schedule_at: 'Time', schedule_day: 'Weekday', schedule_interval: 'Interval (sec)',
       schedule_day0: 'Sun', schedule_day1: 'Mon', schedule_day2: 'Tue', schedule_day3: 'Wed',
       schedule_day4: 'Thu', schedule_day5: 'Fri', schedule_day6: 'Sat',
+      nav_remote: 'Phone remote',
+      sec_remote: 'Phone remote control', remote_enable: 'Enable phone control', remote_port: 'Gateway port',
+      remote_compat: 'WeChat/Douyin open compat mode (HTTP)',
+      remote_compatHint: 'On = plain HTTP: WeChat and Douyin in-app browsers open the link directly; off = self-signed HTTPS (system browsers need a "proceed anyway" tap). Cleartext on the LAN - do not enable on public networks.',
+      remote_hint: 'Phone and this machine on the same Wi-Fi; save settings, send the pairing link below to the phone and open it in a browser, then use sessions, approvals and questions in full',
+      remote_btnPair: 'Refresh pairing code', remote_btnRevoke: 'Revoke all devices',
+      remote_copy: 'Copy', remote_copied: 'Copied',
+      remote_note: 'Security: with the WeChat/Douyin compat mode on (default) the gateway serves plain HTTP - the pairing code and long-lived token travel cleartext on the LAN (WeChat/Douyin in-app browsers cannot open self-signed HTTPS, hence the mode); with it off the gateway uses a self-signed HTTPS certificate and system browsers can choose to proceed. The pairing code is one-shot and valid 10 minutes; the long-lived token is OS-encrypted and never enters settings or backups. The runtime still binds 127.0.0.1 only - the LAN can only reach this gateway. Do not enable on public networks.',
+      remote_state_off: 'Disabled (saves take effect immediately)',
+      remote_state_starting: 'Not running (the gateway starts even before the runtime is up)',
+      remote_state_on: 'Running @ {port} (runtime {rt})',
+      remote_rt_ready: 'connected', remote_rt_wait: 'waiting to boot',
+      remote_no_lan: 'No LAN IPv4 address detected (or the gateway is not running)',
+      remote_pairing_none: 'No active pairing code; click "Refresh pairing code"',
+      remote_pairing_fmt: 'Pairing code: {code} (one-shot, valid {min} min)',
+      remote_revoke_confirm: 'Revoke every paired device? Phones will need to pair again.',
       schedule_enabled: 'Enabled', schedule_delete: 'Delete',
       btn_cancel: 'Cancel', btn_saveTask: 'Save task',
       auto_manualNew: 'New manually', auto_askCreate: 'Create in chat',
@@ -1083,6 +1159,7 @@
       group_general: 'General', group_workspace: 'Workspace', group_system: 'System',
       nav_general: 'General', nav_cost: 'Usage & Cost', nav_runtime: 'Runtime', nav_plugins: 'Plugins',
       nav_tasks: 'Automation', nav_data: 'Data & Backup', nav_update: 'Updates', nav_about: 'About',
+      page_remote_d: "Use this machine's sessions safely from a phone browser",
       page_general_d: 'Shell interface & startup preferences', page_cost_d: 'API rates, peak pricing & budget',
       page_runtime_d: 'Workspace, port & executable paths', page_plugins_d: 'Discover & manage dsh plugins',
       page_tasks_d: 'Configure and manage automation tasks — AI workflows on a schedule.', page_data_d: 'Backups, storage & privacy',
@@ -1193,6 +1270,9 @@
     ['costPeakOutputPerM', 'costPeakOutputPerM', (el) => Math.max(0, Number(el.value) || 0)],
     ['costPeakCacheReadPerM', 'costPeakCacheReadPerM', (el) => Math.max(0, Number(el.value) || 0)],
     ['costPeakCacheWritePerM', 'costPeakCacheWritePerM', (el) => Math.max(0, Number(el.value) || 0)],
+    ['remoteControl', 'remoteControl', (el) => el.checked],
+    ['remotePort', 'remotePort', (el) => Math.min(65535, Math.max(1024, Number(el.value) || 31780))],
+    ['remoteCompat', 'remoteCompat', (el) => el.checked],
   ];
   for (const [id, key, pick] of AUTO_FIELDS) {
     $(id).addEventListener('change', async () => {
@@ -1273,6 +1353,9 @@
     $('costCacheReadPerM').value = s.costCacheReadPerM;
     $('costCacheWritePerM').value = s.costCacheWritePerM;
     $('monthlyBudget').value = s.monthlyBudget;
+    $('remoteControl').checked = !!s.remoteControl;
+    $('remotePort').value = s.remotePort || 31780;
+    $('remoteCompat').checked = !!s.remoteCompat;
     $('costPeakEnabled').checked = !!s.costPeakEnabled;
     $('costPeakWindows').value = s.costPeakWindows || '9-12,14-18';
     $('costPeakInputPerM').value = s.costPeakInputPerM;
@@ -1285,6 +1368,9 @@
     resolvedLang = s.resolvedLanguage || 'zh';
     applyI18n();
   }
+
+  // (v0.2.2 removed the whole-form save button: every setting auto-saves
+  //  itself via AUTO_FIELDS; the remote controls join that list below.)
 
   // ---------------------------------------------------------------- events
   $('channel').addEventListener('change', () => {
@@ -1675,6 +1761,64 @@
   // main pushes scheduled:changed when a task runs/changes while we're open
   window.dshShell.onScheduledChanged(() => {
     if (document.querySelector('#page-tasks.active')) renderAuto();
+  });
+
+  // ------------------------------------------------------- phone remote
+  function remotePairUrl(st) {
+    if (!st || !st.running || !st.urls.length || !st.pairingCode) return null;
+    return `${st.urls[0]}/__dsh_pair?c=${st.pairingCode}`;
+  }
+
+  function renderRemote(st) {
+    const el = $('remote-status');
+    if (!st) { el.textContent = '-'; return; }
+    const lines = [];
+    if (!st.running) lines.push(tr('remote_state_starting'));
+    else lines.push(tr('remote_state_on', { port: st.port, rt: st.runtimeReady ? tr('remote_rt_ready') : tr('remote_rt_wait') }));
+    if (st.running && st.urls.length) lines.push(st.urls.join('\n'));
+    else lines.push(tr('remote_no_lan'));
+    if (st.pairingCode) {
+      const min = Math.max(1, Math.ceil((st.pairingExpiresAt - Date.now()) / 60000));
+      lines.push(tr('remote_pairing_fmt', { code: st.pairingCode, min }));
+    } else {
+      lines.push(tr('remote_pairing_none'));
+    }
+    setStatus(el, lines.join('\n'), st.running ? 'ok' : undefined);
+    // Pairing link row: the URL carries the one-shot code, so a phone that
+    // opens it pairs immediately (no manual code entry).
+    const url = remotePairUrl(st);
+    const row = $('remote-link-row');
+    if (url) {
+      $('remote-link').textContent = url;
+      row.style.display = 'flex';
+    } else {
+      row.style.display = 'none';
+    }
+  }
+
+  async function refreshRemote() {
+    try { renderRemote(await window.dshShell.remoteStatus()); } catch (e) { /* ignore */ }
+  }
+
+  $('btn-remote-pair').addEventListener('click', async () => {
+    try { renderRemote(await window.dshShell.remotePairing()); } catch (e) { /* ignore */ }
+  });
+
+  $('btn-remote-copy').addEventListener('click', async () => {
+    const url = $('remote-link').textContent;
+    if (!url) return;
+    try {
+      await window.dshShell.copyText(url);
+      const btn = $('btn-remote-copy');
+      const label = btn.textContent;
+      btn.textContent = tr('remote_copied');
+      setTimeout(() => { btn.textContent = label; }, 1500);
+    } catch (e) { /* ignore */ }
+  });
+
+  $('btn-remote-revoke').addEventListener('click', async () => {
+    if (!confirm(tr('remote_revoke_confirm'))) return;
+    try { renderRemote(await window.dshShell.remoteRevoke()); } catch (e) { /* ignore */ }
   });
 
   // ------------------------------------------------------- cost & diagnostics
@@ -2078,6 +2222,7 @@
     refreshDiagnostics();
     renderInstalled();
     renderAuto();
+    refreshRemote();
   }
 
   async function pick(kind) {
@@ -2104,6 +2249,10 @@
     setStatus($('update-status'), tr('status_notChecked'));
     validateWarnings();
     await refreshInfo();
+    // Keep the pairing code / link display live: expiry and one-shot
+    // consumption happen server-side, and a stale link is exactly the trap
+    // that strands a phone on the pairing page.
+    setInterval(refreshRemote, 5000);
   })();
 </script>
 </body>

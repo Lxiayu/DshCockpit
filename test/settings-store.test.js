@@ -18,7 +18,19 @@ test('defaults are applied on first run', () => {
   assert.strictEqual(s.get().channel, 'rc');
   assert.strictEqual(s.get().language, 'system');
   assert.strictEqual(s.get().backupKeep, 5);
+  assert.strictEqual(s.get().remoteControl, false);
+  assert.strictEqual(s.get().remoteCompat, true); // scanner compat is opt-out
   assert.ok(Array.isArray(s.get().recentWorkspaces));
+});
+
+test('remoteCompat patches and round-trips as a boolean', () => {
+  const dir = tmpUserData();
+  const s = new SettingsStore(dir);
+  s.patch({ remoteCompat: false });
+  assert.strictEqual(s.get().remoteCompat, false);
+  s.patch({ remoteCompat: 'yes' }); // truthy string coerces like other boolean keys
+  assert.strictEqual(s.get().remoteCompat, true);
+  assert.strictEqual(new SettingsStore(dir).get().remoteCompat, true);
 });
 
 test('patch persists to disk and load merges', () => {
@@ -54,7 +66,8 @@ test('recentWorkspaces patch round-trips', () => {
 test('DEFAULTS exposes all fields', () => {
   for (const k of ['channel', 'pinnedVersion', 'registry', 'keepVersions', 'workspace', 'dshHome',
     'port', 'trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'nodeBin', 'dshBin',
-    'language', 'backupOnQuit', 'backupKeep', 'tokenWidget', 'recentWorkspaces']) {
+    'language', 'backupOnQuit', 'backupKeep', 'tokenWidget', 'recentWorkspaces',
+    'remoteControl', 'remoteCompat', 'remotePort']) {
     assert.ok(k in DEFAULTS, `missing default: ${k}`);
   }
 });
