@@ -29,5 +29,5 @@ contextBridge.exposeInMainWorld('dshShell', {
   remoteStatus: () => ipcRenderer.invoke('remote:status'),
   remotePairing: () => ipcRenderer.invoke('remote:pairing'),
   remoteRevoke: () => ipcRenderer.invoke('remote:revoke'),
-  remoteQr: (url) => ipcRenderer.invoke('remote:qr', url),
+  copyText: (text) => ipcRenderer.invoke('shell:copy-text', text),
 });

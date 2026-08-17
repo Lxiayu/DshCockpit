@@ -239,15 +239,22 @@
       <label data-i18n="remote.port">网关端口</label>
       <input type="number" id="remotePort" min="1024" max="65535" />
     </div>
-    <div class="hint" data-i18n="remote.hint">手机与本机连同一 Wi-Fi；先保存设置，再用手机扫码配对，之后可完整使用会话、审批、提问</div>
+    <div class="row">
+      <label data-i18n="remote.compat">微信/抖音打开兼容模式（HTTP）</label>
+      <input type="checkbox" id="remoteCompat" />
+    </div>
+    <div class="hint" data-i18n="remote.compatHint">开启后走明文 HTTP：微信、抖音内置浏览器可直接打开链接；关闭则恢复自签名 HTTPS（系统浏览器需点「继续访问」）。局域网内明文传输，请勿在公共网络开启。</div>
+    <div class="hint" data-i18n="remote.hint">手机与本机连同一 Wi-Fi；先保存设置，再把下方配对链接发到手机、用浏览器打开，之后可完整使用会话、审批、提问</div>
     <div class="btnrow">
       <button class="secondary" id="btn-remote-pair" data-i18n="remote.btnPair">刷新配对码</button>
-      <button class="secondary" id="btn-remote-qr" data-i18n="remote.btnQr">显示二维码</button>
       <button class="danger" id="btn-remote-revoke" data-i18n="remote.btnRevoke">撤销所有设备</button>
     </div>
     <div class="status" id="remote-status"></div>
-    <div style="text-align:center; margin-top:10px"><img id="remote-qr" alt="QR" style="display:none; width:200px; height:200px; border:1px solid var(--line); border-radius:8px" /></div>
-    <div class="note" data-i18n="remote.note">安全说明：网关使用自签名 HTTPS 证书（手机首次访问会提示「不受信任」，选择继续访问即可）；配对码 10 分钟内一次性有效；长期令牌经系统加密存储、不进入设置与备份。运行时本身仍只监听 127.0.0.1，局域网只能到达此网关。请勿在公共网络下开启。</div>
+    <div id="remote-link-row" style="display:none; align-items:center; gap:8px; margin-top:8px">
+      <span id="remote-link" style="flex:1; word-break:break-all; user-select:all; font-family:ui-monospace,Consolas,monospace; font-size:12px"></span>
+      <button class="secondary" id="btn-remote-copy" data-i18n="remote.copy">复制</button>
+    </div>
+    <div class="note" data-i18n="remote.note">安全说明：默认开启「微信/抖音打开兼容模式」时网关走明文 HTTP，配对码与长期令牌在局域网内明文传输（微信、抖音内置浏览器无法打开自签名 HTTPS，故提供此模式）；关闭兼容模式后为自签名 HTTPS，手机首次访问会提示「不受信任」，系统浏览器选择继续访问即可。配对码 10 分钟内一次性有效；长期令牌经系统加密存储、不进入设置与备份。运行时本身仍只监听 127.0.0.1，局域网只能到达此网关。请勿在公共网络下开启。</div>
   </section>
 
   <section>
@@ -390,9 +397,12 @@
       schedule_every: '间隔', schedule_daily: '每天', schedule_seconds: '秒',
       btn_schedAdd: '添加任务', schedule_note: '到点后会在后台用无头会话运行该提示词（需已配置 API Key），完成后系统通知。',
       sec_remote: '手机远程控制', remote_enable: '启用手机控制', remote_port: '网关端口',
-      remote_hint: '手机与本机连同一 Wi-Fi；先保存设置，再用手机扫码配对，之后可完整使用会话、审批、提问',
-      remote_btnPair: '刷新配对码', remote_btnQr: '显示二维码', remote_btnRevoke: '撤销所有设备',
-      remote_note: '安全说明：网关使用自签名 HTTPS 证书（手机首次访问会提示「不受信任」，选择继续访问即可）；配对码 10 分钟内一次性有效；长期令牌经系统加密存储、不进入设置与备份。运行时本身仍只监听 127.0.0.1，局域网只能到达此网关。请勿在公共网络下开启。',
+      remote_compat: '微信/抖音打开兼容模式（HTTP）',
+      remote_compatHint: '开启后走明文 HTTP：微信、抖音内置浏览器可直接打开链接；关闭则恢复自签名 HTTPS（系统浏览器需点「继续访问」）。局域网内明文传输，请勿在公共网络开启。',
+      remote_hint: '手机与本机连同一 Wi-Fi；先保存设置，再把下方配对链接发到手机、用浏览器打开，之后可完整使用会话、审批、提问',
+      remote_btnPair: '刷新配对码', remote_btnRevoke: '撤销所有设备',
+      remote_copy: '复制', remote_copied: '已复制',
+      remote_note: '安全说明：默认开启「微信/抖音打开兼容模式」时网关走明文 HTTP，配对码与长期令牌在局域网内明文传输（微信、抖音内置浏览器无法打开自签名 HTTPS，故提供此模式）；关闭兼容模式后为自签名 HTTPS，手机首次访问会提示「不受信任」，系统浏览器选择继续访问即可。配对码 10 分钟内一次性有效；长期令牌经系统加密存储、不进入设置与备份。运行时本身仍只监听 127.0.0.1，局域网只能到达此网关。请勿在公共网络下开启。',
       remote_state_off: '未启用（保存后生效）',
       remote_state_starting: '未运行（运行时尚未就绪也先启动网关）',
       remote_state_on: '运行中 @ {port}（运行时{rt}）',
@@ -400,9 +410,7 @@
       remote_no_lan: '未检测到局域网 IPv4 地址（或网关未运行）',
       remote_pairing_none: '当前没有有效配对码，点击「刷新配对码」',
       remote_pairing_fmt: '配对码：{code}（{min} 分钟内有效，一次性）',
-      remote_pair_url: '配对链接：{url}',
       remote_revoke_confirm: '确定撤销所有已配对设备？所有手机需要重新配对。',
-      remote_need_enable: '请先启用并保存「手机控制」设置',
       schedule_enabled: '启用', schedule_delete: '删除',
       privacy_title: '隐私声明',
       privacy_body: '本应用完全在本地运行。我们不会收集、上传或存储您的任何个人信息、API Key、会话内容或用量数据；所有数据仅保存在本机。仅在以下情况访问网络：更新检查（npm registry / GitHub Releases）、插件市场列表（GitHub）、运行时下载（npm registry）。费用估算基于您自行配置的价格参数，不构成计费依据。',
@@ -471,9 +479,12 @@
       schedule_every: 'Every', schedule_daily: 'Daily at', schedule_seconds: 'sec',
       btn_schedAdd: 'Add task', schedule_note: 'Runs the prompt in a background headless session when due (requires an API key); you get a notification when done.',
       sec_remote: 'Phone remote control', remote_enable: 'Enable phone control', remote_port: 'Gateway port',
-      remote_hint: 'Phone and this machine on the same Wi-Fi; save settings, scan the QR to pair, then use sessions, approvals and questions in full',
-      remote_btnPair: 'Refresh pairing code', remote_btnQr: 'Show QR code', remote_btnRevoke: 'Revoke all devices',
-      remote_note: 'Security: the gateway uses a self-signed HTTPS certificate (phones warn once; choose to proceed); the pairing code is one-shot and valid 10 minutes; the long-lived token is OS-encrypted and never enters settings or backups. The runtime still binds 127.0.0.1 only - the LAN can only reach this gateway. Do not enable on public networks.',
+      remote_compat: 'WeChat/Douyin open compat mode (HTTP)',
+      remote_compatHint: 'On = plain HTTP: WeChat and Douyin in-app browsers open the link directly; off = self-signed HTTPS (system browsers need a "proceed anyway" tap). Cleartext on the LAN - do not enable on public networks.',
+      remote_hint: 'Phone and this machine on the same Wi-Fi; save settings, send the pairing link below to the phone and open it in a browser, then use sessions, approvals and questions in full',
+      remote_btnPair: 'Refresh pairing code', remote_btnRevoke: 'Revoke all devices',
+      remote_copy: 'Copy', remote_copied: 'Copied',
+      remote_note: 'Security: with the WeChat/Douyin compat mode on (default) the gateway serves plain HTTP - the pairing code and long-lived token travel cleartext on the LAN (WeChat/Douyin in-app browsers cannot open self-signed HTTPS, hence the mode); with it off the gateway uses a self-signed HTTPS certificate and system browsers can choose to proceed. The pairing code is one-shot and valid 10 minutes; the long-lived token is OS-encrypted and never enters settings or backups. The runtime still binds 127.0.0.1 only - the LAN can only reach this gateway. Do not enable on public networks.',
       remote_state_off: 'Disabled (saves take effect immediately)',
       remote_state_starting: 'Not running (the gateway starts even before the runtime is up)',
       remote_state_on: 'Running @ {port} (runtime {rt})',
@@ -481,9 +492,7 @@
       remote_no_lan: 'No LAN IPv4 address detected (or the gateway is not running)',
       remote_pairing_none: 'No active pairing code; click "Refresh pairing code"',
       remote_pairing_fmt: 'Pairing code: {code} (one-shot, valid {min} min)',
-      remote_pair_url: 'Pair URL: {url}',
       remote_revoke_confirm: 'Revoke every paired device? Phones will need to pair again.',
-      remote_need_enable: 'Enable and save "phone control" first',
       schedule_enabled: 'Enabled', schedule_delete: 'Delete',
       privacy_title: 'Privacy',
       privacy_body: 'This app runs fully locally. We never collect, upload or store your personal information, API keys, conversation contents or usage data; everything stays on this machine. Network is only touched for: update checks (npm registry / GitHub Releases), plugin market listing (GitHub), runtime downloads (npm registry). Cost estimates use the rates you configure and are not a billing basis.',
@@ -572,6 +581,7 @@
     $('monthlyBudget').value = s.monthlyBudget;
     $('remoteControl').checked = !!s.remoteControl;
     $('remotePort').value = s.remotePort || 31780;
+    $('remoteCompat').checked = !!s.remoteCompat;
     $('costPeakEnabled').checked = !!s.costPeakEnabled;
     $('costPeakWindows').value = s.costPeakWindows || '9-12,14-18';
     $('costPeakInputPerM').value = s.costPeakInputPerM;
@@ -611,6 +621,7 @@
       monthlyBudget: Math.max(0, Number($('monthlyBudget').value) || 0),
       remoteControl: $('remoteControl').checked,
       remotePort: Math.min(65535, Math.max(1024, Number($('remotePort').value) || 31780)),
+      remoteCompat: $('remoteCompat').checked,
       costPeakEnabled: $('costPeakEnabled').checked,
       costPeakWindows: $('costPeakWindows').value.trim(),
       costPeakInputPerM: Math.max(0, Number($('costPeakInputPerM').value) || 0),
@@ -815,6 +826,16 @@
       lines.push(tr('remote_pairing_none'));
     }
     setStatus(el, lines.join('\n'), st.running ? 'ok' : undefined);
+    // Pairing link row: the URL carries the one-shot code, so a phone that
+    // opens it pairs immediately (no manual code entry).
+    const url = remotePairUrl(st);
+    const row = $('remote-link-row');
+    if (url) {
+      $('remote-link').textContent = url;
+      row.style.display = 'flex';
+    } else {
+      row.style.display = 'none';
+    }
   }
 
   async function refreshRemote() {
@@ -825,20 +846,15 @@
     try { renderRemote(await window.dshShell.remotePairing()); } catch (e) { /* ignore */ }
   });
 
-  $('btn-remote-qr').addEventListener('click', async () => {
-    let st;
-    try { st = await window.dshShell.remoteStatus(); } catch (e) { /* ignore */ }
-    if (!st || !st.running) { setStatus($('remote-status'), tr('remote_need_enable'), 'bad'); return; }
-    if (!st.pairingCode) {
-      try { st = await window.dshShell.remotePairing(); } catch (e) { /* ignore */ }
-    }
-    const url = remotePairUrl(st);
-    if (!url) { setStatus($('remote-status'), tr('remote_no_lan'), 'bad'); return; }
+  $('btn-remote-copy').addEventListener('click', async () => {
+    const url = $('remote-link').textContent;
+    if (!url) return;
     try {
-      const data = await window.dshShell.remoteQr(url);
-      const img = $('remote-qr');
-      if (data) { img.src = data; img.style.display = ''; }
-      setStatus($('remote-status'), tr('remote_pair_url', { url }) + '\n' + $('remote-status').textContent, 'ok');
+      await window.dshShell.copyText(url);
+      const btn = $('btn-remote-copy');
+      const label = btn.textContent;
+      btn.textContent = tr('remote_copied');
+      setTimeout(() => { btn.textContent = label; }, 1500);
     } catch (e) { /* ignore */ }
   });
 
@@ -938,6 +954,10 @@
     setStatus($('update-status'), tr('status_notChecked'));
     validateWarnings();
     await refreshInfo();
+    // Keep the pairing code / link display live: expiry and one-shot
+    // consumption happen server-side, and a stale link is exactly the trap
+    // that strands a phone on the pairing page.
+    setInterval(refreshRemote, 5000);
   })();
 </script>
 </body>

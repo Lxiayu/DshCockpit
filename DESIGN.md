@@ -1,4 +1,4 @@
-﻿# DshCockpit — 设计文档
+# DshCockpit — 设计文档
 
 > 把 DeepSeek Harness（`dsh`）打包成 Windows / macOS 桌面应用，双击即用，不再依赖终端手动启动。
 >
@@ -389,26 +389,34 @@ preload（`src/preload.js`）向 dsh web 页面注入一个悬浮组件（暗色
 **动机**：dsh 运行时的 HTTP/WS 面板**没有任何鉴权、TLS 或 origin 策略**（上游 `dsh-host-webserver` 明文声明这是单用户本地服务的设计前提），把它直接暴露到局域网等于交出完全控制权（建会话、跑 bash、读文件）。因此手机访问不采用「让运行时绑 0.0.0.0」的方案，而是**壳内加一层鉴权网关**（`src/remote-control.js`）：
 
 ```
-手机浏览器 --HTTPS(自签)--> 壳网关 0.0.0.0:<remotePort>（默认 31780）
-                              ├─ 鉴权：一次性配对码 -> 长期 token cookie（HttpOnly/Secure/SameSite=Lax）
+手机浏览器 --HTTPS(自签) 或 HTTP(兼容模式)--> 壳网关 0.0.0.0:<remotePort>（默认 31780）
+                              ├─ 鉴权：一次性配对码 -> 长期 token cookie（HttpOnly/SameSite=Lax；TLS 下加 Secure）
                               ├─ HTTP 代理  -> http://127.0.0.1:<runtime port>（agent:false，逐请求新连接）
-                              └─ WS upgrade -> 原始 TCP 管道（帧对网关不透明；重写 Host、剥离网关 cookie）
+                              └─ WS upgrade -> 原始 TCP 管道（帧对网关不透明；重写 Host/Origin、剥离网关 cookie）
 ```
 
+**两种传输模式（同一端口）**：默认**兼容模式（HTTP）**（`remoteCompat`，设置项可关），网关直接监听明文 HTTP；关闭后回到自签 HTTPS。原因：微信/抖音内置浏览器对自签证书**直接白屏且无「继续访问」绕过**（装根证书不现实），而系统相机（Safari/Chrome）可以手动继续。兼容模式下配对码与长期令牌在局域网明文传输（TLS 下才加 `Secure` cookie 标记），设置页明确提示「勿在公共网络开启」。
+
+**Origin 重写（dsh 运行时信任栅栏适配）**：运行时 `/api` 信任栅栏要求请求的 `Origin`（若携带）与 `Host` 同源，且 `host.pickDirectory` 等特权方法钉死在回环。网关把 `Host` 和 `Origin` 都重写为 `http://127.0.0.1:<runtime port>`（HTTP 代理与 WS upgrade 重放两条路径都做），使手机流量到达运行时与桌面 Electron 窗口完全一致；网关自身配对鉴权即信任边界。
+
+**随机数 polyfill 注入（非安全上下文适配）**：dsh 网页端用 `crypto.randomUUID()` 生成每个 RPC 的 rpcId，而浏览器只在安全上下文（HTTPS/localhost）暴露该 API——兼容模式（明文 HTTP）下会抛 `crypto.randomUUID is not a function`，全部 API 调用（会话列表、工作区选择）随之瘫痪。网关对经其转发的 `text/html` 文档在 `<head>` 后注入一段内联 polyfill（基于不受安全上下文限制的 `crypto.getRandomValues` 生成 v4 UUID），注入时**删掉上游的 `transfer-encoding` 并改为 `content-length` 成帧**（上游流式 chunked；两者并存是协议错误，浏览器直接拒收）。跳过压缩响应与非 200/非 GET，JSON/流式响应原样透传。运行时首页无 CSP meta 且不压缩（已实测），注入总是先于模块脚本执行。上游根治（client 包改用 `randomUuid()`）另议，polyfill 对任意运行时版本即时生效。
+
 **配对与凭据**：
-- 配对码 6 位数字，10 分钟内**一次性**有效（`/__dsh_pair?c=码`），成功后 302 到 `/` 并种长期 cookie；二维码编码的就是这个 URL（`qrcode` 生成 dataURL，经 IPC 给设置页展示）。
+- 配对码 6 位数字，10 分钟内**一次性**有效（`/__dsh_pair?c=码`）。配对成功不再返回裸 302，而是返回**200 配对成功落地页**（同响应种长期 cookie，页面用 `<meta http-equiv="refresh" content="0; url=/">` 自动进入应用）：部分内置浏览器（微信 XWeb/X5）在 302 响应上存 cookie 不可靠，文档响应先落 cookie 再跳转能避免手机卡在「已消耗配对码但没带上 cookie」的配对门。设置页把 `status().urls[0] + /__dsh_pair?c=码` 拼成**配对链接**直接显示（协议随模式 http/https），并提供「复制」按钮（`shell:copy-text` IPC 走 Electron clipboard，file:// 页面没有 navigator.clipboard）；手机浏览器打开该链接即配对，无需手输配对码。曾尝试过二维码方案（qrcode 生成 dataURL），因设置页展示链路（CSP/跨端兼容）达不到预期，已整体移除（含 qrcode 依赖）。网关对「刚配对成功的 IP 在 60 秒内又撞上配对门」记录一条诊断日志（cookie 大概率被丢弃）。
 - 长期 token 32 字节随机，经 Electron `safeStorage` 加密存 `userData/remote-token.bin`（不可用时降级 `plain:` 前缀并在日志警告一次）；**不进 settings.json、不进备份**（延续「备份不含凭据」原则）。校验用 `crypto.timingSafeEqual`。
 - 「撤销所有设备」重新生成 token，旧 cookie 全部失效，活跃管道立即断开。
+- **cookie 不可用时的 IP 会话兜底**：微信等内置浏览器对纯 IP 主机经常完全不存 cookie（实测日志：配对成功 24ms 后无 cookie 撞回配对门），因此配对成功同时把该设备来源 IP 记入内存会话（`grants`，滑动 7 天、最多 8 台、应用重启与「撤销所有设备」时清空）。`authorized()` 先验 cookie，再验 IP 会话。设置页每 5 秒刷新一次远端状态，配对码过期/被消耗后界面立即更新，避免用户拿着失效链接重试。
 - 防爆破：同 IP 5 次配对失败锁 5 分钟（429）。
 
-**证书**：`node-forge` 生成 RSA-2048 + SHA-256 自签证书，有效期 397 天（低于部分移动浏览器 398 天上限），SAN 覆盖 localhost + 全部局域网 IPv4；缓存于 `remote-cert.json`，检测到 IP 集变化时重签。手机首次访问会有「不受信任」警告，引导用户继续（设置页与配对页均有说明）。
+**证书**：HTTPS 模式下 `node-forge` 生成 RSA-2048 + SHA-256 自签证书，有效期 397 天（低于部分移动浏览器 398 天上限），SAN 覆盖 localhost + 全部局域网 IPv4；缓存于 `remote-cert.json`，检测到 IP 集变化时重签。兼容模式下不生成证书。
 
 **生命周期联动**：运行时 URL 行出现/重启/退出时 `setRuntimeUrl()` 跟随（端口变化即断开管道让手机端重连）；网关可在运行时未就绪时先行启动（此时返回 503）；更新管道切换运行时对手机端只是「断开-重连」。网关端口冲突自动 +1 重试（最多 10 次）。
 
 **安全边界**：
-- 运行时仍只绑 127.0.0.1；局域网流量只能到达网关，必须带有效 cookie；
+- 运行时仍只绑 127.0.0.1；局域网流量只能到达网关，必须带有效 cookie 或属于已配对的 IP 会话；
 - 网关 cookie 在转发前被剥离，运行时永远看不到鉴权材料；
-- 日志不记录 token 与配对 query；`remote:qr` IPC 校验 URL 形态后才生成二维码；
-- 明确建议「勿在公共网络开启」，设置总闸默认关闭。
+- IP 会话是**设备级**信任（家庭路由后每个设备独立源 IP），存于内存、滑动 7 天、随「撤销所有设备」与重启失效；同一 NAT 出口下的其他设备可搭车，公共网络（共享 NAT/ARP 欺骗面）风险升高——与兼容模式的明文限制一样，靠「勿在公共网络开启」约束；
+- 日志不记录 token 与配对 query；
+- 兼容模式（HTTP）默认开启是为了微信/抖音内打开链接可达，代价是局域网明文；设置页明确提示，公共网络勿开启；关闭后恢复 TLS，仅系统浏览器需手动继续访问。
 
-**测试**：`test/remote-control.test.js`（6 项）：cookie 剥离、加密持久化与重载、401/配对/一次性/代理/WS 管道/撤销全链路、运行时未就绪 503、防爆破锁定、`setRuntimeUrl` 状态跟踪。全套 `npm test` 48 项通过。
+**测试**：`test/remote-control.test.js`（7 项）：cookie 剥离、加密持久化与重载、401/配对/一次性/代理/WS 管道/撤销全链路（含 Origin 重写与 IP 会话兜底断言）、运行时未就绪 503、防爆破锁定、`setRuntimeUrl` 状态跟踪、兼容模式纯 HTTP 全链路（无 Secure cookie + IP 会话兜底）。全套 `npm test` 66 项通过。

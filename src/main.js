@@ -15,7 +15,7 @@
 //   DSH_DESKTOP_USER_DATA
 'use strict';
 
-const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut, safeStorage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut, safeStorage, clipboard } = require('electron');
 const { spawn, execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
@@ -891,7 +891,7 @@ function applyRemoteSettings(saved) {
   remote.stop();
   if (saved.remoteControl) {
     remote.setRuntimeUrl(runtimeUrl);
-    remote.start({ port: saved.remotePort })
+    remote.start({ port: saved.remotePort, compat: !!saved.remoteCompat })
       .then((s) => { if (!s.running) notify(t(lang(), 'notify.remoteFailed'), t(lang(), 'notify.remoteFailedBody')); })
       .catch((e) => log(`[remote] start failed: ${e.message}`));
   }
@@ -911,7 +911,7 @@ function registerIpc() {
     // log only the changed keys, never values (M12: no prompts/secrets in logs)
     log(`[shell] settings saved keys: ${Object.keys(partial || {}).join(', ')}`);
     updateTray();
-    if (remote && (saved.remoteControl !== before.remoteControl || saved.remotePort !== before.remotePort)) {
+    if (remote && (saved.remoteControl !== before.remoteControl || saved.remotePort !== before.remotePort || saved.remoteCompat !== before.remoteCompat)) {
       applyRemoteSettings(saved);
     }
     return saved;
@@ -1011,9 +1011,11 @@ function registerIpc() {
     return remote.status();
   });
   ipcMain.handle('remote:revoke', () => (remote ? remote.revokeToken() : null));
-  ipcMain.handle('remote:qr', async (_e, text) => (
-    remote && typeof text === 'string' && /^https:\/\/[A-Za-z0-9.:\\-]+$/.test(text) ? remote.qrDataUrl(text) : null
-  ));
+  // Copy for the settings window (file:// pages have no navigator.clipboard).
+  ipcMain.handle('shell:copy-text', (_e, text) => {
+    if (typeof text === 'string' && text.length > 0 && text.length <= 4096) clipboard.writeText(text);
+    return null;
+  });
   ipcMain.on('search:close', () => { if (searchWindow) searchWindow.close(); });
 
   // injected window chrome
@@ -1890,7 +1892,7 @@ if (!gotLock) {
     remote = new RemoteControl({ userDataDir: app.getPath('userData'), safeStorage, log });
     if (settings.get().remoteControl) {
       remote.setRuntimeUrl(runtimeUrl);
-      remote.start({ port: settings.get().remotePort })
+      remote.start({ port: settings.get().remotePort, compat: !!settings.get().remoteCompat })
         .then((s) => { if (!s.running) notify(t(lang(), 'notify.remoteFailed'), t(lang(), 'notify.remoteFailedBody')); })
         .catch((e) => log(`[remote] start failed: ${e.message}`));
     }

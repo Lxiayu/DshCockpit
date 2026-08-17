@@ -12,6 +12,7 @@ const http = require('node:http');
 const https = require('node:https');
 const net = require('node:net');
 const os = require('node:os');
+const vm = require('node:vm');
 const path = require('node:path');
 const tls = require('node:tls');
 
@@ -34,19 +35,29 @@ function fakeSafeStorage() {
   };
 }
 
-/** Fake dsh runtime: GET /hello answers JSON; upgrade echoes one text frame. */
+/** Fake dsh runtime: GET /hello answers JSON; /page serves an HTML document; upgrade echoes one text frame. */
 function fakeRuntime() {
-  const seen = { lastCookie: null };
+  const seen = { lastCookie: null, lastOrigin: null, lastWsOrigin: null };
   const server = http.createServer((req, res) => {
     seen.lastCookie = req.headers.cookie === undefined ? null : req.headers.cookie;
+    seen.lastOrigin = req.headers.origin === undefined ? null : req.headers.origin;
     if (req.url === '/hello') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true, host: req.headers.host }));
       return;
     }
+    if (req.url === '/page') {
+      // Mimic the real runtime: chunked transfer (no Content-Length), which
+      // the gateway must re-frame with Content-Length after splicing.
+      const html = '<!DOCTYPE html><html><head><title>fake app</title></head><body><div id="app">hello</div></body></html>';
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(html);
+      return;
+    }
     res.writeHead(404); res.end('nf');
   });
   server.on('upgrade', (req, socket) => {
+    seen.lastWsOrigin = req.headers.origin === undefined ? null : req.headers.origin;
     const key = req.headers['sec-websocket-key'] || '';
     const accept = crypto.createHash('sha1').update(key + WS_GUID).digest('base64');
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
@@ -70,11 +81,11 @@ function fakeRuntime() {
   return { server, seen };
 }
 
-function httpsReq(port, reqPath, headers = {}) {
+function httpsReq(port, reqPath, headers = {}, method = 'GET') {
   return new Promise((resolve, reject) => {
     // agent:false - one fresh connection per request; keep-alive sockets would
     // keep the test child process alive after the assertions finish.
-    const req = https.request({ host: '127.0.0.1', port, path: reqPath, rejectUnauthorized: false, agent: false, headers }, (res) => {
+    const req = https.request({ host: '127.0.0.1', port, path: reqPath, method, rejectUnauthorized: false, agent: false, headers }, (res) => {
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') }));
@@ -85,7 +96,21 @@ function httpsReq(port, reqPath, headers = {}) {
   });
 }
 
-function wsHandshake(port, reqPath, cookie) {
+/** Plain-HTTP twin of httpsReq: reaches the gateway only in compat mode. */
+function httpReq(port, reqPath, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, path: reqPath, agent: false, headers }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') }));
+    });
+    req.on('error', reject);
+    req.setTimeout(5000, () => { req.destroy(new Error('client timeout')); });
+    req.end();
+  });
+}
+
+function wsHandshake(port, reqPath, cookie, origin) {
   return new Promise((resolve, reject) => {
     const key = crypto.randomBytes(16).toString('base64');
     let buf = Buffer.alloc(0);
@@ -107,6 +132,7 @@ function wsHandshake(port, reqPath, cookie) {
         `Sec-WebSocket-Key: ${key}`,
         'Sec-WebSocket-Version: 13',
       ];
+      if (origin) lines.push(`Origin: ${origin}`);
       if (cookie) lines.push(`Cookie: ${cookie}`);
       sock.write(lines.join('\r\n') + '\r\n\r\n');
     });
@@ -176,42 +202,112 @@ test('gateway full flow: 401 -> pair -> cookie proxy -> ws pipe -> revoke', asyn
   assert.strictEqual(st.running, true);
   const port = st.port;
 
-  // 1. no cookie -> 401 JSON for API-ish requests, pairing page for browsers
+  // 1. no cookie -> 401 JSON for API-ish requests, pairing page for browsers;
+  //    unpaired WS upgrade is destroyed (the paired-IP grant does not exist yet)
   const anon = await httpsReq(port, '/api/session.list', { accept: 'application/json' });
   assert.strictEqual(anon.status, 401);
   const anonHtml = await httpsReq(port, '/', { accept: 'text/html,application/xhtml+xml' });
   assert.strictEqual(anonHtml.status, 401);
   assert.ok(anonHtml.body.includes('DshCockpit'), 'pairing page served');
+  await assert.rejects(() => wsHandshake(port, '/api/events.mux', null), /ws timeout|closed|not 101|ECONNRESET/i);
 
   // 2. wrong pairing code -> 401 (and no cookie granted)
   const bad = await httpsReq(port, '/__dsh_pair?c=000001', { accept: 'text/html' });
   assert.strictEqual(bad.status, 401);
   assert.ok(!bad.headers['set-cookie'], 'no cookie on bad code');
 
-  // 3. right pairing code -> 302 + long-lived HttpOnly cookie
+  // 3. right pairing code -> 200 landing page (cookie rides a document
+  //    response; meta-refresh walks into the app) + long-lived HttpOnly cookie
   const pair = gw.refreshPairingCode();
   const okPair = await httpsReq(port, `/__dsh_pair?c=${pair.code}`, { accept: 'text/html' });
-  assert.strictEqual(okPair.status, 302);
+  assert.strictEqual(okPair.status, 200);
+  assert.ok(okPair.body.includes('配对成功'), 'landing page served');
+  assert.ok(/http-equiv="refresh"\s+content="0;\s*url=\/"/.test(okPair.body), 'meta-refresh targets /');
   const setCookie = (okPair.headers['set-cookie'] || []).join('\n');
   assert.ok(setCookie.includes(`${COOKIE_NAME}=`), 'cookie set');
   assert.ok(/HttpOnly/i.test(setCookie) && /Secure/i.test(setCookie) && /SameSite=Lax/i.test(setCookie), 'cookie flags');
   const cookie = /dsh_remote=([A-Za-z0-9]+)/.exec(setCookie)[0];
 
-  // 5. authenticated HTTP proxies to the runtime; auth cookie is stripped
-  const proxied = await httpsReq(port, '/hello', { accept: 'application/json', cookie: `other=x; ${cookie}` });
+  // 4. the code is consumed: replaying it gets 401 again, never a second cookie
+  const replay = await httpsReq(port, `/__dsh_pair?c=${pair.code}`, { accept: 'text/html' });
+  assert.strictEqual(replay.status, 401);
+  assert.ok(!replay.headers['set-cookie'], 'one-shot code stays one-shot');
+
+  // 4b. cookie-less follow-up still works: the paired IP carries the session
+  //     (WeChat-style browsers never store the token cookie for IP hosts)
+  const grantOnly = await httpsReq(port, '/hello', { accept: 'application/json' });
+  assert.strictEqual(grantOnly.status, 200, 'paired IP grant authorizes without cookie');
+
+  // 5. authenticated HTTP proxies to the runtime; auth cookie is stripped and
+  //    the phone's LAN Origin is rewritten to the runtime's loopback origin
+  //    (the runtime /api fence 403s any mismatch, e.g. host.pickDirectory)
+  const phoneOrigin = `https://192.168.1.50:${port}`;
+  const proxied = await httpsReq(port, '/hello', { accept: 'application/json', origin: phoneOrigin, cookie: `other=x; ${cookie}` });
   assert.strictEqual(proxied.status, 200);
   assert.deepStrictEqual(JSON.parse(proxied.body), { ok: true, host: `127.0.0.1:${rtPort}` });
+  assert.strictEqual(rt.seen.lastOrigin, `http://127.0.0.1:${rtPort}`, 'Origin rewritten to loopback runtime origin');
   assert.ok(!String(rt.seen.lastCookie || '').includes(COOKIE_NAME), 'gateway cookie never reaches the runtime');
   assert.strictEqual(rt.seen.lastCookie, 'other=x');
 
-  // 6. WS upgrade: unauthorized destroyed, authorized piped + echo round-trip
-  await assert.rejects(() => wsHandshake(port, '/api/events.mux', null), /ws timeout|closed|not 101|ECONNRESET/i);
-  await wsHandshake(port, '/api/events.mux', cookie);
+  // 5b. the landing page's follow-up GET / with the cookie reaches the runtime
+  //     (fake runtime 404s unknown paths, which still proves the proxy ran)
+  const landed = await httpsReq(port, '/', { accept: 'text/html', cookie });
+  assert.strictEqual(landed.status, 404);
 
-  // 7. revoke: old cookie dies
+  // 5c. HTML documents get the crypto.randomUUID polyfill injected right
+  //     after <head> (insecure-context browsers lack it and the web client
+  //     dies on every RPC); the chunked upstream is re-framed with a
+  //     Content-Length and no Transfer-Encoding
+  const page = await httpsReq(port, '/page', { accept: 'text/html', cookie });
+  assert.strictEqual(page.status, 200);
+  assert.ok(/<head[^>]*><script>if\(window\.crypto/.test(page.body), 'polyfill injected right after <head>');
+  assert.ok(page.body.includes('<title>fake app</title>') && page.body.includes('hello'), 'original document intact');
+  assert.strictEqual(page.headers['transfer-encoding'], undefined, 'chunked framing dropped after splicing');
+  assert.strictEqual(String(page.headers['content-length']), String(Buffer.byteLength(page.body)), 'content-length matches injected body');
+  assert.strictEqual(page.headers['cache-control'], 'no-cache', 'injected document forces revalidation');
+
+  // 5c-2. the injected script must actually RUN: execute it in a vm with a
+  //       stubbed crypto (getRandomValues only, like an insecure context)
+  //       and verify it installs a working v4 randomUUID. A polyfill that
+  //       is syntactically dead code is exactly the bug that kept the
+  //       phone broken while string-match tests stayed green.
+  {
+    const script = /<script>(if\(window\.crypto[\s\S]*?)<\/script>/.exec(page.body);
+    assert.ok(script, 'polyfill script tag present');
+    const sandbox = { window: { crypto: { getRandomValues: (a) => { for (let i = 0; i < a.length; i++) a[i] = (i * 41 + 7) & 0xff; return a; } } } };
+    sandbox.globalThis = sandbox;
+    vm.createContext(sandbox);
+    assert.doesNotThrow(() => vm.runInContext(script[1], sandbox), 'polyfill parses and executes');
+    assert.strictEqual(typeof sandbox.window.crypto.randomUUID, 'function', 'randomUUID installed');
+    const id = sandbox.window.crypto.randomUUID();
+    assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, 'v4 UUID shape');
+    // pre-existing randomUUID must NOT be overwritten (secure contexts)
+    const safe = { window: { crypto: { getRandomValues: (a) => a.fill(1), randomUUID: () => 'already-there' } } };
+    safe.globalThis = safe;
+    vm.createContext(safe);
+    vm.runInContext(script[1], safe);
+    assert.strictEqual(safe.window.crypto.randomUUID(), 'already-there', 'native randomUUID left untouched');
+  }
+
+  // 5d. HEAD requests pass through untouched: answering a body-less HEAD
+  //     with the spliced document would violate the protocol
+  const head = await httpsReq(port, '/page', { accept: 'text/html', cookie }, 'HEAD');
+  assert.strictEqual(head.status, 200);
+  assert.strictEqual(head.headers['cache-control'], undefined, 'HEAD is not spliced');
+  assert.strictEqual(head.body, '', 'HEAD carries no body');
+
+  // 6. WS upgrade: the paired IP (grant) plus cookie flow pipes + echoes;
+  //    the upgrade replay rewrites the browser Origin the same way
+  await wsHandshake(port, '/api/events.mux', null);
+  await wsHandshake(port, '/api/events.mux', cookie, phoneOrigin);
+  assert.strictEqual(rt.seen.lastWsOrigin, `http://127.0.0.1:${rtPort}`, 'WS upgrade Origin rewritten to loopback');
+
+  // 7. revoke: old cookie dies and the paired-IP grant is cleared
   gw.revokeToken();
   const dead = await httpsReq(port, '/hello', { accept: 'application/json', cookie });
   assert.strictEqual(dead.status, 401);
+  const deadGrant = await httpsReq(port, '/hello', { accept: 'application/json' });
+  assert.strictEqual(deadGrant.status, 401, 'revoke clears the IP grant too');
 
   // logs must never contain the token or the pairing query
   const logText = logs.join('\n');
@@ -260,6 +356,45 @@ test('setRuntimeUrl change drops piped clients and status tracks it', async (t) 
   assert.strictEqual(gw.runtimePort, 45678);
   gw.setRuntimeUrl(null);
   assert.strictEqual(gw.status().runtimeReady, false);
+  gw.stop();
+});
+test('compat mode serves plain HTTP, pairs without Secure, still rewrites Origin', async (t) => {
+  const gw = new RemoteControl({ userDataDir: tmpDir(), safeStorage: fakeSafeStorage(), log: () => {} });
+  const rt = fakeRuntime();
+  await new Promise((r) => rt.server.listen(0, '127.0.0.1', r));
+  t.after(() => {
+    gw.stop();
+    try { rt.server.close(); } catch { /* ignore */ }
+    try { rt.server.closeAllConnections(); } catch { /* older node */ }
+  });
+  const rtPort = rt.server.address().port;
+  gw.setRuntimeUrl(`http://127.0.0.1:${rtPort}`);
+  const st = await gw.start({ port: 0, compat: true });
+  assert.strictEqual(st.running, true);
+  assert.strictEqual(st.secure, false, 'compat mode is plain http');
+  assert.ok(st.urls.every((u) => u.startsWith('http://')), 'compat urls advertise http');
+  const port = st.port;
+
+  // no TLS needed: a plain HTTP client reaches the pairing gate
+  const anon = await httpReq(port, '/hello', { accept: 'application/json' });
+  assert.strictEqual(anon.status, 401);
+
+  const pair = gw.refreshPairingCode();
+  const okPair = await httpReq(port, `/__dsh_pair?c=${pair.code}`, { accept: 'text/html' });
+  assert.strictEqual(okPair.status, 200);
+  assert.ok(okPair.body.includes('配对成功'), 'compat pairing serves the landing page too');
+  const setCookie = (okPair.headers['set-cookie'] || []).join('\n');
+  assert.ok(!/Secure/i.test(setCookie), 'no Secure flag over plain HTTP (it would never be stored)');
+  assert.ok(/HttpOnly/i.test(setCookie) && /SameSite=Lax/i.test(setCookie), 'other cookie flags kept');
+  const cookie = /dsh_remote=([A-Za-z0-9]+)/.exec(setCookie)[0];
+
+  const proxied = await httpReq(port, '/hello', { accept: 'application/json', origin: `http://192.168.1.50:${port}`, cookie });
+  assert.strictEqual(proxied.status, 200);
+  assert.strictEqual(rt.seen.lastOrigin, `http://127.0.0.1:${rtPort}`, 'Origin rewritten in compat mode too');
+  const grantOnly = await httpReq(port, '/hello', { accept: 'application/json' });
+  assert.strictEqual(grantOnly.status, 200, 'paired IP grant authorizes without cookie in compat mode');
+  const page = await httpReq(port, '/page', { accept: 'text/html' });
+  assert.ok(page.body.includes('crypto.randomUUID'), 'polyfill injected in compat mode too');
   gw.stop();
 });
 

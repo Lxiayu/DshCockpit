@@ -40,10 +40,11 @@ const DEFAULTS = {
   installedPlugins: [],     // plugins installed via the shell plugin market
   remoteControl: false,     // phone remote-control gateway (TLS proxy to the runtime)
   remotePort: 31780,        // gateway listen port (auto-increments on conflict)
+  remoteCompat: true,       // serve the gateway over plain HTTP so WeChat/Douyin scanners can open it (LAN cleartext)
 };
 
 const NUMERIC_KEYS = ['keepVersions', 'port', 'contextWindow', 'costInputPerM', 'costOutputPerM', 'costCacheReadPerM', 'costCacheWritePerM', 'costPeakInputPerM', 'costPeakOutputPerM', 'costPeakCacheReadPerM', 'costPeakCacheWritePerM', 'monthlyBudget', 'backupKeep', 'remotePort'];
-const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'tokenWidget', 'shellAutoUpdate', 'costPeakEnabled', 'remoteControl'];
+const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'tokenWidget', 'shellAutoUpdate', 'costPeakEnabled', 'remoteControl', 'remoteCompat'];
 const STRING_KEYS = ['channel', 'pinnedVersion', 'registry', 'workspace', 'dshHome', 'nodeBin', 'dshBin', 'language', 'quickAskHotkey', 'costPeakWindows'];
 const ARRAY_KEYS = ['recentWorkspaces', 'installedPlugins', 'scheduledTasks'];
 
