@@ -171,7 +171,7 @@ DshCockpit (Electron)
 
 ## 🤝 贡献
 
-欢迎 PR！请先跑 `npm test`（34 项单元测试）。架构细节见 [`DESIGN.md`](DESIGN.md)，功能清单见 [`FEATURES.md`](FEATURES.md)。
+欢迎 PR！请先跑 `npm test`（100 项单元测试）。架构细节见 [`DESIGN.md`](DESIGN.md)，功能清单见 [`FEATURES.md`](FEATURES.md)。
 
 ## 📄 许可证
 

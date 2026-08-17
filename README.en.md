@@ -157,7 +157,7 @@ DshCockpit (Electron)
 
 ## 🤝 Contributing
 
-PRs welcome! Please run `npm test` first (34 unit tests). See [`DESIGN.md`](DESIGN.md) for architecture and [`FEATURES.md`](FEATURES.md) for the feature list.
+PRs welcome! Please run `npm test` first (100 unit tests). See [`DESIGN.md`](DESIGN.md) for architecture and [`FEATURES.md`](FEATURES.md) for the feature list.
 
 ## 📄 License
 
