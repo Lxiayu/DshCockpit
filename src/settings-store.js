@@ -18,6 +18,7 @@ const DEFAULTS = {
   nodeBin: '',              // '' = auto-detect
   dshBin: '',               // '' = auto-detect
   language: 'system',       // zh | en | system (follow OS)
+  themeMode: 'system',      // system | dark | light (shell theme)
   backupOnQuit: true,       // back up sessions when quitting
   backupKeep: 5,            // number of backups to retain
   tokenWidget: true,        // show the in-window token widget
@@ -35,7 +36,8 @@ const DEFAULTS = {
   costPeakCacheWritePerM: 4,// peak ¥ per 1M cache-write tokens
   monthlyBudget: 0,         // ¥/month budget; 0 = disabled
   quickAskHotkey: 'CommandOrControl+Alt+Space',
-  scheduledTasks: [],       // { id, name, prompt, kind, everySeconds?|dailyTime?, enabled, nextRunAt, lastRunAt }
+  scheduledTasks: [],       // { id, name, prompt, kind: every|daily|weekly, everySeconds?|dailyTime?|weeklyDay?+weeklyTime?, templateId?, enabled, nextRunAt, lastRunAt }
+  scheduledHistory: [],     // last 50 scheduled-task runs: { id, taskId, name, startedAt, finishedAt, ok, durationMs, summary }
   recentWorkspaces: [],     // last used workspace dirs (tray quick switch)
   installedPlugins: [],     // plugins installed via the shell plugin market
   remoteControl: false,     // phone remote-control gateway (TLS proxy to the runtime)
@@ -45,8 +47,8 @@ const DEFAULTS = {
 
 const NUMERIC_KEYS = ['keepVersions', 'port', 'contextWindow', 'costInputPerM', 'costOutputPerM', 'costCacheReadPerM', 'costCacheWritePerM', 'costPeakInputPerM', 'costPeakOutputPerM', 'costPeakCacheReadPerM', 'costPeakCacheWritePerM', 'monthlyBudget', 'backupKeep', 'remotePort'];
 const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'tokenWidget', 'shellAutoUpdate', 'costPeakEnabled', 'remoteControl', 'remoteCompat'];
-const STRING_KEYS = ['channel', 'pinnedVersion', 'registry', 'workspace', 'dshHome', 'nodeBin', 'dshBin', 'language', 'quickAskHotkey', 'costPeakWindows'];
-const ARRAY_KEYS = ['recentWorkspaces', 'installedPlugins', 'scheduledTasks'];
+const STRING_KEYS = ['channel', 'pinnedVersion', 'registry', 'workspace', 'dshHome', 'nodeBin', 'dshBin', 'language', 'themeMode', 'quickAskHotkey', 'costPeakWindows'];
+const ARRAY_KEYS = ['recentWorkspaces', 'installedPlugins', 'scheduledTasks', 'scheduledHistory'];
 
 class SettingsStore {
   constructor(userDataDir) {
@@ -65,10 +67,16 @@ class SettingsStore {
   }
 
   save() {
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    const tmp = `${this.file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
-    fs.renameSync(tmp, this.file);
+    try {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      const tmp = `${this.file}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
+      fs.renameSync(tmp, this.file);
+    } catch (err) {
+      // surfaced via the IPC rejection; also log for post-mortem from the shell log
+      console.error(`[settings] save failed (${this.file}):`, err.message);
+      throw err;
+    }
   }
 
   get() {

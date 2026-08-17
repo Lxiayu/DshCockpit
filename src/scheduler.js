@@ -1,8 +1,9 @@
 // src/scheduler.js — shell-level recurring task scheduler.
 //
 // Tasks live in settings.scheduledTasks: { id, name, prompt, kind,
-// everySeconds? | dailyTime? ("HH:MM"), enabled, nextRunAt, lastRunAt }.
-// A 30s tick dispatches due tasks to the caller (which runs headless + notifies).
+// everySeconds? | dailyTime? ("HH:MM") | weeklyDay? (0-6) + weeklyTime?,
+// enabled, nextRunAt, lastRunAt }. A 30s tick dispatches due tasks to the
+// caller (which runs headless + notifies).
 'use strict';
 
 const TICK_MS = 30_000;
@@ -36,6 +37,22 @@ function ensureNextRun(task, now) {
     if (task.nextRunAt === undefined || task.nextRunAt < today.getTime() - 86_400_000) {
       // next occurrence: today at HH:MM if still ahead, else tomorrow
       task.nextRunAt = today.getTime() > now ? today.getTime() : today.getTime() + 86_400_000;
+    }
+    return task.nextRunAt;
+  }
+  if (task.kind === 'weekly') {
+    const t = parseTime(task.weeklyTime);
+    const day = Number(task.weeklyDay);
+    if (!t || !Number.isInteger(day) || day < 0 || day > 6) return null;
+    const target = new Date(now);
+    target.setHours(t.h, t.min, 0, 0);
+    let add = (day - target.getDay() + 7) % 7; // days until the target weekday
+    if (add === 0 && target.getTime() <= now) add = 7; // already past today's slot
+    target.setDate(target.getDate() + add);
+    const next = target.getTime();
+    const week = 7 * 86_400_000;
+    if (task.nextRunAt === undefined || task.nextRunAt < next - week) {
+      task.nextRunAt = next;
     }
     return task.nextRunAt;
   }

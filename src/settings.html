@@ -2,331 +2,820 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'unsafe-inline'" />
 <title>DshCockpit 设置</title>
+<link rel="stylesheet" href="theme.css" />
 <style>
-  :root {
-    --bg: #14171c; --panel: #1c2128; --line: #2d333b; --text: #e6edf3;
-    --dim: #8b949e; --acc: #2563eb; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
-  }
+  /* Design tokens (incl. legacy aliases) live in theme.css, shared by all
+     shell windows; this block only holds settings-page component styles. */
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-    font: 13px/1.6 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
-  header { padding: 14px 20px; border-bottom: 1px solid var(--line); display: flex;
-    align-items: baseline; gap: 10px; }
-  header h1 { font-size: 15px; margin: 0; }
-  header span { color: var(--dim); font-size: 12px; }
-  main { padding: 16px 20px 40px; max-width: 640px; }
-  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-    padding: 14px 16px; margin-bottom: 16px; }
-  section h2 { margin: 0 0 10px; font-size: 13px; color: var(--acc); text-transform: uppercase;
-    letter-spacing: .04em; }
-  .row { display: flex; align-items: center; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
-  .row label { width: 160px; color: var(--dim); flex-shrink: 0; }
-  .row input[type="text"], .row input[type="number"], .row select {
-    flex: 1; min-width: 180px; background: var(--bg); color: var(--text);
-    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
-  .row input[type="checkbox"] { width: auto; }
-  .hint { color: var(--dim); font-size: 12px; margin: 2px 0 0 170px; }
-  button { background: var(--acc); color: #fff; border: 0; border-radius: 6px;
-    padding: 6px 14px; cursor: pointer; font-size: 12px; }
-  button.secondary { background: var(--line); color: var(--text); }
-  button:disabled { opacity: .45; cursor: default; }
-  button.danger { background: var(--bad); }
-  .status { margin-top: 10px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line);
-    background: var(--bg); color: var(--dim); white-space: pre-wrap; word-break: break-all; }
-  .status.ok { color: var(--ok); border-color: var(--ok); }
-  .status.warn { color: var(--warn); border-color: var(--warn); }
-  .status.bad { color: var(--bad); border-color: var(--bad); }
-  .warn { color: var(--warn); font-size: 12px; margin: 2px 0 0 170px; line-height: 1.5; }
-  .kv { display: flex; justify-content: space-between; padding: 3px 0; color: var(--dim); }
-  .kv b { color: var(--text); font-weight: 600; }
-  .btnrow { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-  #busy { display: none; color: var(--warn); }
-  .note { color: var(--dim); font-size: 12px; margin-top: 8px; line-height: 1.7; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg-app); color: var(--text-2);
+    font: 14px/1.6 -apple-system, "SF Pro Text", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased; }
+
+  /* ------------------------------- layout: sidebar + content */
+  #app { display: flex; height: 100vh; overflow: hidden; }
+  #sidebar { width: 208px; flex-shrink: 0; background: var(--bg-panel);
+    border-right: 1px solid var(--border-1); display: flex; flex-direction: column; }
+  #content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #pages { flex: 1; overflow-y: auto; padding: 28px 32px 40px; scroll-behavior: smooth; }
+  .page { max-width: 680px; margin: 0 auto; display: none; }
+  .page.active { display: block; animation: pageIn 200ms var(--ease); }
+  @keyframes pageIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  /* ------------------------------- sidebar internals */
+  .brand { padding: 18px 16px 14px; border-bottom: 1px solid var(--border-1); }
+  .brand h1 { font-size: 14px; margin: 0; color: var(--text-1); font-weight: 600; }
+  .brand #ver { color: var(--text-3); font-size: 11px; font-family: var(--mono); }
+  .search-box { padding: 12px 12px 8px; }
+  .search-box input { width: 100%; background: var(--bg-input); color: var(--text-2);
+    border: 1px solid var(--border-1); border-radius: 8px; padding: 6px 10px; font-size: 12px; }
+  .search-box input::placeholder { color: var(--text-4); }
+  .search-box input:focus { border-color: var(--acc);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 25%, transparent); }
+  nav { flex: 1; overflow-y: auto; padding: 4px 8px 16px; }
+  .group-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--text-4); padding: 14px 10px 6px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 7px 10px;
+    border-radius: 8px; color: var(--text-2); cursor: pointer; font-size: 13px;
+    border: 0; background: none; width: 100%; text-align: left;
+    transition: background 150ms var(--ease), color 150ms var(--ease), box-shadow 150ms var(--ease); }
+  .nav-item .ico { width: 18px; text-align: center; flex-shrink: 0; font-size: 14px; }
+  .nav-item:hover { background: var(--bg-hover); color: var(--text-1); }
+  .nav-item.active { background: var(--acc-soft); color: var(--text-1);
+    box-shadow: inset 2px 0 0 var(--acc); }
+  .nav-item.filtered { display: none; }
+
+  /* ------------------------------- page head & cards */
+  .page-head { margin: 0 0 20px; }
+  .page-head h2 { font-size: 18px; color: var(--text-1); margin: 0 0 4px; font-weight: 600; }
+  .page-head p { margin: 0; color: var(--text-3); font-size: 12px; }
+
+  /* ------------------------------- automation center */
+  .page-head-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+  .page-actions { display: flex; gap: 8px; align-items: center; flex: none; }
+  .auto-plus { font-size: 14px; margin-right: 4px; }
+  .auto-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border-1); margin-bottom: 18px; }
+  .auto-tab { background: transparent; color: var(--text-3); border: 0; border-bottom: 2px solid transparent;
+    border-radius: 6px 6px 0 0; padding: 7px 14px 9px; font-size: 13px; }
+  .auto-tab:hover { background: var(--bg-hover); color: var(--text-1); }
+  .auto-tab.active { color: var(--text-1); border-bottom-color: var(--acc); }
+  .auto-tab-n { color: var(--text-4); font-size: 11px; margin-left: 4px; }
+  .auto-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; margin-bottom: 6px; }
+  .auto-card { background: var(--bg-overlay); border: 1px solid var(--border-1); border-radius: 12px;
+    padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 8px;
+    transition: border-color 150ms var(--ease), transform 150ms var(--ease), background 150ms var(--ease); }
+  .auto-card:hover { border-color: color-mix(in srgb, var(--acc) 45%, transparent);
+    background: var(--bg-hover); transform: translateY(-2px); }
+  .auto-card-name { color: var(--text-1); font-size: 13px; font-weight: 600; line-height: 1.4; }
+  .auto-card-desc { color: var(--text-3); font-size: 12px; line-height: 1.55; min-height: 2.6em;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .auto-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    margin-top: 2px; padding-top: 10px; border-top: 1px solid var(--border-1); }
+  .auto-card-foot .btns { display: flex; gap: 6px; }
+  .auto-card-foot button { padding: 4px 12px; font-size: 12px; }
+  .auto-sched-chip { color: var(--text-4); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mac-win { width: 52px; height: 52px; flex: none; border: 1px solid var(--border-1); border-radius: 9px;
+    background: var(--bg-input); overflow: hidden; }
+  .mac-dots { display: flex; gap: 3.5px; padding: 6px 7px 0; }
+  .mac-dots i { width: 5px; height: 5px; border-radius: 50%; }
+  .mac-dots i:nth-child(1) { background: #FF5F57; } .mac-dots i:nth-child(2) { background: #FEBC2E; }
+  .mac-dots i:nth-child(3) { background: #28C840; }
+  .mac-body { height: calc(100% - 11px); display: flex; align-items: center; justify-content: center; color: var(--acc); }
+  .mac-body svg { width: 20px; height: 20px; }
+  .auto-task-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .auto-state { display: flex; align-items: center; gap: 6px; color: var(--text-4); font-size: 11px; }
+  .auto-state .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-4); }
+  .auto-state.on { color: var(--ok); } .auto-state.on .dot { background: var(--ok); }
+  .auto-task-meta { color: var(--text-4); font-size: 11px; line-height: 1.6; }
+  .spin-sm { width: 11px; height: 11px; border: 2px solid var(--text-4); border-top-color: transparent;
+    border-radius: 50%; display: inline-block; animation: spin 0.9s linear infinite; }
+  .auto-hist-bar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 0 0 10px; }
+  .hist-item { border: 1px solid var(--border-1); border-radius: 10px; background: var(--bg-overlay);
+    padding: 10px 14px; margin-bottom: 8px; }
+  .hist-item summary { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 12px;
+    color: var(--text-2); list-style: none; }
+  .hist-item summary::-webkit-details-marker { display: none; }
+  .hist-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .hist-dot.ok { background: var(--ok); } .hist-dot.bad { background: var(--bad); }
+  .hist-item b { color: var(--text-1); font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hist-time { color: var(--text-4); font-size: 11px; white-space: nowrap; }
+  .hist-dur { color: var(--text-4); font-size: 11px; white-space: nowrap; }
+  .hist-out { margin: 10px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--bg-input);
+    color: var(--text-3); font-size: 12px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
+    max-height: 260px; overflow: auto; }
+  dialog#auto-dialog { background: var(--bg-panel, var(--bg-overlay)); color: var(--text-1);
+    border: 1px solid var(--border-1); border-radius: 14px; padding: 20px 22px; width: min(560px, 92vw);
+    box-shadow: 0 18px 48px rgba(0,0,0,.45); }
+  dialog#auto-dialog::backdrop { background: rgba(0,0,0,.5); }
+  dialog#auto-dialog h3 { margin: 0 0 14px; font-size: 15px; color: var(--text-1); }
+  .auto-form { display: flex; flex-direction: column; gap: 12px; }
+  .auto-field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--text-3); }
+  .auto-field input, .auto-field textarea, .auto-field select { background: var(--bg-input); color: var(--text-1);
+    border: 1px solid var(--border-1); border-radius: 8px; padding: 7px 10px; font-size: 13px; width: 100%;
+    box-sizing: border-box; }
+  .auto-field textarea { resize: vertical; min-height: 110px; font-family: inherit; line-height: 1.6; }
+  .auto-field input:focus, .auto-field textarea:focus, .auto-field select:focus { border-color: var(--acc);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 25%, transparent); outline: none; }
+  .auto-sched-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .auto-sched-row .auto-field { flex: 1 1 110px; }
+  .card { background: var(--bg-panel); border: 1px solid var(--border-1); border-radius: var(--radius);
+    padding: 6px 20px; margin-bottom: 24px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
+  .card > h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--text-3); margin: 14px 0 4px; font-weight: 600; }
+
+  /* ------------------------------- three-part setting row */
+  .setting { display: flex; align-items: center; justify-content: space-between; gap: 24px;
+    padding: 11px 0 11px 8px; margin: 0 -8px; padding-left: 8px; border-radius: 6px;
+    border-bottom: 1px solid var(--border-1); position: relative; flex-wrap: wrap; }
+  .setting:last-child { border-bottom: 0; }
+  .setting:hover { background: var(--bg-hover); }
+  .setting-info { flex: 1 1 220px; min-width: 180px; }
+  .setting-info label, .setting-info .lbl { display: block; color: var(--text-1); font-size: 13px; }
+  .setting-info .desc { display: block; color: var(--text-3); font-size: 12px; margin-top: 2px; line-height: 1.5; }
+  .setting-ctrl { display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
+  .setting-ctrl input[type="text"], .setting-ctrl input[type="number"],
+  .setting-ctrl input[type="time"], .setting-ctrl select {
+    background: var(--bg-input); color: var(--text-1); border: 1px solid var(--border-1);
+    border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+  .setting-ctrl input[type="number"] { width: 110px; font-family: var(--mono); }
+  .setting-ctrl input[type="text"] { min-width: 240px; }
+  .setting-ctrl input.mono { font-family: var(--mono); font-size: 12px; }
+  .setting-ctrl select { min-width: 150px; }
+  /* unified focus ring: default outline suppressed on mouse :focus,
+     shown only for keyboard (:focus-visible); ring follows border-radius */
+  input:focus, select:focus, button:focus, a:focus, .chip:focus { outline: none; }
+  input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible,
+  .chip:focus-visible {
+    outline: 2px solid var(--acc); outline-offset: 2px; }
+  .setting-ctrl input:focus, .setting-ctrl select:focus {
+    border-color: var(--acc);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 25%, transparent); }
+  .setting .inline-hint { color: var(--text-3); font-size: 12px; }
+  .setting.danger-zone { margin-top: 20px; box-shadow: inset 2px 0 0 var(--bad); }
+
+  /* ------------------------------- toggle switch */
+  input[type="checkbox"].toggle { appearance: none; -webkit-appearance: none; width: 36px; height: 20px;
+    border-radius: 9999px; background: #3A3A40; position: relative; cursor: pointer;
+    transition: background 200ms var(--ease), box-shadow 150ms var(--ease); margin: 0; flex-shrink: 0; border: none; }
+  input[type="checkbox"].toggle:hover { box-shadow: inset 0 0 0 1px var(--border-2); }
+  input[type="checkbox"].toggle::after { content: ''; position: absolute; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: transform 200ms var(--ease); }
+  input[type="checkbox"].toggle:checked { background: var(--acc); }
+  input[type="checkbox"].toggle:checked::after { transform: translateX(16px); }
+
+  /* ------------------------------- buttons */
+  button { background: var(--acc); color: #fff; border: 0; border-radius: 8px;
+    padding: 7px 16px; cursor: pointer; font-size: 13px;
+    transition: background 150ms var(--ease), transform 120ms var(--ease); }
+  button:hover { background: var(--acc-hover); }
+  button:active { background: var(--acc-active); }
+  button:not(:disabled):active { transform: translateY(0.5px); }
+  button.secondary { background: var(--bg-overlay); color: var(--text-1); border: 1px solid var(--border-1); }
+  button.secondary:hover { background: var(--bg-hover); }
+  button.danger { background: transparent; color: var(--bad);
+    border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent); }
+  button.danger:hover { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+  button:disabled { opacity: .4; cursor: default; }
+  .btnrow { display: flex; gap: 8px; margin: 14px 0; flex-wrap: wrap; align-items: center; }
+
+  /* ------------------------------- status / hints / warnings */
+  .status { margin: 10px 0 14px; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border-1); background: var(--bg-input); color: var(--text-3);
+    white-space: pre-wrap; word-break: break-all; font-size: 12px; line-height: 1.7; }
+  .status.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+  .status.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+  .status.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+  .warn { color: var(--warn); font-size: 12px; margin: 6px 0; line-height: 1.5;
+    padding: 0 8px; border-radius: 4px; }
+  .note { color: var(--text-3); font-size: 12px; margin: 10px 0 14px; line-height: 1.7; }
+  .kv { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0;
+    color: var(--text-3); border-bottom: 1px solid var(--border-1); font-size: 13px; }
+  .kv:last-of-type { border-bottom: 0; }
+  .kv b { color: var(--text-2); font-weight: 500; font-family: var(--mono); font-size: 12px;
+    text-align: right; word-break: break-all; }
+  #busy { display: none; position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    color: var(--warn); font-size: 12px; background: color-mix(in srgb, var(--bg-panel) 92%, transparent);
+    border: 1px solid var(--border-1); border-radius: 999px; padding: 8px 18px; z-index: 60;
+    box-shadow: 0 10px 28px rgba(0,0,0,.35); max-width: min(72vw, 640px);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+  #busy.flash { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+  .privacy-box { border: 1px solid color-mix(in srgb, var(--acc) 35%, transparent); border-radius: 8px;
+    padding: 12px 14px; margin: 14px 0; background: var(--acc-soft); }
+  .privacy-box b { color: var(--acc); font-size: 13px; }
+  .firstrun-card { border-color: color-mix(in srgb, var(--acc) 45%, transparent); }
+  .firstrun-card ol { margin: 8px 0 10px; padding-left: 20px; color: var(--text-2); line-height: 2; font-size: 13px; }
+
+  /* ------------------------------- plugin center */
+  .plugin-tools { display: flex; gap: 8px; align-items: center; margin: 12px 0 2px; flex-wrap: wrap; }
+  .plugin-tools input { flex: 1 1 200px; background: var(--bg-input); color: var(--text-1);
+    border: 1px solid var(--border-1); border-radius: 8px; padding: 7px 10px; font-size: 13px; }
+  .plugin-tools input::placeholder { color: var(--text-4); }
+  .plugin-tools input:focus { border-color: var(--acc);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 25%, transparent); }
+  .icon-btn { background: var(--bg-overlay); color: var(--text-2); border: 1px solid var(--border-1);
+    border-radius: 8px; width: 32px; height: 32px; padding: 0; flex: none;
+    display: inline-flex; align-items: center; justify-content: center; }
+  .icon-btn:hover { background: var(--bg-hover); color: var(--text-1); }
+  .icon-btn svg { width: 15px; height: 15px; display: block; }
+  .plugin-more { display: block; width: 100%; margin-top: 10px; padding: 8px 0; }
+  #plugin-count { color: var(--text-3); font-size: 12px; white-space: nowrap; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 2px; }
+  .chip { background: var(--bg-input); color: var(--text-2); border: 1px solid var(--border-1);
+    border-radius: 9999px; padding: 3px 12px; font-size: 12px; cursor: pointer;
+    transition: background 150ms var(--ease), color 150ms var(--ease), border-color 150ms var(--ease); }
+  .chip:hover { background: var(--bg-hover); color: var(--text-1); }
+  .chip.active { background: var(--acc-soft); border-color: var(--acc); color: var(--acc); }
+  .plugin-inst { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 8px 0; border-bottom: 1px solid var(--border-1); font-size: 12px; }
+  .plugin-inst:last-child { border-bottom: 0; }
+  .plugin-inst .name { font-family: var(--mono); color: var(--text-1); word-break: break-all; }
+  .plugin-inst button { padding: 4px 12px; font-size: 12px; flex-shrink: 0; }
+  .restart-hint { display: flex; align-items: center; gap: 10px; margin: 12px 0 2px;
+    padding: 9px 12px; background: var(--acc-soft);
+    border: 1px solid color-mix(in srgb, var(--acc) 35%, transparent);
+    border-radius: 8px; color: var(--text-2); font-size: 12px; flex-wrap: wrap; }
+  .restart-hint button { flex-shrink: 0; }
+  .plugin-item { display: flex; align-items: center; gap: 14px; padding: 11px 0;
+    border-bottom: 1px solid var(--border-1); }
+  .plugin-item:last-child { border-bottom: 0; }
+  .plugin-info { flex: 1; min-width: 0; }
+  .plugin-name { font-family: var(--mono); font-size: 13px; color: var(--text-1);
+    font-weight: 600; word-break: break-all; }
+  .plugin-desc { color: var(--text-3); font-size: 12px; margin-top: 2px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .plugin-meta { color: var(--text-4); font-size: 11px; margin-top: 4px; font-family: var(--mono);
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .cat-badge { color: var(--text-3); background: var(--bg-input); border: 1px solid var(--border-1);
+    border-radius: 4px; padding: 0 6px; font-size: 10px; font-family: var(--mono); }
+  .plugin-item > button { flex-shrink: 0; min-width: 64px; }
+  .plugin-empty { color: var(--text-3); font-size: 13px; text-align: center; padding: 28px 0; }
+  .op-tail { color: var(--text-4); font-size: 11px; margin-top: 3px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .spin { display: inline-block; width: 11px; height: 11px; border: 2px solid var(--border-2);
+    border-top-color: var(--acc); border-radius: 50%; vertical-align: -1px;
+    animation: spin 0.9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .skeleton { background: var(--bg-input); border-radius: 5px;
+    animation: shimmer 1.3s var(--ease) infinite; }
+  @keyframes shimmer { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+  @media (prefers-reduced-motion: reduce) {
+    .page.active { animation: none; }
+    .skeleton, .spin { animation: none; }
+    .toggle, .toggle::after { transition-duration: 0.01ms; }
+  }
+
+  /* ------------------------------- scrollbars & selection */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text-4) 40%, transparent);
+    border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--text-4) 60%, transparent); }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::selection { background: var(--acc-soft); }
+
+  /* ------------------------------- narrow window: icon rail (<720px) */
+  @media (max-width: 719px) {
+    #sidebar { width: 56px; }
+    .brand { padding: 14px 8px 10px; text-align: center; }
+    .brand h1 { font-size: 0; }
+    .brand h1::first-letter { font-size: 14px; }
+    .brand #ver { font-size: 9px; display: block; }
+    .search-box { display: none; }
+    .group-label { text-align: center; padding: 10px 0 4px; font-size: 0; }
+    .group-label::before { content: '·'; font-size: 14px; color: var(--text-4); }
+    .nav-item { justify-content: center; padding: 9px 0; }
+    .nav-item .txt { display: none; }
+    #pages { padding: 20px 16px 32px; }
+  }
 </style>
 </head>
 <body>
-<header><h1 data-i18n="title">DshCockpit 设置</h1><span id="ver"></span></header>
-<main>
-  <div id="busy">⏳ 处理中…</div>
+<div id="app">
 
-  <section id="sec-firstrun" style="display:none; border-color: var(--acc)">
-    <h2 data-i18n="sec.firstrun">首次使用</h2>
-    <ol style="margin:0; padding-left:20px; color:var(--text); line-height:2">
-      <li data-i18n="firstrun.step1">在窗口的 Harness 界面中打开「设置」，配置 DeepSeek API Key</li>
-      <li data-i18n="firstrun.step2">回到此窗口，选择工作区目录（或把文件夹拖到右上角工具条）</li>
-      <li data-i18n="firstrun.step3">开始对话；右上角胶囊会实时显示 token 用量</li>
-    </ol>
-  </section>
-
-  <section>
-    <h2 data-i18n="sec.update">更新</h2>
-    <div class="row">
-      <label data-i18n="channel">更新通道</label>
-      <select id="channel">
-        <option value="rc" data-i18n="channel.rc">rc（跟随预览版，推荐）</option>
-        <option value="latest" data-i18n="channel.latest">latest（仅正式版）</option>
-        <option value="pinned" data-i18n="channel.pinned">pinned（锁定版本）</option>
-      </select>
+  <!-- ============================== sidebar ============================== -->
+  <div id="sidebar">
+    <div class="brand"><h1 data-i18n="title">DshCockpit 设置</h1><span id="ver"></span></div>
+    <div class="search-box">
+      <input type="text" id="nav-search" data-i18n-placeholder="nav_search" placeholder="搜索设置…" />
     </div>
-    <div class="row" id="row-pinned" style="display:none">
-      <label data-i18n="pinnedVersion">锁定版本</label>
-      <input type="text" id="pinnedVersion" placeholder="0.1.0-rc.6" />
-    </div>
-    <div class="row">
-      <label data-i18n="registry">npm 镜像源</label>
-      <select id="registry">
-        <option value="https://registry.npmjs.org/" data-i18n="registry.official">官方源 registry.npmjs.org</option>
-        <option value="https://registry.npmmirror.com/" data-i18n="registry.mirror">镜像 npmmirror.com</option>
-      </select>
-    </div>
-    <div class="hint" data-i18n="hint.registry">从哪里下载运行时与插件依赖（第三方镜像有供应链信任风险）</div>
-    <div class="warn" id="warn-registry" style="display:none"></div>
-    <div class="row">
-      <label data-i18n="keepVersions">保留版本数</label>
-      <input type="number" id="keepVersions" min="1" max="5" />
-    </div>
-    <div class="hint" data-i18n="hint.keepVersions">运行时版本目录最多保留几个（用于一键回滚）</div>
-    <div class="row">
-      <label data-i18n="checkOnStart">启动时检查更新</label>
-      <input type="checkbox" id="checkUpdatesOnStartup" />
-    </div>
-    <div class="btnrow">
-      <button id="btn-check" data-i18n="btn.check">检查更新</button>
-      <button id="btn-apply" disabled data-i18n="btn.apply">应用更新</button>
-      <button id="btn-rollback" class="secondary" disabled data-i18n="btn.rollback">回滚到上一版本</button>
-    </div>
-    <div class="status" id="update-status"></div>
-  </section>
-
-  <section>
-    <h2 data-i18n="sec.plugins">插件市场</h2>
-    <div class="btnrow">
-      <button id="btn-open-market" data-i18n="btn.openMarket">打开插件市场…</button>
-      <span id="plugins-count" style="align-self:center; color:var(--dim); font-size:12px"></span>
-    </div>
-    <div class="note" data-i18n="plugins.note">插件来自 GitHub「dsh-plugin」话题，由社区维护；安装会执行仓库脚本并重启运行时，请只安装你信任的插件。搜索与安装都在独立窗口中完成，不占用本页空间。</div>
-  </section>
-
-  <section>
-    <h2 data-i18n="sec.runtime">运行时</h2>
-    <div class="row">
-      <label data-i18n="workspace">工作区目录</label>
-      <input type="text" id="workspace" data-i18n-placeholder="workspace.ph" placeholder="默认：用户主目录" />
-      <button class="secondary" id="pick-workspace" data-i18n="btn.browse">浏览…</button>
-    </div>
-    <div class="warn" id="warn-workspace" style="display:none"></div>
-    <div class="hint" data-i18n="hint.workspace">Agent 的工作目录（默认用户主目录；拖文件夹到窗口右上角工具条可快速切换）</div>
-    <div class="row">
-      <label>DSH_HOME</label>
-      <input type="text" id="dshHome" data-i18n-placeholder="dshHome.ph" placeholder="默认：~/.dsh" />
-      <button class="secondary" id="pick-dshHome" data-i18n="btn.browse">浏览…</button>
-    </div>
-    <div class="warn" id="warn-dshhome" style="display:none"></div>
-    <div class="hint" data-i18n="hint.dshHome">会话、配置与 API 凭据的存放目录（默认 ~/.dsh）</div>
-    <div class="row">
-      <label data-i18n="port">端口</label>
-      <input type="number" id="port" min="0" max="65535" />
-      <span class="hint" style="margin-left:0" data-i18n="port.hint">0 = 由系统自动分配（推荐）</span>
-    </div>
-    <div class="warn" id="warn-port" style="display:none"></div>
-    <div class="row">
-      <label data-i18n="nodeBin">Node 可执行文件</label>
-      <input type="text" id="nodeBin" data-i18n-placeholder="auto" placeholder="留空自动检测" />
-    </div>
-    <div class="hint" data-i18n="hint.nodeBin">运行 dsh 的 Node 程序，一般留空自动检测（高级用户可指定）</div>
-    <div class="row">
-      <label data-i18n="dshBin">dsh bin.js 路径</label>
-      <input type="text" id="dshBin" data-i18n-placeholder="auto" placeholder="留空自动检测" />
-    </div>
-    <div class="hint" data-i18n="hint.dshBin">dsh 的 lib/bin.js 文件路径，一般留空自动检测（高级用户可指定）</div>
-    <div class="row">
-      <label data-i18n="settings.contextWindow">上下文窗口（估算）</label>
-      <input type="number" id="contextWindow" min="1024" max="10000000" step="1024" />
-    </div>
-    <div class="hint" data-i18n="settings.contextWindowHint">token 胶囊的「上下文压力」按此值估算；DeepSeek 模型通常 64k–128k</div>
-    <div class="hint" data-i18n="runtime.hint">工作区 / DSH_HOME / 端口 / Node / dsh 路径的修改将在下次重启运行时后生效（托盘 → 重启运行时）。</div>
-  </section>
-
-  <section>
-    <h2 data-i18n="sec.app">应用</h2>
-    <div class="row">
-      <label data-i18n="trayOnClose">关闭窗口时最小化到托盘</label>
-      <input type="checkbox" id="trayOnClose" />
-    </div>
-    <div class="row">
-      <label data-i18n="autoStart">开机自启</label>
-      <input type="checkbox" id="autoStart" />
-    </div>
-    <div class="row">
-      <label data-i18n="language">界面语言</label>
-      <select id="language">
-        <option value="system" data-i18n="language.system">跟随系统</option>
-        <option value="zh" data-i18n="language.zh">中文</option>
-        <option value="en" data-i18n="language.en">English</option>
-      </select>
-    </div>
-    <div class="row">
-      <label data-i18n="shellAutoUpdate">自动检查壳更新</label>
-      <input type="checkbox" id="shellAutoUpdate" />
-    </div>
-  </section>
-
-  <section>
-    <h2 data-i18n="sec.data">数据与安全</h2>
-    <div class="row">
-      <label data-i18n="backupOnQuit">退出时自动备份会话</label>
-      <input type="checkbox" id="backupOnQuit" />
-    </div>
-    <div class="row">
-      <label data-i18n="backupKeep">保留备份份数</label>
-      <input type="number" id="backupKeep" min="1" max="20" />
-    </div>
-    <div class="btnrow">
-      <button id="btn-backup" class="secondary" data-i18n="btn.backupNow">立即备份</button>
-    </div>
-    <div class="status" id="backup-status"></div>
-    <div class="row" style="align-items:flex-start; margin-top:12px">
-      <label data-i18n="storage">存储占用</label>
-      <div id="storage-list" style="flex:1; font-size:12px; color:var(--dim); line-height:1.9"></div>
-    </div>
-    <div class="btnrow">
-      <button id="btn-cleanup" class="danger" data-i18n="btn.cleanup">清理（日志 / 旧备份）</button>
-    </div>
-    <div class="status" id="storage-status"></div>
-    <div style="border:1px solid var(--acc); border-radius:6px; padding:10px 12px; margin-top:12px; background:rgba(37,99,235,.08)">
-      <b data-i18n="privacy.title" style="color:var(--acc)">隐私声明</b>
-      <div class="note" style="margin-top:4px" data-i18n="privacy.body">本应用完全在本地运行。我们不会收集、上传或存储您的任何个人信息、API Key、会话内容或用量数据；所有数据仅保存在本机。仅在以下情况访问网络：更新检查（npm registry / GitHub Releases）、插件市场列表（GitHub）、运行时下载（npm registry）。费用估算基于您自行配置的价格参数，不构成计费依据。</div>
-    </div>
-    <div class="note" data-i18n="security.note">安全说明：会话备份只包含会话记录与 settings.yaml，不包含 API 凭据（凭据仍在 DSH_HOME 的 .credentials.yaml，系统钥匙串集成规划中）；运行时下载全程校验完整性；harness 自带的文件沙箱与审批机制不受桌面化影响。</div>
-  </section>
-
-  <section>
-    <h2 data-i18n="sec.schedule">定时任务</h2>
-    <div class="row">
-      <label data-i18n="schedule.name">任务名</label>
-      <input type="text" id="schedName" />
-    </div>
-    <div class="row">
-      <label data-i18n="schedule.prompt">提示词</label>
-      <input type="text" id="schedPrompt" />
-    </div>
-    <div class="row">
-      <label data-i18n="schedule.type">类型</label>
-      <select id="schedKind" style="width:120px">
-        <option value="every" data-i18n="schedule.every">间隔</option>
-        <option value="daily" data-i18n="schedule.daily">每天</option>
-      </select>
-      <input type="number" id="schedEvery" min="60" value="3600" style="width:110px" />
-      <span id="schedEveryLabel" data-i18n="schedule.seconds">秒</span>
-      <input type="time" id="schedDaily" style="width:120px; display:none" />
-    </div>
-    <div class="btnrow">
-      <button id="btn-sched-add" data-i18n="btn.schedAdd">添加任务</button>
-    </div>
-    <div id="sched-list"></div>
-    <div class="note" data-i18n="schedule.note">到点后会在后台用无头会话运行该提示词（需已配置 API Key），完成后系统通知。</div>
-  </section>
-
-  <section>
-    <h2 data-i18n="sec.remote">手机远程控制</h2>
-    <div class="row">
-      <label data-i18n="remote.enable">启用手机控制</label>
-      <input type="checkbox" id="remoteControl" />
-    </div>
-    <div class="row">
-      <label data-i18n="remote.port">网关端口</label>
-      <input type="number" id="remotePort" min="1024" max="65535" />
-    </div>
-    <div class="row">
-      <label data-i18n="remote.compat">微信/抖音打开兼容模式（HTTP）</label>
-      <input type="checkbox" id="remoteCompat" />
-    </div>
-    <div class="hint" data-i18n="remote.compatHint">开启后走明文 HTTP：微信、抖音内置浏览器可直接打开链接；关闭则恢复自签名 HTTPS（系统浏览器需点「继续访问」）。局域网内明文传输，请勿在公共网络开启。</div>
-    <div class="hint" data-i18n="remote.hint">手机与本机连同一 Wi-Fi；先保存设置，再把下方配对链接发到手机、用浏览器打开，之后可完整使用会话、审批、提问</div>
-    <div class="btnrow">
-      <button class="secondary" id="btn-remote-pair" data-i18n="remote.btnPair">刷新配对码</button>
-      <button class="danger" id="btn-remote-revoke" data-i18n="remote.btnRevoke">撤销所有设备</button>
-    </div>
-    <div class="status" id="remote-status"></div>
-    <div id="remote-link-row" style="display:none; align-items:center; gap:8px; margin-top:8px">
-      <span id="remote-link" style="flex:1; word-break:break-all; user-select:all; font-family:ui-monospace,Consolas,monospace; font-size:12px"></span>
-      <button class="secondary" id="btn-remote-copy" data-i18n="remote.copy">复制</button>
-    </div>
-    <div class="note" data-i18n="remote.note">安全说明：默认开启「微信/抖音打开兼容模式」时网关走明文 HTTP，配对码与长期令牌在局域网内明文传输（微信、抖音内置浏览器无法打开自签名 HTTPS，故提供此模式）；关闭兼容模式后为自签名 HTTPS，手机首次访问会提示「不受信任」，系统浏览器选择继续访问即可。配对码 10 分钟内一次性有效；长期令牌经系统加密存储、不进入设置与备份。运行时本身仍只监听 127.0.0.1，局域网只能到达此网关。请勿在公共网络下开启。</div>
-  </section>
-
-  <section>
-    <h2 data-i18n="sec.cost">用量与成本</h2>
-    <div class="row">
-      <label data-i18n="cost.inputRate">输入 ¥/百万</label>
-      <input type="number" id="costInputPerM" min="0" step="0.1" />
-    </div>
-    <div class="row">
-      <label data-i18n="cost.outputRate">输出 ¥/百万</label>
-      <input type="number" id="costOutputPerM" min="0" step="0.1" />
-    </div>
-    <div class="row">
-      <label data-i18n="cost.cacheReadRate">缓存读 ¥/百万</label>
-      <input type="number" id="costCacheReadPerM" min="0" step="0.1" />
-    </div>
-    <div class="row">
-      <label data-i18n="cost.cacheWriteRate">缓存写 ¥/百万</label>
-      <input type="number" id="costCacheWritePerM" min="0" step="0.1" />
-    </div>
-    <div class="row">
-      <label data-i18n="cost.budget">月度预算 ¥</label>
-      <input type="number" id="monthlyBudget" min="0" step="1" />
-      <span class="hint" style="margin-left:0" data-i18n="cost.budgetHint">0 = 不限制；达到 80% / 100% 时提醒</span>
-    </div>
-    <div class="row">
-      <label data-i18n="cost.peakEnabled">峰谷分时计价</label>
-      <input type="checkbox" id="costPeakEnabled" />
-    </div>
-    <div class="row">
-      <label data-i18n="cost.peakWindows">峰时时段（北京时间）</label>
-      <input type="text" id="costPeakWindows" placeholder="9-12,14-18" />
-    </div>
-    <div class="hint" data-i18n="cost.peakWindowsHint">格式如 9-12,14-18；峰时事件按峰时费率估算</div>
-    <div class="row">
-      <label data-i18n="cost.peakInputRate">峰时输入 ¥/百万</label>
-      <input type="number" id="costPeakInputPerM" min="0" step="0.1" />
-    </div>
-    <div class="row">
-      <label data-i18n="cost.peakOutputRate">峰时输出 ¥/百万</label>
-      <input type="number" id="costPeakOutputPerM" min="0" step="0.1" />
-    </div>
-    <div class="row">
-      <label data-i18n="cost.peakCacheReadRate">峰时缓存读 ¥/百万</label>
-      <input type="number" id="costPeakCacheReadPerM" min="0" step="0.1" />
-    </div>
-    <div class="row">
-      <label data-i18n="cost.peakCacheWriteRate">峰时缓存写 ¥/百万</label>
-      <input type="number" id="costPeakCacheWritePerM" min="0" step="0.1" />
-    </div>
-    <div class="status" id="cost-status"></div>
-    <div class="note" data-i18n="cost.ratesHint">费用按你配置的价格估算，仅供参考，不构成实际计费。</div>
-  </section>
-
-  <section>
-    <h2 data-i18n="sec.about">关于</h2>
-    <div class="kv"><span data-i18n="about.shell">壳版本</span><b id="about-shell"></b></div>
-    <div class="kv"><span data-i18n="about.runtime">当前运行时</span><b id="about-runtime"></b></div>
-    <div class="kv"><span data-i18n="about.path">运行时路径</span><b id="about-path" style="word-break:break-all"></b></div>
-    <div class="kv"><span data-i18n="about.dshHome">DSH_HOME</span><b id="about-dshHome" style="word-break:break-all"></b></div>
-    <div class="kv"><span data-i18n="about.diagnostics">崩溃诊断</span><b id="about-diagnostics"></b></div>
-    <div class="btnrow">
-      <button class="secondary" id="open-logs" data-i18n="btn.openLogs">打开日志目录</button>
-      <button class="secondary" id="open-diagnostics" data-i18n="btn.openDiagnostics">打开诊断目录</button>
-    </div>
-  </section>
-
-  <div class="btnrow">
-    <button id="btn-save" data-i18n="btn.save">保存</button>
-    <span class="hint" style="margin-left:0" data-i18n="save.hint">保存后立即生效（更新相关设置作用于下次检查；路径设置作用于下次重启运行时）。</span>
+    <nav id="nav">
+      <div class="group-label" data-i18n="group.general">常规</div>
+      <button class="nav-item" data-page="general"><span class="ico">🏠</span><span class="txt" data-i18n="nav.general">通用</span></button>
+      <button class="nav-item" data-page="cost"><span class="ico">📊</span><span class="txt" data-i18n="nav.cost">用量与成本</span></button>
+      <div class="group-label" data-i18n="group.workspace">工作</div>
+      <button class="nav-item" data-page="runtime"><span class="ico">⚙️</span><span class="txt" data-i18n="nav.runtime">运行时</span></button>
+      <button class="nav-item" data-page="plugins"><span class="ico">🧩</span><span class="txt" data-i18n="nav.plugins">插件</span></button>
+      <button class="nav-item" data-page="tasks"><span class="ico">⏰</span><span class="txt" data-i18n="nav.tasks">任务与自动化</span></button>
+      <button class="nav-item" data-page="remote"><span class="ico">📱</span><span class="txt" data-i18n="nav.remote">手机远程</span></button>
+      <div class="group-label" data-i18n="group.system">系统</div>
+      <button class="nav-item" data-page="data"><span class="ico">💾</span><span class="txt" data-i18n="nav.data">数据与备份</span></button>
+      <button class="nav-item" data-page="update"><span class="ico">⬆️</span><span class="txt" data-i18n="nav.update">更新</span></button>
+      <button class="nav-item" data-page="about"><span class="ico">ℹ️</span><span class="txt" data-i18n="nav.about">关于</span></button>
+    </nav>
   </div>
-</main>
+
+  <!-- ============================== content ============================== -->
+  <div id="content">
+    <div id="pages">
+
+      <!-- ------------------------- page: general (was 应用) -->
+      <div class="page" id="page-general">
+        <div class="page-head">
+          <h2 data-i18n="nav.general">通用</h2>
+          <p data-i18n="page.general.d">壳的界面与启动偏好</p>
+        </div>
+        <div class="card">
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="trayOnClose">关闭窗口时最小化到托盘</label></div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="trayOnClose" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="autoStart">开机自启</label></div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="autoStart" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="language">界面语言</label></div>
+            <div class="setting-ctrl">
+              <select id="language">
+                <option value="system" data-i18n="language.system">跟随系统</option>
+                <option value="zh" data-i18n="language.zh">中文</option>
+                <option value="en" data-i18n="language.en">English</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="shellAutoUpdate">自动检查壳更新</label></div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="shellAutoUpdate" /></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="card.appearance">外观</h3>
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="themeMode">主题</label>
+              <span class="desc" data-i18n="themeMode.hint">跟随系统深浅色自动切换，也可手动固定</span>
+            </div>
+            <div class="setting-ctrl">
+              <select id="theme-mode">
+                <option value="system" data-i18n="theme.system">跟随系统</option>
+                <option value="dark" data-i18n="theme.dark">深色</option>
+                <option value="light" data-i18n="theme.light">浅色</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ------------------------- page: cost (was 用量与成本) -->
+      <div class="page" id="page-cost">
+        <div class="page-head">
+          <h2 data-i18n="nav.cost">用量与成本</h2>
+          <p data-i18n="page.cost.d">API 费率、峰谷分时与预算</p>
+        </div>
+        <div class="card">
+          <h3 data-i18n="card.costRates">谷时费率（默认）</h3>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="cost.inputRate">输入 ¥/百万</label></div>
+            <div class="setting-ctrl"><input type="number" id="costInputPerM" min="0" step="0.1" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="cost.outputRate">输出 ¥/百万</label></div>
+            <div class="setting-ctrl"><input type="number" id="costOutputPerM" min="0" step="0.1" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="cost.cacheReadRate">缓存读 ¥/百万</label></div>
+            <div class="setting-ctrl"><input type="number" id="costCacheReadPerM" min="0" step="0.1" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="cost.cacheWriteRate">缓存写 ¥/百万</label></div>
+            <div class="setting-ctrl"><input type="number" id="costCacheWritePerM" min="0" step="0.1" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="cost.budget">月度预算 ¥</label>
+              <span class="desc" data-i18n="cost.budgetHint">0 = 不限制；达到 80% / 100% 时提醒</span>
+            </div>
+            <div class="setting-ctrl"><input type="number" id="monthlyBudget" min="0" step="1" /></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="card.costPeak">峰谷分时计价</h3>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="cost.peakEnabled">峰谷分时计价</label></div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="costPeakEnabled" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="cost.peakWindows">峰时时段（北京时间）</label>
+              <span class="desc" data-i18n="cost.peakWindowsHint">格式如 9-12,14-18；峰时事件按峰时费率估算</span>
+            </div>
+            <div class="setting-ctrl"><input type="text" class="mono" id="costPeakWindows" placeholder="9-12,14-18" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="cost.peakInputRate">峰时输入 ¥/百万</label></div>
+            <div class="setting-ctrl"><input type="number" id="costPeakInputPerM" min="0" step="0.1" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="cost.peakOutputRate">峰时输出 ¥/百万</label></div>
+            <div class="setting-ctrl"><input type="number" id="costPeakOutputPerM" min="0" step="0.1" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="cost.peakCacheReadRate">峰时缓存读 ¥/百万</label></div>
+            <div class="setting-ctrl"><input type="number" id="costPeakCacheReadPerM" min="0" step="0.1" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="cost.peakCacheWriteRate">峰时缓存写 ¥/百万</label></div>
+            <div class="setting-ctrl"><input type="number" id="costPeakCacheWritePerM" min="0" step="0.1" /></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="card.costUsage">用量统计</h3>
+          <div class="status" id="cost-status"></div>
+          <div class="note" data-i18n="cost.ratesHint">费用按你配置的价格估算，仅供参考，不构成实际计费。</div>
+        </div>
+      </div>
+
+      <!-- ------------------------- page: runtime (was 运行时) -->
+      <div class="page" id="page-runtime">
+        <div class="page-head">
+          <h2 data-i18n="nav.runtime">运行时</h2>
+          <p data-i18n="page.runtime.d">工作区、端口与可执行文件路径</p>
+        </div>
+        <div class="card">
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="workspace">工作区目录</label>
+              <span class="desc" data-i18n="hint.workspace">Agent 的工作目录（默认用户主目录；拖文件夹到窗口右上角工具条可快速切换）</span>
+            </div>
+            <div class="setting-ctrl">
+              <input type="text" class="mono" id="workspace" data-i18n-placeholder="workspace.ph" placeholder="默认：用户主目录" />
+              <button class="secondary" id="pick-workspace" data-i18n="btn.browse">浏览…</button>
+            </div>
+          </div>
+          <div class="warn" id="warn-workspace" style="display:none"></div>
+          <div class="setting">
+            <div class="setting-info">
+              <label>DSH_HOME</label>
+              <span class="desc" data-i18n="hint.dshHome">会话、配置与 API 凭据的存放目录（默认 ~/.dsh）</span>
+            </div>
+            <div class="setting-ctrl">
+              <input type="text" class="mono" id="dshHome" data-i18n-placeholder="dshHome.ph" placeholder="默认：~/.dsh" />
+              <button class="secondary" id="pick-dshHome" data-i18n="btn.browse">浏览…</button>
+            </div>
+          </div>
+          <div class="warn" id="warn-dshhome" style="display:none"></div>
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="port">端口</label>
+              <span class="desc" data-i18n="port.hint">0 = 由系统自动分配（推荐）</span>
+            </div>
+            <div class="setting-ctrl"><input type="number" id="port" min="0" max="65535" /></div>
+          </div>
+          <div class="warn" id="warn-port" style="display:none"></div>
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="nodeBin">Node 可执行文件</label>
+              <span class="desc" data-i18n="hint.nodeBin">运行 dsh 的 Node 程序，一般留空自动检测（高级用户可指定）</span>
+            </div>
+            <div class="setting-ctrl"><input type="text" class="mono" id="nodeBin" data-i18n-placeholder="auto" placeholder="留空自动检测" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="dshBin">dsh bin.js 路径</label>
+              <span class="desc" data-i18n="hint.dshBin">dsh 的 lib/bin.js 文件路径，一般留空自动检测（高级用户可指定）</span>
+            </div>
+            <div class="setting-ctrl"><input type="text" class="mono" id="dshBin" data-i18n-placeholder="auto" placeholder="留空自动检测" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="settings.contextWindow">上下文窗口（估算）</label>
+              <span class="desc" data-i18n="settings.contextWindowHint">token 胶囊的「上下文压力」按此值估算；DeepSeek 模型通常 64k–128k</span>
+            </div>
+            <div class="setting-ctrl"><input type="number" id="contextWindow" min="1024" max="10000000" step="1024" /></div>
+          </div>
+          <div class="note" data-i18n="runtime.hint">工作区 / DSH_HOME / 端口 / Node / dsh 路径的修改将在下次重启运行时后生效（托盘 → 重启运行时）。</div>
+        </div>
+      </div>
+
+      <!-- ------------------------- page: plugins (内嵌插件中心) -->
+      <div class="page" id="page-plugins">
+        <div class="page-head">
+          <h2 data-i18n="nav.plugins">插件</h2>
+          <p data-i18n="page.plugins.d">发现与管理 dsh 插件</p>
+        </div>
+        <div class="card">
+          <h3 data-i18n="sec.plugins">插件市场</h3>
+          <div class="plugin-tools">
+            <input type="text" id="plugin-search" data-i18n-placeholder="plugins.searchPh" placeholder="搜索插件…" />
+            <button class="icon-btn" id="plugin-go" data-i18n-title="plugins.go" aria-label="搜索" title="搜索">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                <circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.8-3.8"></path>
+              </svg>
+            </button>
+            <button class="icon-btn" id="plugin-refresh" data-i18n-title="plugins.refresh" aria-label="刷新" title="刷新">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12a9 9 0 1 1-2.64-6.36"></path><path d="M21 3v6h-6"></path>
+              </svg>
+            </button>
+            <span id="plugin-count"></span>
+          </div>
+          <div class="chips" id="plugin-cats"></div>
+          <div class="note" id="market-source"></div>
+          <div class="note" data-i18n="plugins.note">插件来自社区精选列表 awesome-dsh-plugin；安装会执行仓库脚本并重启运行时，请只安装你信任的插件。</div>
+        </div>
+        <div class="card">
+          <h3><span data-i18n="plugins.installedTitle">已安装</span> · <span id="plugin-installed-count"></span></h3>
+          <div id="plugin-installed"></div>
+          <div class="restart-hint" id="plugin-restart-hint" style="display:none">
+            <span data-i18n="plugins.restartHint">插件已变更，重启 runtime 后生效。</span>
+            <button class="secondary" id="plugin-restart" data-i18n="plugins.restartNow">立即重启</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="plugins.discoverTitle">发现</h3>
+          <div class="status" id="plugin-status" style="display:none"></div>
+          <div id="plugin-list"></div>
+        </div>
+      </div>
+
+      <!-- ------------------------- page: tasks → automation center -->
+      <div class="page" id="page-tasks">
+        <div class="page-head page-head-row">
+          <div>
+            <h2 data-i18n="nav.tasks">自动化</h2>
+            <p data-i18n="page.tasks.d">配置和管理自动化任务，让 AI 按计划执行工作流。</p>
+          </div>
+          <div class="page-actions">
+            <button class="secondary" id="auto-new" data-i18n="auto.manualNew">手动新建</button>
+            <button id="auto-ask"><span class="auto-plus">＋</span><span data-i18n="auto.askCreate">在对话中创建</span></button>
+          </div>
+        </div>
+
+        <div class="auto-tabs" id="auto-tabs">
+          <button class="auto-tab active" data-tab="tasks"><span data-i18n="auto.tabTasks">已配置</span><span class="auto-tab-n" id="auto-tab-n"></span></button>
+          <button class="auto-tab" data-tab="history"><span data-i18n="auto.tabHistory">执行历史</span></button>
+          <button class="auto-tab" data-tab="templates"><span data-i18n="auto.tabTpl">任务模板</span></button>
+        </div>
+
+        <div id="auto-pane-tasks">
+          <div class="auto-grid" id="auto-list"></div>
+          <div class="plugin-empty" id="auto-empty" style="display:none"></div>
+        </div>
+
+        <div id="auto-pane-history" style="display:none">
+          <div class="auto-hist-bar">
+            <span class="note" id="auto-hist-note" style="margin:0"></span>
+            <button class="secondary" id="auto-hist-clear" data-i18n="auto.clearHistory">清空历史</button>
+          </div>
+          <div id="auto-hist"></div>
+        </div>
+
+        <div id="auto-pane-templates" style="display:none">
+          <div class="auto-grid" id="auto-tpl"></div>
+        </div>
+        <div class="note" data-i18n="auto.note">到点后会在后台用无头会话运行该任务的提示词（需已配置 API Key），完成后系统通知并记录到执行历史。</div>
+      </div>
+
+      <!-- ------------------------- page: remote (手机远程控制) -->
+      <div class="page" id="page-remote">
+        <div class="page-head">
+          <h2 data-i18n="nav.remote">手机远程</h2>
+          <p data-i18n="page.remote.d">在手机浏览器中安全使用本机会话</p>
+        </div>
+        <div class="card">
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="remote.enable">启用手机控制</label>
+            </div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="remoteControl" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="remote.port">网关端口</label></div>
+            <div class="setting-ctrl"><input type="number" id="remotePort" min="1024" max="65535" style="width:110px" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="remote.compat">微信/抖音打开兼容模式（HTTP）</label>
+              <div class="note" data-i18n="remote.compatHint">开启后走明文 HTTP：微信、抖音内置浏览器可直接打开链接；关闭则恢复自签名 HTTPS（系统浏览器需点「继续访问」）。局域网内明文传输，请勿在公共网络开启。</div>
+            </div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="remoteCompat" /></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="note" data-i18n="remote.hint">手机与本机连同一 Wi-Fi；开关与端口改动即存即生效，再把下方配对链接发到手机、用浏览器打开，之后可完整使用会话、审批、提问</div>
+          <div class="btnrow">
+            <button class="secondary" id="btn-remote-pair" data-i18n="remote.btnPair">刷新配对码</button>
+            <button class="danger" id="btn-remote-revoke" data-i18n="remote.btnRevoke">撤销所有设备</button>
+          </div>
+          <div class="status" id="remote-status"></div>
+          <div id="remote-link-row" style="display:none; align-items:center; gap:8px; margin-top:8px">
+            <span id="remote-link" style="flex:1; word-break:break-all; user-select:all; font-family:ui-monospace,Consolas,monospace; font-size:12px"></span>
+            <button class="secondary" id="btn-remote-copy" data-i18n="remote.copy">复制</button>
+          </div>
+        </div>
+        <div class="note" data-i18n="remote.note">安全说明：默认开启「微信/抖音打开兼容模式」时网关走明文 HTTP，配对码与长期令牌在局域网内明文传输（微信、抖音内置浏览器无法打开自签名 HTTPS，故提供此模式）；关闭兼容模式后为自签名 HTTPS，手机首次访问会提示「不受信任」，系统浏览器选择继续访问即可。配对码 10 分钟内一次性有效；长期令牌经系统加密存储、不进入设置与备份。运行时本身仍只监听 127.0.0.1，局域网只能到达此网关。请勿在公共网络下开启。</div>
+      </div>
+
+      <!-- ------------------------- page: data (was 数据与安全) -->
+      <div class="page" id="page-data">
+        <div class="page-head">
+          <h2 data-i18n="nav.data">数据与备份</h2>
+          <p data-i18n="page.data.d">备份、存储与隐私</p>
+        </div>
+        <div class="card">
+          <h3 data-i18n="card.backup">会话备份</h3>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="backupOnQuit">退出时自动备份会话</label></div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="backupOnQuit" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="backupKeep">保留备份份数</label></div>
+            <div class="setting-ctrl"><input type="number" id="backupKeep" min="1" max="20" /></div>
+          </div>
+          <div class="btnrow"><button id="btn-backup" class="secondary" data-i18n="btn.backupNow">立即备份</button></div>
+          <div class="status" id="backup-status"></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="card.rescue">Profile 快照与救回</h3>
+          <div class="setting" style="flex-direction:column;align-items:stretch;gap:6px">
+            <span class="desc" data-i18n="rescue.hint">每次安装/卸载插件前后自动快照 webUI 配置；当插件导致 webUI 崩溃或功能异常时，可一键回滚到任一快照。</span>
+            <div id="snapshot-list" style="font-size:12px;color:var(--text-3);line-height:1.9"></div>
+            <div class="btnrow">
+              <button id="btn-safemode" class="danger" data-i18n="btn.safeMode">安全模式重启</button>
+            </div>
+            <div class="status" id="rescue-status"></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="card.storage">存储占用</h3>
+          <div class="setting" style="align-items:flex-start">
+            <div class="setting-info"><span class="lbl" data-i18n="storage">存储占用</span></div>
+            <div id="storage-list" class="setting-ctrl" style="flex:1; font-size:12px; color:var(--text-3); line-height:1.9; white-space:pre-wrap"></div>
+          </div>
+          <div class="setting danger-zone">
+            <div class="setting-info">
+              <label data-i18n="btn.cleanup" style="color:var(--bad)">清理（日志 / 旧备份）</label>
+              <span class="desc" data-i18n="storage.cleanupHint">删除旧日志与超出保留份数的备份，不可恢复</span>
+            </div>
+            <div class="setting-ctrl"><button id="btn-cleanup" class="danger" data-i18n="btn.cleanup">清理（日志 / 旧备份）</button></div>
+          </div>
+          <div class="status" id="storage-status"></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="card.privacy">隐私与安全</h3>
+          <div class="privacy-box">
+            <b data-i18n="privacy.title">隐私声明</b>
+            <div class="note" style="margin-top:4px" data-i18n="privacy.body">本应用完全在本地运行。我们不会收集、上传或存储您的任何个人信息、API Key、会话内容或用量数据；所有数据仅保存在本机。仅在以下情况访问网络：更新检查（npm registry / GitHub Releases）、插件市场列表（GitHub）、运行时下载（npm registry）。费用估算基于您自行配置的价格参数，不构成计费依据。</div>
+          </div>
+          <div class="note" data-i18n="security.note">安全说明：会话备份只包含会话记录与 settings.yaml，不包含 API 凭据（凭据仍在 DSH_HOME 的 .credentials.yaml，系统钥匙串集成规划中）；运行时下载全程校验完整性；harness 自带的文件沙箱与审批机制不受桌面化影响。</div>
+        </div>
+      </div>
+
+      <!-- ------------------------- page: update (was 更新) -->
+      <div class="page" id="page-update">
+        <div class="page-head">
+          <h2 data-i18n="nav.update">更新</h2>
+          <p data-i18n="page.update.d">运行时更新通道与版本</p>
+        </div>
+        <div class="card">
+          <h3 data-i18n="card.updateChannel">通道与来源</h3>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="channel">更新通道</label></div>
+            <div class="setting-ctrl">
+              <select id="channel">
+                <option value="rc" data-i18n="channel.rc">rc（跟随预览版，推荐）</option>
+                <option value="latest" data-i18n="channel.latest">latest（仅正式版）</option>
+                <option value="pinned" data-i18n="channel.pinned">pinned（锁定版本）</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting" id="row-pinned" style="display:none">
+            <div class="setting-info"><label data-i18n="pinnedVersion">锁定版本</label></div>
+            <div class="setting-ctrl"><input type="text" class="mono" id="pinnedVersion" placeholder="0.1.0-rc.6" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="registry">npm 镜像源</label>
+              <span class="desc" data-i18n="hint.registry">从哪里下载运行时与插件依赖（第三方镜像有供应链信任风险）</span>
+            </div>
+            <div class="setting-ctrl">
+              <select id="registry">
+                <option value="https://registry.npmjs.org/" data-i18n="registry.official">官方源 registry.npmjs.org</option>
+                <option value="https://registry.npmmirror.com/" data-i18n="registry.mirror">镜像 npmmirror.com</option>
+              </select>
+            </div>
+          </div>
+          <div class="warn" id="warn-registry" style="display:none"></div>
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="keepVersions">保留版本数</label>
+              <span class="desc" data-i18n="hint.keepVersions">运行时版本目录最多保留几个（用于一键回滚）</span>
+            </div>
+            <div class="setting-ctrl"><input type="number" id="keepVersions" min="1" max="5" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="checkOnStart">启动时检查更新</label></div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="checkUpdatesOnStartup" /></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="card.updateOps">版本操作</h3>
+          <div class="btnrow">
+            <button id="btn-check" data-i18n="btn.check">检查更新</button>
+            <button id="btn-apply" disabled data-i18n="btn.apply">应用更新</button>
+            <button id="btn-rollback" class="secondary" disabled data-i18n="btn.rollback">回滚到上一版本</button>
+          </div>
+          <div class="status" id="update-status"></div>
+        </div>
+      </div>
+
+      <!-- ------------------------- page: about (was 关于 + 首次使用) -->
+      <div class="page" id="page-about">
+        <div class="page-head">
+          <h2 data-i18n="nav.about">关于</h2>
+          <p data-i18n="page.about.d">版本、诊断与帮助</p>
+        </div>
+        <div class="card firstrun-card" id="sec-firstrun" style="display:none">
+          <h3 data-i18n="sec.firstrun">首次使用</h3>
+          <ol>
+            <li data-i18n="firstrun.step1">在窗口的 Harness 界面中打开「设置」，配置 DeepSeek API Key</li>
+            <li data-i18n="firstrun.step2">回到此窗口，选择工作区目录（或把文件夹拖到右上角工具条）</li>
+            <li data-i18n="firstrun.step3">开始对话；右上角胶囊会实时显示 token 用量</li>
+          </ol>
+        </div>
+        <div class="card">
+          <h3 data-i18n="card.aboutVersions">版本信息</h3>
+          <div class="kv"><span data-i18n="about.shell">壳版本</span><b id="about-shell"></b></div>
+          <div class="kv"><span data-i18n="about.runtime">当前运行时</span><b id="about-runtime"></b></div>
+          <div class="kv"><span data-i18n="about.path">运行时路径</span><b id="about-path"></b></div>
+          <div class="kv"><span data-i18n="about.dshHome">DSH_HOME</span><b id="about-dshHome"></b></div>
+          <div class="kv"><span data-i18n="about.diagnostics">崩溃诊断</span><b id="about-diagnostics"></b></div>
+          <div class="btnrow">
+            <button class="secondary" id="open-logs" data-i18n="btn.openLogs">打开日志目录</button>
+            <button class="secondary" id="open-diagnostics" data-i18n="btn.openDiagnostics">打开诊断目录</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- floating operation / auto-save-error indicator (see busy()/flash()) -->
+    <div id="busy"></div>
+  </div>
+</div>
+
+<!-- ------------------------- automation task dialog -->
+<dialog id="auto-dialog">
+  <h3 id="auto-dlg-title">新建任务</h3>
+  <div class="auto-form">
+    <label class="auto-field">
+      <span data-i18n="schedule.name">任务名</span>
+      <input type="text" id="auto-f-name" maxlength="100" />
+    </label>
+    <label class="auto-field">
+      <span data-i18n="schedule.prompt">提示词</span>
+      <textarea id="auto-f-prompt" rows="7" maxlength="4000"></textarea>
+    </label>
+    <div class="auto-sched-row">
+      <label class="auto-field">
+        <span data-i18n="schedule.type">类型</span>
+        <select id="auto-f-kind">
+          <option value="daily" data-i18n="schedule.daily">每天</option>
+          <option value="weekly" data-i18n="schedule.weekly">每周</option>
+          <option value="every" data-i18n="schedule.every">间隔</option>
+        </select>
+      </label>
+      <label class="auto-field" id="auto-f-day-wrap">
+        <span data-i18n="schedule.day">星期</span>
+        <select id="auto-f-day">
+          <option value="1" data-i18n="schedule.day1">周一</option>
+          <option value="2" data-i18n="schedule.day2">周二</option>
+          <option value="3" data-i18n="schedule.day3">周三</option>
+          <option value="4" data-i18n="schedule.day4">周四</option>
+          <option value="5" data-i18n="schedule.day5">周五</option>
+          <option value="6" data-i18n="schedule.day6">周六</option>
+          <option value="0" data-i18n="schedule.day0">周日</option>
+        </select>
+      </label>
+      <label class="auto-field" id="auto-f-time-wrap">
+        <span data-i18n="schedule.at">时间</span>
+        <input type="time" id="auto-f-time" value="09:00" />
+      </label>
+      <label class="auto-field" id="auto-f-every-wrap" style="display:none">
+        <span data-i18n="schedule.interval">间隔</span>
+        <input type="number" id="auto-f-every" min="60" step="60" value="3600" />
+        <span class="inline-hint" data-i18n="schedule.seconds">秒</span>
+      </label>
+    </div>
+  </div>
+  <div class="btnrow" style="justify-content:flex-end">
+    <button class="secondary" id="auto-f-cancel" data-i18n="btn.cancel">取消</button>
+    <button id="auto-f-save" data-i18n="btn.saveTask">保存任务</button>
+  </div>
+</dialog>
 
 <script>
   const $ = (id) => document.getElementById(id);
@@ -337,14 +826,13 @@
   // ----------------------------------------------------------------- i18n
   const I18N = {
     zh: {
-      title: 'DshCockpit 设置', sec_update: '更新', sec_runtime: '运行时', sec_app: '应用',
-      sec_data: '数据与安全', sec_about: '关于',
+      title: 'DshCockpit 设置',
       channel: '更新通道', channel_rc: 'rc（跟随预览版，推荐）', channel_latest: 'latest（仅正式版）', channel_pinned: 'pinned（锁定版本）',
       pinnedVersion: '锁定版本', registry: 'npm 镜像源',
       registry_official: '官方源 registry.npmjs.org', registry_mirror: '镜像 npmmirror.com',
       keepVersions: '保留版本数', checkOnStart: '启动时检查更新',
       btn_check: '检查更新', btn_apply: '应用更新', btn_rollback: '回滚到上一版本', btn_browse: '浏览…',
-      btn_backupNow: '立即备份', btn_openLogs: '打开日志目录', btn_save: '保存',
+      btn_backupNow: '立即备份', btn_openLogs: '打开日志目录',
       status_notChecked: '尚未检查。',
       workspace: '工作区目录', workspace_ph: '默认：用户主目录',
       dshHome_ph: '默认：~/.dsh', port: '端口', port_hint: '0 = 由系统自动分配（推荐）',
@@ -352,14 +840,21 @@
       runtime_hint: '工作区 / DSH_HOME / 端口 / Node / dsh 路径的修改将在下次重启运行时后生效（托盘 → 重启运行时）。',
       trayOnClose: '关闭窗口时最小化到托盘', autoStart: '开机自启',
       language: '界面语言', language_system: '跟随系统', language_zh: '中文', language_en: 'English',
+      themeMode: '主题', themeMode_hint: '跟随系统深浅色自动切换，也可手动固定',
+      theme_system: '跟随系统', theme_dark: '深色', theme_light: '浅色',
       backupOnQuit: '退出时自动备份会话', backupKeep: '保留备份份数',
       security_note: '安全说明：会话备份只包含会话记录与 settings.yaml，不包含 API 凭据（凭据仍在 DSH_HOME 的 .credentials.yaml，系统钥匙串集成规划中）；运行时下载全程校验完整性；harness 自带的文件沙箱与审批机制不受桌面化影响。',
       about_shell: '壳版本', about_runtime: '当前运行时', about_path: '运行时路径', about_dshHome: 'DSH_HOME',
-      save_hint: '保存后立即生效（更新相关设置作用于下次检查；路径设置作用于下次重启运行时）。',
-      busy_saving: '⏳ 保存中…', saved_ok: '✅ 设置已保存。', saved_fail: '❌ 保存失败：',
+      busy_saving: '⏳ 保存中…', saved_fail: '❌ 保存失败：',
       backup_running: '⏳ 正在备份…', backup_done: '✅ 备份完成',
       backup_info: '备份目录：{dir}\n份数：{count} | 最新：{latest} | 大小：{size} MB',
       backup_none: '暂无备份。',
+      card_rescue: 'Profile 快照与救回', rescue_hint: '每次安装/卸载插件前后自动快照 webUI 配置；当插件导致 webUI 崩溃或功能异常时，可一键回滚到任一快照。',
+      btn_safeMode: '安全模式重启',
+      snap_none: '暂无快照（安装或卸载插件后自动生成）。',
+      snap_preInstall: '装插件前', snap_postInstall: '装插件后', snap_preRemove: '卸载前', snap_postRemove: '卸载后', snap_preRestore: '回滚前', snap_preSafeMode: '安全模式前',
+      snap_restore: '回滚', snap_confirm: '回滚到 {time} 的 Profile 快照？当前 webUI 插件配置将被覆盖，运行时会自动重启。', snap_restored: '✅ 已回滚并重启运行时',
+      snap_safeConfirm: '进入安全模式？将卸载全部第三方插件、只保留官方组件（会先自动快照，可随时回滚）。', snap_safeDone: '✅ 已进入安全模式并重启运行时',
       check_running: '正在查询 npm registry…',
       check_fail: '❌ 检查失败：', new_found: '发现新版本：{a} → {b}\n已下载并验证后，「应用更新」会可用。',
       up_to_date: '已是最新（{v}）。', apply_ok: '✅ 已切换到 {v}，运行时已重启。', apply_fail: '❌ 应用更新失败：',
@@ -370,19 +865,45 @@
       warn_path_ascii: '⚠ 路径含非 ASCII 字符：dsh 在 Windows 上有已知路径 bug（官方讨论区 #107），建议使用纯英文路径。',
       sec_firstrun: '首次使用', firstrun_step1: '在窗口的 Harness 界面中打开「设置」，配置 DeepSeek API Key', firstrun_step2: '回到此窗口，选择工作区目录（或把文件夹拖到右上角工具条）', firstrun_step3: '开始对话；右上角胶囊会实时显示 token 用量',
       shellAutoUpdate: '自动检查壳更新',
-      sec_plugins: '插件市场', btn_pluginsRefresh: '刷新插件列表',
-      btn_openMarket: '打开插件市场…', plugins_installedCount: '已安装 {n} 个插件',
+      sec_plugins: '插件市场',
+      plugins_searchPh: '搜索插件（名称 / 描述）…', plugins_refresh: '刷新', plugins_go: '搜索',
+      plugins_installedCount: '{n} 个插件',
+      plugins_shownCount: '已显示 {n}/{t} 个', plugins_loadMore: '加载更多（还有 {n} 个）…',
+      plugins_catAll: '全部', plugins_catTheme: '主题与外观', plugins_catSkills: '技能与提示词',
+      plugins_catWorkflow: '效率与工作流', plugins_catMemory: '记忆与上下文', plugins_catDesign: '设计与创作',
+      plugins_catDevtools: '开发者工具', plugins_catFun: '趣味装饰', plugins_catOther: '其他',
+      plugins_installedTitle: '已安装', plugins_emptyInstalled: '尚未安装任何插件；在下方发现列表点击「安装」。',
+      plugins_discoverTitle: '发现',
+      plugins_opInstall: '正在安装 {name}…', plugins_opRemove: '正在卸载 {name}…',
+      plugins_stageResolve: '解析依赖', plugins_stageDownload: '下载',
+      plugins_stageInstall: '安装依赖', plugins_stageCleanup: '清理残留',
+      plugins_installedOk: '✅ 已安装 {name}，运行时已自动重启。',
+      plugins_removedOk: '✅ 已卸载 {name}，运行时已自动重启。',
+      plugins_actionFailed: '❌ 操作失败：',
+      plugins_restartHint: '插件已变更，重启 runtime 后生效。', plugins_restartNow: '立即重启',
+      plugins_restarting: '重启中…', plugins_restartDone: '✅ 运行时已重启。',
+      plugins_loadFail: '❌ 加载失败：', plugins_retry: '重试',
       hint_registry: '从哪里下载运行时与插件依赖（第三方镜像有供应链信任风险）',
       hint_keepVersions: '运行时版本目录最多保留几个（用于一键回滚）',
       hint_workspace: 'Agent 的工作目录（默认用户主目录；拖文件夹到窗口右上角工具条可快速切换）',
       hint_dshHome: '会话、配置与 API 凭据的存放目录（默认 ~/.dsh）',
       hint_nodeBin: '运行 dsh 的 Node 程序，一般留空自动检测（高级用户可指定）',
       hint_dshBin: 'dsh 的 lib/bin.js 文件路径，一般留空自动检测（高级用户可指定）',
-      plugins_note: '插件来自 GitHub「dsh-plugin」话题，由社区维护；安装会执行仓库脚本并重启运行时，请只安装你信任的插件。搜索与安装都在独立窗口中完成，不占用本页空间。',
-      plugins_loading: '正在从 GitHub 加载插件列表…', plugins_empty: '暂无插件。', plugins_error: '插件操作失败：',
-      plugins_install: '安装', plugins_remove: '卸载', plugins_action_ok: '✅ 操作完成，运行时已重启。',
-      storage: '存储占用', btn_cleanup: '清理（日志 / 旧备份）', cleanup_confirm: '确定清理旧日志和超出保留份数的备份吗？', cleanup_done: '✅ 清理完成，释放约 {mb} MB', storage_total: '合计：{mb} MB',
-      sec_cost: '用量与成本',
+      plugins_note: '插件来自社区精选列表 awesome-dsh-plugin；安装会执行仓库脚本并重启运行时，请只安装你信任的插件。',
+      mcat_ui: 'UI 增强', mcat_billing: '用量与计费', mcat_theme: '主题与外观', mcat_models: '模型与接入',
+      mcat_sessions: '会话与消息', mcat_memory: '记忆', mcat_tools: '工具与能力', mcat_vision: '视觉与多模态',
+      mcat_skills: '技能包', mcat_workflow: '工作流与自动化', mcat_notify: '通知与集成', mcat_devtools: '开发与运行时',
+      mcat_market: '插件市场与管理', mcat_fun: '娱乐',
+      market_searchChip: '🔍 在 GitHub 搜索',
+      market_searchPhGitHub: '搜索 GitHub 上的 dsh 插件…',
+      market_searchEmptyHint: '在上方搜索框输入关键词，即可搜索 GitHub 上的 dsh 插件（覆盖未收录进精选列表的仓库）',
+      market_source: '数据来源：',
+      market_updated: '更新于 {time}',
+      market_stale: '网络不可用，显示本地缓存',
+      market_fallback: '精选列表不可用，显示 GitHub 话题搜索结果',
+      plugins_loading: '正在从 GitHub 加载插件列表…', plugins_empty: '没有找到匹配的插件。',
+      plugins_install: '安装', plugins_remove: '卸载',
+      storage: '存储占用', btn_cleanup: '清理（日志 / 旧备份）', storage_cleanupHint: '删除旧日志与超出保留份数的备份，不可恢复', cleanup_confirm: '确定清理旧日志和超出保留份数的备份吗？', cleanup_done: '✅ 清理完成，释放约 {mb} MB', storage_total: '合计：{mb} MB',
       cost_inputRate: '输入 ¥/百万', cost_outputRate: '输出 ¥/百万',
       cost_cacheReadRate: '缓存读 ¥/百万', cost_cacheWriteRate: '缓存写 ¥/百万',
       cost_budget: '月度预算 ¥', cost_budgetHint: '0 = 不限制；达到 80% / 100% 时提醒',
@@ -392,10 +913,13 @@
       cost_peakCacheReadRate: '峰时缓存读 ¥/百万', cost_peakCacheWriteRate: '峰时缓存写 ¥/百万',
       cost_ratesHint: '费用按你配置的价格估算，仅供参考，不构成实际计费。',
       cost_today: '今天', cost_week: '近 7 天', cost_month: '近 30 天', cost_perWorkspace: '按工作区：',
-      sec_schedule: '定时任务',
       schedule_name: '任务名', schedule_prompt: '提示词', schedule_type: '类型',
       schedule_every: '间隔', schedule_daily: '每天', schedule_seconds: '秒',
       btn_schedAdd: '添加任务', schedule_note: '到点后会在后台用无头会话运行该提示词（需已配置 API Key），完成后系统通知。',
+      schedule_weekly: '每周', schedule_at: '时间', schedule_day: '星期', schedule_interval: '间隔秒数',
+      schedule_day0: '周日', schedule_day1: '周一', schedule_day2: '周二', schedule_day3: '周三',
+      schedule_day4: '周四', schedule_day5: '周五', schedule_day6: '周六',
+      nav_remote: '手机远程',
       sec_remote: '手机远程控制', remote_enable: '启用手机控制', remote_port: '网关端口',
       remote_compat: '微信/抖音打开兼容模式（HTTP）',
       remote_compatHint: '开启后走明文 HTTP：微信、抖音内置浏览器可直接打开链接；关闭则恢复自签名 HTTPS（系统浏览器需点「继续访问」）。局域网内明文传输，请勿在公共网络开启。',
@@ -412,21 +936,75 @@
       remote_pairing_fmt: '配对码：{code}（{min} 分钟内有效，一次性）',
       remote_revoke_confirm: '确定撤销所有已配对设备？所有手机需要重新配对。',
       schedule_enabled: '启用', schedule_delete: '删除',
+      btn_cancel: '取消', btn_saveTask: '保存任务',
+      auto_manualNew: '手动新建', auto_askCreate: '在对话中创建',
+      auto_tabTasks: '已配置', auto_tabHistory: '执行历史', auto_tabTpl: '任务模板',
+      auto_emptyTasks: '还没有自动化任务；从「任务模板」一键创建，或点右上角「手动新建」。',
+      auto_emptyHistory: '暂无执行记录；任务运行后会记录在这里。',
+      auto_active: '运行中', auto_paused: '已暂停', auto_running: '执行中…',
+      auto_runNow: '运行', auto_edit: '编辑',
+      auto_editTitle: '编辑任务', auto_newTitle: '新建任务',
+      auto_useTpl: '使用模板', auto_askShort: '对话创建',
+      auto_nextRun: '下次运行', auto_lastRun: '上次运行',
+      auto_histCount: '共 {n} 条记录', auto_noOutput: '（无输出）',
+      auto_clearHistory: '清空历史',
+      auto_note: '到点后会在后台用无头会话运行该任务的提示词（需已配置 API Key），完成后系统通知并记录到执行历史。',
+      auto_copiedTitle: '引导提示词已复制',
+      auto_copiedBody: '已切换到主窗口；把引导词粘贴到对话中，让 AI 帮你完善任务提示词。',
+      auto_askSchedHint: '待定（如：每天 09:00）',
+      auto_askSeed: '（请先描述你想让 AI 自动完成什么）',
+      auto_askGuide: '请帮我创建一个 dsh 自动化任务。\n- 任务名：{name}\n- 计划：{sched}\n- 提示词草稿：{seed}\n请帮我完善这份提示词（明确信息来源、输出格式与异常处理），最终输出三段：任务名、计划、最终提示词。我会回到「设置 → 自动化」手动新建任务并粘贴最终提示词。',
+      auto_tpl_ai_news_name: '每日 AI 新闻简报',
+      auto_tpl_ai_news_desc: '每天早上推送 AI 行业热点新闻摘要与趋势分析。',
+      auto_tpl_ai_news_prompt: '搜索并汇总今天 AI 行业的重点动态：1) 列出 5-8 条最重要的新闻（模型发布、融资、政策、开源项目）；2) 每条用一两句话概括并注明来源；3) 结尾给出 3-5 句的趋势总结。输出为简洁的中文简报。',
+      auto_tpl_brand_radar_name: '品牌舆情监控周报',
+      auto_tpl_brand_radar_desc: '每周自动抓取品牌在社交媒体和社区中的提及与评价，生成舆情摘要。',
+      auto_tpl_brand_radar_prompt: '搜索过去 7 天社交媒体与技术社区（X/Twitter、Reddit、Hacker News、V2EX、知乎等）中对我们品牌的提及与评价：1) 汇总正面/负面/中性的代表性观点；2) 标出需要跟进的问题或机会；3) 生成一段可直接发给团队的中文舆情周报。',
+      auto_tpl_competitor_name: '每周竞品动态追踪',
+      auto_tpl_competitor_desc: '定期追踪竞品的产品更新、社区反馈和重要新闻。',
+      auto_tpl_competitor_prompt: '调研主要竞品最近一周的动态：产品更新、版本发布、重要公告、社区反馈。逐个竞品列出：动态内容、对我们的影响、建议关注程度。最后用三句话总结对我们的启示。中文输出。',
+      auto_tpl_stock_name: '股价监控与预警',
+      auto_tpl_stock_desc: '每天追踪关注的股票价格变动，异常波动时自动预警。',
+      auto_tpl_stock_prompt: '查询我关注的股票（NVDA、AAPL、TSLA）的最新价格与当日涨跌幅：1) 列表展示价格、涨跌幅、成交量；2) 对单日涨跌超过 ±5% 的标的，重点分析可能原因并预警；3) 一段话总结今日行情。中文输出。',
+      auto_tpl_security_name: '安全漏洞扫描',
+      auto_tpl_security_desc: '定期扫描代码仓库，发现经过验证的中高危安全漏洞。',
+      auto_tpl_security_prompt: '扫描当前工作区代码仓库的安全问题：1) 检查依赖中已知的中高危 CVE；2) 扫描源码中明显的安全隐患（硬编码密钥、SQL 注入、路径穿越、不安全的反序列化等）；3) 按严重程度排序输出发现项与修复建议。只报告经过验证的问题。',
+      auto_tpl_bug_scan_name: '扫描提交发现 Bug',
+      auto_tpl_bug_scan_desc: '分析最近的代码提交，发现可能导致严重后果的高危 Bug。',
+      auto_tpl_bug_scan_prompt: '分析当前工作区仓库最近的代码提交（git log 最近 50 条及对应 diff）：1) 找出可能导致崩溃、数据损坏或安全问题的缺陷；2) 每个缺陷说明：位置、触发条件、后果、建议修复方式；3) 只报告高置信度的问题。中文输出。',
+      auto_tpl_test_cov_name: '补充测试覆盖',
+      auto_tpl_test_cov_desc: '识别最近变更中缺少测试的高风险代码，自动补充测试。',
+      auto_tpl_test_cov_prompt: '分析当前工作区仓库最近变更的代码：1) 识别缺少测试覆盖的高风险模块与函数；2) 为其中最重要的 3-5 处补充单元测试；3) 运行测试确认全部通过，并汇总本次补充了哪些测试。',
+      auto_tpl_changelog_name: '每日变更摘要',
+      auto_tpl_changelog_desc: '每天汇总代码仓库的变更情况，生成团队可读的工程日报。',
+      auto_tpl_changelog_prompt: '汇总当前工作区仓库今天的变更（基于 git log）：1) 按功能 / 修复 / 重构分组列出提交；2) 生成一份团队可读的中文工程日报：做了什么、为什么、影响范围、后续注意事项。',
       privacy_title: '隐私声明',
       privacy_body: '本应用完全在本地运行。我们不会收集、上传或存储您的任何个人信息、API Key、会话内容或用量数据；所有数据仅保存在本机。仅在以下情况访问网络：更新检查（npm registry / GitHub Releases）、插件市场列表（GitHub）、运行时下载（npm registry）。费用估算基于您自行配置的价格参数，不构成计费依据。',
       about_diagnostics: '崩溃诊断', about_diagnosticsCount: '{n} 次（可在诊断目录查看）', about_diagnosticsNone: '无',
       btn_openDiagnostics: '打开诊断目录',
       settings_contextWindow: '上下文窗口（估算）', settings_contextWindowHint: 'token 胶囊的「上下文压力」按此值估算；DeepSeek 模型通常 64k–128k',
+      nav_search: '搜索设置…',
+      group_general: '常规', group_workspace: '工作', group_system: '系统',
+      nav_general: '通用', nav_cost: '用量与成本', nav_runtime: '运行时', nav_plugins: '插件',
+      nav_tasks: '自动化', nav_data: '数据与备份', nav_update: '更新', nav_about: '关于',
+      page_remote_d: '在手机浏览器中安全使用本机会话',
+      page_general_d: '壳的界面与启动偏好', page_cost_d: 'API 费率、峰谷分时与预算',
+      page_runtime_d: '工作区、端口与可执行文件路径', page_plugins_d: '发现与管理 dsh 插件',
+      page_tasks_d: '配置和管理自动化任务，让 AI 按计划执行工作流。', page_data_d: '备份、存储与隐私',
+      page_update_d: '运行时更新通道与版本', page_about_d: '版本、诊断与帮助',
+      card_costRates: '谷时费率（默认）', card_costPeak: '峰谷分时计价', card_costUsage: '用量统计',
+      card_backup: '会话备份', card_storage: '存储占用', card_privacy: '隐私与安全',
+      card_updateChannel: '通道与来源', card_updateOps: '版本操作', card_aboutVersions: '版本信息',
+      card_appearance: '外观',
     },
     en: {
-      title: 'DshCockpit Settings', sec_update: 'Updates', sec_runtime: 'Runtime', sec_app: 'Application',
-      sec_data: 'Data & Security', sec_about: 'About',
+      title: 'DshCockpit Settings',
       channel: 'Update channel', channel_rc: 'rc (follow previews, recommended)', channel_latest: 'latest (stable only)', channel_pinned: 'pinned (locked version)',
       pinnedVersion: 'Pinned version', registry: 'npm registry',
       registry_official: 'Official registry.npmjs.org', registry_mirror: 'Mirror npmmirror.com',
       keepVersions: 'Keep versions', checkOnStart: 'Check updates on startup',
       btn_check: 'Check updates', btn_apply: 'Apply update', btn_rollback: 'Roll back', btn_browse: 'Browse…',
-      btn_backupNow: 'Back up now', btn_openLogs: 'Open log folder', btn_save: 'Save',
+      btn_backupNow: 'Back up now', btn_openLogs: 'Open log folder',
       status_notChecked: 'Not checked yet.',
       workspace: 'Workspace', workspace_ph: 'Default: home directory',
       dshHome_ph: 'Default: ~/.dsh', port: 'Port', port_hint: '0 = auto-assigned by the OS (recommended)',
@@ -434,14 +1012,21 @@
       runtime_hint: 'Workspace / DSH_HOME / port / Node / dsh path changes take effect after "Restart runtime" in the tray.',
       trayOnClose: 'Minimize to tray on close', autoStart: 'Start at login',
       language: 'Language', language_system: 'Follow system', language_zh: '中文', language_en: 'English',
+      themeMode: 'Theme', themeMode_hint: 'Follow the system light/dark mode, or fix it manually',
+      theme_system: 'Follow system', theme_dark: 'Dark', theme_light: 'Light',
       backupOnQuit: 'Back up sessions on quit', backupKeep: 'Keep backups',
       security_note: 'Security: backups contain only session logs and settings.yaml, never API credentials (credentials stay in DSH_HOME/.credentials.yaml; OS-keychain integration is planned); runtime downloads are integrity-checked end to end; the harness file sandbox and approval prompts are unaffected.',
       about_shell: 'Shell version', about_runtime: 'Active runtime', about_path: 'Runtime path', about_dshHome: 'DSH_HOME',
-      save_hint: 'Saves immediately (update settings apply on the next check; path settings apply after the next runtime restart).',
-      busy_saving: '⏳ Saving…', saved_ok: '✅ Settings saved.', saved_fail: '❌ Save failed: ',
+      busy_saving: '⏳ Saving…', saved_fail: '❌ Save failed: ',
       backup_running: '⏳ Backing up…', backup_done: '✅ Backup complete',
       backup_info: 'Backup folder: {dir}\nCopies: {count} | Latest: {latest} | Size: {size} MB',
       backup_none: 'No backups yet.',
+      card_rescue: 'Profile snapshots & rescue', rescue_hint: 'Snapshots of the webUI profile are taken automatically before/after every plugin install or removal; if a plugin crashes the webUI, roll back to any snapshot in one click.',
+      btn_safeMode: 'Restart in safe mode',
+      snap_none: 'No snapshots yet (created automatically on plugin install/removal).',
+      snap_preInstall: 'before install', snap_postInstall: 'after install', snap_preRemove: 'before removal', snap_postRemove: 'after removal', snap_preRestore: 'before rollback', snap_preSafeMode: 'before safe mode',
+      snap_restore: 'Roll back', snap_confirm: 'Roll the profile back to the snapshot from {time}? Current webUI plugin config will be overwritten and the runtime restarts.', snap_restored: '✅ Rolled back; runtime restarting',
+      snap_safeConfirm: 'Enter safe mode? All third-party plugins will be removed and only official bundles kept (a snapshot is taken first, so you can roll back).', snap_safeDone: '✅ Safe mode active; runtime restarting',
       check_running: 'Querying npm registry…',
       check_fail: '❌ Check failed: ', new_found: 'New version: {a} → {b}\nOnce downloaded and verified, "Apply update" becomes available.',
       up_to_date: 'Up to date ({v}).', apply_ok: '✅ Switched to {v}; runtime restarted.', apply_fail: '❌ Apply failed: ',
@@ -452,19 +1037,45 @@
       warn_path_ascii: '⚠ Non-ASCII path: dsh has known Windows path bugs (discussion #107); prefer ASCII-only paths.',
       sec_firstrun: 'First run', firstrun_step1: 'Open the Harness "Settings" in the window and configure your DeepSeek API key', firstrun_step2: 'Back here, pick a workspace folder (or drag a folder onto the top-right bar)', firstrun_step3: 'Start chatting; the top-right pill shows live token usage',
       shellAutoUpdate: 'Auto-check shell updates',
-      sec_plugins: 'Plugin market', btn_pluginsRefresh: 'Refresh plugin list',
-      btn_openMarket: 'Open plugin market…', plugins_installedCount: '{n} installed',
+      sec_plugins: 'Plugin market',
+      plugins_searchPh: 'Search plugins (name / description)…', plugins_refresh: 'Refresh', plugins_go: 'Search',
+      plugins_installedCount: '{n} plugins',
+      plugins_shownCount: 'Showing {n} of {t}', plugins_loadMore: 'Load more ({n} more)…',
+      plugins_catAll: 'All', plugins_catTheme: 'Themes & Skins', plugins_catSkills: 'Skills & Prompts',
+      plugins_catWorkflow: 'Productivity & Workflow', plugins_catMemory: 'Memory & Context', plugins_catDesign: 'Design & Creation',
+      plugins_catDevtools: 'Developer Tools', plugins_catFun: 'Fun & Decor', plugins_catOther: 'Other',
+      plugins_installedTitle: 'Installed', plugins_emptyInstalled: 'No plugins installed yet; click "Install" in the list below.',
+      plugins_discoverTitle: 'Discover',
+      plugins_opInstall: 'Installing {name}…', plugins_opRemove: 'Removing {name}…',
+      plugins_stageResolve: 'resolving', plugins_stageDownload: 'downloading',
+      plugins_stageInstall: 'installing', plugins_stageCleanup: 'cleaning up',
+      plugins_installedOk: '✅ {name} installed; the runtime restarted automatically.',
+      plugins_removedOk: '✅ {name} removed; the runtime restarted automatically.',
+      plugins_actionFailed: '❌ Action failed: ',
+      plugins_restartHint: 'Plugins changed; restart the runtime to apply.', plugins_restartNow: 'Restart now',
+      plugins_restarting: 'Restarting…', plugins_restartDone: '✅ Runtime restarted.',
+      plugins_loadFail: '❌ Failed to load: ', plugins_retry: 'Retry',
       hint_registry: 'Where runtime and plugin dependencies are downloaded from (third-party mirrors are a supply-chain trust boundary)',
       hint_keepVersions: 'How many runtime version dirs to keep (for one-click rollback)',
       hint_workspace: "The agent's working directory (default: home; drag a folder onto the top-right bar to switch quickly)",
       hint_dshHome: 'Where sessions, config and API credentials live (default ~/.dsh)',
       hint_nodeBin: 'The Node executable used to run dsh; usually auto-detected (advanced)',
       hint_dshBin: 'The dsh lib/bin.js path; usually auto-detected (advanced)',
-      plugins_note: 'Plugins come from the GitHub "dsh-plugin" topic, maintained by the community; installing runs the repo scripts and restarts the runtime — only install plugins you trust. Search and install happen in a separate window.',
-      plugins_loading: 'Loading plugins from GitHub…', plugins_empty: 'No plugins found.', plugins_error: 'Plugin error: ',
-      plugins_install: 'Install', plugins_remove: 'Remove', plugins_action_ok: '✅ Done; runtime restarted.',
-      storage: 'Storage usage', btn_cleanup: 'Clean up (logs / old backups)', cleanup_confirm: 'Delete old logs and backups beyond the keep count?', cleanup_done: '✅ Cleaned up, freed ~{mb} MB', storage_total: 'Total: {mb} MB',
-      sec_cost: 'Usage & Cost',
+      plugins_note: 'Plugins come from the community-curated awesome-dsh-plugin list; installing runs the repo scripts and restarts the runtime — only install plugins you trust.',
+      mcat_ui: 'UI Enhancements', mcat_billing: 'Usage & Billing', mcat_theme: 'Themes & Appearance', mcat_models: 'Models & Providers',
+      mcat_sessions: 'Sessions & Messages', mcat_memory: 'Memory', mcat_tools: 'Tools & Capabilities', mcat_vision: 'Vision & Multimodal',
+      mcat_skills: 'Skills', mcat_workflow: 'Workflow & Automation', mcat_notify: 'Notifications & Integrations', mcat_devtools: 'Development & Runtime',
+      mcat_market: 'Plugin Markets & Managers', mcat_fun: 'Just for Fun',
+      market_searchChip: '🔍 Search on GitHub',
+      market_searchPhGitHub: 'Search dsh plugins on GitHub…',
+      market_searchEmptyHint: 'Type a keyword in the search box above to search GitHub for dsh plugins (covers repos not in the curated list)',
+      market_source: 'Source:',
+      market_updated: 'updated {time}',
+      market_stale: 'offline — showing cached data',
+      market_fallback: 'curated list unavailable — showing GitHub topic search',
+      plugins_loading: 'Loading plugins from GitHub…', plugins_empty: 'No matching plugins found.',
+      plugins_install: 'Install', plugins_remove: 'Remove',
+      storage: 'Storage usage', btn_cleanup: 'Clean up (logs / old backups)', storage_cleanupHint: 'Delete old logs and backups beyond the keep count — cannot be undone', cleanup_confirm: 'Delete old logs and backups beyond the keep count?', cleanup_done: '✅ Cleaned up, freed ~{mb} MB', storage_total: 'Total: {mb} MB',
       cost_inputRate: 'Input ¥/1M', cost_outputRate: 'Output ¥/1M',
       cost_cacheReadRate: 'Cache read ¥/1M', cost_cacheWriteRate: 'Cache write ¥/1M',
       cost_budget: 'Monthly budget ¥', cost_budgetHint: '0 = unlimited; alerts at 80% / 100%',
@@ -474,10 +1085,13 @@
       cost_peakCacheReadRate: 'Peak cache read ¥/1M', cost_peakCacheWriteRate: 'Peak cache write ¥/1M',
       cost_ratesHint: 'Costs are estimated from the rates you configure; not a billing basis.',
       cost_today: 'Today', cost_week: 'Last 7 days', cost_month: 'Last 30 days', cost_perWorkspace: 'By workspace:',
-      sec_schedule: 'Scheduled tasks',
-      schedule_name: 'Name', schedule_prompt: 'Prompt', schedule_type: 'Type',
+      schedule_name: 'Task name', schedule_prompt: 'Prompt', schedule_type: 'Type',
       schedule_every: 'Every', schedule_daily: 'Daily at', schedule_seconds: 'sec',
       btn_schedAdd: 'Add task', schedule_note: 'Runs the prompt in a background headless session when due (requires an API key); you get a notification when done.',
+      schedule_weekly: 'Weekly on', schedule_at: 'Time', schedule_day: 'Weekday', schedule_interval: 'Interval (sec)',
+      schedule_day0: 'Sun', schedule_day1: 'Mon', schedule_day2: 'Tue', schedule_day3: 'Wed',
+      schedule_day4: 'Thu', schedule_day5: 'Fri', schedule_day6: 'Sat',
+      nav_remote: 'Phone remote',
       sec_remote: 'Phone remote control', remote_enable: 'Enable phone control', remote_port: 'Gateway port',
       remote_compat: 'WeChat/Douyin open compat mode (HTTP)',
       remote_compatHint: 'On = plain HTTP: WeChat and Douyin in-app browsers open the link directly; off = self-signed HTTPS (system browsers need a "proceed anyway" tap). Cleartext on the LAN - do not enable on public networks.',
@@ -494,11 +1108,66 @@
       remote_pairing_fmt: 'Pairing code: {code} (one-shot, valid {min} min)',
       remote_revoke_confirm: 'Revoke every paired device? Phones will need to pair again.',
       schedule_enabled: 'Enabled', schedule_delete: 'Delete',
+      btn_cancel: 'Cancel', btn_saveTask: 'Save task',
+      auto_manualNew: 'New manually', auto_askCreate: 'Create in chat',
+      auto_tabTasks: 'Configured', auto_tabHistory: 'Run history', auto_tabTpl: 'Templates',
+      auto_emptyTasks: 'No automation tasks yet — create one from "Templates" in one click, or "New manually".',
+      auto_emptyHistory: 'No runs yet; results appear here after a task runs.',
+      auto_active: 'Active', auto_paused: 'Paused', auto_running: 'Running…',
+      auto_runNow: 'Run', auto_edit: 'Edit',
+      auto_editTitle: 'Edit task', auto_newTitle: 'New task',
+      auto_useTpl: 'Use template', auto_askShort: 'In chat',
+      auto_nextRun: 'Next run', auto_lastRun: 'Last run',
+      auto_histCount: '{n} runs', auto_noOutput: '(no output)',
+      auto_clearHistory: 'Clear history',
+      auto_note: 'When due, the task prompt runs in a background headless session (requires an API key); you get a notification and a history entry when done.',
+      auto_copiedTitle: 'Guiding prompt copied',
+      auto_copiedBody: 'Switched to the main window — paste the guide into the chat and let the agent refine your task prompt.',
+      auto_askSchedHint: 'TBD (e.g. daily 09:00)',
+      auto_askSeed: '(describe what you want the AI to automate first)',
+      auto_askGuide: 'Help me create a dsh automation task.\n- Name: {name}\n- Schedule: {sched}\n- Draft prompt: {seed}\nPlease refine the prompt (clarify sources, output format and error handling), then output three sections: name, schedule, final prompt. I will create the task under Settings → Automation and paste the final prompt.',
+      auto_tpl_ai_news_name: 'Daily AI News Digest',
+      auto_tpl_ai_news_desc: 'Every morning, a digest of AI industry headlines with trend analysis.',
+      auto_tpl_ai_news_prompt: 'Search and summarize today\'s key AI industry developments: 1) list the 5-8 most important news items (model releases, funding, policy, open source); 2) one or two sentences each, with sources; 3) end with a 3-5 sentence trend summary. Output in Chinese.',
+      auto_tpl_brand_radar_name: 'Brand Sentiment Weekly',
+      auto_tpl_brand_radar_desc: 'Weekly scan of brand mentions and reviews across social media and communities.',
+      auto_tpl_brand_radar_prompt: 'Search the past 7 days of social and dev communities (X/Twitter, Reddit, Hacker News, V2EX, Zhihu) for mentions of our brand: 1) summarize representative positive/negative/neutral opinions; 2) flag issues or opportunities to follow up; 3) produce a Chinese weekly report ready to send to the team.',
+      auto_tpl_competitor_name: 'Weekly Competitor Watch',
+      auto_tpl_competitor_desc: 'Track competitor product updates, community feedback and major news on a schedule.',
+      auto_tpl_competitor_prompt: 'Research what major competitors shipped in the last week: product updates, releases, announcements, community feedback. For each competitor list: the update, impact on us, and how closely to watch. Finish with a three-sentence takeaway. Output in Chinese.',
+      auto_tpl_stock_name: 'Stock Price Alerts',
+      auto_tpl_stock_desc: 'Track watched stock prices daily; alert automatically on abnormal moves.',
+      auto_tpl_stock_prompt: 'Check the latest prices and daily moves of the stocks I follow (NVDA, AAPL, TSLA): 1) table of price, change %, volume; 2) for any ticker moving more than ±5%, analyze likely causes and flag an alert; 3) one-paragraph market recap. Output in Chinese.',
+      auto_tpl_security_name: 'Security Vulnerability Scan',
+      auto_tpl_security_desc: 'Periodically scan the repo for verified medium/high severity issues.',
+      auto_tpl_security_prompt: 'Scan the repository in the current workspace for security issues: 1) known medium/high CVEs in dependencies; 2) obvious source-level risks (hardcoded secrets, SQL injection, path traversal, unsafe deserialization); 3) findings and fixes ordered by severity. Only report verified issues.',
+      auto_tpl_bug_scan_name: 'Commit Bug Scan',
+      auto_tpl_bug_scan_desc: 'Analyze recent commits to catch high-impact bugs before they bite.',
+      auto_tpl_bug_scan_prompt: 'Analyze the repository\'s recent commits (git log last 50 + diffs): 1) find defects that could cause crashes, data corruption or security issues; 2) for each: location, trigger condition, impact, suggested fix; 3) only report high-confidence issues. Output in Chinese.',
+      auto_tpl_test_cov_name: 'Test Coverage Booster',
+      auto_tpl_test_cov_desc: 'Spot high-risk recently changed code missing tests and add them automatically.',
+      auto_tpl_test_cov_prompt: 'Analyze recently changed code in the repository: 1) identify high-risk modules/functions lacking test coverage; 2) add unit tests for the 3-5 most important ones; 3) run the tests to confirm they pass and summarize what was added.',
+      auto_tpl_changelog_name: 'Daily Change Digest',
+      auto_tpl_changelog_desc: 'Summarize each day\'s repo changes into a team-ready engineering report.',
+      auto_tpl_changelog_prompt: 'Summarize today\'s changes in the repository (from git log): 1) group commits by feature / fix / refactor; 2) produce a Chinese engineering report: what changed, why, blast radius, and what to watch next.',
       privacy_title: 'Privacy',
       privacy_body: 'This app runs fully locally. We never collect, upload or store your personal information, API keys, conversation contents or usage data; everything stays on this machine. Network is only touched for: update checks (npm registry / GitHub Releases), plugin market listing (GitHub), runtime downloads (npm registry). Cost estimates use the rates you configure and are not a billing basis.',
       about_diagnostics: 'Crash diagnostics', about_diagnosticsCount: '{n} (see diagnostics folder)', about_diagnosticsNone: 'none',
       btn_openDiagnostics: 'Open diagnostics',
       settings_contextWindow: 'Context window (estimate)', settings_contextWindowHint: 'The pill\'s "context pressure" is estimated against this value; DeepSeek models are typically 64k–128k',
+      nav_search: 'Search settings…',
+      group_general: 'General', group_workspace: 'Workspace', group_system: 'System',
+      nav_general: 'General', nav_cost: 'Usage & Cost', nav_runtime: 'Runtime', nav_plugins: 'Plugins',
+      nav_tasks: 'Automation', nav_data: 'Data & Backup', nav_update: 'Updates', nav_about: 'About',
+      page_remote_d: "Use this machine's sessions safely from a phone browser",
+      page_general_d: 'Shell interface & startup preferences', page_cost_d: 'API rates, peak pricing & budget',
+      page_runtime_d: 'Workspace, port & executable paths', page_plugins_d: 'Discover & manage dsh plugins',
+      page_tasks_d: 'Configure and manage automation tasks — AI workflows on a schedule.', page_data_d: 'Backups, storage & privacy',
+      page_update_d: 'Runtime update channel & versions', page_about_d: 'Versions, diagnostics & help',
+      card_costRates: 'Off-peak rates (default)', card_costPeak: 'Peak & off-peak pricing', card_costUsage: 'Usage',
+      card_backup: 'Session backups', card_storage: 'Storage', card_privacy: 'Privacy & security',
+      card_updateChannel: 'Channel & source', card_updateOps: 'Version actions', card_aboutVersions: 'Versions',
+      card_appearance: 'Appearance',
     },
   };
 
@@ -524,14 +1193,118 @@
       const key = el.dataset.i18nPlaceholder.replaceAll(/[-.]/g, '_');
       el.placeholder = tr(key);
     });
+    document.querySelectorAll('[data-i18n-title]').forEach((el) => {
+      const key = el.dataset.i18nTitle.replaceAll(/[-.]/g, '_');
+      el.title = tr(key);
+    });
     document.title = tr('title');
+    filterNav(); // nav labels changed with the language — re-apply the filter
+    renderAutoTpl(); // template cards are built from I18N at runtime
+  }
+
+  // ------------------------------------------------------------- routing
+  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'tasks', 'data', 'update', 'about'];
+  function pageFromHash() {
+    const p = (location.hash || '').replace(/^#\/?/, '');
+    return PAGES.includes(p) ? p : 'general';
+  }
+  function showPage(p, push) {
+    if (!PAGES.includes(p)) p = 'general';
+    document.querySelectorAll('.page').forEach((el) => el.classList.toggle('active', el.id === 'page-' + p));
+    document.querySelectorAll('.nav-item').forEach((a) => a.classList.toggle('active', a.dataset.page === p));
+    $('pages').scrollTop = 0;
+    if (push && location.hash !== '#/' + p) location.hash = '#/' + p;
+    // plugins is a low-traffic page with a network-backed list — load lazily
+    // on first visit so opening the settings window stays offline-fast
+    if (p === 'plugins' && !plug.loaded) { plug.loaded = true; loadPlugins(); }
+    // automation center: refresh the task list on every visit (cheap, local)
+    if (p === 'tasks') renderAuto();
+  }
+  window.addEventListener('hashchange', () => showPage(pageFromHash(), false));
+  document.querySelectorAll('.nav-item').forEach((a) => {
+    a.addEventListener('click', () => showPage(a.dataset.page, true));
+  });
+
+  // -------------------------------------------------------- nav search
+  function filterNav() {
+    const q = ($('nav-search').value || '').trim().toLowerCase();
+    document.querySelectorAll('.nav-item').forEach((a) => {
+      const label = (a.textContent || '').trim().toLowerCase();
+      a.classList.toggle('filtered', !!q && !label.includes(q));
+    });
+  }
+  $('nav-search').addEventListener('input', filterNav);
+
+  // ---------------------------------------------------- auto-save
+  // Every persisted setting saves itself on change — there is no save
+  // button. [id, settingsKey, pick]: pick() coerces the DOM value exactly
+  // like the old full-form save did (trim / clamp / checkbox → boolean).
+  // 'theme-mode' → 'themeMode': hyphenated DOM ids map to camelCase keys.
+  const AUTO_FIELDS = [
+    ['channel', 'channel', (el) => el.value],
+    ['pinnedVersion', 'pinnedVersion', (el) => el.value.trim()],
+    ['registry', 'registry', (el) => el.value],
+    ['keepVersions', 'keepVersions', (el) => Math.max(1, Number(el.value) || 2)],
+    ['checkUpdatesOnStartup', 'checkUpdatesOnStartup', (el) => el.checked],
+    ['workspace', 'workspace', (el) => el.value.trim()],
+    ['dshHome', 'dshHome', (el) => el.value.trim()],
+    ['port', 'port', (el) => Math.max(0, Number(el.value) || 0)],
+    ['nodeBin', 'nodeBin', (el) => el.value.trim()],
+    ['dshBin', 'dshBin', (el) => el.value.trim()],
+    ['contextWindow', 'contextWindow', (el) => Math.max(1024, Number(el.value) || 128000)],
+    ['trayOnClose', 'trayOnClose', (el) => el.checked],
+    ['autoStart', 'autoStart', (el) => el.checked],
+    ['language', 'language', (el) => el.value],
+    ['theme-mode', 'themeMode', (el) => el.value],
+    ['shellAutoUpdate', 'shellAutoUpdate', (el) => el.checked],
+    ['backupOnQuit', 'backupOnQuit', (el) => el.checked],
+    ['backupKeep', 'backupKeep', (el) => Math.max(1, Number(el.value) || 5)],
+    ['costInputPerM', 'costInputPerM', (el) => Math.max(0, Number(el.value) || 0)],
+    ['costOutputPerM', 'costOutputPerM', (el) => Math.max(0, Number(el.value) || 0)],
+    ['costCacheReadPerM', 'costCacheReadPerM', (el) => Math.max(0, Number(el.value) || 0)],
+    ['costCacheWritePerM', 'costCacheWritePerM', (el) => Math.max(0, Number(el.value) || 0)],
+    ['monthlyBudget', 'monthlyBudget', (el) => Math.max(0, Number(el.value) || 0)],
+    ['costPeakEnabled', 'costPeakEnabled', (el) => el.checked],
+    ['costPeakWindows', 'costPeakWindows', (el) => el.value.trim()],
+    ['costPeakInputPerM', 'costPeakInputPerM', (el) => Math.max(0, Number(el.value) || 0)],
+    ['costPeakOutputPerM', 'costPeakOutputPerM', (el) => Math.max(0, Number(el.value) || 0)],
+    ['costPeakCacheReadPerM', 'costPeakCacheReadPerM', (el) => Math.max(0, Number(el.value) || 0)],
+    ['costPeakCacheWritePerM', 'costPeakCacheWritePerM', (el) => Math.max(0, Number(el.value) || 0)],
+    ['remoteControl', 'remoteControl', (el) => el.checked],
+    ['remotePort', 'remotePort', (el) => Math.min(65535, Math.max(1024, Number(el.value) || 31780))],
+    ['remoteCompat', 'remoteCompat', (el) => el.checked],
+  ];
+  for (const [id, key, pick] of AUTO_FIELDS) {
+    $(id).addEventListener('change', async () => {
+      try {
+        const saved = await window.dshShell.saveSettings({ [key]: pick($(id)) });
+        if (current) current[key] = saved[key]; // keep the snapshot in sync
+      } catch (e) {
+        flash(tr('saved_fail') + e.message);
+      }
+    });
   }
 
   // ----------------------------------------------------------------- state
+  let flashTimer = null;
   function busy(on, text) {
     updating = on;
-    $('busy').style.display = on ? 'block' : 'none';
-    if (text) $('busy').textContent = text;
+    clearTimeout(flashTimer);
+    const b = $('busy');
+    b.classList.remove('flash');
+    b.style.display = on ? 'block' : 'none';
+    if (text) b.textContent = text;
+  }
+  // transient feedback (e.g. an auto-save failure) in the floating pill;
+  // never clobbers a running operation's busy indicator
+  function flash(text) {
+    if (updating) return;
+    const b = $('busy');
+    b.textContent = text;
+    b.classList.add('flash');
+    b.style.display = 'block';
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => busy(false), 4000);
   }
 
   function setStatus(el, text, cls) {
@@ -571,6 +1344,7 @@
     $('trayOnClose').checked = !!s.trayOnClose;
     $('autoStart').checked = !!s.autoStart;
     $('language').value = s.language || 'system';
+    $('theme-mode').value = s.themeMode || 'system';
     $('shellAutoUpdate').checked = !!s.shellAutoUpdate;
     $('backupOnQuit').checked = !!s.backupOnQuit;
     $('backupKeep').value = s.backupKeep;
@@ -595,46 +1369,15 @@
     applyI18n();
   }
 
-  function collectForm() {
-    return {
-      channel: $('channel').value,
-      pinnedVersion: $('pinnedVersion').value.trim(),
-      registry: $('registry').value,
-      keepVersions: Math.max(1, Number($('keepVersions').value) || 2),
-      checkUpdatesOnStartup: $('checkUpdatesOnStartup').checked,
-      workspace: $('workspace').value.trim(),
-      dshHome: $('dshHome').value.trim(),
-      port: Math.max(0, Number($('port').value) || 0),
-      nodeBin: $('nodeBin').value.trim(),
-      dshBin: $('dshBin').value.trim(),
-      contextWindow: Math.max(1024, Number($('contextWindow').value) || 128000),
-      trayOnClose: $('trayOnClose').checked,
-      autoStart: $('autoStart').checked,
-      language: $('language').value,
-      shellAutoUpdate: $('shellAutoUpdate').checked,
-      backupOnQuit: $('backupOnQuit').checked,
-      backupKeep: Math.max(1, Number($('backupKeep').value) || 5),
-      costInputPerM: Math.max(0, Number($('costInputPerM').value) || 0),
-      costOutputPerM: Math.max(0, Number($('costOutputPerM').value) || 0),
-      costCacheReadPerM: Math.max(0, Number($('costCacheReadPerM').value) || 0),
-      costCacheWritePerM: Math.max(0, Number($('costCacheWritePerM').value) || 0),
-      monthlyBudget: Math.max(0, Number($('monthlyBudget').value) || 0),
-      remoteControl: $('remoteControl').checked,
-      remotePort: Math.min(65535, Math.max(1024, Number($('remotePort').value) || 31780)),
-      remoteCompat: $('remoteCompat').checked,
-      costPeakEnabled: $('costPeakEnabled').checked,
-      costPeakWindows: $('costPeakWindows').value.trim(),
-      costPeakInputPerM: Math.max(0, Number($('costPeakInputPerM').value) || 0),
-      costPeakOutputPerM: Math.max(0, Number($('costPeakOutputPerM').value) || 0),
-      costPeakCacheReadPerM: Math.max(0, Number($('costPeakCacheReadPerM').value) || 0),
-      costPeakCacheWritePerM: Math.max(0, Number($('costPeakCacheWritePerM').value) || 0),
-    };
-  }
+  // (v0.2.2 removed the whole-form save button: every setting auto-saves
+  //  itself via AUTO_FIELDS; the remote controls join that list below.)
 
   // ---------------------------------------------------------------- events
   $('channel').addEventListener('change', () => {
     $('row-pinned').style.display = $('channel').value === 'pinned' ? '' : 'none';
   });
+  // language re-paints the whole UI locally on top of the generic auto-save;
+  // the main process rebroadcasts the resolved language/theme to every window
   $('language').addEventListener('change', () => {
     const v = $('language').value;
     if (v === 'zh' || v === 'en') resolvedLang = v;
@@ -643,19 +1386,6 @@
   ['registry', 'port', 'workspace', 'dshHome'].forEach((id) => {
     $(id).addEventListener('input', validateWarnings);
     $(id).addEventListener('change', validateWarnings);
-  });
-
-  $('btn-save').addEventListener('click', async () => {
-    busy(true, tr('busy_saving'));
-    try {
-      const saved = await window.dshShell.saveSettings(collectForm());
-      fillForm(saved);
-      setStatus($('update-status'), tr('saved_ok'), 'ok');
-    } catch (e) {
-      setStatus($('update-status'), tr('saved_fail') + e.message, 'bad');
-    } finally {
-      busy(false);
-    }
   });
 
   $('btn-check').addEventListener('click', async () => {
@@ -746,63 +1476,291 @@
     setStatus($('backup-status'), text, cls);
   }
 
-  // ------------------------------------------------------------ scheduler
-  function schedDesc(t) {
-    if (t.kind === 'every') return tr('schedule.every') + ' ' + (Number(t.everySeconds) || 60) + ' ' + tr('schedule.seconds');
-    return tr('schedule.daily') + ' ' + (t.dailyTime || '');
+  // ------------------------------------------------------------ profile snapshots / rescue
+  const SNAP_LABELS = { 'pre-install': tr('snap.preInstall'), 'post-install': tr('snap.postInstall'), 'pre-remove': tr('snap.preRemove'), 'post-remove': tr('snap.postRemove'), 'pre-restore': tr('snap.preRestore'), 'pre-safe-mode': tr('snap.preSafeMode') };
+  async function renderSnapshots() {
+    const el = $('snapshot-list');
+    if (!el) return;
+    let snaps = [];
+    try { snaps = await window.dshShell.profileSnapshots(); } catch { /* ipc not ready */ }
+    el.innerHTML = '';
+    if (!snaps.length) { el.textContent = tr('snap.none'); return; }
+    for (const s of snaps.slice(0, 8)) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 0';
+      const info = document.createElement('span');
+      const time = (s.time || '').replace('T', ' ').slice(0, 16);
+      const label = SNAP_LABELS[s.label] || s.label || '';
+      const plugins = (s.plugins || []).length ? ` · ${s.plugins.join(', ')}` : '';
+      info.textContent = `${time} · ${label}${plugins}`;
+      const btn = document.createElement('button');
+      btn.className = 'secondary';
+      btn.style.cssText = 'padding:2px 10px;font-size:11px';
+      btn.textContent = tr('snap.restore');
+      btn.addEventListener('click', async () => {
+        if (!confirm(tr('snap.confirm', { time }))) return;
+        try {
+          const r = await window.dshShell.restoreSnapshot(s.id);
+          setStatus($('rescue-status'), r.ok ? tr('snap.restored') : tr('saved_fail') + r.reason, r.ok ? 'ok' : 'bad');
+          if (r.ok) renderSnapshots();
+        } catch (e) {
+          setStatus($('rescue-status'), tr('saved_fail') + e.message, 'bad');
+        }
+      });
+      row.append(info, btn);
+      el.append(row);
+    }
   }
-
-  async function renderSched() {
+  const smBtn = $('btn-safemode');
+  if (smBtn) smBtn.addEventListener('click', async () => {
+    if (!confirm(tr('snap.safeConfirm'))) return;
     try {
-      const list = await window.dshShell.scheduledList();
-      const el = $('sched-list');
-      el.innerHTML = '';
-      if (!list.length) return;
-      for (const t of list) {
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid var(--line); font-size:12px;';
-        const info = document.createElement('div');
-        info.style.flex = '1';
-        info.innerHTML = `<b>${escapeHtml(t.name || t.id)}</b> <span style="color:var(--dim)">${escapeHtml(schedDesc(t))}</span><br><span style="color:var(--dim)">${escapeHtml((t.prompt || '').slice(0, 80))}</span>`;
-        const en = document.createElement('input');
-        en.type = 'checkbox';
-        en.checked = !!t.enabled;
-        en.title = tr('schedule.enabled');
-        en.addEventListener('change', async () => {
-          await window.dshShell.scheduledUpsert({ ...t, enabled: en.checked });
-          renderSched();
-        });
-        const del = document.createElement('button');
-        del.textContent = tr('schedule.delete');
-        del.className = 'danger';
-        del.addEventListener('click', async () => {
-          await window.dshShell.scheduledRemove(t.id);
-          renderSched();
-        });
-        row.appendChild(info); row.appendChild(en); row.appendChild(del);
-        el.appendChild(row);
-      }
-    } catch (e) { /* ignore */ }
-  }
-
-  $('schedKind').addEventListener('change', () => {
-    const daily = $('schedKind').value === 'daily';
-    $('schedDaily').style.display = daily ? '' : 'none';
-    $('schedEvery').style.display = daily ? 'none' : '';
-    $('schedEveryLabel').style.display = daily ? 'none' : '';
+      await window.dshShell.safeMode();
+      setStatus($('rescue-status'), tr('snap.safeDone'), 'ok');
+      renderSnapshots();
+    } catch (e) {
+      setStatus($('rescue-status'), tr('saved_fail') + e.message, 'bad');
+    }
   });
 
-  $('btn-sched-add').addEventListener('click', async () => {
-    const name = $('schedName').value.trim();
-    const prompt = $('schedPrompt').value.trim();
+  // ------------------------------------------------------ automation center
+  // Built-in task templates. Names / descriptions / prompts live in I18N
+  // (auto_tpl_<id>_{name,desc,prompt}); only the schedule defaults live here.
+  const AUTO_TPL = [
+    { id: 'ai-news', icon: 'news', sched: { kind: 'daily', dailyTime: '09:00' } },
+    { id: 'brand-radar', icon: 'radar', sched: { kind: 'weekly', weeklyDay: 1, weeklyTime: '09:00' } },
+    { id: 'competitor', icon: 'chart', sched: { kind: 'weekly', weeklyDay: 5, weeklyTime: '17:00' } },
+    { id: 'stock', icon: 'trend', sched: { kind: 'daily', dailyTime: '18:00' } },
+    { id: 'security', icon: 'shield', sched: { kind: 'daily', dailyTime: '09:00' } },
+    { id: 'bug-scan', icon: 'bug', sched: { kind: 'daily', dailyTime: '09:00' } },
+    { id: 'test-cov', icon: 'flask', sched: { kind: 'weekly', weeklyDay: 6, weeklyTime: '10:00' } },
+    { id: 'changelog', icon: 'doc', sched: { kind: 'daily', dailyTime: '18:30' } },
+  ];
+  const AUTO_ICONS = {
+    news: '<path d="M4 5h13v14H6a2 2 0 0 1-2-2z"/><path d="M17 8h3v9a2 2 0 0 1-2 2"/><path d="M7 9h7M7 12h7M7 15h4"/>',
+    radar: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><path d="m12 12 5.5-5.5"/>',
+    chart: '<path d="M4 20V5"/><path d="M4 20h16"/><path d="M8.5 16v-4M13 16V9M17.5 16v-6"/>',
+    trend: '<path d="m4 17 5-5 4 3 7-8"/><path d="M15.5 7H20v4.5"/>',
+    shield: '<path d="m12 3 7 3v5.5c0 4.4-3 7.4-7 8.9-4-1.5-7-4.5-7-8.9V6z"/>',
+    bug: '<circle cx="12" cy="14" r="4"/><path d="M12 10V7M9.5 7.5 8 5.5M14.5 7.5 16 5.5M8 13H4M20 13h-4M8.5 16.5 6 18.5M15.5 16.5 18 18.5"/>',
+    flask: '<path d="M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3"/><path d="M8 3h8M7.6 15h8.8"/>',
+    doc: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h7M9 16h7"/>',
+    bolt: '<path d="M13 3 5.5 13.5H11l-1 7.5 7.5-10.5H12z"/>',
+  };
+  const auto = { tasks: [], running: new Set(), editId: null, tplId: null };
+  const svgIcon = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${AUTO_ICONS[name] || AUTO_ICONS.bolt}</svg>`;
+  const macWin = (icon) => `<div class="mac-win"><div class="mac-dots"><i></i><i></i><i></i></div><div class="mac-body">${svgIcon(icon)}</div></div>`;
+  const fmtDT = (v) => {
+    if (!v) return '—';
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return '—';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+
+  function schedDesc(t) {
+    if (t.kind === 'every') return tr('schedule.every') + ' ' + (Number(t.everySeconds) || 60) + ' ' + tr('schedule.seconds');
+    if (t.kind === 'weekly') return tr('schedule.weekly') + ' ' + tr('schedule.day' + (Number(t.weeklyDay) || 1)) + ' ' + (t.weeklyTime || '09:00');
+    return tr('schedule.daily') + ' ' + (t.dailyTime || '09:00');
+  }
+
+  async function renderAuto() {
+    try {
+      const r = await window.dshShell.scheduledList();
+      auto.tasks = (r && r.tasks) || [];
+      auto.running = new Set((r && r.running) || []);
+    } catch { /* keep the last snapshot */ }
+    $('auto-tab-n').textContent = auto.tasks.length ? String(auto.tasks.length) : '';
+    renderAutoTasks();
+    renderAutoHistory();
+  }
+
+  function renderAutoTasks() {
+    const el = $('auto-list');
+    el.innerHTML = '';
+    const empty = $('auto-empty');
+    empty.style.display = auto.tasks.length ? 'none' : '';
+    empty.textContent = tr('auto.emptyTasks');
+    for (const t of auto.tasks) {
+      const tpl = AUTO_TPL.find((x) => x.id === t.templateId);
+      const running = auto.running.has(t.id);
+      const on = t.enabled !== false;
+      const card = document.createElement('div');
+      card.className = 'auto-card';
+      const state = running
+        ? `<span class="auto-state"><span class="spin-sm"></span>${escapeHtml(tr('auto.running'))}</span>`
+        : `<span class="auto-state${on ? ' on' : ''}"><span class="dot"></span>${escapeHtml(tr(on ? 'auto.active' : 'auto.paused'))}</span>`;
+      card.innerHTML = `<div class="auto-task-top">${macWin(tpl ? tpl.icon : 'bolt')}${state}</div>`
+        + `<div class="auto-card-name">${escapeHtml(t.name || t.id)}</div>`
+        + `<div class="auto-card-desc">${escapeHtml(schedDesc(t))}</div>`
+        + `<div class="auto-task-meta">${escapeHtml(tr('auto.nextRun'))}: ${t.nextRunAt ? fmtDT(t.nextRunAt) : '—'}<br>${escapeHtml(tr('auto.lastRun'))}: ${t.lastRunAt ? fmtDT(t.lastRunAt) : '—'}</div>`
+        + `<div class="auto-card-foot"><span class="auto-sched-chip"></span><div class="btns"></div></div>`;
+      const en = document.createElement('input');
+      en.type = 'checkbox';
+      en.className = 'toggle';
+      en.checked = on;
+      en.title = tr('schedule.enabled');
+      en.addEventListener('change', async () => {
+        await window.dshShell.scheduledUpsert({ ...t, enabled: en.checked });
+        renderAuto();
+      });
+      card.querySelector('.auto-sched-chip').appendChild(en);
+      const btns = card.querySelector('.btns');
+      const mk = (label, cls, fn, dis) => {
+        const b = document.createElement('button');
+        b.textContent = label;
+        if (cls) b.className = cls;
+        b.disabled = !!dis;
+        b.addEventListener('click', fn);
+        return b;
+      };
+      btns.appendChild(mk(tr(running ? 'auto.running' : 'auto.runNow'), 'secondary', async () => {
+        try { await window.dshShell.scheduledRun(t.id); } catch { /* refreshed via scheduled:changed */ }
+        renderAuto();
+      }, running));
+      btns.appendChild(mk(tr('auto.edit'), 'secondary', () => openAutoDialog({ task: t })));
+      btns.appendChild(mk(tr('schedule.delete'), 'danger', async () => {
+        await window.dshShell.scheduledRemove(t.id);
+        renderAuto();
+      }));
+      el.appendChild(card);
+    }
+  }
+
+  async function renderAutoHistory() {
+    let list = [];
+    try { list = (await window.dshShell.scheduledHistory()) || []; } catch { /* ignore */ }
+    $('auto-hist-note').textContent = tr('auto.histCount', { n: list.length });
+    const el = $('auto-hist');
+    el.innerHTML = '';
+    if (!list.length) {
+      const d = document.createElement('div');
+      d.className = 'plugin-empty';
+      d.textContent = tr('auto.emptyHistory');
+      el.appendChild(d);
+      return;
+    }
+    for (const h of list) {
+      const item = document.createElement('details');
+      item.className = 'hist-item';
+      const s = document.createElement('summary');
+      s.innerHTML = `<span class="hist-dot ${h.ok ? 'ok' : 'bad'}"></span><b>${escapeHtml(h.name || h.taskId)}</b>`
+        + `<span class="hist-time">${fmtDT(h.startedAt)}</span>`
+        + `<span class="hist-dur">${Math.round((h.durationMs || 0) / 1000)}s</span>`;
+      const out = document.createElement('pre');
+      out.className = 'hist-out';
+      out.textContent = h.summary || tr('auto.noOutput');
+      item.appendChild(s);
+      item.appendChild(out);
+      el.appendChild(item);
+    }
+  }
+
+  function renderAutoTpl() {
+    const el = $('auto-tpl');
+    el.innerHTML = '';
+    for (const tpl of AUTO_TPL) {
+      const card = document.createElement('div');
+      card.className = 'auto-card';
+      card.innerHTML = `${macWin(tpl.icon)}`
+        + `<div class="auto-card-name">${escapeHtml(tr('auto_tpl_' + tpl.id + '_name'))}</div>`
+        + `<div class="auto-card-desc">${escapeHtml(tr('auto_tpl_' + tpl.id + '_desc'))}</div>`
+        + '<div class="auto-card-foot"><span class="auto-sched-chip"></span><div class="btns"></div></div>';
+      card.querySelector('.auto-sched-chip').textContent = schedDesc(tpl.sched);
+      const btns = card.querySelector('.btns');
+      const ask = document.createElement('button');
+      ask.className = 'secondary';
+      ask.textContent = tr('auto.askShort');
+      ask.addEventListener('click', () => askInChat(tpl.id));
+      const use = document.createElement('button');
+      use.textContent = tr('auto.useTpl');
+      use.addEventListener('click', () => openAutoDialog({ tpl }));
+      btns.appendChild(ask);
+      btns.appendChild(use);
+      el.appendChild(card);
+    }
+  }
+
+  $('auto-tabs').addEventListener('click', (e) => {
+    const tab = e.target.closest('.auto-tab');
+    if (!tab) return;
+    document.querySelectorAll('#auto-tabs .auto-tab').forEach((b) => b.classList.toggle('active', b === tab));
+    $('auto-pane-tasks').style.display = tab.dataset.tab === 'tasks' ? '' : 'none';
+    $('auto-pane-history').style.display = tab.dataset.tab === 'history' ? '' : 'none';
+    $('auto-pane-templates').style.display = tab.dataset.tab === 'templates' ? '' : 'none';
+  });
+
+  // ---- task dialog (create from template / manual / edit existing) ----
+  function schedToForm(sched) {
+    const kind = sched.kind || 'daily';
+    $('auto-f-kind').value = kind;
+    $('auto-f-time-wrap').style.display = kind === 'every' ? 'none' : '';
+    $('auto-f-day-wrap').style.display = kind === 'weekly' ? '' : 'none';
+    $('auto-f-every-wrap').style.display = kind === 'every' ? '' : 'none';
+    const time = sched.dailyTime || sched.weeklyTime;
+    if (time) $('auto-f-time').value = time;
+    if (sched.weeklyDay != null) $('auto-f-day').value = String(sched.weeklyDay);
+    if (sched.everySeconds != null) $('auto-f-every').value = String(Math.max(60, Number(sched.everySeconds) || 3600));
+  }
+  function formToSched() {
+    const kind = $('auto-f-kind').value;
+    if (kind === 'every') return { kind, everySeconds: Math.max(60, Number($('auto-f-every').value) || 3600) };
+    if (kind === 'weekly') return { kind, weeklyDay: Number($('auto-f-day').value) || 1, weeklyTime: $('auto-f-time').value || '09:00' };
+    return { kind, dailyTime: $('auto-f-time').value || '09:00' };
+  }
+  function openAutoDialog(opts) {
+    const o = opts || {};
+    auto.editId = o.task ? o.task.id : null;
+    auto.tplId = o.tpl ? o.tpl.id : (o.task && o.task.templateId) || null;
+    $('auto-dlg-title').textContent = tr(auto.editId ? 'auto.editTitle' : 'auto.newTitle');
+    $('auto-f-name').value = o.task ? (o.task.name || '')
+      : o.tpl ? tr('auto_tpl_' + o.tpl.id + '_name') : '';
+    $('auto-f-prompt').value = o.task ? (o.task.prompt || '')
+      : o.tpl ? tr('auto_tpl_' + o.tpl.id + '_prompt') : '';
+    schedToForm(o.task || (o.tpl ? o.tpl.sched : { kind: 'daily', dailyTime: '09:00' }));
+    $('auto-dialog').showModal();
+    $('auto-f-name').focus();
+  }
+  $('auto-f-kind').addEventListener('change', () => schedToForm({ kind: $('auto-f-kind').value }));
+  $('auto-f-cancel').addEventListener('click', () => $('auto-dialog').close());
+  $('auto-f-save').addEventListener('click', async () => {
+    const name = $('auto-f-name').value.trim();
+    const prompt = $('auto-f-prompt').value.trim();
     if (!name || !prompt) return;
-    const kind = $('schedKind').value;
-    const task = kind === 'every'
-      ? { name, prompt, kind, everySeconds: Math.max(60, Number($('schedEvery').value) || 3600), enabled: true }
-      : { name, prompt, kind, dailyTime: $('schedDaily').value || '09:00', enabled: true };
-    await window.dshShell.scheduledUpsert(task);
-    $('schedName').value = ''; $('schedPrompt').value = '';
-    renderSched();
+    const task = { ...formToSched(), name, prompt, templateId: auto.tplId || undefined, enabled: true };
+    if (auto.editId) task.id = auto.editId;
+    $('auto-dialog').close();
+    try {
+      await window.dshShell.scheduledUpsert(task);
+      renderAuto();
+    } catch (e) {
+      alert(tr('saved_fail') + e.message);
+    }
+  });
+
+  $('auto-new').addEventListener('click', () => openAutoDialog({}));
+  $('auto-hist-clear').addEventListener('click', async () => {
+    await window.dshShell.scheduledClearHistory();
+    renderAuto();
+  });
+
+  // "create in chat": copy a guiding prompt for the agent, surface the main
+  // window; the user pastes it and iterates with the agent on the prompt
+  async function askInChat(tplId) {
+    const tpl = tplId ? AUTO_TPL.find((x) => x.id === tplId) : null;
+    const name = tpl ? tr('auto_tpl_' + tpl.id + '_name') : '';
+    const sched = tpl ? schedDesc(tpl.sched) : tr('auto.askSchedHint');
+    const seed = tpl ? tr('auto_tpl_' + tpl.id + '_prompt') : tr('auto.askSeed');
+    const text = tr('auto.askGuide', { name, sched, seed });
+    try {
+      await window.dshShell.copyAndShow(text, tr('auto.copiedTitle'), tr('auto.copiedBody'));
+    } catch { /* ignore */ }
+  }
+  $('auto-ask').addEventListener('click', () => askInChat());
+
+  // main pushes scheduled:changed when a task runs/changes while we're open
+  window.dshShell.onScheduledChanged(() => {
+    if (document.querySelector('#page-tasks.active')) renderAuto();
   });
 
   // ------------------------------------------------------- phone remote
@@ -896,22 +1854,348 @@
 
   $('open-diagnostics').addEventListener('click', () => window.dshShell.openDiagnostics());
 
-  // ---------------------------------------------------------- plugin market
+  // ---------------------------------------------------------- plugin center
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  async function refreshPluginsCount() {
-    try {
-      const r = await window.dshShell.pluginsList();
-      if (r.ok) {
-        const n = (r.plugins || []).filter((p) => p.installed).length;
-        $('plugins-count').textContent = tr('plugins.installedCount', { n });
-      }
-    } catch (e) { /* ignore */ }
+  const PLUGIN_CATS = { // for GitHub-search results (rule-based categories)
+    all: 'plugins.catAll', theme: 'plugins.catTheme', skills: 'plugins.catSkills',
+    workflow: 'plugins.catWorkflow', memory: 'plugins.catMemory', design: 'plugins.catDesign',
+    devtools: 'plugins.catDevtools', fun: 'plugins.catFun', other: 'plugins.catOther',
+  };
+  // for curated-list results (categories come from awesome-dsh-plugin)
+  const MARKET_CATS = {
+    ui: 'mcat.ui', billing: 'mcat.billing', theme: 'mcat.theme', models: 'mcat.models',
+    sessions: 'mcat.sessions', memory: 'mcat.memory', tools: 'mcat.tools', vision: 'mcat.vision',
+    skills: 'mcat.skills', workflow: 'mcat.workflow', notify: 'mcat.notify', devtools: 'mcat.devtools',
+    market: 'mcat.market', fun: 'mcat.fun',
+  };
+  const SEARCH_CHIP = '__search__';
+  const PLUGIN_STAGE_KEYS = {
+    resolve: 'plugins.stageResolve', download: 'plugins.stageDownload',
+    install: 'plugins.stageInstall', cleanup: 'plugins.stageCleanup',
+  };
+  const PLUGIN_PAGE = 60; // rows rendered per batch — the curated list has 1000+ entries
+  const plug = {
+    loaded: false,      // lazy-load latch: first showPage('plugins') fetches
+    mode: 'market',     // 'market' (curated list) | 'search' (GitHub search tab)
+    cat: 'all',         // active category chip (client-side filter)
+    limit: PLUGIN_PAGE, // incremental render: only the first `limit` filtered rows hit the DOM
+    items: [],          // plugins of the active mode
+    market: null,       // last plugins:market response (curated list)
+    acting: false,      // one install/remove at a time (mirrors main's guard)
+    pendingReload: false, // search typed mid-op; re-runs after the op settles
+    seq: 0,             // drops stale search responses
+    op: '', name: '', stage: '', tail: '',
+    t0: 0, timer: null, labelEl: null, tailEl: null,
+  };
+
+  function plugStatus(text, cls) {
+    const el = $('plugin-status');
+    el.style.display = text ? '' : 'none';
+    el.textContent = text;
+    el.className = 'status' + (cls ? ' ' + cls : '');
   }
 
-  $('btn-open-market').addEventListener('click', () => window.dshShell.openMarket());
+  /** Installed-area card: rows from settings.installedPlugins (names + remove). */
+  function renderInstalled() {
+    const list = (current && current.installedPlugins) || [];
+    $('plugin-installed-count').textContent = tr('plugins.installedCount', { n: list.length });
+    const el = $('plugin-installed');
+    el.innerHTML = '';
+    if (!list.length) {
+      const d = document.createElement('div');
+      d.className = 'note';
+      d.textContent = tr('plugins.emptyInstalled');
+      el.appendChild(d);
+      return;
+    }
+    for (const name of list) {
+      const row = document.createElement('div');
+      row.className = 'plugin-inst';
+      const nm = document.createElement('span');
+      nm.className = 'name';
+      nm.textContent = name;
+      const btn = document.createElement('button');
+      btn.className = 'secondary';
+      btn.textContent = tr('plugins.remove');
+      btn.addEventListener('click', () => pluginAct('remove', name, btn));
+      row.appendChild(nm); row.appendChild(btn);
+      el.appendChild(row);
+    }
+  }
+
+  /** Category chips: 全部 + curated categories (with counts) + GitHub 搜索. */
+  function renderChips() {
+    const el = $('plugin-cats');
+    el.innerHTML = '';
+    const mk = (cat, label, count) => {
+      const b = document.createElement('button');
+      b.className = 'chip' + (plug.cat === cat ? ' active' : '');
+      b.dataset.cat = cat;
+      b.textContent = count != null ? `${label} ${count}` : label;
+      return b;
+    };
+    el.appendChild(mk('all', tr('plugins.catAll')));
+    const cats = (plug.market && plug.market.categories) || [];
+    for (const c of cats) {
+      const label = tr(MARKET_CATS[c.id] || 'plugins.catOther');
+      el.appendChild(mk(c.id, label, c.count));
+    }
+    el.appendChild(mk(SEARCH_CHIP, tr('market.searchChip')));
+  }
+
+  function renderSource() {
+    const el = $('market-source');
+    if (!el) return;
+    const m = plug.market;
+    if (!m) { el.textContent = ''; return; }
+    const time = (m.fetchedAt ? new Date(m.fetchedAt) : null);
+    const stamp = time ? `${time.getFullYear()}-${String(time.getMonth() + 1).padStart(2, '0')}-${String(time.getDate()).padStart(2, '0')}` : '';
+    let text = tr('market.source') + ' ';
+    const a = document.createElement('a');
+    a.href = 'https://github.com/awesome-dsh-plugin/awesome-dsh-plugin';
+    a.target = '_blank';
+    a.rel = 'noreferrer';
+    a.textContent = 'awesome-dsh-plugin';
+    el.textContent = '';
+    el.append(text, a, ' (CC0)');
+    if (m.source === 'stale') el.append(' · ' + tr('market.stale'));
+    else if (m.source === 'fallback') el.append(' · ' + tr('market.fallback'));
+    else if (stamp) el.append(' · ' + tr('market.updated', { time: stamp }));
+  }
+
+  function renderPlugins() {
+    const el = $('plugin-list');
+    el.innerHTML = '';
+    const kw = ($('plugin-search').value || '').trim().toLowerCase();
+    const inCat = (p) => plug.cat === 'all' || (plug.mode === 'market' && p.category === plug.cat);
+    const inKw = (p) => !kw
+      || p.fullName.toLowerCase().includes(kw)
+      || String(p.description || '').toLowerCase().includes(kw)
+      || String(p.descriptionEn || '').toLowerCase().includes(kw);
+    const items = plug.items.filter((p) => inCat(p) && inKw(p));
+    const shown = items.slice(0, plug.limit);
+    $('plugin-count').textContent = tr('plugins.shownCount', { n: shown.length, t: items.length });
+    if (!items.length) {
+      const d = document.createElement('div');
+      d.className = 'plugin-empty';
+      d.textContent = '🧩 ' + (plug.mode === 'search' && !kw ? tr('market.searchEmptyHint') : tr('plugins.empty'));
+      el.appendChild(d);
+      return;
+    }
+    const useEn = resolvedLang === 'en';
+    for (const p of shown) {
+      const row = document.createElement('div');
+      row.className = 'plugin-item';
+      const info = document.createElement('div');
+      info.className = 'plugin-info';
+      const nm = document.createElement('div');
+      nm.className = 'plugin-name';
+      nm.textContent = p.fullName;
+      const ds = document.createElement('div');
+      ds.className = 'plugin-desc';
+      const desc = useEn ? (p.descriptionEn || p.description) : (p.description || p.descriptionEn);
+      ds.textContent = desc || '—';
+      ds.title = desc || '';
+      const mt = document.createElement('div');
+      mt.className = 'plugin-meta';
+      const catKey = plug.mode === 'market' ? MARKET_CATS[p.category] : PLUGIN_CATS[p.category];
+      const catLabel = tr(catKey || 'plugins.catOther');
+      const stars = p.stars == null ? '—' : String(p.stars);
+      mt.innerHTML = `★ ${escapeHtml(stars)}${p.updated ? ' · ' + escapeHtml(p.updated) : ''}`
+        + ` · <span class="cat-badge">${escapeHtml(catLabel)}</span>`;
+      const btn = document.createElement('button');
+      if (p.installed) { btn.className = 'secondary'; btn.textContent = tr('plugins.remove'); }
+      else btn.textContent = tr('plugins.install');
+      btn.addEventListener('click', () => pluginAct(p.installed ? 'remove' : 'install', p.fullName, btn));
+      info.appendChild(nm); info.appendChild(ds); info.appendChild(mt);
+      row.appendChild(info); row.appendChild(btn);
+      el.appendChild(row);
+    }
+    if (items.length > shown.length) {
+      const more = document.createElement('button');
+      more.className = 'secondary plugin-more';
+      more.textContent = tr('plugins.loadMore', { n: items.length - shown.length });
+      more.addEventListener('click', () => {
+        plug.limit += PLUGIN_PAGE;
+        renderPlugins();
+        // keep the button roughly under the cursor for rapid repeat clicks
+        const next = el.querySelector('.plugin-more');
+        if (next) next.scrollIntoView({ block: 'nearest' });
+      });
+      el.appendChild(more);
+    }
+  }
+
+  function renderSkeleton() {
+    const el = $('plugin-list');
+    el.innerHTML = '';
+    for (let i = 0; i < 5; i++) {
+      const row = document.createElement('div');
+      row.className = 'plugin-item';
+      row.innerHTML = '<div class="plugin-info">'
+        + '<div class="skeleton" style="width:38%;height:12px"></div>'
+        + '<div class="skeleton" style="width:82%;height:10px;margin-top:8px"></div>'
+        + '<div class="skeleton" style="width:46%;height:10px;margin-top:8px"></div>'
+        + '</div>';
+      el.appendChild(row);
+    }
+  }
+
+  async function loadPlugins(force = false) {
+    if (plug.acting) { plug.pendingReload = true; return; } // never re-render buttons mid-op
+    const seq = ++plug.seq;
+    renderSkeleton();
+    plugStatus(tr('plugins.loading'));
+    $('plugin-count').textContent = '';
+    try {
+      if (plug.mode === 'search') {
+        const r = await window.dshShell.pluginSearch(($('plugin-search').value || '').trim());
+        if (seq !== plug.seq) return; // a newer search superseded this response
+        if (!r.ok) throw new Error(r.reason || 'GitHub API error');
+        plug.items = r.plugins || [];
+      } else {
+        const r = await window.dshShell.pluginMarket(force);
+        if (seq !== plug.seq) return;
+        if (!r.ok) throw new Error(r.reason || 'GitHub API error');
+        plug.market = r;
+        plug.items = r.plugins || [];
+        renderChips();
+        renderSource();
+      }
+      plugStatus('');
+      renderPlugins();
+    } catch (e) {
+      if (seq !== plug.seq) return;
+      plugStatus(tr('plugins.loadFail') + e.message, 'bad');
+      const retry = document.createElement('button');
+      retry.className = 'secondary';
+      retry.style.marginTop = '8px';
+      retry.textContent = tr('plugins.retry');
+      retry.addEventListener('click', () => loadPlugins(plug.mode === 'market'));
+      const st = $('plugin-status');
+      st.appendChild(document.createElement('br'));
+      st.appendChild(retry);
+      $('plugin-list').innerHTML = '';
+    }
+  }
+
+  function setActionButtons(disabled) {
+    document.querySelectorAll('#plugin-list .plugin-item button, #plugin-list .plugin-more, #plugin-installed button')
+      .forEach((b) => { b.disabled = disabled; });
+  }
+
+  function renderOpStatus() {
+    if (!plug.labelEl) return;
+    const base = tr(plug.op === 'remove' ? 'plugins.opRemove' : 'plugins.opInstall', { name: plug.name });
+    const stage = plug.stage ? ' · ' + tr(PLUGIN_STAGE_KEYS[plug.stage]) : '';
+    plug.labelEl.textContent = `${base}${stage}（${Math.round((Date.now() - plug.t0) / 1000)}s）`;
+    if (plug.tailEl && plug.tail) plug.tailEl.textContent = plug.tail;
+  }
+
+  // live stage/tail pushed by the main process while `dsh plugin` runs
+  window.dshShell.onPluginProgress((d) => {
+    if (!plug.acting || !d) return;
+    if (d.stage && PLUGIN_STAGE_KEYS[d.stage]) plug.stage = d.stage;
+    if (d.tail) plug.tail = d.tail;
+    renderOpStatus();
+  });
+
+  async function pluginAct(action, fullName, btn) {
+    if (plug.acting) return;
+    plug.acting = true;
+    plug.op = action; plug.name = fullName; plug.stage = ''; plug.tail = '';
+    // a second concurrent op would corrupt the web profile (main rejects too)
+    setActionButtons(true);
+    btn.innerHTML = '<span class="spin"></span>';
+    const st = $('plugin-status');
+    st.style.display = '';
+    st.className = 'status';
+    st.innerHTML = '<span class="spin"></span> <span id="plugin-op-label"></span><div id="plugin-op-tail" class="op-tail"></div>';
+    plug.labelEl = $('plugin-op-label');
+    plug.tailEl = $('plugin-op-tail');
+    plug.t0 = Date.now();
+    renderOpStatus();
+    plug.timer = setInterval(renderOpStatus, 1_000);
+    let r;
+    try { r = await window.dshShell.pluginAction(action, fullName); }
+    catch (e) { r = { ok: false, reason: e.message }; }
+    clearInterval(plug.timer); plug.timer = null;
+    plug.labelEl = plug.tailEl = null;
+    plug.acting = false;
+    if (r.ok) {
+      plugStatus(tr(action === 'remove' ? 'plugins.removedOk' : 'plugins.installedOk', { name: fullName }), 'ok');
+      $('plugin-restart-hint').style.display = 'flex';
+      for (const it of plug.items) if (it.fullName === fullName) it.installed = action !== 'remove';
+      try {
+        const s = await window.dshShell.getSettings();
+        if (current) current.installedPlugins = s.installedPlugins || [];
+      } catch { /* keep the previous installed list */ }
+      renderInstalled();
+      renderPlugins(); // re-render also re-enables all action buttons
+      if (plug.pendingReload) { plug.pendingReload = false; loadPlugins(); }
+    } else {
+      plugStatus(tr('plugins.actionFailed') + (r.reason || ''), 'bad');
+      renderPlugins();
+      renderInstalled();
+    }
+  }
+
+  $('plugin-restart').addEventListener('click', async () => {
+    const b = $('plugin-restart');
+    b.disabled = true;
+    b.textContent = tr('plugins.restarting');
+    let r;
+    try { r = await window.dshShell.restartRuntime(); }
+    catch (e) { r = { ok: false, reason: e.message }; }
+    b.disabled = false;
+    b.textContent = tr('plugins.restartNow');
+    if (r && r.ok) {
+      $('plugin-restart-hint').style.display = 'none';
+      plugStatus(tr('plugins.restartDone'), 'ok');
+    } else {
+      plugStatus(tr('plugins.actionFailed') + ((r && r.reason) || ''), 'bad');
+    }
+  });
+
+  $('plugin-cats').addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip');
+    if (!chip) return;
+    plug.cat = chip.dataset.cat;
+    document.querySelectorAll('#plugin-cats .chip').forEach((c) => c.classList.toggle('active', c === chip));
+    plug.limit = PLUGIN_PAGE; // new view — start from the first page again
+    const wantSearch = plug.cat === SEARCH_CHIP;
+    if (wantSearch !== (plug.mode === 'search')) {
+      plug.mode = wantSearch ? 'search' : 'market';
+      $('plugin-search').placeholder = tr(wantSearch ? 'market.searchPhGitHub' : 'plugins.searchPh');
+      if (wantSearch) $('plugin-search').focus(); // the empty state points here
+      loadPlugins(); // different data source — refetch
+      return;
+    }
+    renderPlugins();
+  });
+
+  let pluginSearchTimer = null;
+  const runPluginSearch = () => {
+    // market mode filters the curated list client-side; GitHub search mode
+    // hits the API
+    if (plug.mode !== 'search') { plug.limit = PLUGIN_PAGE; renderPlugins(); return; }
+    clearTimeout(pluginSearchTimer);
+    loadPlugins();
+  };
+  $('plugin-search').addEventListener('input', () => {
+    // market mode filters live; GitHub search mode debounces the API call
+    if (plug.mode !== 'search') { plug.limit = PLUGIN_PAGE; renderPlugins(); return; }
+    clearTimeout(pluginSearchTimer);
+    pluginSearchTimer = setTimeout(() => loadPlugins(), 350);
+  });
+  $('plugin-search').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); runPluginSearch(); }
+  });
+  $('plugin-go').addEventListener('click', runPluginSearch);
+  $('plugin-refresh').addEventListener('click', () => { plug.limit = PLUGIN_PAGE; loadPlugins(plug.mode === 'market'); });
 
   async function refreshInfo() {
     try {
@@ -933,10 +2217,11 @@
     try {
       renderStorage(await window.dshShell.storageInfo());
     } catch (e) { /* ignore */ }
+    renderSnapshots();
     refreshCost();
     refreshDiagnostics();
-    refreshPluginsCount();
-    renderSched();
+    renderInstalled();
+    renderAuto();
     refreshRemote();
   }
 
@@ -949,6 +2234,16 @@
   $('open-logs').addEventListener('click', () => window.dshShell.openLogDir());
 
   (async () => {
+    showPage(pageFromHash(), false);
+    // theme: apply the resolved theme early (before the form paints) and keep
+    // it live when the system switches or the user saves a manual override.
+    try { document.documentElement.dataset.theme = await window.dshShell.getTheme(); } catch { /* dark default */ }
+    window.dshShell.onTheme((t) => {
+      const root = document.documentElement;
+      root.classList.add('theme-anim');
+      root.dataset.theme = t;
+      setTimeout(() => root.classList.remove('theme-anim'), 420);
+    });
     const s = await window.dshShell.getSettings();
     fillForm(s);
     setStatus($('update-status'), tr('status_notChecked'));
