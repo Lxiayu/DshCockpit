@@ -1203,7 +1203,7 @@
   }
 
   // ------------------------------------------------------------- routing
-  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'tasks', 'data', 'update', 'about'];
+  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'tasks', 'remote', 'data', 'update', 'about'];
   function pageFromHash() {
     const p = (location.hash || '').replace(/^#\/?/, '');
     return PAGES.includes(p) ? p : 'general';
