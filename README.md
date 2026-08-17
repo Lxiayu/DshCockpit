@@ -6,7 +6,7 @@
 
 **把 DeepSeek Harness 变成一台常驻后台的 Agent 驾驶舱**
 
-成本控制 · 用量监控 · 自动更新 · 定时任务 · 快捷问询 · 数据安全
+成本控制 · 用量监控 · 自动更新 · 定时任务 · 快捷问询 · 局域网手机操控 · 数据安全
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)](#)
@@ -26,7 +26,7 @@
 欢迎扫码进群，讨论使用问题、反馈建议，或聊聊 Agent 桌面化的玩法。
 
 <div align="center">
-<img src="b5f31d11d2c10688d6dcb8dc24fc39c8.jpg" width="260" alt="DshCockpit 交流群二维码" />
+<img src="photo/qrcode-group.png" width="260" alt="DshCockpit 交流群二维码" />
 </div>
 
 ---
