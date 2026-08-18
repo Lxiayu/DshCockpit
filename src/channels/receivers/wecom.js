@@ -58,6 +58,7 @@ class WecomChannel {
     this.hooks = hooks || {};
     const injected = deps || {};
     this.sdk = injected.sdk || require('@wecom/aibot-node-sdk');
+    this.authTimeoutMs = injected.authTimeoutMs || AUTH_TIMEOUT_MS; // tests
     this.supportsCards = true;
 
     this.client = null;
@@ -80,12 +81,16 @@ class WecomChannel {
   async start() {
     this.stopped = false;
     const creds = this.readCredentials();
-    if (!creds) throw new Error('wecom: credentials missing (configure bot id/secret first)');
+    if (!creds) {
+      const err = new Error('wecom: credentials missing (configure bot id/secret first)');
+      err.permanent = true; // config problem — no point auto-reconnecting
+      throw err;
+    }
     const client = new this.sdk.WSClient({ botId: creds.botId, secret: creds.secret, logger: QUIET_LOGGER });
     this.client = client;
 
     const up = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('wecom: authenticate timeout')), AUTH_TIMEOUT_MS);
+      const timer = setTimeout(() => reject(new Error('wecom: authenticate timeout')), this.authTimeoutMs);
       if (typeof timer.unref === 'function') timer.unref();
       client.once('authenticated', () => { clearTimeout(timer); resolve(); });
       client.once('disconnected', (reason) => {

@@ -29,21 +29,21 @@ test('backupNow copies sessions and settings, never credentials', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('backupNow prunes beyond keep', () => {
+test('backupNow prunes beyond keep', async () => {
   const home = makeHome();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-backup-prune-'));
   for (let i = 0; i < 4; i += 1) backupNow({ dshHome: home, backupDir: dir, keep: 2, log: () => {} });
-  const info = backupInfo(dir);
+  const info = await backupInfo(dir);
   assert.strictEqual(info.count, 2, 'only keep newest 2');
   fs.rmSync(home, { recursive: true, force: true });
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('backupInfo reports latest and size', () => {
+test('backupInfo reports latest and size', async () => {
   const home = makeHome();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-backup-info-'));
   backupNow({ dshHome: home, backupDir: dir, keep: 3, log: () => {} });
-  const info = backupInfo(dir);
+  const info = await backupInfo(dir);
   assert.strictEqual(info.count, 1);
   assert.ok(info.latest);
   assert.ok(info.sizeMB >= 0);

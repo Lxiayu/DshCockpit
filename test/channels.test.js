@@ -564,3 +564,132 @@ test('manager: offline broadcasts queue taskDone / drop approvals, replay on con
   mgr.stopAll();
   assert.strictEqual(Ctor.stats.stopped, 1);
 });
+
+test('manager: permanent start failure parks the channel (no reconnect loop)', async () => {
+  const { mgr, ft } = makeManager({ configs: [{ id: 'feishu', enabled: true }] });
+  const boom = new Error('feishu: credentials missing');
+  boom.permanent = true; // adapters flag config/credential errors this way
+  function Ctor() {
+    this.start = async () => { throw boom; };
+    this.stop = async () => {};
+  }
+  mgr.register('feishu', Ctor);
+
+  const r = await mgr.startChannel('feishu');
+  assert.strictEqual(r.ok, false);
+  assert.match(r.reason, /credentials missing/);
+  assert.strictEqual(ft.delays.length, 0, 'permanent failure must not schedule a reconnect');
+  const st = mgr.statusAll().find((c) => c.id === 'feishu').status;
+  assert.strictEqual(st.state, 'offline');
+  assert.match(st.lastError, /credentials missing/);
+  mgr.stopAll();
+});
+
+test('manager: reconnect gives up after the attempt cap; toggling resets it', async () => {
+  const { mgr, ft } = makeManager({ configs: [{ id: 'feishu', enabled: true }] });
+  mgr.register('feishu', makeChannelCtor({ startFails: 'boom' }));
+
+  await mgr.startChannel('feishu'); // failure #1 schedules retry #1
+  for (let i = 1; i <= 13; i++) {
+    ft.fire(i);
+    await flush(); await flush();
+  }
+  // the cap fires on the 13th failure: 12 retries were scheduled, then silence
+  assert.strictEqual(ft.delays.length, 12, 'reconnect stops after MAX_RECONNECT_ATTEMPTS');
+  ft.fire(99); await flush();
+  assert.strictEqual(ft.delays.length, 12, 'no timer left to fire');
+
+  // user toggles off→on: the parked state clears and retries resume
+  mgr.toggle('feishu', false);
+  mgr.toggle('feishu', true);
+  await flush(); await flush();
+  assert.ok(ft.delays.length > 12, 'toggle resets the reconnect loop');
+  mgr.stopAll();
+});
+
+test('manager: hasSecrets decodes the vault once and caches until configureSecrets', () => {
+  const safe = fakeSafeStorage();
+  const settings = fakeSettings([]);
+  const mgr = createChannelManager({
+    userDataDir: tmpDir(),
+    settings,
+    safeStorage: safe,
+    log: () => {},
+    lang: () => 'zh',
+    timers: fakeTimers(),
+  });
+
+  assert.strictEqual(mgr.hasSecrets('feishu'), false);
+  const before = safe.calls.decrypt;
+  assert.strictEqual(mgr.hasSecrets('feishu'), false, 'cached — no extra decrypt call');
+  assert.strictEqual(safe.calls.decrypt, before);
+
+  mgr.configureSecrets('feishu', { appId: 'a', appSecret: 'b' });
+  assert.strictEqual(mgr.hasSecrets('feishu'), true);
+  const after1 = safe.calls.decrypt;
+  assert.strictEqual(mgr.hasSecrets('feishu'), true, 'cached after write');
+  assert.strictEqual(safe.calls.decrypt, after1);
+
+  mgr.configureSecrets('feishu', null); // clears → invalidates the cache
+  assert.strictEqual(mgr.hasSecrets('feishu'), false);
+  mgr.stopAll();
+});
+
+// ------------------------------------------- connecting-window races (P1-2/3)
+
+test('manager: concurrent startChannel during the connecting window dedupes (no double impl)', async () => {
+  const { mgr } = makeManager({ configs: [{ id: 'feishu', enabled: true }] });
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const stats = { started: 0, stopped: 0 };
+  function SlowCtor() {
+    this.supportsCards = true;
+    this.start = async () => { stats.started += 1; await gate; };
+    this.stop = async () => { stats.stopped += 1; };
+    this.sendText = async () => {};
+    this.sendCard = async () => {};
+  }
+  mgr.register('feishu', SlowCtor);
+
+  // second call lands while `await impl.start()` is still in flight — the
+  // id is not in `instances` yet, so without the in-flight guard it would
+  // build a second impl and leak the first connection
+  const p1 = mgr.startChannel('feishu');
+  const p2 = mgr.startChannel('feishu');
+  release();
+  const [r1, r2] = await Promise.all([p1, p2]);
+  assert.strictEqual(r1.ok, true);
+  assert.strictEqual(r2.ok, true);
+  assert.strictEqual(r2.alreadyRunning, true, 'second start during connecting is deduped');
+  assert.strictEqual(stats.started, 1, 'exactly one impl was constructed');
+  const st = mgr.statusAll().find((c) => c.id === 'feishu').status;
+  assert.strictEqual(st.state, 'online');
+  mgr.stopAll();
+  assert.strictEqual(stats.stopped, 1, 'the single impl is stopped once');
+});
+
+test('manager: disabling during the connecting window aborts the start (no zombie online)', async () => {
+  const { mgr } = makeManager({ configs: [{ id: 'feishu', enabled: true }] });
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const stats = { started: 0, stopped: 0 };
+  function SlowCtor() {
+    this.supportsCards = true;
+    this.start = async () => { stats.started += 1; await gate; };
+    this.stop = async () => { stats.stopped += 1; };
+    this.sendText = async () => {};
+    this.sendCard = async () => {};
+  }
+  mgr.register('feishu', SlowCtor);
+
+  const p = mgr.startChannel('feishu'); // connecting window opens
+  mgr.toggle('feishu', false);          // user disables before start resolves
+  release();
+  await p;
+  const st = mgr.statusAll().find((c) => c.id === 'feishu').status;
+  assert.strictEqual(st.state, 'offline', 'channel must never come online');
+  assert.strictEqual(stats.stopped, 1, 'the in-flight impl was stopped, not leaked');
+  assert.strictEqual(stats.started, 1, 'only one impl was ever constructed');
+  mgr.stopAll();
+  assert.strictEqual(stats.stopped, 1, 'stopAll finds no instance to stop again');
+});

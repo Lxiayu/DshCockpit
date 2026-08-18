@@ -19,6 +19,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const fsp = require('node:fs/promises');
 const path = require('node:path');
 const zlib = require('node:zlib');
 
@@ -129,13 +130,12 @@ function validateSkillMd(text, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// zip extraction (pure) — GitHub codeload zips are plain store/deflate
+// zip extraction — GitHub codeload zips are plain store/deflate
 // ---------------------------------------------------------------------------
-/** Extract a zip archive buffer into [{path, data}] (directories skipped).
- * Reads the central directory for sizes, then each local header for the
- * data offset (local extra-field length can differ from the CD's). */
-function extractZipBuffer(buf) {
-  const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+/** Walk the central directory, yielding {name, raw, method} for every file
+ * entry (directories skipped). Shared by the sync and async extractors so
+ * the parse logic lives in exactly one place. */
+function* zipEntries(b) {
   // locate the end-of-central-directory record (scan back over a possible
   // trailing comment, max 64 KiB per the zip spec)
   let eocd = -1;
@@ -146,8 +146,6 @@ function extractZipBuffer(buf) {
   if (eocd < 0) throw new Error('zip: end-of-central-directory record not found');
   const count = b.readUInt16LE(eocd + 10);
   let off = b.readUInt32LE(eocd + 16);
-  const out = [];
-  let total = 0;
   for (let n = 0; n < count; n++) {
     if (off + 46 > b.length || b.readUInt32LE(off) !== 0x02014b50) {
       throw new Error('zip: corrupt central directory entry');
@@ -168,6 +166,17 @@ function extractZipBuffer(buf) {
     const lExtraLen = b.readUInt16LE(localOff + 28);
     const start = localOff + 30 + lNameLen + lExtraLen;
     const raw = b.subarray(start, start + compSize);
+    yield { name, raw, method };
+  }
+}
+
+/** Extract a zip archive buffer into [{path, data}] (directories skipped).
+ * Sync variant — pure in-memory helper kept for tests / small archives. */
+function extractZipBuffer(buf) {
+  const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+  const out = [];
+  let total = 0;
+  for (const { name, raw, method } of zipEntries(b)) {
     let data;
     if (method === 0) data = Buffer.from(raw);
     else if (method === 8) data = zlib.inflateRawSync(raw);
@@ -175,6 +184,30 @@ function extractZipBuffer(buf) {
     total += data.length;
     if (total > MAX_UNCOMPRESSED_BYTES) throw new Error('zip: decompressed size exceeds the safety cap');
     out.push({ path: name.replace(/\\/g, '/'), data });
+  }
+  return out;
+}
+
+/** Async extraction for the main-process install path (P1-4 win-jank fix):
+ * inflates via the callback zlib API (non-blocking) and yields to the event
+ * loop between entries, so a large repo zip can't freeze every window.
+ * Identical results/errors to extractZipBuffer. */
+async function extractZipBufferAsync(buf) {
+  const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+  const out = [];
+  let total = 0;
+  let i = 0;
+  for (const { name, raw, method } of zipEntries(b)) {
+    let data;
+    if (method === 0) data = Buffer.from(raw);
+    else if (method === 8) data = await new Promise((resolve, reject) => {
+      zlib.inflateRaw(raw, (err, outBuf) => (err ? reject(err) : resolve(outBuf)));
+    });
+    else throw new Error(`zip: unsupported compression method ${method} for ${name}`);
+    total += data.length;
+    if (total > MAX_UNCOMPRESSED_BYTES) throw new Error('zip: decompressed size exceeds the safety cap');
+    out.push({ path: name.replace(/\\/g, '/'), data });
+    if (++i % 16 === 0) await new Promise((resolve) => setImmediate(resolve)); // yield between chunks
   }
   return out;
 }
@@ -330,7 +363,7 @@ function createSkillsManager(deps) {
         clearTimeout(connectTimer); // headers arrived — only the total cap remains
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const files = stripZipRoot(extractZipBuffer(Buffer.from(await res.arrayBuffer())));
+      const files = stripZipRoot(await extractZipBufferAsync(Buffer.from(await res.arrayBuffer())));
       return { branch, commit, files };
     } catch (e) {
       if (timeoutKind) {
@@ -360,15 +393,19 @@ function createSkillsManager(deps) {
       } catch { /* no usable staging — download below */ }
     }
     const { commit, files } = await fetchRepoZip(fullName);
-    fs.rmSync(dir, { recursive: true, force: true });
-    fs.mkdirSync(dir, { recursive: true });
+    // P1-4 (win-jank fix): all disk work is async via fsp — sync rmSync +
+    // writeFileSync for hundreds of files froze the main process for seconds
+    // under Windows AV; yield between writes so windows stay responsive.
+    await fsp.rm(dir, { recursive: true, force: true });
+    await fsp.mkdir(dir, { recursive: true });
     for (const f of files) {
       const dest = path.join(dir, f.path);
       if (!dest.startsWith(dir + path.sep)) continue; // zip-slip guard
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.writeFileSync(dest, f.data);
+      await fsp.mkdir(path.dirname(dest), { recursive: true });
+      await fsp.writeFile(dest, f.data);
+      await new Promise((resolve) => setImmediate(resolve)); // yield between files
     }
-    fs.writeFileSync(manifestFile, JSON.stringify({ fullName, commit, stagedAt: now() }));
+    await fsp.writeFile(manifestFile, JSON.stringify({ fullName, commit, stagedAt: now() }));
     return { commit, dir, candidates: scanCandidatesFromDir(dir), reused: false };
   }
 
@@ -413,9 +450,10 @@ function createSkillsManager(deps) {
    * rename flips it into place — dsh's chokidar watcher never sees a
    * half-written <name>/ tree. The source (staging cache or the user's
    * import dir) is never moved or consumed. Failures always remove the
-   * tmp tree so no partial skill is left behind.
+   * tmp tree so no partial skill is left behind. Async (fsp) — the sync
+   * cpSync of a large tree pinned the main process (P1-4).
    */
-  function installDirFrom(srcDir, meta, record) {
+  async function installDirFrom(srcDir, meta, record) {
     const root = skillsRoot();
     const dest = path.join(root, meta.name);
     const srcResolved = path.resolve(srcDir);
@@ -423,13 +461,13 @@ function createSkillsManager(deps) {
     if (dest.startsWith(srcResolved + path.sep)) return { ok: false, code: 'write', reason: 'source contains destination' };
     const tmp = path.join(root, `.tmp-${meta.name}-${process.pid}`);
     try {
-      fs.mkdirSync(root, { recursive: true });
-      fs.rmSync(tmp, { recursive: true, force: true });
-      fs.cpSync(srcResolved, tmp, { recursive: true });
-      fs.rmSync(dest, { recursive: true, force: true }); // upgrade: replace old tree
-      fs.renameSync(tmp, dest);
+      await fsp.mkdir(root, { recursive: true });
+      await fsp.rm(tmp, { recursive: true, force: true });
+      await fsp.cp(srcResolved, tmp, { recursive: true });
+      await fsp.rm(dest, { recursive: true, force: true }); // upgrade: replace old tree
+      await fsp.rename(tmp, dest);
     } catch (e) {
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+      try { await fsp.rm(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
       return { ok: false, code: 'write', reason: e.message };
     }
     const reg = readRegistry(registryFile());
@@ -490,7 +528,7 @@ function createSkillsManager(deps) {
       if (!c.valid) { errors.push(...c.errors); continue; }
       progress({ stage: 'verify', tail: c.name });
       const sub = c.dir ? path.join(staged.dir, c.dir) : staged.dir;
-      const r = installDirFrom(sub, c, record);
+      const r = await installDirFrom(sub, c, record);
       if (r.ok) installed.push({ name: r.name, warnings: r.warnings });
       else errors.push({ code: 'write', params: { msg: r.reason || '' } });
     }
@@ -537,7 +575,7 @@ function createSkillsManager(deps) {
     }
     progress({ stage: 'verify', tail: name });
     const sub = cand.dir ? path.join(staged.dir, cand.dir) : staged.dir;
-    const r = installDirFrom(sub, cand, { repo: rec.repo, commit: staged.commit });
+    const r = await installDirFrom(sub, cand, { repo: rec.repo, commit: staged.commit });
     if (!r.ok) return r;
     return { ok: true, installed: [{ name: r.name, warnings: r.warnings }], commit: staged.commit };
   }
@@ -546,8 +584,9 @@ function createSkillsManager(deps) {
    * validation pipeline, recorded with a local source instead of a repo.
    * `pick` mirrors install(): undefined → single-candidate auto-import
    * (multi returns the candidate list), a dir name imports that one,
-   * 'all' imports every valid candidate. */
-  function importLocal(dir, pick) {
+   * 'all' imports every valid candidate. Async because the atomic install
+   * (installDirFrom) is now fsp-based (P1-4). */
+  async function importLocal(dir, pick) {
     const src = path.resolve(String(dir || ''));
     let stat;
     try { stat = fs.statSync(src); } catch { return { ok: false, code: 'invalid', errors: [{ code: 'e1', params: {} }] }; }
@@ -560,13 +599,13 @@ function createSkillsManager(deps) {
     if (pick === undefined || pick === null) {
       if (rootCand) {
         if (!rootCand.valid) return { ok: false, code: 'invalid', errors: rootCand.errors };
-        const r = installDirFrom(src, rootCand, { repo: null, source: 'local' });
+        const r = await installDirFrom(src, rootCand, { repo: null, source: 'local' });
         if (!r.ok) return r;
         return { ok: true, installed: [{ name: r.name, warnings: r.warnings }] };
       }
       if (cands.length > 1) return { ok: false, code: 'multi', candidates: cands };
       if (!cands[0].valid) return { ok: false, code: 'invalid', errors: cands[0].errors };
-      const r = installDirFrom(path.join(src, cands[0].dir), cands[0], { repo: null, source: 'local' });
+      const r = await installDirFrom(path.join(src, cands[0].dir), cands[0], { repo: null, source: 'local' });
       if (!r.ok) return r;
       return { ok: true, installed: [{ name: r.name, warnings: r.warnings }] };
     }
@@ -580,7 +619,7 @@ function createSkillsManager(deps) {
     for (const c of chosen) {
       if (!c.valid) { errors.push(...c.errors); continue; }
       const sub = c.dir ? path.join(src, c.dir) : src;
-      const r = installDirFrom(sub, c, { repo: null, source: 'local' });
+      const r = await installDirFrom(sub, c, { repo: null, source: 'local' });
       if (r.ok) installed.push({ name: r.name, warnings: r.warnings });
       else errors.push({ code: 'write', params: { msg: r.reason || '' } });
     }
@@ -656,6 +695,7 @@ module.exports = {
   parseFrontmatter,
   validateSkillMd,
   extractZipBuffer,
+  extractZipBufferAsync,
   stripZipRoot,
   findSkillCandidates,
   buildSkillsMarketPayload,

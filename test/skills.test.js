@@ -340,13 +340,13 @@ test('manager remove + upgrade: uninstall deletes dir and record; upgrade re-pin
 
 // ------------------------------------------------------------- local import
 
-test('importLocal: root dir installs; collections multi → pick one/all; W1 aligns dir to name; bad dirs give E1/E3', () => {
+test('importLocal: root dir installs; collections multi → pick one/all; W1 aligns dir to name; bad dirs give E1/E3', async () => {
   const { mgr, root } = newManager(async () => { throw new Error('network must not be touched'); });
 
   // root SKILL.md — imports as-is, recorded as a local source
   const solo = tmpDir();
   fs.writeFileSync(path.join(solo, 'SKILL.md'), md('local-skill', 'From my disk.'));
-  const r1 = mgr.importLocal(solo);
+  const r1 = await mgr.importLocal(solo);
   assert.equal(r1.ok, true);
   assert.equal(fs.existsSync(path.join(root, 'local-skill', 'SKILL.md')), true);
   assert.equal(mgr.listInstalled()[0].source, 'local');
@@ -357,13 +357,13 @@ test('importLocal: root dir installs; collections multi → pick one/all; W1 ali
   fs.writeFileSync(path.join(coll, 'oldname', 'SKILL.md'), md('aligned-name', 'dir differs from name'));
   fs.mkdirSync(path.join(coll, 'second'), { recursive: true });
   fs.writeFileSync(path.join(coll, 'second', 'SKILL.md'), md('second-skill', 'two'));
-  const r2 = mgr.importLocal(coll);
+  const r2 = await mgr.importLocal(coll);
   assert.equal(r2.ok, false);
   assert.equal(r2.code, 'multi');
   assert.equal(r2.candidates.length, 2);
 
   // pick one: destination aligns to the frontmatter name (W1)
-  const r3 = mgr.importLocal(coll, 'oldname');
+  const r3 = await mgr.importLocal(coll, 'oldname');
   assert.equal(r3.ok, true);
   assert.equal(fs.existsSync(path.join(root, 'aligned-name', 'SKILL.md')), true, 'dir renamed to skill name');
   assert.equal(fs.existsSync(path.join(root, 'oldname')), false);
@@ -372,20 +372,20 @@ test('importLocal: root dir installs; collections multi → pick one/all; W1 ali
   assert.equal(fs.existsSync(path.join(coll, 'oldname', 'SKILL.md')), true);
 
   // pick all
-  const r4 = mgr.importLocal(coll, 'all');
+  const r4 = await mgr.importLocal(coll, 'all');
   assert.equal(r4.ok, true);
   assert.equal(fs.existsSync(path.join(root, 'second-skill', 'SKILL.md')), true);
 
   // no SKILL.md → E1; nonexistent path → E1 wrapped as invalid; invalid frontmatter → invalid
   const plain = tmpDir();
   fs.writeFileSync(path.join(plain, 'README.md'), '# not a skill\n');
-  assert.equal(mgr.importLocal(plain).code, 'e1');
-  const gone = mgr.importLocal(path.join(plain, 'nope'));
+  assert.equal((await mgr.importLocal(plain)).code, 'e1');
+  const gone = await mgr.importLocal(path.join(plain, 'nope'));
   assert.equal(gone.code, 'invalid');
   assert.equal(gone.errors[0].code, 'e1');
   const bad = tmpDir();
   fs.writeFileSync(path.join(bad, 'SKILL.md'), '---\nname: x\n---\n'); // description missing
-  const r5 = mgr.importLocal(bad);
+  const r5 = await mgr.importLocal(bad);
   assert.equal(r5.ok, false);
   assert.equal(r5.code, 'invalid');
   assert.equal(r5.errors[0].code, 'e3');

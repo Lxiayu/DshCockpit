@@ -18,6 +18,11 @@ const semver = require('semver');
 
 const PACKAGE = '@deepseek-ai/dsh';
 const SMOKE_TIMEOUT_MS = 60_000;
+/** Hard deadline for one arborist install. rc runtimes are a 60+ package
+ * monorepo; without this a stalled registry / cache lock would hold the
+ * update pipeline forever (the "check update" button then appears to hang
+ * and the app has to be force-quit). */
+const INSTALL_TIMEOUT_MS = 10 * 60_000;
 
 class RuntimeManager {
   constructor({ userDataDir, settings, log, resolveNodeBin }) {
@@ -29,6 +34,11 @@ class RuntimeManager {
     this.log = log || (() => {});
     this.resolveNodeBin = resolveNodeBin; // () => path string
     this._installLocks = new Map(); // per-version in-flight install promises (dedupe)
+    this.installTimeoutMs = INSTALL_TIMEOUT_MS; // injectable for tests
+    this.smokeTimeoutMs = SMOKE_TIMEOUT_MS; // injectable for tests
+    this.nodeProbeTimeoutMs = 5_000; // `node --version` probe deadline (tests)
+    this._arborist = null; // injectable for tests (defaults to @npmcli/arborist)
+    this._spawn = spawn; // injectable for tests (defaults to node:child_process)
     this.state = { activeVersion: null, previousVersion: null, pendingVersion: null, installed: [], broken: [], knownIssues: {}, lastSnapshot: null };
     this.loadState();
   }
@@ -184,8 +194,10 @@ class RuntimeManager {
     if (cfg.channel === 'latest') {
       return packument['dist-tags'] && packument['dist-tags'].latest || null;
     }
-    // rc: highest version (prereleases included)
-    const versions = Object.keys(packument.versions || {});
+    // rc: highest version (prereleases included). Versions that semver cannot
+    // parse are skipped — a single malformed entry must not throw the sort and
+    // take down the whole check.
+    const versions = Object.keys(packument.versions || {}).filter((v) => semver.valid(v));
     if (!versions.length) return null;
     versions.sort(semver.rcompare);
     return versions[0];
@@ -201,8 +213,9 @@ class RuntimeManager {
     // Hard deadline: pacote may not honor the AbortSignal, so a dead/unroutable
     // network must not hang the guided first-run (or the 15s update check)
     // forever. The losing promise is left to settle on its own.
+    let deadlineTimer = null;
     const deadline = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('registry check timed out')), 40_000);
+      deadlineTimer = setTimeout(() => reject(new Error('registry check timed out')), 40_000);
     });
     try {
       const p = await Promise.race([
@@ -218,6 +231,7 @@ class RuntimeManager {
       return p;
     } finally {
       clearTimeout(timer);
+      clearTimeout(deadlineTimer); // M-fix: the losing deadline timer must not leak
     }
   }
 
@@ -238,15 +252,63 @@ class RuntimeManager {
       if (valid && semver.lt(target, current)) {
         return { ok: true, available: false, current, target, reason: 'installed version newer than channel target' };
       }
+      // The target is newer — pre-flight the runtime's own engines.node before
+      // committing to a (potentially long, non-cancellable) install. rc builds
+      // can require a newer Node than the shell bundles (Electron's built-in);
+      // installing anyway would stall on broken postinstall hooks.
+      const meta = packument.versions[target] || {};
+      const nodeRange = meta.engines && meta.engines.node;
+      if (nodeRange) {
+        const found = await this.detectNodeVersion();
+        if (found && !semver.satisfies(found, nodeRange)) {
+          return {
+            ok: false, available: true, current, target,
+            reason: `${PACKAGE}@${target} requires Node ${nodeRange}, found v${found}`,
+          };
+        }
+      }
       return { ok: true, available: true, current, target };
     } catch (err) {
       return { ok: false, available: false, reason: err.message };
     }
   }
 
+  /** Resolve the actual Node version used to run the runtime (vX.Y.Z or null). */
+  detectNodeVersion() {
+    const node = this.resolveNodeBin();
+    if (!node || !node.bin) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      const child = this._spawn(node.bin, ['--version'], {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const timer = setTimeout(() => {
+        try { child.kill(); } catch { /* ignore */ }
+        resolve(null); // undetectable — don't block the update, smoke test covers it
+      }, this.nodeProbeTimeoutMs);
+      let out = '';
+      child.stdout.on('data', (d) => { out += d; });
+      child.on('close', () => {
+        clearTimeout(timer);
+        const m = String(out).trim().match(/^v?(\d+\.\d+\.\d+)/);
+        resolve(m ? m[1] : null);
+      });
+      child.on('error', () => {
+        clearTimeout(timer);
+        resolve(null);
+      });
+    });
+  }
+
   // --------------------------------------------------------------- install
-  /** Install a version into runtime/<version> via arborist (respects registry + cache .npmrc). */
-  async installVersion(version) {
+  /**
+   * Install a version into runtime/<version> via arborist (respects registry + cache .npmrc).
+   * @param {string} version
+   * @param {(p: {stage: string, pkgCount?: number}) => void} [onProgress] live progress
+   *   callback so the UI can render an install console instead of dead air
+   *   (the rc runtime is a 60+ package monorepo and can take minutes).
+   */
+  async installVersion(version, onProgress) {
     // short-circuit only on a managed copy; a bootstrap path reference is not
     // enough (materialization must actually install into userData)
     const existingManaged = this.state.installed.find((e) => e.version === version && e.source === 'managed');
@@ -257,12 +319,14 @@ class RuntimeManager {
     // Dedupe concurrent installs of the same version (guided first-run vs the
     // delayed background update check) so arborist never reifies one dir twice.
     if (this._installLocks.has(version)) return this._installLocks.get(version);
-    const promise = this._doInstall(version).finally(() => this._installLocks.delete(version));
+    const promise = this._doInstall(version, onProgress).finally(() => this._installLocks.delete(version));
     this._installLocks.set(version, promise);
     return promise;
   }
 
-  async _doInstall(version) {
+  async _doInstall(version, onProgress) {
+    const report = (p) => { if (typeof onProgress === 'function') { try { onProgress(p); } catch { /* UI must not break installs */ } } };
+    report({ stage: 'preparing' });
     const targetDir = path.join(this.runtimeDir, version);
     fs.mkdirSync(targetDir, { recursive: true });
     fs.writeFileSync(
@@ -277,14 +341,43 @@ class RuntimeManager {
     );
 
     this.log(`[runtime] installing ${PACKAGE}@${version} -> ${targetDir}`);
-    const Arborist = require('@npmcli/arborist');
+    const Arborist = this._arborist || require('@npmcli/arborist');
     const arb = new Arborist({ path: targetDir });
-    await arb.reify({ save: false });
+    // Deadline around reify(): arborist can stall on a slow registry, a locked
+    // npm cache or a broken postinstall hook, and it has no built-in timeout.
+    // Without this the "check update" flow hangs forever (force-quit required).
+    let timer = null;
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`install timed out after ${Math.round(this.installTimeoutMs / 1000)}s`)), this.installTimeoutMs);
+    });
+    // While reify runs, surface liveness: count resolved top-level packages in
+    // node_modules so the console shows progress ("installed N packages…")
+    // instead of dead air. readdirSync on the top level only stays cheap even
+    // for large trees.
+    let pkgCount = 0;
+    let probe = null;
+    const startedAt = Date.now();
+    if (typeof onProgress === 'function') {
+      probe = setInterval(() => {
+        const nm = path.join(targetDir, 'node_modules');
+        try { pkgCount = fs.readdirSync(nm).length; } catch { /* not created yet */ }
+        // arborist materializes node_modules late; elapsed time is the honest
+        // liveness signal (a bare "0 packages" for minutes looks like a hang)
+        report({ stage: 'installing', pkgCount, elapsedMs: Date.now() - startedAt });
+      }, 500);
+    }
+    try {
+      await Promise.race([arb.reify({ save: false }), deadline]);
+    } finally {
+      clearTimeout(timer);
+      if (probe) clearInterval(probe);
+    }
     this.log(`[runtime] install finished for ${version}`);
 
     const entry = { version, path: targetDir, source: 'managed' };
     this.state.installed.push(entry);
     this.saveState();
+    report({ stage: 'finalizing', pkgCount, elapsedMs: Date.now() - startedAt });
     return entry;
   }
 
@@ -302,7 +395,7 @@ class RuntimeManager {
     const env = { ...process.env, DSH_HOME: dshHome };
     if (node && node.runAsNode) env.ELECTRON_RUN_AS_NODE = '1';
     return new Promise((resolve) => {
-      const child = spawn(
+      const child = this._spawn(
         node.bin,
         [binJs, '--profile', 'web', '--dump-config'],
         { env, cwd: entry.path, windowsHide: true, stdio: 'ignore' }
@@ -310,7 +403,7 @@ class RuntimeManager {
       const timer = setTimeout(() => {
         try { child.kill(); } catch { /* ignore */ }
         resolve({ ok: false, reason: 'timeout' });
-      }, SMOKE_TIMEOUT_MS);
+      }, this.smokeTimeoutMs);
       child.on('error', (err) => {
         clearTimeout(timer);
         resolve({ ok: false, reason: err.message });

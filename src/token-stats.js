@@ -167,22 +167,42 @@ async function parseSessionLogAsync(file, windows) {
       }
       const fresh = grown.slice(0, lastNl + 1); // complete lines only
       const inc = sumUsage(fresh, windows);
-      const t = hit.result.totals;
-      t.input += inc.input; t.output += inc.output;
-      t.cacheRead += inc.cacheRead; t.cacheWrite += inc.cacheWrite;
-      t.lines += inc.lines;
-      if (inc.lastUsage) t.lastUsage = inc.lastUsage;
-      if (t.peak && t.offPeak) {
-        t.peak.input += inc.peak.input; t.peak.output += inc.peak.output;
-        t.peak.cacheRead += inc.peak.cacheRead; t.peak.cacheWrite += inc.peak.cacheWrite;
-        t.offPeak.input += inc.offPeak.input; t.offPeak.output += inc.offPeak.output;
-        t.offPeak.cacheRead += inc.offPeak.cacheRead; t.offPeak.cacheWrite += inc.offPeak.cacheWrite;
-      }
+      // P1-1 (concurrent double-count): accumulate onto a SNAPSHOT of the
+      // cached totals instead of mutating them in place — collectStats() has
+      // several independent callers (5s poll, settings refresh, onTurnEnd,
+      // manual refresh) that can both hit this branch during one growth
+      // window; two in-place adds of the same new bytes would double-count
+      // the session and leave the poisoned totals in the cache until restart.
+      const base = hit.result.totals;
+      const t = {
+        input: base.input + inc.input,
+        output: base.output + inc.output,
+        cacheRead: base.cacheRead + inc.cacheRead,
+        cacheWrite: base.cacheWrite + inc.cacheWrite,
+        lines: base.lines + inc.lines,
+        lastUsage: inc.lastUsage || base.lastUsage,
+        peak: {
+          input: (base.peak ? base.peak.input : 0) + inc.peak.input,
+          output: (base.peak ? base.peak.output : 0) + inc.peak.output,
+          cacheRead: (base.peak ? base.peak.cacheRead : 0) + inc.peak.cacheRead,
+          cacheWrite: (base.peak ? base.peak.cacheWrite : 0) + inc.peak.cacheWrite,
+        },
+        offPeak: {
+          input: (base.offPeak ? base.offPeak.input : 0) + inc.offPeak.input,
+          output: (base.offPeak ? base.offPeak.output : 0) + inc.offPeak.output,
+          cacheRead: (base.offPeak ? base.offPeak.cacheRead : 0) + inc.offPeak.cacheRead,
+          cacheWrite: (base.offPeak ? base.offPeak.cacheWrite : 0) + inc.offPeak.cacheWrite,
+        },
+      };
+      // A concurrent parse may have already consumed these bytes and replaced
+      // the cache entry while we were reading — abandon our increment and let
+      // the catch below fall through to a full re-parse.
+      if (parseCache.get(file) !== hit) throw new Error('cache advanced concurrently; full re-parse');
       const result = { totals: t, meta: hit.result.meta, mtimeMs: st.mtimeMs };
       // byte length (not char length) keeps the offset valid for multi-byte logs
       parseCache.set(file, { size: st.size, mtimeMs: st.mtimeMs, result, offset: hit.offset + Buffer.byteLength(fresh, 'utf8'), wkey });
       return result;
-    } catch { /* reader raced a rewrite; fall through to a full re-parse */ }
+    } catch { /* reader raced a rewrite or a concurrent parse; full re-parse below */ }
   }
   let text;
   let offset;

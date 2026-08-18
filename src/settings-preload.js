@@ -6,6 +6,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('dshShell', {
   getSettings: () => ipcRenderer.invoke('shell:get-settings'),
   saveSettings: (partial) => ipcRenderer.invoke('shell:save-settings', partial),
+  // renderer trace: page-open / async-render timings land in the main log
+  log: (msg) => ipcRenderer.invoke('shell:log', msg),
   getTheme: () => ipcRenderer.invoke('shell:get-theme'),
   onTheme: (cb) => ipcRenderer.on('shell:theme', (_e, t) => cb(t)),
   pickFolder: (kind) => ipcRenderer.invoke('shell:pick-folder', kind),
@@ -84,4 +86,6 @@ contextBridge.exposeInMainWorld('dshShell', {
   channelsConfigure: (id, values) => ipcRenderer.invoke('shell:channels-configure', id, values),
   channelsTest: (id, values) => ipcRenderer.invoke('shell:channels-test', id, values),
   onChannelsChanged: (cb) => ipcRenderer.on('channels:changed', () => cb()),
+  // runtime install progress (update console): live frames from runUpdateCheck
+  onUpdateProgress: (cb) => ipcRenderer.on('update:progress', (_e, p) => cb(p)),
 });

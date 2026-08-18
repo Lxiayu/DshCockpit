@@ -318,6 +318,27 @@
     .nav-item .txt { display: none; }
     #pages { padding: 20px 16px 32px; }
   }
+
+  /* runtime install console — a mini terminal so a long rc install never
+     looks like a hang */
+  .term {
+    background: #050507;
+    border: 1px solid var(--border-2);
+    border-radius: var(--radius);
+    color: #6EE7A8;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.55;
+    margin: 10px 0 0;
+    max-height: 260px;
+    overflow: auto;
+    padding: 10px 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .term .err { color: #F87171; }
+  #install-stage { font-weight: 600; }
+  #install-stage::before { content: '▸ '; color: var(--acc); }
 </style>
 </head>
 <body>
@@ -996,6 +1017,13 @@
           </div>
           <div class="status" id="update-status"></div>
         </div>
+        <!-- runtime install console: live progress so a long rc install never
+             looks like a hang (preparing → installing N packages… → smoke) -->
+        <div class="card" id="install-console-card" style="display:none">
+          <h3 data-i18n="card.installConsole">安装进度</h3>
+          <div class="status" id="install-stage"></div>
+          <pre id="install-console" class="term" aria-live="polite"></pre>
+        </div>
       </div>
 
       <!-- ------------------------- page: about (was 关于 + 首次使用) -->
@@ -1135,11 +1163,13 @@
       snap_preInstall: '装插件前', snap_postInstall: '装插件后', snap_preRemove: '卸载前', snap_postRemove: '卸载后', snap_preRestore: '回滚前', snap_preSafeMode: '安全模式前',
       snap_restore: '回滚', snap_confirm: '回滚到 {time} 的 Profile 快照？当前 webUI 插件配置将被覆盖，运行时会自动重启。', snap_restored: '✅ 已回滚并重启运行时',
       snap_safeConfirm: '进入安全模式？将卸载全部第三方插件、只保留官方组件（会先自动快照，可随时回滚）。', snap_safeDone: '✅ 已进入安全模式并重启运行时',
-      check_running: '正在查询 npm registry…',
-      check_fail: '❌ 检查失败：', new_found: '发现新版本：{a} → {b}\n已下载并验证后，「应用更新」会可用。',
+      check_running: '正在查询 npm registry…', check_in_progress: '已有检查/安装正在进行中，请稍候…',
+      check_fail: '❌ 检查失败：', new_found: '发现新版本：{a} → {b}\n已下载并验证后，「应用更新」会可用。', update_ready: '更新已就绪：{a} → {b}。点击「应用更新」生效。',
       up_to_date: '已是最新（{v}）。', apply_ok: '✅ 已切换到 {v}，运行时已重启。', apply_fail: '❌ 应用更新失败：',
       rollback_ok: '↩️ 已回滚 {a} → {b}，运行时已重启。', rollback_fail: '❌ 回滚失败：',
       pending_hint: '待应用更新：{v}。点击「应用更新」。',
+      card_installConsole: '安装进度',
+      update_stageChecking: '正在检查更新…', update_stagePreparing: '准备安装…', update_stageInstalling: '正在安装依赖…', update_stageSmoke: '正在冒烟测试…', update_stageDone: '安装完成', update_stageFailed: '安装失败',
       warn_mirror: '注意：非官方镜像由第三方维护，存在供应链信任风险；下载完整性仍会校验。',
       warn_port_hyperv: '⚠ 3070–3169 是 Windows Hyper-V/WSL2 的保留端口区间，启动可能失败（官方讨论区 #589），建议换用其他端口。',
       warn_path_ascii: '⚠ 路径含非 ASCII 字符：dsh 在 Windows 上有已知路径 bug（官方讨论区 #107），建议使用纯英文路径。',
@@ -1265,11 +1295,14 @@
       channels_cfg_guide: '接入引导',
       channels_cfg_missing: '请先填写凭据',
       channels_feishu_appId: 'App ID', channels_feishu_appSecret: 'App Secret',
-      channels_feishu_guide: '在飞书开放平台创建企业自建应用 → 事件订阅选「使用长连接模式」→ 订阅 im.message.receive_v1 与 card.action.trigger → 权限开启「以应用身份发消息」→ 发布应用。回调地址留空（走本机长连接，无需公网）。',
+      channels_feishu_phAppId: '后台「凭证与基础信息」中的 App ID', channels_feishu_phAppSecret: '后台「凭证与基础信息」中的 App Secret',
+      channels_feishu_guide: '1. 打开 open.feishu.cn → 开发者后台 → 创建「企业自建应用」（需企业管理员或开发者权限）。\n2. 进入应用 →「凭证与基础信息」，复制 App ID、App Secret，填入上方两个输入框。\n3. 在「事件与回调 → 事件订阅」页面，把订阅方式改为「使用长连接接收事件」，并添加事件 im.message.receive_v1（接收消息）。\n4. 在「事件与回调 → 回调配置」页面，把订阅方式改为「使用长连接接收回调」，并添加回调 card.action.trigger（卡片回传交互）。\n5. 注意：第 3、4 步保存时，本机客户端的长连接必须处于在线状态，否则无法保存成功。\n6. 在「权限管理」开启「以应用身份发消息」等消息权限；再到「版本管理与发布」创建版本并发布，等待企业管理员审核通过。\n7. 回到本页点击「测试连接」验证凭据（仅校验，不会发送消息）；通过后打开开关即完成接入。\n提示：长连接模式仅支持企业自建应用；无需公网 IP/域名，也无需配置回调 URL。',
       channels_wecom_botId: '机器人 ID', channels_wecom_secret: '机器人 Secret',
-      channels_wecom_guide: '企业微信管理后台 → 应用管理 → 创建智能机器人（AI Bot）→ 复制机器人 ID 与 Secret。WebSocket 长连接接入，无需公网回调。',
+      channels_wecom_phBotId: '创建机器人时页面展示的 Bot ID', channels_wecom_phSecret: '创建机器人时页面展示的 Secret（仅一次）',
+      channels_wecom_guide: '1. 打开企业微信客户端 → 工作台 → 智能机器人 → 创建机器人 → 手动创建。\n2. 选择「API 模式」创建。\n3. 在 API 配置页面，把连接方式选为「使用长连接」。\n4. 配置完成后页面会自动生成并展示 Bot ID 和 Secret —— 仅在创建时展示一次，请立即复制，填入上方「机器人 ID」「机器人 Secret」两个输入框。\n5. 点击「测试连接」验证凭据（仅校验，不会发送消息）；通过后打开开关即完成接入。\n提示：Secret 是长连接专用密钥，与 Webhook 模式的 Token/EncodingAESKey 不同；同一机器人同一时间只能保持一个有效长连接（多开会被互踢）。无需公网 IP/域名，无需配置回调地址。',
       channels_dingtalk_clientId: 'Client ID', channels_dingtalk_clientSecret: 'Client Secret',
-      channels_dingtalk_guide: '钉钉开放平台 → 创建企业内部应用 → 消息推送选「Stream 模式」→ 复制 Client ID / Client Secret → 完成版本发布与可用范围。Stream 走本机 WebSocket，无需公网回调。',
+      channels_dingtalk_phClientId: '后台「凭证与基础信息」中的 Client ID', channels_dingtalk_phClientSecret: '后台「凭证与基础信息」中的 Client Secret',
+      channels_dingtalk_guide: '1. 打开 open.dingtalk.com → 开发者后台 → 创建「企业内部应用」（需企业管理员或开发者权限）。\n2. 进入应用 →「凭证与基础信息」，复制 Client ID（旧称 AppKey）与 Client Secret（旧称 AppSecret），填入上方两个输入框。\n3. 在应用内创建机器人：「应用能力 → 添加机器人 → 企业内部机器人」，消息接收方式选择「Stream 模式」（官方推荐，即 Stream 推送）。\n4. 到「版本管理与发布」发布应用版本，并设置好可用范围，确保机器人对目标成员可见。\n5. 点击「测试连接」验证凭据（仅校验，不会发送消息）；通过后打开开关即完成接入。\n提示：Stream 模式官方称为「五零接入」——零公网 IP、零域名、零证书、零网关、零内网穿透，无需配置回调地址。',
       channels_whatsapp_guide: 'WhatsApp 渠道规划中（Cloud API 需公网 webhook），敬请期待。',
       schedule_enabled: '启用', schedule_delete: '删除',
       btn_cancel: '取消', btn_saveTask: '保存任务',
@@ -1483,11 +1516,13 @@
       snap_preInstall: 'before install', snap_postInstall: 'after install', snap_preRemove: 'before removal', snap_postRemove: 'after removal', snap_preRestore: 'before rollback', snap_preSafeMode: 'before safe mode',
       snap_restore: 'Roll back', snap_confirm: 'Roll the profile back to the snapshot from {time}? Current webUI plugin config will be overwritten and the runtime restarts.', snap_restored: '✅ Rolled back; runtime restarting',
       snap_safeConfirm: 'Enter safe mode? All third-party plugins will be removed and only official bundles kept (a snapshot is taken first, so you can roll back).', snap_safeDone: '✅ Safe mode active; runtime restarting',
-      check_running: 'Querying npm registry…',
-      check_fail: '❌ Check failed: ', new_found: 'New version: {a} → {b}\nOnce downloaded and verified, "Apply update" becomes available.',
+      check_running: 'Querying npm registry…', check_in_progress: 'An update check is already running; please wait…',
+      check_fail: '❌ Check failed: ', new_found: 'New version: {a} → {b}\nOnce downloaded and verified, "Apply update" becomes available.', update_ready: 'Update ready: {a} → {b}. Click "Apply update" to activate.',
       up_to_date: 'Up to date ({v}).', apply_ok: '✅ Switched to {v}; runtime restarted.', apply_fail: '❌ Apply failed: ',
       rollback_ok: '↩️ Rolled back {a} → {b}; runtime restarted.', rollback_fail: '❌ Rollback failed: ',
       pending_hint: 'Pending update: {v}. Click "Apply update".',
+      card_installConsole: 'Install progress',
+      update_stageChecking: 'Checking for updates…', update_stagePreparing: 'Preparing install…', update_stageInstalling: 'Installing dependencies…', update_stageSmoke: 'Running smoke test…', update_stageDone: 'Install finished', update_stageFailed: 'Install failed',
       warn_mirror: 'Note: third-party mirrors are a supply-chain trust boundary; integrity is still verified.',
       warn_port_hyperv: '⚠ 3070–3169 is the Windows Hyper-V/WSL2 reserved port range; boot may fail (discussion #589), pick another port.',
       warn_path_ascii: '⚠ Non-ASCII path: dsh has known Windows path bugs (discussion #107); prefer ASCII-only paths.',
@@ -1613,11 +1648,14 @@
       channels_cfg_guide: 'Setup guide',
       channels_cfg_missing: 'Fill in the credentials first',
       channels_feishu_appId: 'App ID', channels_feishu_appSecret: 'App Secret',
-      channels_feishu_guide: 'Feishu Open Platform → create a custom app → event subscription "Long connection mode" → subscribe to im.message.receive_v1 and card.action.trigger → enable im:message:send_as_bot → publish. Leave the callback URL empty (local outbound connection, no public network).',
+      channels_feishu_phAppId: 'App ID from console → Credentials & Basic Info', channels_feishu_phAppSecret: 'App Secret from console → Credentials & Basic Info',
+      channels_feishu_guide: '1. Open open.feishu.cn → developer console → create an "enterprise self-built app" (requires enterprise admin or developer rights).\n2. Open the app → "Credentials & Basic Info", copy the App ID and App Secret into the two fields above.\n3. "Events & Callbacks → Event subscription": switch the mode to "Use long connection to receive events" and add event im.message.receive_v1 (incoming messages).\n4. "Events & Callbacks → Callback configuration": switch to "Use long connection to receive callbacks" and add card.action.trigger (card interactions).\n5. Note: when saving steps 3-4, the local client must be online with its long connection active, or the save will fail.\n6. Under "Permissions" enable message permissions such as "send messages as the app", then create and publish a version under "Version management & release" and wait for enterprise admin approval.\n7. Back here, click "Test connection" to verify the credentials (validation only — no message is sent); once it passes, turn on the switch to finish.\nNote: long-connection mode supports enterprise self-built apps only. No public IP/domain and no callback URL are needed.',
       channels_wecom_botId: 'Bot ID', channels_wecom_secret: 'Bot Secret',
-      channels_wecom_guide: 'WeCom admin console → App management → create an AI Bot (智能机器人) → copy the Bot ID and Secret. Outbound WebSocket; no public callback needed.',
+      channels_wecom_phBotId: 'Bot ID shown once when you create the bot', channels_wecom_phSecret: 'Secret shown once when you create the bot',
+      channels_wecom_guide: '1. Open the WeCom client → Workbench (工作台) → AI Bot (智能机器人) → Create bot → Manual creation.\n2. Choose "API mode".\n3. On the API configuration page, select "Use long connection" as the connection method.\n4. After saving, the page generates and shows the Bot ID and Secret — shown only once, so copy them immediately into the two fields above.\n5. Click "Test connection" to verify the credentials (validation only — no message is sent); once it passes, turn on the switch to finish.\nNote: the Secret is a long-connection-specific key, different from the Token/EncodingAESKey of webhook mode. A bot can only hold one active long connection at a time (another instance will kick it off). No public IP/domain or callback URL is needed.',
       channels_dingtalk_clientId: 'Client ID', channels_dingtalk_clientSecret: 'Client Secret',
-      channels_dingtalk_guide: 'DingTalk Open Platform → create an internal app → message delivery "Stream mode" → copy the Client ID / Client Secret → publish with an availability scope. Stream uses an outbound local WebSocket; no public callback.',
+      channels_dingtalk_phClientId: 'Client ID from console → Credentials & Basic Info', channels_dingtalk_phClientSecret: 'Client Secret from console → Credentials & Basic Info',
+      channels_dingtalk_guide: '1. Open open.dingtalk.com → developer console → create an "enterprise internal app" (requires enterprise admin or developer rights).\n2. Open the app → "Credentials & Basic Info", copy the Client ID (formerly AppKey) and Client Secret (formerly AppSecret) into the two fields above.\n3. Create a bot in the app: "Capabilities → Add a bot → Internal app bot", and choose "Stream mode" for message receiving (Stream push, recommended).\n4. Publish an app version under "Version management & release" and set the availability scope so the bot is visible to the intended members.\n5. Click "Test connection" to verify the credentials (validation only — no message is sent); once it passes, turn on the switch to finish.\nNote: Stream mode is officially the "five-zero integration" — zero public IP, zero domain, zero certificate, zero gateway, zero tunneling. No callback URL is needed.',
       channels_whatsapp_guide: 'WhatsApp channel is planned (Cloud API needs a public webhook) — coming soon.',
       schedule_enabled: 'Enabled', schedule_delete: 'Delete',
       btn_cancel: 'Cancel', btn_saveTask: 'Save task',
@@ -1832,7 +1870,7 @@
     document.title = tr('title');
     filterNav(); // nav labels changed with the language — re-apply the filter
     renderAutoTpl(); // template cards are built from I18N at runtime
-    if (channelsCache.length) renderChannels(channelsCache); // channel cards are tr-built too
+    if (channelsCache.length) renderChannels(channelsCache, { preserveInput: true }); // channel cards are tr-built too
   }
 
   // ------------------------------------------------------------- routing
@@ -1934,6 +1972,11 @@
 
   // ----------------------------------------------------------------- state
   let flashTimer = null;
+  // renderer-side trace → main log (设置 → 关于 → 打开日志目录 可查看).
+  // Lets us confirm the async-render + cache logic end to end.
+  function dbg(msg) {
+    try { window.dshShell.log(msg); } catch { /* preload/IPC not ready */ }
+  }
   function busy(on, text) {
     updating = on;
     clearTimeout(flashTimer);
@@ -2036,34 +2079,67 @@
     $(id).addEventListener('change', validateWarnings);
   });
 
+  // re-entry guard: a second click mid-install would hit the main-side
+  // "already running" rejection — disable the button for the whole flow
+  let checkBusy = false;
   $('btn-check').addEventListener('click', async () => {
+    if (checkBusy) return;
+    checkBusy = true;
+    $('btn-check').disabled = true;
     busy(true, tr('check_running'));
     setStatus($('update-status'), tr('check_running'));
+    dbg('btn-check: clicked → invoking shell:check-update');
+    // surface the install console — a long rc install must show liveness
+    $('install-console-card').style.display = 'block';
+    $('install-console').textContent = '';
+    $('install-stage').textContent = tr('update.stageChecking');
     try {
       const r = await window.dshShell.checkUpdate();
-      if (!r.ok) setStatus($('update-status'), tr('check_fail') + r.reason, 'bad');
-      else if (r.available) {
-        setStatus($('update-status'), tr('new_found', { a: r.current, b: r.target }), 'warn');
+      dbg(`btn-check: result ok=${r.ok} available=${r.available} installed=${r.installed}${r.target ? ` target=${r.target}` : ''}${r.reason ? ` reason=${r.reason}` : ''}`);
+      if (!r.ok) {
+        if (String(r.reason || '').includes('already running')) {
+          // another check (tray/startup) is in flight — not a failure
+          setStatus($('update-status'), tr('check_in_progress'), 'warn');
+        } else {
+          setStatus($('update-status'), tr('check_fail') + r.reason, 'bad');
+        }
+      } else if (r.available) {
+        if (r.installed) {
+          // download + smoke finished: this is a pending apply, not a fresh
+          // download — say so and arm the apply button
+          setStatus($('update-status'), tr('update_ready', { a: r.current, b: r.target }), 'ok');
+        } else {
+          setStatus($('update-status'), tr('new_found', { a: r.current, b: r.target }), 'warn');
+        }
         $('btn-apply').disabled = false;
       } else {
         setStatus($('update-status'), tr('up_to_date', { v: r.current }), 'ok');
         $('btn-apply').disabled = true;
+        // nothing to install — hide the install console (it stays visible
+        // only when a download/install actually ran)
+        $('install-console-card').style.display = 'none';
       }
     } catch (e) {
+      dbg(`btn-check: threw ${e.message}`);
       setStatus($('update-status'), tr('check_fail') + e.message, 'bad');
     } finally {
+      checkBusy = false;
+      $('btn-check').disabled = false;
       busy(false);
     }
   });
 
   $('btn-apply').addEventListener('click', async () => {
     busy(true, tr('busy_saving'));
+    dbg('btn-apply: clicked → invoking shell:apply-update');
     try {
       const r = await window.dshShell.applyUpdate();
+      dbg(`btn-apply: applied ${r.previous} → ${r.current}`);
       setStatus($('update-status'), tr('apply_ok', { v: r.current }), 'ok');
       $('btn-apply').disabled = true;
       refreshInfo();
     } catch (e) {
+      dbg(`btn-apply: failed ${e.message}`);
       setStatus($('update-status'), tr('apply_fail') + e.message, 'bad');
     } finally {
       busy(false);
@@ -2081,6 +2157,49 @@
     } finally {
       busy(false);
     }
+  });
+
+  // runtime install console: append live frames (preparing → N packages → smoke).
+  // arborist materializes node_modules very late, so "N packages" alone looks
+  // like a hang — every installing frame also shows the honest elapsed seconds,
+  // and identical frames are suppressed so the console doesn't spam.
+  const UPDATE_STAGE_KEYS = {
+    checking: 'update.stageChecking', preparing: 'update.stagePreparing',
+    installing: 'update.stageInstalling', smoke: 'update.stageSmoke',
+    done: 'update.stageDone', failed: 'update.stageFailed',
+  };
+  let lastInstLine = '';
+  let lastRecvStage = null;
+  window.dshShell.onUpdateProgress((p) => {
+    if (!p || !p.stage) return;
+    // confirm IPC delivery in the main log; frame-level detail is throttled
+    // main-side (broadcastUpdateProgress), so only log stage changes here
+    if (p.stage !== lastRecvStage) {
+      lastRecvStage = p.stage;
+      dbg(`update:progress recv → ${p.stage}${p.stage === 'installing' ? ` pkg=${p.pkgCount || 0} elapsed=${p.elapsedMs || 0}ms` : ''}`);
+    }
+    const term = $('install-console');
+    const stage = $('install-stage');
+    let line = '';
+    switch (p.stage) {
+      case 'preparing': line = '$ dsh install…'; break;
+      case 'installing': {
+        const secs = Math.max(0, Math.round((p.elapsedMs || 0) / 1000));
+        line = `  ${p.pkgCount || 0} packages resolved · ${secs}s`;
+        if (line === lastInstLine) return; // no new info — don't repeat
+        break;
+      }
+      case 'smoke': line = '$ dsh --profile web --dump-config'; break;
+      case 'done': line = '✓ ' + tr('update.stageDone'); break;
+      case 'failed': line = '✗ ' + tr('update.stageFailed'); break;
+      default: return;
+    }
+    lastInstLine = p.stage === 'installing' ? line : '';
+    term.textContent += line + '\n';
+    term.scrollTop = term.scrollHeight;
+    const key = UPDATE_STAGE_KEYS[p.stage];
+    if (key) stage.textContent = tr(key);
+    if (p.stage === 'done') refreshInfo(); // install finished → sync apply button/status
   });
 
   $('btn-backup').addEventListener('click', async () => {
@@ -2599,16 +2718,16 @@
   };
   const CHANNEL_FIELDS = {
     feishu: [
-      { key: 'appId', trKey: 'channels_feishu_appId', secret: false },
-      { key: 'appSecret', trKey: 'channels_feishu_appSecret', secret: true },
+      { key: 'appId', trKey: 'channels_feishu_appId', phKey: 'channels_feishu_phAppId', secret: false },
+      { key: 'appSecret', trKey: 'channels_feishu_appSecret', phKey: 'channels_feishu_phAppSecret', secret: true },
     ],
     wecom: [
-      { key: 'botId', trKey: 'channels_wecom_botId', secret: false },
-      { key: 'secret', trKey: 'channels_wecom_secret', secret: true },
+      { key: 'botId', trKey: 'channels_wecom_botId', phKey: 'channels_wecom_phBotId', secret: false },
+      { key: 'secret', trKey: 'channels_wecom_secret', phKey: 'channels_wecom_phSecret', secret: true },
     ],
     dingtalk: [
-      { key: 'clientId', trKey: 'channels_dingtalk_clientId', secret: false },
-      { key: 'clientSecret', trKey: 'channels_dingtalk_clientSecret', secret: true },
+      { key: 'clientId', trKey: 'channels_dingtalk_clientId', phKey: 'channels_dingtalk_phClientId', secret: false },
+      { key: 'clientSecret', trKey: 'channels_dingtalk_clientSecret', phKey: 'channels_dingtalk_phClientSecret', secret: true },
     ],
   };
   const CHANNEL_DOT_CLASS = { offline: 'var(--text-3)', connecting: '#d29922', online: '#28a745', backoff: '#d29922' };
@@ -2623,9 +2742,20 @@
     return st.lastError ? `${tr('channels_state_offline')} — ${st.lastError}` : tr('channels_state_offline');
   }
 
-  function renderChannels(list) {
+  function renderChannels(list, opts) {
+    const preserve = !!(opts && opts.preserveInput);
     channelsCache = list || [];
     const wrap = $('channels-list');
+    // Rebuilding the card list wipes in-progress credential/allowlist edits;
+    // when this render is a passive state push (not a user action), snapshot
+    // the field values first and restore them after.
+    const prev = {};
+    if (preserve) {
+      for (const inp of wrap.querySelectorAll('input[type="text"], input[type="password"]')) {
+        const k = inp.dataset.chField;
+        if (k) prev[k] = inp.value;
+      }
+    }
     wrap.textContent = '';
     for (const ch of channelsCache) {
       const card = document.createElement('div');
@@ -2686,6 +2816,7 @@
       afHint.textContent = tr('channels_allowFromHint');
       const afInput = document.createElement('input');
       afInput.type = 'text';
+      afInput.dataset.chField = 'af:' + ch.type; // for preserve-on-push
       afInput.placeholder = 'user_123, chat_456';
       afInput.value = (ch.allowFrom || []).join(', ');
       afInput.style.width = '100%';
@@ -2742,8 +2873,9 @@
           fCtrl.className = 'setting-ctrl';
           const input = document.createElement('input');
           input.type = f.secret ? 'password' : 'text';
+          input.dataset.chField = ch.type + '.' + f.key; // for preserve-on-push
           input.autocomplete = 'off';
-          input.placeholder = ch.credentialsConfigured ? '••••••••' : '';
+          input.placeholder = ch.credentialsConfigured ? '••••••••' : (f.phKey ? tr(f.phKey) : '');
           input.style.width = '240px';
           inputs[f.key] = input;
           fCtrl.appendChild(input);
@@ -2828,6 +2960,8 @@
         guideBody.className = 'desc';
         guideBody.style.display = 'block';
         guideBody.style.marginTop = '4px';
+        // guides are multi-line step lists; pre-line honors the \n in the copy
+        guideBody.style.whiteSpace = 'pre-line';
         guideBody.textContent = tr(`channels_${ch.type}_guide`);
         guide.appendChild(guideSummary);
         guide.appendChild(guideBody);
@@ -2837,16 +2971,32 @@
 
       wrap.appendChild(card);
     }
+    // restore in-progress edits after a passive push render
+    if (preserve) {
+      for (const inp of wrap.querySelectorAll('input')) {
+        const k = inp.dataset.chField;
+        if (k && prev[k] !== undefined && inp.type !== 'checkbox') inp.value = prev[k];
+      }
+    }
   }
 
-  async function refreshChannels() {
+  async function refreshChannels(preserveInput) {
     try {
       const r = await window.dshShell.channelsList();
-      renderChannels((r && r.channels) || []);
+      renderChannels((r && r.channels) || [], { preserveInput: !!preserveInput });
     } catch (e) { /* main not ready */ }
   }
 
-  window.dshShell.onChannelsChanged(() => refreshChannels());
+  // passive state pushes (online/offline/backoff…) arrive in bursts — debounce
+  // them so the card list is rebuilt at most ~3×/s instead of per transition
+  let channelsPushTimer = null;
+  window.dshShell.onChannelsChanged(() => {
+    if (channelsPushTimer) return;
+    channelsPushTimer = setTimeout(() => {
+      channelsPushTimer = null;
+      refreshChannels(true); // preserve in-progress edits on passive pushes
+    }, 300);
+  });
 
   // ------------------------------------------------------- cost & diagnostics
   function renderCost(info) {
@@ -2876,7 +3026,9 @@
   }
 
   async function refreshCost() {
-    try { renderCost(await window.dshShell.costInfo()); } catch (e) { /* ignore */ }
+    const t = Date.now();
+    try { renderCost(await window.dshShell.costInfo()); dbg(`refreshCost: costInfo ok in ${Date.now() - t}ms (collectStats cache path)`); }
+    catch (e) { dbg(`refreshCost: failed ${e.message}`); }
   }
 
   // ------------------------------------------------------- official balance
@@ -2899,7 +3051,9 @@
   }
 
   async function refreshBalance() {
-    try { renderBalance(await window.dshShell.balanceInfo()); } catch (e) { /* ignore */ }
+    const t = Date.now();
+    try { renderBalance(await window.dshShell.balanceInfo()); dbg(`refreshBalance: balanceInfo ok in ${Date.now() - t}ms`); }
+    catch (e) { dbg(`refreshBalance: failed ${e.message}`); }
   }
 
   $('btn-balance-refresh').addEventListener('click', async () => {
@@ -3006,10 +3160,12 @@
   window.dshShell.onCompactStatus(() => refreshCompact());
 
   async function refreshDiagnostics() {
+    const t = Date.now();
     try {
       const d = await window.dshShell.diagnosticsInfo();
       $('about-diagnostics').textContent = d.crashCount ? tr('about.diagnosticsCount', { n: d.crashCount }) : tr('about.diagnosticsNone');
-    } catch (e) { /* ignore */ }
+      dbg(`refreshDiagnostics: ok in ${Date.now() - t}ms (crashes=${d.crashCount})`);
+    } catch (e) { dbg(`refreshDiagnostics: failed ${e.message}`); }
   }
 
   $('open-diagnostics').addEventListener('click', () => window.dshShell.openDiagnostics());
@@ -4088,26 +4244,42 @@
     }
   });
 
-  async function refreshInfo() {
-    try {
-      const info = await window.dshShell.runtimeInfo();
-      $('about-runtime').textContent = info.activeVersion || '—';
-      $('about-path').textContent = info.activePath || '—';
-      const pending = info.pendingVersion;
-      if (pending) {
-        $('btn-apply').disabled = false;
-        setStatus($('update-status'), tr('pending_hint', { v: pending }), 'warn');
-      } else {
-        $('btn-apply').disabled = true;
-      }
-      $('btn-rollback').disabled = !(info.installed && info.installed.length > 1);
-    } catch (e) { /* ignore */ }
-    try {
-      renderBackup(await window.dshShell.backupInfo());
-    } catch (e) { /* ignore */ }
-    try {
-      renderStorage(await window.dshShell.storageInfo());
-    } catch (e) { /* ignore */ }
+  function refreshInfo() {
+    const t0 = Date.now();
+    dbg('refreshInfo: start — sections render independently');
+    // every section resolves on its own — a slow IPC (storage tree walk,
+    // token scan) must never block the rest of the page from painting
+    (async () => {
+      try {
+        const t1 = Date.now();
+        const info = await window.dshShell.runtimeInfo();
+        dbg(`refreshInfo: runtimeInfo ok in ${Date.now() - t1}ms (pending=${info.pendingVersion || 'none'})`);
+        $('about-runtime').textContent = info.activeVersion || '—';
+        $('about-path').textContent = info.activePath || '—';
+        const pending = info.pendingVersion;
+        if (pending) {
+          $('btn-apply').disabled = false;
+          setStatus($('update-status'), tr('pending_hint', { v: pending }), 'warn');
+        } else {
+          $('btn-apply').disabled = true;
+        }
+        $('btn-rollback').disabled = !(info.installed && info.installed.length > 1);
+      } catch (e) { dbg(`refreshInfo: runtimeInfo failed: ${e.message}`); }
+    })();
+    (async () => {
+      try {
+        const t1 = Date.now();
+        renderBackup(await window.dshShell.backupInfo());
+        dbg(`refreshInfo: backupInfo ok in ${Date.now() - t1}ms`);
+      } catch (e) { dbg(`refreshInfo: backupInfo failed: ${e.message}`); }
+    })();
+    (async () => {
+      try {
+        const t1 = Date.now();
+        renderStorage(await window.dshShell.storageInfo());
+        dbg(`refreshInfo: storageInfo ok in ${Date.now() - t1}ms`);
+      } catch (e) { dbg(`refreshInfo: storageInfo failed: ${e.message}`); }
+    })();
     renderSnapshots();
     refreshCost();
     refreshBalance();
@@ -4115,6 +4287,7 @@
     renderInstalled();
     renderAuto();
     refreshRemote();
+    dbg(`refreshInfo: all sections fired in ${Date.now() - t0}ms (no await — page keeps painting)`);
   }
 
   async function pick(kind) {
@@ -4126,6 +4299,8 @@
   $('open-logs').addEventListener('click', () => window.dshShell.openLogDir());
 
   (async () => {
+    const tBoot = Date.now();
+    dbg('page init: start');
     showPage(pageFromHash(), false);
     // theme: apply the resolved theme early (before the form paints) and keep
     // it live when the system switches or the user saves a manual override.
@@ -4140,12 +4315,16 @@
     fillForm(s);
     setStatus($('update-status'), tr('status_notChecked'));
     validateWarnings();
-    await refreshInfo();
+    dbg(`page init: form painted in ${Date.now() - tBoot}ms — firing refreshInfo (not awaited)`);
+    // not awaited: the page paints immediately, then each refreshInfo section
+    // fills in as its IPC returns (slow storage/token scans don't gate the UI)
+    refreshInfo();
     // Keep the pairing code / link display live: expiry and one-shot
     // consumption happen server-side, and a stale link is exactly the trap
     // that strands a phone on the pairing page. The public-remote card joins
     // the same cadence (its detectors self-cache for 60s on the main side).
     setInterval(() => { refreshRemote(); refreshPublicRemote(); }, 5000);
+    dbg(`page init: done (${Date.now() - tBoot}ms total, refreshInfo already fired)`);
   })();
 </script>
 </body>

@@ -60,6 +60,91 @@ test('installVersion returns the managed copy without re-installing', async () =
   fs.rmSync(ud, { recursive: true, force: true });
 });
 
+test('resolveTarget skips malformed versions in the rc channel', () => {
+  const { manager } = makeManager();
+  const target = manager.resolveTarget({
+    versions: {
+      '0.1.0-rc.6': {},
+      'not-a-version': {},
+      '0.1.0-rc.7': {},
+      '0.1.0-rc.9-beta': {},
+    },
+  });
+  // highest *valid* prerelease wins; the malformed entry must not throw the sort
+  assert.strictEqual(target, '0.1.0-rc.9-beta');
+});
+
+test('checkForUpdate refuses the target when engines.node is unsatisfied', async () => {
+  const { manager } = makeManager();
+  manager.state.activeVersion = '0.1.0-rc.5';
+  manager.fetchPackument = async () => ({
+    versions: {
+      '0.1.0-rc.5': {},
+      '0.1.0-rc.7': { engines: { node: '>=22.19.0' } },
+    },
+  });
+  manager.detectNodeVersion = async () => '22.14.0'; // Electron 37's bundled Node
+  const report = await manager.checkForUpdate();
+  assert.strictEqual(report.ok, false);
+  assert.strictEqual(report.available, true);
+  assert.match(report.reason, /requires Node >=22\.19\.0, found v22\.14\.0/);
+});
+
+test('checkForUpdate proceeds when engines.node is satisfied', async () => {
+  const { manager } = makeManager();
+  manager.state.activeVersion = '0.1.0-rc.5';
+  manager.fetchPackument = async () => ({
+    versions: {
+      '0.1.0-rc.5': {},
+      '0.1.0-rc.7': { engines: { node: '>=22.19.0' } },
+    },
+  });
+  manager.detectNodeVersion = async () => '24.1.0';
+  const report = await manager.checkForUpdate();
+  assert.strictEqual(report.ok, true);
+  assert.strictEqual(report.available, true);
+  assert.strictEqual(report.target, '0.1.0-rc.7');
+});
+
+test('installVersion times out when arborist reify stalls', async () => {
+  const { ud, manager } = makeManager();
+  manager.installTimeoutMs = 40;
+  // fake arborist whose reify never settles — mirrors a stalled registry/cache
+  manager._arborist = class FakeArborist {
+    constructor() {}
+    async reify() { await new Promise(() => {}); }
+  };
+  const version = '0.1.0-rc.7';
+  await assert.rejects(
+    manager.installVersion(version),
+    /install timed out after 0s/
+  );
+  // timeout must not leave a zombie install lock behind (retry is possible)
+  assert.strictEqual(manager._installLocks.has(version), false);
+  fs.rmSync(ud, { recursive: true, force: true });
+});
+
+test('installVersion reports live progress frames (preparing/installing/finalizing)', async () => {
+  const { ud, manager } = makeManager();
+  const frames = [];
+  manager._arborist = class FakeArb {
+    constructor() {}
+    async reify() {
+      const nm = path.join(ud, 'runtime', '0.1.0-rc.7', 'node_modules');
+      fs.mkdirSync(nm, { recursive: true });
+      for (const p of ['@a/one', '@a/two', 'three']) fs.mkdirSync(path.join(nm, p), { recursive: true });
+      await new Promise((r) => setTimeout(r, 700)); // let the 500ms liveness probe fire
+    }
+  };
+  const entry = await manager.installVersion('0.1.0-rc.7', (p) => frames.push(p));
+  assert.strictEqual(entry.source, 'managed');
+  assert.ok(frames.some((f) => f.stage === 'preparing'), 'preparing frame emitted');
+  const inst = frames.find((f) => f.stage === 'installing');
+  assert.ok(inst && inst.pkgCount >= 2, `liveness frame reports resolved packages (got ${inst && inst.pkgCount})`);
+  assert.strictEqual(frames[frames.length - 1].stage, 'finalizing');
+  fs.rmSync(ud, { recursive: true, force: true });
+});
+
 test('state round-trips to disk', () => {
   const { ud, manager } = makeManager();
   const fake = path.join(ud, 'fake-install');
@@ -208,4 +293,125 @@ test('snapshotDshHome excludes profiles/node_modules', async () => {
   assert.strictEqual(fs.existsSync(path.join(snap, 'profiles', 'node_modules')), false, 'node_modules not in snapshot');
   assert.ok(fs.existsSync(path.join(snap, 'settings.yaml')), 'settings copied');
   fs.rmSync(ud, { recursive: true, force: true });
+});
+
+// -------------------------------------------------- update failure/timeout
+
+const { EventEmitter } = require('node:events');
+
+/** Spawn stub with a controllable child (mirrors node:child_process). */
+function fakeChild({ exitCode = null, error = null, stdout = '' } = {}) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.kill = () => {};
+  if (stdout) setImmediate(() => child.stdout.emit('data', Buffer.from(stdout)));
+  if (exitCode !== null) setImmediate(() => child.emit('close', exitCode));
+  if (error) setImmediate(() => child.emit('error', error));
+  return child;
+}
+
+test('checkForUpdate swallows registry failures into ok:false (no throw)', async () => {
+  const { manager } = makeManager();
+  manager.fetchPackument = async () => { throw new Error('network down'); };
+  const report = await manager.checkForUpdate();
+  assert.strictEqual(report.ok, false);
+  assert.strictEqual(report.available, false);
+  assert.strictEqual(report.reason, 'network down');
+});
+
+test('checkForUpdate reports no version for channel when the packument is empty', async () => {
+  const { manager } = makeManager();
+  manager.fetchPackument = async () => ({ versions: {}, 'dist-tags': {} });
+  const report = await manager.checkForUpdate();
+  assert.strictEqual(report.ok, true);
+  assert.strictEqual(report.available, false);
+  assert.match(report.reason, /no version for channel/);
+});
+
+test('detectNodeVersion resolves null when the probe errors', async () => {
+  const { manager } = makeManager();
+  manager._spawn = () => fakeChild({ error: new Error('ENOENT') });
+  assert.strictEqual(await manager.detectNodeVersion(), null);
+});
+
+test('detectNodeVersion resolves null on non-version output', async () => {
+  const { manager } = makeManager();
+  manager._spawn = () => fakeChild({ exitCode: 0, stdout: 'not a version\n' });
+  assert.strictEqual(await manager.detectNodeVersion(), null);
+});
+
+test('detectNodeVersion times out (probe hangs) and resolves null', async () => {
+  const { manager } = makeManager();
+  manager.nodeProbeTimeoutMs = 20;
+  manager._spawn = () => fakeChild(); // never closes, no output
+  assert.strictEqual(await manager.detectNodeVersion(), null);
+});
+
+test('detectNodeVersion parses vX.Y.Z from stdout', async () => {
+  const { manager } = makeManager();
+  manager._spawn = () => fakeChild({ exitCode: 0, stdout: 'v22.19.0\n' });
+  assert.strictEqual(await manager.detectNodeVersion(), '22.19.0');
+});
+
+test('installVersion rejects (and clears the lock) when arborist reify fails', async () => {
+  const { ud, manager } = makeManager();
+  manager._arborist = class FakeArb {
+    constructor() {}
+    async reify() { throw new Error('registry auth failed'); }
+  };
+  const version = '0.1.0-rc.7';
+  await assert.rejects(manager.installVersion(version), /registry auth failed/);
+  assert.strictEqual(manager._installLocks.has(version), false, 'lock released after failure');
+  fs.rmSync(ud, { recursive: true, force: true });
+});
+
+test('smokeTest fails fast when lib/bin.js is missing', async () => {
+  const { manager } = makeManager();
+  const r = await manager.smokeTest({ path: path.join(os.tmpdir(), 'dsh-nope-xyz'), version: '1.0.0' });
+  assert.strictEqual(r.ok, false);
+  assert.match(r.reason, /missing lib\/bin\.js/);
+});
+
+test('smokeTest reports a non-zero exit as failure with the exit code', async () => {
+  const { ud, manager } = makeManager();
+  const p = path.join(ud, 'runtime', '0.2.0');
+  fakeInstall(p, '0.2.0');
+  manager._spawn = () => fakeChild({ exitCode: 1 });
+  const r = await manager.smokeTest({ path: p, version: '0.2.0' });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.exitCode, 1);
+  fs.rmSync(ud, { recursive: true, force: true });
+});
+
+test('smokeTest times out when the child never exits', async () => {
+  const { ud, manager } = makeManager();
+  const p = path.join(ud, 'runtime', '0.2.0');
+  fakeInstall(p, '0.2.0');
+  manager.smokeTimeoutMs = 20;
+  manager._spawn = () => fakeChild(); // never closes
+  const r = await manager.smokeTest({ path: p, version: '0.2.0' });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.reason, 'timeout');
+  fs.rmSync(ud, { recursive: true, force: true });
+});
+
+test('activate records broken + knownIssues and throws when the smoke test fails', async () => {
+  const { ud, manager } = makeManager();
+  const p = path.join(ud, 'runtime', '0.2.0');
+  fakeInstall(p, '0.2.0');
+  manager.state.installed.push({ version: '0.2.0', path: p, source: 'managed' });
+  manager._spawn = () => fakeChild({ exitCode: 1 });
+  await assert.rejects(manager.activate('0.2.0'), /smoke test failed/);
+  assert.ok(manager.state.broken.includes('0.2.0'), 'marked broken');
+  assert.ok(manager.state.knownIssues['0.2.0'], 'issue recorded');
+  // smoke-failed activation must NOT have switched the active pointer
+  assert.notStrictEqual(manager.state.activeVersion, '0.2.0');
+  fs.rmSync(ud, { recursive: true, force: true });
+});
+
+test('rollback throws when there is no previous version to return to', async () => {
+  const { manager } = makeManager();
+  manager.state.activeVersion = '0.2.0';
+  manager.state.previousVersion = null;
+  await assert.rejects(manager.rollback(), /no previous version/);
 });

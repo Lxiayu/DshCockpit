@@ -125,10 +125,27 @@ function peakWindowsOf(cfg) {
  * per-turn cost computation — always bucketed by the (default 9-12,14-18)
  * peak windows so the official matrix pricing gets its peak/off-peak split;
  * display paths still gate on costPeakEnabled, and one stable bucketing key
- * keeps the parse cache warm. */
-async function collectStats() {
+ * keeps the parse cache warm.
+ *
+ * The full scan (walk every session file + per-file cache check) is not free
+ * on a big sessions tree — on Windows + AV it visibly janks the settings page.
+ * A short result-level TTL serves the 5s token poll / refresh buttons / cost
+ * page from cache; only turn-end accounting (per-turn baseline diff) needs
+ * fresh data and forces a scan. */
+let costCache = { at: 0, data: null };
+const COST_CACHE_TTL_MS = 10_000;
+async function collectStats(force = false) {
+  const now = Date.now();
+  if (!force && costCache.data && now - costCache.at < COST_CACHE_TTL_MS) {
+    log(`[perf] collectStats cache hit (age=${now - costCache.at}ms)`);
+    return costCache.data;
+  }
+  const t0 = Date.now();
   const windows = cost.parseWindows(settings.get().costPeakWindows) || cost.DEFAULT_WINDOWS;
-  return tokenStats.collect(dshHomeOf(), { windows });
+  const data = await tokenStats.collect(dshHomeOf(), { windows });
+  log(`[perf] collectStats ${force ? 'forced ' : ''}recompute took ${Date.now() - t0}ms`);
+  if (!force) costCache = { at: now, data };
+  return data;
 }
 
 const manager = new RuntimeManager({
@@ -944,12 +961,50 @@ function buildAppMenu() {
 // ---------------------------------------------------------------------------
 // update pipeline
 // ---------------------------------------------------------------------------
+/** Push a runtime-install progress frame to every open window (update console).
+ *  Logging is throttled to stage transitions + meaningful installing frames
+ *  (first frame, first non-zero package count, then every 10s) so a 500ms
+ *  probe never floods the log with identical "0 packages" lines. */
+let lastProgressStage = null;
+let lastInstLogAt = 0;
+let lastInstPkg = -1;
+function broadcastUpdateProgress(p) {
+  if (!p || !p.stage) return;
+  for (const w of BrowserWindow.getAllWindows()) {
+    try { if (!w.isDestroyed()) w.webContents.send('update:progress', p); } catch { /* ignore */ }
+  }
+  const stage = p.stage;
+  if (stage !== lastProgressStage) {
+    lastProgressStage = stage;
+    lastInstLogAt = 0;
+    lastInstPkg = -1;
+    log(`[update] progress → ${stage}`);
+    return;
+  }
+  if (stage === 'installing') {
+    const now = Date.now();
+    const pkg = p.pkgCount || 0;
+    if (lastInstLogAt === 0 || (pkg > 0 && pkg !== lastInstPkg) || now - lastInstLogAt >= 10_000) {
+      lastInstLogAt = now;
+      lastInstPkg = pkg;
+      log(`[update] installing: ${pkg} packages · ${Math.round((p.elapsedMs || 0) / 1000)}s`);
+    }
+  }
+}
+
 async function runUpdateCheck(notifyUser) {
-  if (updateInFlight || guidedInstallInProgress) return { ok: false, reason: 'already running' };
+  if (updateInFlight || guidedInstallInProgress) {
+    log(`[update] check skipped: already running (inFlight=${updateInFlight} guided=${guidedInstallInProgress})`);
+    return { ok: false, reason: 'already running' };
+  }
   updateInFlight = true;
+  const t0 = Date.now();
+  log(`[update] check started (notifyUser=${notifyUser})`);
   try {
     const report = await manager.checkForUpdate();
+    log(`[update] registry check done in ${Date.now() - t0}ms → ok=${report.ok} available=${report.available}${report.target ? ` target=${report.target}` : ''}`);
     if (!report.ok) {
+      log(`[update] check failed: ${report.reason}`);
       if (notifyUser) notify(t(lang(), 'notify.updateFailed'), report.reason);
       return report;
     }
@@ -961,12 +1016,19 @@ async function runUpdateCheck(notifyUser) {
       return report;
     }
     notify(t(lang(), 'notify.newVersion'), t(lang(), 'notify.downloading', { a: report.current, b: report.target }));
-    const entry = await manager.installVersion(report.target);
+    // Live progress → every window's update console (a long rc install must
+    // not look like a hang; the console shows preparing/installing N packages…)
+    const tInstall = Date.now();
+    const entry = await manager.installVersion(report.target, (p) => broadcastUpdateProgress(p));
+    log(`[update] install finished in ${((Date.now() - tInstall) / 1000).toFixed(1)}s → ${entry.version}`);
+    broadcastUpdateProgress({ stage: 'smoke' });
     const smoke = await manager.smokeTest(entry);
     if (!smoke.ok) {
       if (!manager.state.broken.includes(report.target)) manager.state.broken.push(report.target);
       manager.state.knownIssues[report.target] = smoke.reason || `smoke test failed (exit ${smoke.exitCode})`;
       manager.saveState();
+      broadcastUpdateProgress({ stage: 'failed' });
+      log(`[update] smoke test failed for ${report.target}: ${smoke.reason || smoke.exitCode}`);
       notify(
         t(lang(), 'notify.smokeFailed'),
         t(lang(), 'notify.smokeFailedBody', { v: report.target, reason: smoke.reason || smoke.exitCode, c: report.current })
@@ -976,10 +1038,14 @@ async function runUpdateCheck(notifyUser) {
     }
     manager.state.pendingVersion = report.target;
     manager.saveState();
+    broadcastUpdateProgress({ stage: 'done' });
+    log(`[update] pending set → ${report.target} (apply via tray or 设置页「应用更新」)`);
     notify(t(lang(), 'notify.ready'), t(lang(), 'notify.readyBody', { a: report.current, b: report.target }));
     updateTray();
     return { ...report, installed: true, smoke: true };
   } catch (err) {
+    log(`[update] check/install threw: ${err.message}`);
+    broadcastUpdateProgress({ stage: 'failed' });
     if (notifyUser) notify(t(lang(), 'notify.updateFailed'), err.message);
     return { ok: false, reason: err.message };
   } finally {
@@ -1105,6 +1171,11 @@ function stopQuickTunnel() {
 }
 
 function registerIpc() {
+  // renderer trace channel: settings-page open / async-render timings land
+  // in the same main log (view via 设置 → 关于 → 打开日志目录)
+  ipcMain.handle('shell:log', (_e, msg) => {
+    if (typeof msg === 'string' && msg.length <= 2000) log(`[settings] ${msg}`);
+  });
   ipcMain.handle('shell:get-settings', () => ({
     ...settings.get(),
     shellVersion: APP_VERSION,
@@ -1477,6 +1548,12 @@ function setWorkspace(ws) {
 
 /** Total size of a directory tree in MB (rounded). Async — uses fsp so the
  *  main thread is never blocked by AV scanning each statSync. */
+// Storage sizes walk the whole sessions/backups/runtimes tree (recursive
+// readdir + stat per file) — on Windows + AV that is many slow syscalls, so
+// storageInfo() caches its result (30s TTL, same strategy as collectStats)
+// and storageCleanup() invalidates it explicitly.
+let storageCache = { at: 0, data: null };
+const STORAGE_CACHE_TTL_MS = 30_000;
 async function dirSizeMBAsync(p) {
   let total = 0;
   let entries;
@@ -1488,6 +1565,12 @@ async function dirSizeMBAsync(p) {
 }
 
 async function storageInfo() {
+  const now = Date.now();
+  if (storageCache.data && now - storageCache.at < STORAGE_CACHE_TTL_MS) {
+    log(`[perf] storageInfo cache hit (age=${now - storageCache.at}ms)`);
+    return storageCache.data;
+  }
+  const t0 = Date.now();
   const ud = app.getPath('userData');
   const defs = [
     { name: 'sessions', path: path.join(dshHomeOf(), 'sessions') },
@@ -1500,10 +1583,13 @@ async function storageInfo() {
   // instead of N sequential ones (each is non-blocking anyway via fsp).
   const sizes = await Promise.all(defs.map((d) => dirSizeMBAsync(d.path)));
   const items = defs.map((d, i) => ({ name: d.name, path: d.path, sizeMB: sizes[i] }));
-  return { items, totalMB: Math.round(items.reduce((a, i) => a + i.sizeMB, 0) * 10) / 10 };
+  log(`[perf] storageInfo tree walk took ${Date.now() - t0}ms`);
+  storageCache = { at: now, data: { items, totalMB: Math.round(items.reduce((a, i) => a + i.sizeMB, 0) * 10) / 10 } };
+  return storageCache.data;
 }
 
 async function storageCleanup() {
+  storageCache = { at: 0, data: null }; // sizes change — force a fresh walk
   const [logsBefore, backupsBefore] = await Promise.all([
     dirSizeMBAsync(path.join(app.getPath('userData'), 'logs')),
     dirSizeMBAsync(backupDir()),
@@ -1809,7 +1895,7 @@ async function skillsAction(op, arg, pick) {
     else if (op === 'install') r = await skillsMgr.install(String(arg || ''), pick === undefined ? null : pick);
     else if (op === 'remove') r = skillsMgr.remove(String(arg || ''));
     else if (op === 'upgrade') r = await skillsMgr.upgrade(String(arg || ''));
-    else if (op === 'import') r = skillsMgr.importLocal(String(arg || ''));
+    else if (op === 'import') r = await skillsMgr.importLocal(String(arg || ''));
     else r = { ok: false, code: 'invalid', reason: 'unknown op' };
 
     // bundle-plugin skill packs live in the plugin pipeline (restart applies)
@@ -2106,7 +2192,15 @@ async function pluginAction(action, fullName) {
       const rootPkg = path.join(profileDirOf(), 'node_modules', fullName.split('/')[1], 'package.json');
       if (!fs.existsSync(rootPkg)) {
         sendMarketProgress({ stage: 'resolve', tail: 'collection repo — locating subpackage' });
-        const { sub, candidates } = await findSubpackage(fullName);
+        // findSubpackage() returns null when the GitHub API lookup itself
+        // failed (rate limit / transient network), NOT when the repo truly
+        // has no subpackage. In that case keep the install as-is: `dsh add`
+        // already succeeded and wrote the profile dependency, so the plugin
+        // takes effect on the next restart — force-pruning here would only
+        // destroy a working install.
+        const info = await findSubpackage(fullName);
+        const sub = info ? info.sub : null;
+        const candidates = info ? info.candidates : [];
         if (sub) {
           log(`[shell] ${fullName} is a collection repo; installing subpackage ${sub}`);
           sendMarketProgress({ stage: 'resolve', tail: `subpackage: ${sub}` });
@@ -2119,6 +2213,8 @@ async function pluginAction(action, fullName) {
             notify(t(lang(), 'plugin.failed'), t(lang(), 'plugin.failedBody', { name: `${fullName} (${sub})`, reason }));
             return { ok: false, code: 'exit', reason };
           }
+        } else if (!info) {
+          log(`[shell] ${fullName}: subpackage lookup failed (GitHub API); keeping the current install — verify after restart`);
         } else {
           const list = (candidates || []).join(', ');
           const reason = t(lang(), 'plugin.collectionRepo') + (list ? `: ${list}` : '');
@@ -2143,6 +2239,11 @@ async function pluginAction(action, fullName) {
       notify(t(lang(), 'plugin.installed'), t(lang(), 'plugin.installedBody', { name: fullName }));
     }
     return { ok: true, restarted: true };
+  } catch (e) {
+    // never leak a raw exception through the IPC bridge (renderer would show
+    // "Error invoking remote method"); surface a readable failure instead
+    log(`[shell] plugin ${action} ${fullName} threw: ${e.message}`);
+    return { ok: false, code: 'error', reason: e.message };
   } finally {
     pluginGuard.release();
   }
@@ -2363,7 +2464,7 @@ async function onTurnEnd() {
   if (now - lastTurnEndAt < 5_000) return; // debounce repeated frames
   lastTurnEndAt = now;
   try {
-    const stats = await collectStats();
+    const stats = await collectStats(true); // fresh: per-turn baseline diff
     primeTurnBaseline(stats); // sessions created after the boot prime
     let latest = null;
     for (const s of stats.sessions) if (!latest || s.mtimeMs > latest.mtimeMs) latest = s;
@@ -3084,11 +3185,19 @@ if (!gotLock) {
     channelsMgr.register('feishu', FeishuChannel, (c) => testFeishuConnection({ appId: c.appId, appSecret: c.appSecret }));
     channelsMgr.register('wecom', WecomChannel, (c) => testWecomConnection({ botId: c.botId, secret: c.secret }));
     channelsMgr.register('dingtalk', DingtalkChannel, (c) => testDingtalkConnection({ clientId: c.clientId, clientSecret: c.clientSecret }));
-    // push channel state changes (online/offline/backoff) to every open window
+    // push channel state changes (online/offline/backoff) to every open window.
+    // Coalesce bursty updates (reconnect storms fire emitState repeatedly) into
+    // a single push — without this the renderer rebuilds the whole channel
+    // card list on every transition and the settings page janks.
+    let channelPushTimer = null;
     channelsMgr.onState(() => {
-      for (const w of BrowserWindow.getAllWindows()) {
-        try { if (!w.isDestroyed()) w.webContents.send('channels:changed'); } catch { /* ignore */ }
-      }
+      if (channelPushTimer) return;
+      channelPushTimer = setTimeout(() => {
+        channelPushTimer = null;
+        for (const w of BrowserWindow.getAllWindows()) {
+          try { if (!w.isDestroyed()) w.webContents.send('channels:changed'); } catch { /* ignore */ }
+        }
+      }, 300);
     });
     channelsMgr.startEnabled();
     broadcastTheme(); // push the resolved theme once settings are ready

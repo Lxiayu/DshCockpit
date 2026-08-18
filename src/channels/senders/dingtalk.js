@@ -4,11 +4,16 @@
 // open-dingtalk.github.io/developerpedia/docs/learn/stream/protocol/):
 //   - replies ride the per-message sessionWebhook the bot message carries
 //     (valid until sessionWebhookExpiredTime): POST it with
-//     { msgtype: 'markdown', markdown: { title, text } } — no access token
-//     needed, no public callback URL.
+//     { msgtype: 'markdown', markdown: { title, text } }. The official Node
+//     SDK example sends an `x-acs-dingtalk-access-token` header on the
+//     webhook POST (value = Client ID; the protocol doc does not specify
+//     this header — 以官方文档为准，需真机验证), no public callback URL.
 //   - connection probe: POST /v1.0/gateway/connections/open with
 //     clientId/clientSecret — the same call the receiver makes before dialing
 //     the WebSocket; getting { endpoint, ticket } back proves the credentials.
+//     subscriptions use the official {type, topic} shape (B4): EVENT topic
+//     '*' + CALLBACK topics /v1.0/im/bot/messages/get and
+//     /v1.0/card/instances/callback.
 //
 // Cards: interactive card buttons need a public callback or a pre-registered
 // card template; per plan C6 the DingTalk channel degrades to command text
@@ -55,9 +60,13 @@ async function openGatewayConnection({ clientId, clientSecret, fetchImpl, tag = 
       body: JSON.stringify({
         clientId,
         clientSecret,
+        // B4: official subscription shape is {type, topic} (protocol doc:
+        // subscriptions[].topic = "订阅的具体业务 Topic"; EVENT supports only
+        // '*' — 开发者后台勾选事件后星号订阅全部)
         subscriptions: [
-          { type: 'EVENT', subscriptionKeys: [] },
-          { type: 'CALLBACK', subscriptionKeys: ['/v1.0/im/bot/messages/get', '/v1.0/card/instances/callback'] },
+          { type: 'EVENT', topic: '*' },
+          { type: 'CALLBACK', topic: '/v1.0/im/bot/messages/get' },
+          { type: 'CALLBACK', topic: '/v1.0/card/instances/callback' },
         ],
         tag,
       }),
@@ -90,9 +99,12 @@ async function testDingtalkConnection({ clientId, clientSecret, fetchImpl, timeo
 
 /**
  * Reply through a session webhook. Markdown carries the reply-instruction
- * text from the formatter (multi-line friendly).
+ * text from the formatter (multi-line friendly). `accessToken` (Client ID,
+ * B5) is sent as `x-acs-dingtalk-access-token` per the official Node SDK
+ * example — the protocol doc leaves the header unspecified, so this is a
+ * best-effort addition (以官方文档为准，需真机验证).
  */
-async function sendViaSessionWebhook({ sessionWebhook, title, text, fetchImpl, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+async function sendViaSessionWebhook({ sessionWebhook, title, text, fetchImpl, accessToken, timeoutMs = DEFAULT_TIMEOUT_MS }) {
   if (!sessionWebhook) throw new Error('dingtalk: no active session webhook');
   if (!fetchImpl) throw Object.assign(new Error('dingtalk: fetch unavailable'), { status: 0 });
   let ac = null;
@@ -103,9 +115,11 @@ async function sendViaSessionWebhook({ sessionWebhook, title, text, fetchImpl, t
     if (typeof timer.unref === 'function') timer.unref();
   }
   try {
+    const headers = { 'content-type': 'application/json' };
+    if (accessToken) headers['x-acs-dingtalk-access-token'] = String(accessToken);
     const res = await fetchImpl(String(sessionWebhook), {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers,
       body: JSON.stringify({ msgtype: 'markdown', markdown: { title: String(title || 'DshCockpit'), text: String(text || '') } }),
       signal: ac ? ac.signal : undefined,
     });

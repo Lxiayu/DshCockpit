@@ -144,7 +144,11 @@ class FeishuChannel {
     this.stopped = false;
     if (!this.WS) throw new Error('feishu: WebSocket unavailable in this runtime');
     const creds = this.readCredentials();
-    if (!creds) throw new Error('feishu: credentials missing (configure app_id/app_secret first)');
+    if (!creds) {
+      const err = new Error('feishu: credentials missing (configure app_id/app_secret first)');
+      err.permanent = true; // config problem — no point auto-reconnecting
+      throw err;
+    }
     this.client = createFeishuClient({
       appId: creds.appId,
       appSecret: creds.appSecret,

@@ -133,6 +133,32 @@ test('incremental parse: appended events counted once, partial lines held back',
   fs.rmSync(home, { recursive: true, force: true });
 });
 
+test('incremental parse: concurrent collects must not double-count shared new bytes (P1-1)', async () => {
+  const home = makeSessionLog([
+    JSON.stringify({ type: 'assistant/message', time: T_PEAK, data: { usage: { inputTokens: 100, outputTokens: 10 } } }),
+  ]);
+  const logFile = path.join(home, 'sessions', 'proj', 'sess1', 'session.jsonl');
+  await ts.parseSessionLogAsync(logFile, WIN); // warm the cache
+  fs.appendFileSync(logFile, JSON.stringify({ type: 'assistant/message', time: T_OFF, data: { usage: { inputTokens: 9, outputTokens: 2 } } }) + '\n');
+
+  // two collects interleave inside the same growth window: both stat the same
+  // old cache entry, both read the same new bytes — the old in-place
+  // accumulation added them twice and left the cache poisoned
+  const [a, b] = await Promise.all([
+    ts.parseSessionLogAsync(logFile, WIN),
+    ts.parseSessionLogAsync(logFile, WIN),
+  ]);
+  assert.strictEqual(a.totals.input, 109, 'first concurrent parse counts the new bytes once');
+  assert.strictEqual(b.totals.input, 109, 'second concurrent parse must not double count');
+  assert.strictEqual(a.totals.peak.input, 100);
+  assert.strictEqual(b.totals.offPeak.input, 9);
+
+  // the cache must not be poisoned either — a follow-up parse reads 109
+  const c = await ts.parseSessionLogAsync(logFile, WIN);
+  assert.strictEqual(c.totals.input, 109, 'cache stays consistent after the race');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
 test('integration: parses the real live session log if present (zstd, small only)', async () => {
   const realHome = path.join(require('node:os').homedir(), '.dsh');
   const root = path.join(realHome, 'sessions');

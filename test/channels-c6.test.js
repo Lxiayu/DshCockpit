@@ -74,7 +74,7 @@ FakeWS.OPEN = 1;
 function fakeFetch(routes = {}) {
   const calls = [];
   const fn = async (url, opts = {}) => {
-    calls.push({ url: String(url), method: opts.method || 'GET', body: opts.body });
+    calls.push({ url: String(url), method: opts.method || 'GET', body: opts.body, headers: opts.headers || {} });
     for (const [prefix, handler] of Object.entries(routes)) {
       if (String(url).startsWith(prefix)) {
         const r = typeof handler === 'function' ? handler(url, opts) : handler;
@@ -422,13 +422,18 @@ it('dingtalk sender: gateway/open probe + classified failures', async () => {
   assert.strictEqual(classifyDingtalkError(new Error('fetch failed: ECONNREFUSED')).kind, 'network');
   assert.strictEqual(classifyDingtalkError(new Error('strange')).kind, 'protocol');
 
-  // the open call must carry the subscription topics and never log the secret
+  // the open call must carry the official {type, topic} subscriptions (B4)
+  // and never log the secret
   const body = JSON.parse(ok.calls[0].body);
-  assert.deepStrictEqual(body.subscriptions[1].subscriptionKeys, ['/v1.0/im/bot/messages/get', '/v1.0/card/instances/callback']);
+  assert.deepStrictEqual(body.subscriptions, [
+    { type: 'EVENT', topic: '*' },
+    { type: 'CALLBACK', topic: '/v1.0/im/bot/messages/get' },
+    { type: 'CALLBACK', topic: '/v1.0/card/instances/callback' },
+  ], 'subscriptions use the official {type, topic} shape');
   assert.strictEqual(body.clientId, 'c');
 });
 
-it('dingtalk receiver: JSON frames — ping→pong, event→ACK, webhook capture, disconnect report', async () => {
+it('dingtalk receiver: official frames — ping echoes opaque, CALLBACK/EVENT ACK shapes, webhook capture, disconnect report', async () => {
   const { tokens, dispatch, calls } = makePipeline();
   const token = tokens.issue({ kind: 'approval', tool: 'Bash' });
 
@@ -448,30 +453,40 @@ it('dingtalk receiver: JSON frames — ping→pong, event→ACK, webhook capture
   await ch.start();
   assert.ok(ch.ws.url.includes('ticket=tk1'), 'endpoint URL carries the one-shot ticket');
 
-  // server keepalive ping
-  ch.handleRawFrame(JSON.stringify({ payload: { headers: {}, data: 'ping' } }));
-  const pong = JSON.parse(ch.ws.sent[0]);
-  assert.strictEqual(pong.payload.data, 'pong');
-
-  // bot message: @-mention + Chinese command + sessionWebhook capture
+  // server keepalive ping — official shape: SYSTEM frame whose data is a JSON
+  // string carrying `opaque`; the response must echo it verbatim (B2) with
+  // the request's messageId
   ch.handleRawFrame(JSON.stringify({
-    headers: { requestId: 'req-1' },
-    payload: {
-      headers: { topic: '/v1.0/im/bot/messages/get', messageId: 'm-1' },
-      data: {
-        msgtype: 'text',
-        text: { content: ' @机器人 批准 ' + token },
-        senderStaffId: 'staff_1',
-        sessionWebhook: 'https://oapi.dingtalk.com/robot/sendBySession?session=xyz',
-        sessionWebhookExpiredTime: Date.now() + 600_000,
-      },
-    },
+    type: 'SYSTEM',
+    headers: { topic: 'ping', messageId: 'ping-1', contentType: 'application/json' },
+    data: JSON.stringify({ opaque: 'abc-123' }),
   }));
-  // ACK frame: SUCCESS receipt mirroring requestId/messageId
+  const pong = JSON.parse(ch.ws.sent[0]);
+  assert.strictEqual(pong.code, 200);
+  assert.strictEqual(pong.message, 'OK');
+  assert.strictEqual(pong.headers.messageId, 'ping-1', 'ping response mirrors the request messageId');
+  assert.strictEqual(pong.data, '{"opaque":"abc-123"}', 'opaque echoed verbatim');
+
+  // bot message: official CALLBACK frame — data is a JSON string with the
+  // @-mention + Chinese command + sessionWebhook
+  ch.handleRawFrame(JSON.stringify({
+    specVersion: '1.0',
+    type: 'CALLBACK',
+    headers: { topic: '/v1.0/im/bot/messages/get', messageId: 'm-1', contentType: 'application/json' },
+    data: JSON.stringify({
+      msgtype: 'text',
+      text: { content: ' @机器人 批准 ' + token },
+      senderStaffId: 'staff_1',
+      sessionWebhook: 'https://oapi.dingtalk.com/robot/sendBySession?session=xyz',
+      sessionWebhookExpiredTime: Date.now() + 600_000,
+    }),
+  }));
+  // ACK frame: official top-level response shape, messageId mirrored (B3)
   const ack = JSON.parse(ch.ws.sent[1]);
-  assert.strictEqual(ack.headers.requestId, 'req-1');
-  assert.strictEqual(ack.payload.headers.messageId, 'm-1');
-  assert.strictEqual(ack.payload.data.code, 'SUCCESS');
+  assert.strictEqual(ack.code, 200);
+  assert.strictEqual(ack.message, 'OK');
+  assert.strictEqual(ack.headers.messageId, 'm-1');
+  assert.deepStrictEqual(JSON.parse(ack.data), { response: {} }, 'CALLBACK data is {"response":{}}');
   await flush(); await flush();
   assert.strictEqual(calls.approval.length, 1, 'approved through the dispatcher');
   assert.strictEqual(ch.webhook, 'https://oapi.dingtalk.com/robot/sendBySession?session=xyz');
@@ -482,15 +497,24 @@ it('dingtalk receiver: JSON frames — ping→pong, event→ACK, webhook capture
   const card = parseDingtalkCardCallback({ content: { params: { action: 'answer', token: 'tk', text: 'yes' } }, senderStaffId: 's2' });
   assert.deepStrictEqual(card.command, { type: 'answer', token: 'tk', text: 'yes' });
   assert.strictEqual(parseDingtalkMessage({ msgtype: 'image' }), null);
-  assert.strictEqual(buildAckFrame({ headers: { requestId: 'r' }, payload: { headers: { messageId: 'm' } } }).payload.data.code, 'SUCCESS');
 
-  // outbound via sessionWebhook (markdown body)
+  // EVENT frames ACK with {"status":"SUCCESS","message":"success"}
+  const evt = buildAckFrame({ type: 'EVENT', headers: { messageId: 'e-1' } });
+  assert.strictEqual(evt.code, 200);
+  assert.strictEqual(evt.headers.messageId, 'e-1');
+  assert.deepStrictEqual(JSON.parse(evt.data), { status: 'SUCCESS', message: 'success' });
+  const cb = buildAckFrame({ type: 'CALLBACK', headers: { messageId: 'c-1' } });
+  assert.strictEqual(cb.headers.messageId, 'c-1');
+  assert.deepStrictEqual(JSON.parse(cb.data), { response: {} });
+
+  // outbound via sessionWebhook: markdown body + official access-token header (B5)
   const send = fakeFetch({
     'https://oapi.dingtalk.com/robot/sendBySession': { body: { errcode: 0, errmsg: 'ok' } },
   });
   ch.fetchImpl = send;
   await ch.sendText('结果完成');
   assert.strictEqual(send.calls.length, 1);
+  assert.strictEqual(send.calls[0].headers['x-acs-dingtalk-access-token'], 'c', 'Client ID sent as x-acs-dingtalk-access-token (B5)');
   assert.strictEqual(JSON.parse(send.calls[0].body).msgtype, 'markdown');
 
   // expired webhook refuses instead of firing a doomed request
@@ -550,7 +574,9 @@ it('manager: configureSecrets/hasSecrets/testChannel vault wiring + status surfa
 
 it('receiver→dispatcher: button and text commands flow through all three adapters with runtime routing fields', async () => {
   const dir = tmpDir();
-  const store = { imChannels: [] };
+  // production start paths only run for channels enabled in config (toggle /
+  // startEnabled), so seed the store like the app would after a user enable
+  const store = { imChannels: ['feishu', 'wecom', 'dingtalk'].map((id) => ({ id, type: id, enabled: true, allowFrom: [] })) };
   const approvals = [];
   const questions = [];
   const mgr = createChannelManager({

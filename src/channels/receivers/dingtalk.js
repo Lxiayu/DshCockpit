@@ -1,34 +1,44 @@
 // src/channels/receivers/dingtalk.js — DingTalk Stream Mode channel (C6).
 //
-// Self-written protocol layer over the official Stream spec (no Node SDK
-// exists; Python dingtalk-stream / Java app-stream-client are the reference
-// implementations). Wire shape is JSON text frames on one WebSocket:
+// Self-written protocol layer over the official Stream spec. An official
+// Node SDK exists (`dingtalk-stream-sdk-nodejs`, npm, open-dingtalk
+// org — v2.0.4); we keep the hand-rolled transport (no extra dependency,
+// same built-in WebSocket policy as runtime-events.js) and follow the
+// official protocol documents (open.dingtalk.com/document/direction/
+// stream-mode-protocol-access-description + open-dingtalk.github.io/
+// developerpedia/docs/learn/stream/protocol/). Wire shape is JSON text
+// frames on one WebSocket:
 //
-//   1. POST /v1.0/gateway/connections/open (clientId/Secret + subscriptions)
-//      → { endpoint, ticket } — ticket is one-shot, 90s TTL, never stored
+//   1. POST /v1.0/gateway/connections/open (clientId/Secret + subscriptions
+//      [{type,topic}]) → { endpoint, ticket } — ticket is one-shot, 90s TTL,
+//      never stored
 //   2. wss connect endpoint?ticket=…
-//   3. server frames → route by payload:
-//        payload.data === 'ping'              → mirror a 'pong' frame
-//        topic /v1.0/im/bot/messages/get      → ACK + bot message (text;
-//        sessionWebhook inside becomes the reply channel; group traffic
-//        arrives @-prefixed → parseCommandText strips mentions)
+//   3. server frames (top-level {type, headers:{topic,messageId,…}, data}):
+//        headers.topic === 'ping'              → echo `opaque` verbatim
+//        topic /v1.0/im/bot/messages/get      → ACK {code,message,headers,
+//        data} + bot message (text; sessionWebhook inside becomes the reply
+//        channel; group traffic arrives @-prefixed → parseCommandText strips
+//        mentions)
 //        topic /v1.0/card/instances/callback  → ACK + card button callback
 //        (value = our {action, token} JSON when a card plugin sends one)
-//   4. every routed frame is ACKed immediately ({code:'SUCCESS'} reply with
-//      the original requestId/messageId) — the gate retries un-ACKed frames
+//   4. every routed frame is ACKed immediately with the official response
+//      shape ({code:200, message:'OK', headers:{messageId (from the request)},
+//      data}) — CALLBACK data {"response":{}}, EVENT data
+//      {"status":"SUCCESS"} — the gate retries un-ACKed EVENT frames
 //   5. close/error → hooks.notifyDisconnect → manager backoff loop
 //
 // Transport: the Node built-in WebSocket (WHATWG API, stable since Node 22 /
 // Electron 37 main) — same choice as src/runtime-events.js; the `ws` npm
 // package stays undeclared (only the official WeCom SDK pulls it).
 //
-// Outbound: markdown via sessionWebhook (senders/dingtalk.js). Buttons would
-// need a public callback — per plan they degrade to command text, so
-// supportsCards is false and the formatter's text shape (reply-instruction
-// with the one-shot token) is what users see.
+// Outbound: markdown via sessionWebhook (senders/dingtalk.js) — replies carry
+// the official SDK's `x-acs-dingtalk-access-token` header (Client ID; the
+// protocol doc leaves the header unspecified — 以官方文档为准，需真机验证).
+// Buttons would need a public callback — per plan they degrade to command
+// text, so supportsCards is false and the formatter's text shape
+// (reply-instruction with the one-shot token) is what users see.
 'use strict';
 
-const crypto = require('node:crypto');
 const {
   openGatewayConnection,
   sendViaSessionWebhook,
@@ -65,34 +75,54 @@ function parseDingtalkCardCallback(data) {
   return { senderId: String(data.senderStaffId || data.senderId || ''), command };
 }
 
-/** ACK frame for a routed server frame (requestId/messageId mirrored). */
+/**
+ * ACK frame for a routed server frame (B3). Official response shape
+ * (developerpedia "协议描述" 响应示例): top-level
+ * { code: 200, message: 'OK', headers: { messageId (mirror the request's),
+ *   contentType: 'application/json' }, data: <JSON string> }.
+ *  - CALLBACK frames (bot message / card callback) → data {"response":{}}
+ *    ("机器人消息的响应中，只需要标识成功失败即可，钉钉服务端暂时不用该 data 字段")
+ *  - EVENT frames → data {"status":"SUCCESS","message":"success"} (status
+ *    必填：SUCCESS 消费成功 / LATER 消费失败)
+ * messageId comes from the received frame's headers (report §3.2: "响应
+ * 的时候将此信息回传给服务端").
+ */
 function buildAckFrame(frame) {
   const h = (frame && frame.headers) || {};
-  const ph = (frame && frame.payload && frame.payload.headers) || {};
+  const type = (frame && frame.type) || '';
+  const data = type === 'EVENT'
+    ? JSON.stringify({ status: 'SUCCESS', message: 'success' })
+    : JSON.stringify({ response: {} });
   return {
-    headers: {
-      contentType: 'application/json',
-      requestId: h.requestId || '',
-      messageId: `ack-${crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex')}`,
-    },
-    payload: {
-      headers: { contentType: 'application/json', messageId: ph.messageId || '', timestamp: String(Date.now()) },
-      data: {
-        code: 'SUCCESS',
-        message: 'success',
-        headers: { contentType: 'application/json' },
-        data: {},
-        systemErrors: null,
-      },
-    },
+    code: 200,
+    message: 'OK',
+    headers: { contentType: 'application/json', messageId: h.messageId || '' },
+    data,
   };
 }
 
-/** Pong frame for the server's keepalive ping. */
-function buildPongFrame() {
+/**
+ * Ping keepalive response (B2). Official protocol: the ping request's data
+ * is a JSON string carrying `opaque` (developerpedia "ping 请求处理") and the
+ * response must echo it verbatim — "响应的数据必须和推送的数据完全一致，并且响应的
+ * messageId和请求的messageId必须保持一致". Fall back to a 'pong' echo when no
+ * opaque is present (以官方文档为准，需真机验证).
+ */
+function buildPingResponseFrame(headers, data) {
+  const h = headers || {};
+  let payload;
+  if (data && typeof data === 'object' && data.opaque !== undefined) {
+    payload = JSON.stringify({ opaque: data.opaque });
+  } else if (typeof data === 'string' && data) {
+    payload = data; // already the raw echo
+  } else {
+    payload = JSON.stringify({ opaque: '' });
+  }
   return {
-    headers: { contentType: 'application/json' },
-    payload: { headers: { contentType: 'application/json' }, data: 'pong' },
+    code: 200,
+    message: 'OK',
+    headers: { contentType: 'application/json', messageId: h.messageId || '' },
+    data: payload,
   };
 }
 
@@ -122,6 +152,8 @@ class DingtalkChannel {
     this.lastPingAt = 0;
     this.heartbeatTimer = null;
     this.stopped = false;
+    this.clientId = '';         // used for the sessionWebhook access-token header (B5)
+    this.heartbeatIntervalMs = injected.heartbeatIntervalMs || 30_000; // tests
   }
 
   /** @private secrets JSON string → { clientId, clientSecret } | null */
@@ -140,7 +172,12 @@ class DingtalkChannel {
     this.stopped = false;
     if (!this.WS) throw new Error('dingtalk: WebSocket unavailable in this runtime');
     const creds = this.readCredentials();
-    if (!creds) throw new Error('dingtalk: credentials missing (configure client id/secret first)');
+    if (!creds) {
+      const err = new Error('dingtalk: credentials missing (configure client id/secret first)');
+      err.permanent = true; // config problem — no point auto-reconnecting
+      throw err;
+    }
+    this.clientId = creds.clientId;
     const { endpoint, ticket } = await openGatewayConnection({
       clientId: creds.clientId,
       clientSecret: creds.clientSecret,
@@ -179,18 +216,25 @@ class DingtalkChannel {
     });
   }
 
-  /** @private one JSON frame from the gate. */
+  /** @private one JSON frame from the gate. Official push shape (B2/B3):
+   * top-level { type, headers: {topic, messageId, contentType, time}, data }
+   * where data is a JSON string (developerpedia "协议描述"). */
   handleRawFrame(text) {
     let frame = null;
     try { frame = JSON.parse(text); } catch { return; }
-    const payload = frame && frame.payload;
-    const data = payload && payload.data;
-    if (data === 'ping') {
+    const headers = (frame && frame.headers) || {};
+    const topic = headers.topic || '';
+    let data = frame && frame.data;
+    // the pushed data is a JSON string; parse it for routing, but the ping
+    // handler needs the raw string to echo back verbatim
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch { /* keep the raw string */ }
+    }
+    if (topic === 'ping') {
       this.lastPingAt = this.now();
-      this.sendJson(buildPongFrame());
+      this.sendJson(buildPingResponseFrame(headers, data));
       return;
     }
-    const topic = (payload && payload.headers && payload.headers.topic) || '';
     if (topic !== '/v1.0/im/bot/messages/get' && topic !== '/v1.0/card/instances/callback') return;
     this.sendJson(buildAckFrame(frame)); // ACK first, then process
     this.lastPingAt = this.now();
@@ -225,7 +269,7 @@ class DingtalkChannel {
         this.log('[channels] dingtalk heartbeat timeout; forcing reconnect');
         this.teardown();
       }
-    }, 30_000);
+    }, this.heartbeatIntervalMs);
     if (typeof this.heartbeatTimer.unref === 'function') this.heartbeatTimer.unref();
   }
 
@@ -285,6 +329,9 @@ class DingtalkChannel {
       sessionWebhook: this.webhook,
       title: 'DshCockpit',
       text,
+      // official Node SDK example sends the access-token header (B5); the
+      // protocol doc doesn't specify it — 以官方文档为准，需真机验证
+      accessToken: this.clientId,
       fetchImpl: this.fetchImpl,
     });
   }
@@ -301,5 +348,6 @@ module.exports = {
   parseDingtalkMessage,
   parseDingtalkCardCallback,
   buildAckFrame,
-  buildPongFrame,
+  buildPingResponseFrame,
+  buildPongFrame: buildPingResponseFrame, // legacy alias
 };

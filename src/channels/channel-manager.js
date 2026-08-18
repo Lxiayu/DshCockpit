@@ -39,6 +39,10 @@ const BUILTIN_SLOTS = ['feishu', 'wecom', 'dingtalk', 'whatsapp'];
 
 const BACKOFF_BASE_MS = 1_000;
 const BACKOFF_MAX_MS = 60_000;
+/** Stop auto-reconnecting after this many consecutive failures: a config or
+ * credential problem won't heal itself, and the 1s→2s→4s…60s loop would
+ * otherwise push `channels:changed` to the renderer forever (UI jank). */
+const MAX_RECONNECT_ATTEMPTS = 12;
 const TASK_DONE_DEBOUNCE_MS = 3_000;
 
 // ------------------------------------------------------------ state machine
@@ -116,7 +120,18 @@ function createChannelManager(deps) {
 
   const states = new Map();     // id -> ChannelState
   const instances = new Map();  // id -> { impl, sender, reconnectTimer }
+  /** ids whose startChannel() is in flight (between beginConnect and the
+   * post-start instances.set) — guards against building a second impl while
+   * `await impl.start()` is still running (P1-2). */
+  const starting = new Set();
   const subscribers = new Set();
+  /** ids parked by a permanent error (credentials/config): no auto-reconnect
+   * until the user toggles the channel off and on again. */
+  const permanentFailures = new Set();
+  /** hasSecrets() decodes safeStorage for every slot; cache until credentials
+   * are written/cleared so statusAll() stays cheap on the renderer's poll. */
+  let secretsCacheValid = false;
+  const secretsCache = new Set();
   let lastTaskDoneAt = 0;
 
   const stateOf = (id) => {
@@ -135,6 +150,12 @@ function createChannelManager(deps) {
   // ------------------------------------------------------------- config
 
   const configs = () => (settings && settings.get().imChannels) || [];
+
+  /** Errors flagged `permanent` (credentials/config, see the channel adapters)
+   * must not trigger the auto-reconnect loop. */
+  function isPermanentError(e) {
+    return !!(e && e.permanent === true);
+  }
 
   function configOf(id) {
     return configs().find((c) => c && c.id === id) || { id, type: id, enabled: false, allowFrom: [] };
@@ -161,6 +182,12 @@ function createChannelManager(deps) {
     const state = stateOf(id);
     const existing = instances.get(id);
     if (existing) return { ok: true, alreadyRunning: true };
+    // P1-2: `instances` is only populated after `await impl.start()` resolves,
+    // so during the connecting window a second startChannel (toggle double-
+    // click, startEnabled vs manual toggle, reconnect timer vs toggle) would
+    // otherwise build a second impl — leaking the first connection's socket
+    // and heartbeat and double-processing inbound. Dedupe while connecting.
+    if (starting.has(id) || state.state === 'connecting') return { ok: true, alreadyRunning: true };
     const ctor = registry.get(id);
     if (!ctor) {
       // Registered placeholder slot: surface the readable not-installed state.
@@ -170,6 +197,7 @@ function createChannelManager(deps) {
       return { ok: false, reason: 'not-installed' };
     }
     state.beginConnect();
+    starting.add(id);
     emitState();
     const cfg = configOf(id);
     try {
@@ -185,6 +213,16 @@ function createChannelManager(deps) {
         },
       });
       await impl.start();
+      // P1-3: the user may have toggled this channel off while connecting —
+      // never bring a disabled channel online (stopChannel couldn't see the
+      // in-flight impl because it isn't in `instances` yet, so we must stop
+      // it here instead of leaving a zombie connection that keeps receiving).
+      if (!configs().some((c) => c && c.id === id && c.enabled)) {
+        try { await impl.stop(); } catch { /* ignore */ }
+        state.markFailed(null);
+        log(`[channels] ${id} start aborted: disabled while connecting`);
+        return { ok: true, alreadyRunning: false };
+      }
       const rec = { impl, sender: createSender(impl), reconnectTimer: null };
       instances.set(id, rec);
       state.markOnline();
@@ -199,8 +237,18 @@ function createChannelManager(deps) {
       state.markFailed(e.message);
       emitState();
       log(`[channels] ${id} start failed: ${e.message}`);
-      scheduleReconnect(id);
+      if (isPermanentError(e)) {
+        // credentials/config problems won't heal on their own — park the
+        // channel instead of hammering the loop (reconnect storms previously
+        // pushed channels:changed to the renderer every second → UI jank)
+        permanentFailures.add(id);
+        instances.delete(id);
+      } else {
+        scheduleReconnect(id);
+      }
       return { ok: false, reason: e.message };
+    } finally {
+      starting.delete(id);
     }
   }
 
@@ -217,8 +265,15 @@ function createChannelManager(deps) {
   }
 
   function scheduleReconnect(id) {
+    if (permanentFailures.has(id)) return; // parked until the user toggles
     if (!instances.has(id) && !configs().some((c) => c && c.id === id && c.enabled)) return; // disabled meanwhile
     const state = stateOf(id);
+    if (state.attempts >= MAX_RECONNECT_ATTEMPTS) {
+      // give up silently: the state already reads backoff with the attempt
+      // count, and the renderer shows it; toggling off/on resets
+      permanentFailures.add(id);
+      return;
+    }
     const delay = state.nextBackoffMs();
     let rec = instances.get(id);
     if (!rec) { rec = { impl: null, sender: null, reconnectTimer: null }; instances.set(id, rec); }
@@ -324,6 +379,7 @@ function createChannelManager(deps) {
   function configureSecrets(id, values) {
     const type = String(id || '');
     if (!registry.has(type)) return { ok: false, reason: 'unknown-channel' };
+    secretsCacheValid = false; // vault changed — invalidate the hasSecrets cache
     if (values === null || values === undefined) {
       secrets.remove(type);
       log(`[channels] ${type} credentials cleared`);
@@ -335,9 +391,19 @@ function createChannelManager(deps) {
     return { ok: true };
   }
 
-  /** Whether the vault holds (decodable) credentials for a channel. */
+  /** Whether the vault holds (decodable) credentials for a channel. Decoding
+   * safeStorage is not free (DPAPI/Keychain round-trips), so cache the result
+   * per-slot and only refresh after configureSecrets(). */
   function hasSecrets(id) {
-    try { return !!secrets.get(String(id || '')); } catch { return false; }
+    const type = String(id || '');
+    if (!secretsCacheValid) {
+      secretsCache.clear();
+      for (const slot of registry.keys()) {
+        try { if (secrets.get(slot)) secretsCache.add(slot); } catch { /* keep miss */ }
+      }
+      secretsCacheValid = true;
+    }
+    return secretsCache.has(type);
   }
 
   /**
@@ -365,6 +431,12 @@ function createChannelManager(deps) {
     if (!registry.has(type)) return { ok: false, reason: 'unknown-channel' };
     saveConfig(type, { enabled: !!enabled });
     if (enabled) {
+      permanentFailures.delete(type); // fresh start clears the parked state
+      // …and reset the retry budget, otherwise an exhausted channel parks again
+      // on the very first start attempt
+      const st = stateOf(type);
+      st.attempts = 0;
+      st.lastError = null;
       startChannel(type); // async; state lands via subscribers
     } else {
       stopChannel(type);
