@@ -31,11 +31,24 @@ const tokenStats = require('./token-stats');
 const windowState = require('./window-state');
 const { connectEvents } = require('./runtime-events');
 const cost = require('./cost');
+const balance = require('./balance');
 const { runHeadless } = require('./headless');
 const { Scheduler } = require('./scheduler');
 const { searchSessions } = require('./session-search');
-const { RemoteControl } = require('./remote-control');
+const { RemoteControl, PAIR_PATH } = require('./remote-control');
+const { createPublicRemote, buildPairUrl } = require('./public-remote');
+const { createModelsManager, PRESETS: MODELS_PRESETS, OLLAMA_PRESET: MODELS_OLLAMA_PRESET } = require('./models-manager');
+const compact = require('./compact');
+const { createMemoryFiles } = require('./memory-files');
 const { createPluginOpGuard, failureCode, shouldCleanupAfterFailure, summarizeOutput, inferStage, parsePnpmBlockedPackage, upsertOnlyBuiltDependencies, pickSubpackage, resolveDepKey, pruneBundles, sanitizeProfile } = require('./plugin-flow');
+const { createSkillsManager, buildSkillsMarketPayload } = require('./skills');
+const { createChannelManager } = require('./channels/channel-manager');
+const { FeishuChannel } = require('./channels/receivers/feishu');
+const { testFeishuConnection } = require('./channels/senders/feishu');
+const { WecomChannel } = require('./channels/receivers/wecom');
+const { testWecomConnection } = require('./channels/senders/wecom');
+const { DingtalkChannel } = require('./channels/receivers/dingtalk');
+const { testDingtalkConnection } = require('./channels/senders/dingtalk');
 
 if (process.env.DSH_DESKTOP_USER_DATA) {
   // must happen before app is ready; keeps logs/state inside the workspace
@@ -72,11 +85,20 @@ let quickAskRunning = false;
 let searchWindow = null;
 let scheduler = null;
 let remote = null; // phone remote-control gateway (constructed after app ready)
+let publicRemote = null; // C7: Tailscale detection + cloudflared quick tunnel helper
+let channelsMgr = null; // IM channels hub (C5 skeleton; constructed after app ready)
 let loadingWindow = null;
 let trayPeakTimer = null; // 1-minute tray refresh for the peak/off-peak countdown
+let balanceMonitor = null; // official balance poller (constructed after app ready)
+let balanceTimer = null; // 5-minute fallback poll for the balance monitor
+let modelsMgr = null; // model provider panel state (constructed after app ready)
+let compactTracker = null; // compaction watcher (C3, constructed after app ready)
+let compactTimer = null; // 5-second compaction scan cadence
+let sessionRunning = false; // live host/session-status frames (C3 busy check)
 let guidedInstallInProgress = false;
 let mainWindowPending = false; // guided first-run: runtime booting, main window not open yet
 const pluginGuard = createPluginOpGuard(); // one dsh plugin op at a time (profile safety)
+const skillsGuard = createPluginOpGuard(); // one skill install/upgrade at a time (atomic writes)
 const scheduledRunning = new Set();
 const budgetNotified = new Set();
 const materializing = new Set();
@@ -88,6 +110,7 @@ const backupDir = () => path.join(app.getPath('userData'), 'backups');
 const dshHomeOf = () => settings.effective().dshHome || path.join(os.homedir(), '.dsh');
 const windowStateFile = () => path.join(app.getPath('userData'), 'window-state.json');
 const costHistoryFile = () => path.join(app.getPath('userData'), 'cost-history.json');
+const balanceSnapshotFile = () => path.join(app.getPath('userData'), 'balance-snapshot.json');
 const diagnosticsDir = () => path.join(app.getPath('userData'), 'diagnostics');
 const TOKEN_POLL_MS = 5_000;
 
@@ -98,11 +121,14 @@ function peakWindowsOf(cfg) {
   return cost.parseWindows(cfg.costPeakWindows) || cost.DEFAULT_WINDOWS;
 }
 
-/** One collect shared by the 5s poll, manual refresh and cost-info IPC —
- * peak/off-peak bucketing is applied whenever peak pricing is enabled. */
+/** One collect shared by the 5s poll, manual refresh, cost-info IPC and the
+ * per-turn cost computation — always bucketed by the (default 9-12,14-18)
+ * peak windows so the official matrix pricing gets its peak/off-peak split;
+ * display paths still gate on costPeakEnabled, and one stable bucketing key
+ * keeps the parse cache warm. */
 async function collectStats() {
-  const windows = peakWindowsOf(settings.get());
-  return windows ? tokenStats.collect(dshHomeOf(), { windows }) : tokenStats.collect(dshHomeOf());
+  const windows = cost.parseWindows(settings.get().costPeakWindows) || cost.DEFAULT_WINDOWS;
+  return tokenStats.collect(dshHomeOf(), { windows });
 }
 
 const manager = new RuntimeManager({
@@ -110,6 +136,24 @@ const manager = new RuntimeManager({
   settings,
   log: (line) => log(line),
   resolveNodeBin: () => bestNodeBin(),
+});
+
+// AGENTS.md memory editor (C3): manages exactly the workspace + DSH_HOME
+// files through a closed write whitelist (see src/memory-files.js)
+const memory = createMemoryFiles({
+  workspaceOf: () => settings.effective().workspace || os.homedir(),
+  dshHomeOf,
+});
+
+// Skills (SKILL.md packs) manager (C4): pure-fs installs into
+// <DSH_HOME>/skills — dsh hot-reloads them, so no runtime restart is ever
+// triggered from this path. Repo zips stage under userData (never inside the
+// skills root, where half-written trees would flash into the runtime).
+const skillsMgr = createSkillsManager({
+  dshHomeOf,
+  stagingRoot: () => path.join(app.getPath('userData'), 'skills-staging'),
+  log: (line) => log(line),
+  progress: sendSkillsProgress,
 });
 
 // ---------------------------------------------------------------------------
@@ -967,6 +1011,7 @@ async function doRollback() {
 /** Restart/stop the phone gateway after its settings changed. */
 function applyRemoteSettings(saved) {
   if (!remote) return;
+  remote.setPublicMode(!!saved.remotePublic); // C7 posture follows the switch, no restart needed
   remote.stop();
   if (saved.remoteControl) {
     remote.setRuntimeUrl(runtimeUrl);
@@ -974,6 +1019,89 @@ function applyRemoteSettings(saved) {
       .then((s) => { if (!s.running) notify(t(lang(), 'notify.remoteFailed'), t(lang(), 'notify.remoteFailedBody')); })
       .catch((e) => log(`[remote] start failed: ${e.message}`));
   }
+}
+
+// ---------------------------------------------------------------------------
+// public remote access (C7): Tailscale detection + cloudflared quick tunnel
+// ---------------------------------------------------------------------------
+const PUBLIC_REMOTE_MODES = ['lan', 'tailscale', 'cloudflare'];
+
+function publicRemoteModeLabel(mode) {
+  const key = { lan: 'publicRemote.modeLan', tailscale: 'publicRemote.modeTailscale', cloudflare: 'publicRemote.modeCloudflare' }[mode];
+  return key ? t(lang(), key) : String(mode);
+}
+
+/** Snapshot for the settings page: switch state, both detectors, tunnel, links. */
+async function publicRemoteStatus(force = false) {
+  const st = remote ? remote.status() : { running: false, port: null, secure: true, pairingCode: null };
+  const mode = PUBLIC_REMOTE_MODES.includes(settings.get().remotePublicMode) ? settings.get().remotePublicMode : 'lan';
+  const pub = !!settings.get().remotePublic;
+  const [ts, cf, tunnel] = await Promise.all([
+    publicRemote ? publicRemote.detectTailscale(force) : Promise.resolve(null),
+    publicRemote ? publicRemote.detectCloudflared(force) : Promise.resolve(null),
+    Promise.resolve(publicRemote ? publicRemote.tunnelStatus() : { running: false, url: null }),
+  ]);
+  const code = st.pairingCode;
+  const pair = (base) => (base && code ? `${base}${PAIR_PATH}?c=${code}` : null);
+  const tsReady = pub && mode === 'tailscale' && ts && ts.state === 'loggedIn' && st.running;
+  return {
+    publicMode: pub,
+    mode,
+    gateway: {
+      running: st.running,
+      port: st.port,
+      secure: st.secure,
+      pairingCode: code,
+      pairingExpiresAt: st.pairingExpiresAt || null,
+    },
+    tailscale: ts,
+    cloudflared: cf,
+    tunnel,
+    links: {
+      lan: st.running && st.urls && st.urls.length ? pair(st.urls[0]) : null,
+      tailscale: tsReady ? buildPairUrl(ts.ipv4, st.port, st.secure, code) : null,
+      tailscaleDns: tsReady ? buildPairUrl(ts.dnsName, st.port, st.secure, code) : null,
+      tunnel: tunnel && tunnel.url ? pair(tunnel.url) : null,
+    },
+  };
+}
+
+/** Enable public access — refuses to run without the renderer's explicit confirm. */
+function enablePublicRemote(mode, confirmed) {
+  if (confirmed !== true) return { ok: false, reason: 'confirm-required' };
+  const m = PUBLIC_REMOTE_MODES.includes(mode) && mode !== 'lan' ? mode : 'tailscale';
+  settings.patch({ remotePublic: true, remotePublicMode: m });
+  if (remote) remote.setPublicMode(true); // also audits the switch via the gateway log
+  log(`[remote] public access enabled (mode=${m})`);
+  notify(t(lang(), 'notify.publicRemoteOn'), t(lang(), 'notify.publicRemoteOnBody', { mode: publicRemoteModeLabel(m) }));
+  return { ok: true, mode: m };
+}
+
+/** Disable public access and take the temporary tunnel down with it. */
+function disablePublicRemote() {
+  settings.patch({ remotePublic: false });
+  if (remote) remote.setPublicMode(false);
+  if (publicRemote) publicRemote.stopTunnel(); // public exposure ends with the switch
+  log('[remote] public access disabled');
+  notify(t(lang(), 'notify.publicRemoteOff'), t(lang(), 'notify.publicRemoteOffBody'));
+  return { ok: true };
+}
+
+/** Start a cloudflared quick tunnel to the running gateway port. */
+async function startQuickTunnel() {
+  if (!publicRemote) return { ok: false, reason: 'not-ready' };
+  const st = remote ? remote.status() : null;
+  if (!st || !st.running || !st.port) return { ok: false, reason: 'gateway-not-running' };
+  const r = await publicRemote.startTunnel(st.port);
+  if (r.ok) notify(t(lang(), 'notify.tunnelStarted'), t(lang(), 'notify.tunnelStartedBody', { url: r.url }));
+  else notify(t(lang(), 'notify.tunnelFailed'), t(lang(), 'notify.tunnelFailedBody', { reason: r.reason }));
+  return r;
+}
+
+function stopQuickTunnel() {
+  if (!publicRemote) return { ok: false };
+  publicRemote.stopTunnel();
+  return { ok: true };
 }
 
 function registerIpc() {
@@ -994,13 +1122,20 @@ function registerIpc() {
     if (remote && (saved.remoteControl !== before.remoteControl || saved.remotePort !== before.remotePort || saved.remoteCompat !== before.remoteCompat)) {
       applyRemoteSettings(saved);
     }
+    // C7: the public-access switch changes the gateway's auth posture, not
+    // its listener — follow it live (and audit the transition there).
+    if (remote && saved.remotePublic !== before.remotePublic) {
+      remote.setPublicMode(!!saved.remotePublic);
+    }
     return saved;
   });
   ipcMain.handle('shell:get-theme', () => resolvedTheme());
   ipcMain.handle('shell:pick-folder', async (_e, kind) => {
     const res = await dialog.showOpenDialog(settingsWindow || mainWindow, {
       properties: ['openDirectory', 'createDirectory'],
-      title: kind === 'workspace' ? t(lang(), 'dialog.pickWorkspace') : t(lang(), 'dialog.pickDshHome'),
+      title: kind === 'workspace'
+        ? t(lang(), 'dialog.pickWorkspace')
+        : kind === 'skills' ? t(lang(), 'dialog.pickSkillDir') : t(lang(), 'dialog.pickDshHome'),
     });
     return res.canceled ? null : { path: res.filePaths[0] };
   });
@@ -1046,6 +1181,23 @@ function registerIpc() {
     }
   });
   ipcMain.handle('shell:plugin-action', (_e, action, fullName) => pluginAction(action, fullName));
+  // skills center (C4): market + installed in one payload; actions below
+  ipcMain.handle('shell:skills-list', async (_e, force) => {
+    try {
+      const installed = skillsMgr.listInstalled();
+      const { source, entries, fetchedAt } = await fetchMarketData(Boolean(force));
+      const starMap = await fetchStarMap();
+      const repos = new Set(installed.filter((s) => s.repo).map((s) => s.repo));
+      return { ok: true, source, fetchedAt, installed, ...buildSkillsMarketPayload(entries, starMap, repos) };
+    } catch (e) {
+      return { ok: false, reason: e.message };
+    }
+  });
+  ipcMain.handle('shell:skills-preview', (_e, fullName) => skillsAction('preview', fullName));
+  ipcMain.handle('shell:skills-install', (_e, fullName, pick) => skillsAction('install', fullName, pick));
+  ipcMain.handle('shell:skills-remove', (_e, name) => skillsAction('remove', name));
+  ipcMain.handle('shell:skills-upgrade', (_e, name) => skillsAction('upgrade', name));
+  ipcMain.handle('shell:skills-import', (_e, dir, pick) => skillsAction('import', dir, pick));
   ipcMain.handle('shell:profile-snapshots', () => {
     try {
       const base = profileSnapshotDir();
@@ -1081,6 +1233,20 @@ function registerIpc() {
   ipcMain.handle('shell:cost-info', async () => {
     const stats = await collectStats();
     return costSnapshot(stats);
+  });
+  // official account balance (C1): snapshot for display + forced refresh
+  ipcMain.handle('shell:balance-info', () => ({
+    snapshot: balanceMonitor ? balanceMonitor.snapshot() : null,
+    threshold: balance.lowBalanceThreshold(settings.get().monthlyBudget || 0),
+  }));
+  ipcMain.handle('shell:balance-refresh', async () => {
+    if (!balanceMonitor) return { ok: false, reason: 'not ready' };
+    try {
+      const snap = await balanceMonitor.refresh({ force: true });
+      return snap ? { ok: true, snapshot: snap } : { ok: false, reason: 'DEEPSEEK_API_KEY not found' };
+    } catch (e) {
+      return { ok: false, reason: e.message };
+    }
   });
   ipcMain.handle('shell:diagnostics-info', () => diagnosticsInfo());
   ipcMain.handle('shell:open-diagnostics', () => shell.openPath(diagnosticsDir()));
@@ -1178,6 +1344,80 @@ function registerIpc() {
     return remote.status();
   });
   ipcMain.handle('remote:revoke', () => (remote ? remote.revokeToken() : null));
+
+  // public remote access (C7): Tailscale detection + cloudflared quick tunnel.
+  // Enabling demands the renderer's explicit second confirmation (public
+  // network warning); the main process re-checks the flag and audits.
+  ipcMain.handle('shell:public-remote-status', (_e, force) => publicRemoteStatus(!!force));
+  ipcMain.handle('shell:public-remote-enable', (_e, mode, confirmed) => enablePublicRemote(mode, confirmed));
+  ipcMain.handle('shell:public-remote-disable', () => disablePublicRemote());
+  ipcMain.handle('shell:tunnel-start', () => startQuickTunnel());
+  ipcMain.handle('shell:tunnel-stop', () => stopQuickTunnel());
+
+  // IM channels (C5): settings-window surface. All channel state mutations run
+  // in the main process; the renderer only renders statusAll() snapshots.
+  ipcMain.handle('shell:channels-list', () => (channelsMgr ? { channels: channelsMgr.statusAll() } : { channels: [] }));
+  ipcMain.handle('shell:channels-toggle', (_e, id, enabled) => (
+    channelsMgr ? channelsMgr.toggle(String(id || ''), !!enabled) : { ok: false, reason: 'not ready' }
+  ));
+  ipcMain.handle('shell:channels-allowfrom', (_e, id, allowFrom) => (
+    channelsMgr ? channelsMgr.setAllowFrom(String(id || ''), allowFrom) : { ok: false, reason: 'not ready' }
+  ));
+  // C6: credentials live in the main-process safeStorage vault; the renderer
+  // sends field values, gets back booleans/result shapes only (never secrets)
+  ipcMain.handle('shell:channels-configure', (_e, id, values) => (
+    channelsMgr ? channelsMgr.configureSecrets(String(id || ''), values) : { ok: false, reason: 'not ready' }
+  ));
+  ipcMain.handle('shell:channels-test', (_e, id, values) => (
+    channelsMgr ? channelsMgr.testChannel(String(id || ''), values) : { ok: false, reason: 'not ready' }
+  ));
+
+  // model provider panel (C2): test/fetch run in the main process so the API
+  // key never crosses into the renderer — only result shapes go back
+  ipcMain.handle('shell:models-list', () => (modelsMgr ? modelsMgr.list() : {
+    presets: MODELS_PRESETS, ollamaPreset: MODELS_OLLAMA_PRESET, profiles: [], default: null,
+  }));
+  ipcMain.handle('shell:models-save', (_e, profile, apiKey) => {
+    if (!modelsMgr) return { ok: false, reason: 'not ready' };
+    try {
+      const r = modelsMgr.save(profile, apiKey);
+      return r;
+    } catch (e) {
+      log(`[models] save failed: ${e.message}`);
+      return { ok: false, reason: e.message };
+    }
+  });
+  ipcMain.handle('shell:models-remove', (_e, id) => {
+    if (!modelsMgr) return { ok: false, reason: 'not ready' };
+    try {
+      const r = modelsMgr.remove(String(id || ''));
+      if (r.ok) {
+        notify(t(lang(), 'notify.modelsRemoved'), t(lang(), 'notify.modelsRemovedBody', { id: String(id || '') }));
+      }
+      return r;
+    } catch (e) {
+      log(`[models] remove failed: ${e.message}`);
+      return { ok: false, reason: e.message };
+    }
+  });
+  ipcMain.handle('shell:models-test', async (_e, target) => {
+    if (!modelsMgr) return { ok: false, kind: 'other', reason: 'not ready' };
+    return modelsMgr.test(target || {});
+  });
+  ipcMain.handle('shell:ollama-status', async () => {
+    if (!modelsMgr) return { installed: false, version: null, models: [], registered: false, reason: 'not ready' };
+    return modelsMgr.ollamaStatus();
+  });
+  ipcMain.handle('shell:models-set-default', (_e, provider, model) => {
+    if (!modelsMgr) return { ok: false, reason: 'not ready' };
+    const r = modelsMgr.setDefault(provider, model);
+    if (r.ok) {
+      notify(t(lang(), 'notify.modelsDefaultSet'), t(lang(), 'notify.modelsDefaultSetBody', {
+        provider: String(provider || ''), model: String(model || ''),
+      }));
+    }
+    return r;
+  });
   // Copy for the settings window (file:// pages have no navigator.clipboard).
   ipcMain.handle('shell:copy-text', (_e, text) => {
     if (typeof text === 'string' && text.length > 0 && text.length <= 4096) clipboard.writeText(text);
@@ -1197,6 +1437,29 @@ function registerIpc() {
   ipcMain.on('chrome:set-workspace', (_e, ws) => setWorkspace(ws));
   ipcMain.on('chrome:report', (_e, info) => {
     log(`[shell] chrome placed at top=${info.top} right=${info.right} (controls found: ${info.found}, saved pos: ${info.saved})`);
+  });
+  ipcMain.on('chrome:compact-now', async () => { await compactNow(); }); // pill context menu (C3)
+
+  // long-session center (C3): compaction + AGENTS.md memory files
+  ipcMain.handle('shell:compact-now', async () => compactNow());
+  ipcMain.handle('shell:compact-status', () => ({
+    compacting: compactTracker ? compactTracker.isCompacting() : false,
+    sessionRunning,
+    last: compactTracker ? (compactTracker.history()[0] || null) : null,
+  }));
+  ipcMain.handle('shell:compact-history', () => (compactTracker ? compactTracker.history() : []));
+  ipcMain.handle('shell:memory-get', (_e, scope) => memory.get(String(scope || '')));
+  ipcMain.handle('shell:memory-save', async (_e, scope, content) => {
+    const r = await memory.save(String(scope || ''), typeof content === 'string' ? content : '');
+    if (r.ok) notify(t(lang(), 'memory.saved'), t(lang(), 'memory.savedBody', { path: r.path }));
+    else log(`[memory] save failed: ${r.code} (${r.reason || ''})`);
+    return r;
+  });
+  ipcMain.handle('shell:memory-delete', async (_e, scope) => {
+    const r = await memory.remove(String(scope || ''));
+    if (r.ok) notify(t(lang(), 'memory.deleted'), t(lang(), 'memory.deletedBody', { path: r.path }));
+    else log(`[memory] delete failed: ${r.code} (${r.reason || ''})`);
+    return r;
   });
 }
 
@@ -1510,6 +1773,80 @@ function sendMarketProgress(info) {
   }
 }
 
+/** Forward skill install/upgrade progress (resolve → download → verify → write). */
+function sendSkillsProgress(info) {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    try { settingsWindow.webContents.send('skills:progress', info); } catch { /* ignore */ }
+  }
+}
+
+/** Map validation errors [{code, params}] to readable localized lines. */
+function skillsErrorReason(errors) {
+  return (Array.isArray(errors) ? errors : [])
+    .map((e) => t(lang(), `skills.${e.code}`, e.params || {}))
+    .join('；');
+}
+
+/** skills.js result codes are kebab-case ('plugin-form', 'no-source', …)
+ * while the i18n keys are camelCase (skills.pluginForm) — bridge them. */
+function skillsCodeKey(code) {
+  return String(code || '').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+}
+
+/**
+ * Serialized skill operations (install/upgrade/remove/import/preview).
+ * Skills are pure files — no runtime restart here; dsh picks them up via its
+ * skills watcher and they apply to new sessions. Bundle-plugin-form skill
+ * packs (package.json + dsh bundle) are delegated to the plugin pipeline.
+ */
+async function skillsAction(op, arg, pick) {
+  if (!skillsGuard.tryBegin(op, String(arg || ''))) {
+    return { ok: false, code: 'busy', reason: t(lang(), 'skills.busy') };
+  }
+  try {
+    let r;
+    if (op === 'preview') r = await skillsMgr.preview(String(arg || ''));
+    else if (op === 'install') r = await skillsMgr.install(String(arg || ''), pick === undefined ? null : pick);
+    else if (op === 'remove') r = skillsMgr.remove(String(arg || ''));
+    else if (op === 'upgrade') r = await skillsMgr.upgrade(String(arg || ''));
+    else if (op === 'import') r = skillsMgr.importLocal(String(arg || ''));
+    else r = { ok: false, code: 'invalid', reason: 'unknown op' };
+
+    // bundle-plugin skill packs live in the plugin pipeline (restart applies)
+    if (!r.ok && r.code === 'plugin-form' && op === 'install') {
+      log(`[skills] ${arg} is a bundle-plugin skill pack; delegating to plugin install`);
+      const pr = await pluginAction('add', String(arg));
+      return { ...pr, delegated: 'plugin' };
+    }
+
+    if (!r.ok && Array.isArray(r.errors) && !r.reason) {
+      r.reason = skillsErrorReason(r.errors) || t(lang(), `skills.${skillsCodeKey(r.code) || 'e1'}`);
+    } else if (!r.ok && !r.reason && r.code) {
+      const key = `skills.${skillsCodeKey(r.code)}`;
+      const text = t(lang(), key);
+      r.reason = text !== key ? text : r.code;
+    }
+
+    if (r.ok && op === 'remove') {
+      notify(t(lang(), 'skills.removed'), t(lang(), 'skills.removedBody', { name: String(arg) }));
+      log(`[skills] removed ${arg}`);
+    } else if (r.ok && op !== 'preview') {
+      const names = (r.installed || []).map((i) => i.name).join(', ') || String(arg);
+      const warnings = (r.installed || []).flatMap((i) => i.warnings || []);
+      const body = t(lang(), 'skills.installedBody', { name: names })
+        + (warnings.length ? `\n${warnings.map((w) => t(lang(), `skills.${w.code}`, w.params || {})).join('\n')}` : '');
+      notify(t(lang(), 'skills.installed'), body);
+      log(`[skills] ${op} ok: ${names}`);
+    } else if (!r.ok && r.code !== 'multi' && r.code !== 'busy' && op !== 'preview') {
+      notify(t(lang(), 'skills.failed'), t(lang(), 'skills.failedBody', { name: String(arg), reason: r.reason || r.code }));
+      log(`[skills] ${op} ${arg} failed (${r.code}): ${r.reason || ''}`);
+    }
+    return r;
+  } finally {
+    skillsGuard.release();
+  }
+}
+
 /** Profile paths for the web runtime. */
 function profileDirOf() { return path.join(dshHomeOf(), 'profiles', 'web'); }
 
@@ -1820,7 +2157,11 @@ function pushTokens(stats) {
   const needsSetup = !fs.existsSync(path.join(dshHomeOf(), '.credentials.yaml'));
   const cur = stats.current;
   const tot = stats.totals;
-  const pressure = cur ? cur.input + cur.cacheRead + cur.cacheWrite : 0;
+  // C3: context pressure = the prompt side of the MOST RECENT request's
+  // usage (stats.current.lastUsage), not the session's cumulative input —
+  // long sessions used to keep the pill yellow/red long after the actual
+  // context had been compacted or was far from full.
+  const pressure = tokenStats.pressureOf(cur);
   const windowSize = Math.max(1024, settings.get().contextWindow || 128000);
   const pressurePct = Math.min(100, Math.round((pressure / windowSize) * 100));
   // Send only what the pill needs — the full sessions array was being
@@ -1829,7 +2170,43 @@ function pushTokens(stats) {
     sessionCount: stats.sessionCount,
     current: cur, totals: tot,
     lang: lang(), needsSetup, pressurePct,
+    compacting: compactTracker ? compactTracker.isCompacting() : false,
   });
+}
+
+// ---------------------------------------------------------------------------
+// long-session center (C3): manual /compact trigger + compaction tracking
+// ---------------------------------------------------------------------------
+/** Trigger `/compact` in the main window's composer (official dsh command
+ * path, idle-only upstream). Refused with a readable reason while the agent
+ * is running a turn or a compaction is already in progress. */
+async function compactNow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return { ok: false, code: 'no-window', reason: t(lang(), 'compact.noWindow') };
+  }
+  if (sessionRunning || (compactTracker && compactTracker.isCompacting())) {
+    return { ok: false, code: 'busy', reason: t(lang(), 'compact.busy') };
+  }
+  const r = await compact.submitCompactCommand(mainWindow.webContents);
+  if (!r.ok) {
+    const reason = r.code === 'no-input' || r.code === 'inject'
+      ? t(lang(), 'compact.injectFailed')
+      : t(lang(), 'compact.failedBody', { code: r.code });
+    log(`[compact] trigger failed: ${r.code}${r.detail ? ` (${r.detail})` : ''}`);
+    notify(t(lang(), 'compact.failedTitle'), reason);
+    return { ok: false, code: r.code, reason };
+  }
+  log(`[compact] /compact submitted via composer (${r.selector}, ${r.method})`);
+  return { ok: true, selector: r.selector, method: r.method };
+}
+
+function broadcastCompactStatus() {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.webContents.send('compact:status', {
+      compacting: compactTracker ? compactTracker.isCompacting() : false,
+      sessionRunning,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1902,6 +2279,7 @@ function costSnapshot(stats) {
     perWorkspace: [...perWorkspace.entries()].map(([cwd, v]) => ({ cwd, ...v })).sort((a, b) => b.cost - a.cost),
     currency: '¥',
     rates,
+    lastTurn, // official-price cost of the most recent turn (C1)
     peak: {
       enabled: peakEnabled,
       isPeak: ps ? ps.peak : false,
@@ -1924,6 +2302,137 @@ function checkBudget(monthCost) {
   } else {
     notify(t(lang(), 'notify.budgetWarn'), t(lang(), 'notify.budgetWarnBody', { pct }));
   }
+}
+
+// ---------------------------------------------------------------------------
+// per-turn cost at official prices (C1) + official account balance polling
+// ---------------------------------------------------------------------------
+let lastTurn = null;     // {cost, saved, inputTokens, outputTokens, cacheReadTokens, model, at}
+let turnBaseline = null; // {file, totals} — usage of the active session at the previous turn end
+
+/** Seed the turn baseline from the latest session so the first turn end after
+ * boot reports only that turn (not the whole pre-existing session). */
+function primeTurnBaseline(stats) {
+  if (!stats || !stats.sessions || !stats.sessions.length || turnBaseline) return;
+  let latest = null;
+  for (const s of stats.sessions) if (!latest || s.mtimeMs > latest.mtimeMs) latest = s;
+  if (latest) turnBaseline = { file: latest.file, totals: latest.usage };
+}
+
+function isZeroUsage(u) {
+  return !u || (u.input === 0 && u.output === 0 && u.cacheRead === 0 && u.cacheWrite === 0);
+}
+
+/** Usage of one turn = latest session totals minus the baseline captured at
+ * the previous turn end. A session without a baseline reports its whole
+ * usage (correct for sessions created after boot; pre-existing ones were
+ * primed above). Peak/offPeak sub-buckets are carried through when both
+ * sides have them (the shared collect always buckets). */
+function turnUsageDelta(latest) {
+  const cur = latest.usage;
+  if (!turnBaseline || turnBaseline.file !== latest.file) return cur;
+  const base = turnBaseline.totals || {};
+  const delta = {
+    input: (cur.input || 0) - (base.input || 0),
+    output: (cur.output || 0) - (base.output || 0),
+    cacheRead: (cur.cacheRead || 0) - (base.cacheRead || 0),
+    cacheWrite: (cur.cacheWrite || 0) - (base.cacheWrite || 0),
+  };
+  if (cur.peak && cur.offPeak && base.peak && base.offPeak) {
+    delta.peak = {
+      input: (cur.peak.input || 0) - (base.peak.input || 0),
+      output: (cur.peak.output || 0) - (base.peak.output || 0),
+      cacheRead: (cur.peak.cacheRead || 0) - (base.peak.cacheRead || 0),
+      cacheWrite: (cur.peak.cacheWrite || 0) - (base.peak.cacheWrite || 0),
+    };
+    delta.offPeak = {
+      input: (cur.offPeak.input || 0) - (base.offPeak.input || 0),
+      output: (cur.offPeak.output || 0) - (base.offPeak.output || 0),
+      cacheRead: (cur.offPeak.cacheRead || 0) - (base.offPeak.cacheRead || 0),
+      cacheWrite: (cur.offPeak.cacheWrite || 0) - (base.offPeak.cacheWrite || 0),
+    };
+  }
+  return delta;
+}
+
+let lastTurnEndAt = 0;
+/** A turn just finished (host session-status running=false): compute this
+ * turn's official-price cost + cache savings, then refresh the balance. */
+async function onTurnEnd() {
+  const now = Date.now();
+  if (now - lastTurnEndAt < 5_000) return; // debounce repeated frames
+  lastTurnEndAt = now;
+  try {
+    const stats = await collectStats();
+    primeTurnBaseline(stats); // sessions created after the boot prime
+    let latest = null;
+    for (const s of stats.sessions) if (!latest || s.mtimeMs > latest.mtimeMs) latest = s;
+    if (!latest) return;
+    const delta = turnUsageDelta(latest);
+    turnBaseline = { file: latest.file, totals: latest.usage };
+    // zero delta = duplicate turn-end frame; negative = the log was rewritten
+    // (resync) — in both cases keep the previous real lastTurn
+    if (isZeroUsage(delta) || !delta || delta.input < 0 || delta.output < 0 || delta.cacheRead < 0) return;
+    const tc = cost.turnCost(delta, cost.DEFAULT_MODEL);
+    lastTurn = {
+      cost: tc.cost, saved: tc.saved,
+      inputTokens: tc.inputTokens, outputTokens: tc.outputTokens, cacheReadTokens: tc.cacheReadTokens,
+      model: cost.DEFAULT_MODEL, at: now,
+    };
+    log(`[shell] turn cost: ¥${tc.cost.toFixed(4)} (cache saved ¥${tc.saved.toFixed(4)}, hit ${tc.cacheReadTokens} tok)`);
+  } catch (e) {
+    log(`[shell] turn cost failed: ${e.message}`);
+  } finally {
+    // billing has settled by now — this is the most meaningful poll moment;
+    // the monitor self-throttles (5 min after a success) and backs off on errors
+    if (balanceMonitor) balanceMonitor.refresh();
+  }
+}
+
+/** Build the official-balance poller (key never leaves the main process). */
+function initBalanceMonitor() {
+  balanceMonitor = balance.createMonitor({
+    snapshotFile: balanceSnapshotFile(),
+    readKey: () => balance.findApiKey({
+      env: process.env,
+      credentialsPath: path.join(dshHomeOf(), '.credentials.yaml'),
+      envPath: path.join(dshHomeOf(), '.env'),
+    }),
+    budgetOf: () => settings.get().monthlyBudget || 0,
+    onLowBalance: (snap, threshold) => {
+      const sym = snap.currency === 'USD' ? '$' : '¥';
+      notify(t(lang(), 'notify.balanceLow'), t(lang(), 'notify.balanceLowBody', {
+        amount: `${sym}${snap.total.toFixed(2)}`, threshold: `${sym}${threshold.toFixed(2)}`,
+      }));
+    },
+    log,
+  });
+  // delayed first query (off the boot path) + 5-minute fallback polling
+  setTimeout(() => { if (!quitting) balanceMonitor.refresh(); }, 15_000);
+  balanceTimer = setInterval(() => { if (!quitting) balanceMonitor.refresh(); }, balance.THROTTLE_MS);
+}
+
+/** Compaction tracker (C3): scan the active session's JSONL for the
+ * compaction/start|summary|end chain every 5s. The tick is stat-gated in
+ * compact.js, so a quiet cycle costs one stat call, and the savings are
+ * priced with the same bucketing the cost center uses. */
+function initCompactTracking() {
+  compactTracker = compact.createTracker({
+    historyFile: path.join(app.getPath('userData'), 'compact-history.json'),
+    dshHomeOf,
+    windows: () => cost.parseWindows(settings.get().costPeakWindows) || cost.DEFAULT_WINDOWS,
+    log,
+    onStatus: () => broadcastCompactStatus(),
+    onRecord: (rec) => {
+      notify(t(lang(), 'notify.compactDone'), t(lang(), 'notify.compactDoneBody', {
+        before: tokenStats.fmt(rec.beforeTokens || 0),
+        after: tokenStats.fmt(rec.afterTokens || 0),
+        saved: (rec.savedYuan || 0).toFixed(2),
+      }));
+      broadcastCompactStatus();
+    },
+  });
+  compactTimer = setInterval(() => { if (!quitting) compactTracker.tick(); }, TOKEN_POLL_MS);
 }
 
 // ---------------------------------------------------------------------------
@@ -2260,18 +2769,27 @@ function startEventsFeed() {
   // host stream: session running state (task done)
   eventsFeed.push(connectEvents(base, '/api/events.host', (frame) => {
     if (frame && frame.type === 'host/session-status') {
+      sessionRunning = !!frame.running; // busy check for the manual /compact entry (C3)
       if (!eventsFeedLiveLogged) {
         eventsFeedLiveLogged = true;
         log(`[shell] events feed live (session ${frame.sessionId}, running=${frame.running})`);
       }
-      if (frame.running === false) onTaskDone();
+      if (frame.running === false) {
+        onTaskDone();
+        onTurnEnd(); // per-turn official cost + balance refresh (C1)
+      }
     }
   }, onFeedError));
-  // mux stream: approval / question frames while the window is hidden
+  // mux stream: approval / question frames while the window is hidden. Wire
+  // frames are ServerRequest envelopes ({type:'server-request', rpcId,
+  // payload}); older runtimes sent the bare frame — unwrap both shapes so
+  // the rpcId (needed to answer /api/respond) survives either way.
   eventsFeed.push(connectEvents(base, '/api/events.mux', (frame) => {
     if (!frame) return;
-    if (frame.type === 'approval/requested') onApprovalRequested(frame);
-    else if (frame.type === 'question/requested') onQuestionRequested(frame);
+    const payload = (frame.type === 'server-request' && frame.payload) ? frame.payload : frame;
+    if (!payload || typeof payload !== 'object') return;
+    if (payload.type === 'approval/requested') onApprovalRequested(payload, frame.rpcId);
+    else if (payload.type === 'question/requested') onQuestionRequested(payload, frame.rpcId);
   }, onFeedError));
   log(`[shell] events feed -> ${base}api/events.{host,mux}`);
 }
@@ -2282,6 +2800,10 @@ function stopEventsFeed() {
   }
   eventsFeed = [];
   if (eventsRetryTimer) { clearTimeout(eventsRetryTimer); eventsRetryTimer = null; }
+  // no live frames until the feed reconnects: drop the busy flag and any
+  // compaction start orphaned by a runtime crash/restart (C3)
+  sessionRunning = false;
+  if (compactTracker) compactTracker.resetOpen();
 }
 
 function windowHidden() {
@@ -2292,19 +2814,78 @@ function onTaskDone() {
   const now = Date.now();
   if (now - lastTaskNotifyAt < 8_000) return; // debounce
   lastTaskNotifyAt = now;
+  // IM push (C5): parallel to the system notification, debounced + queued
+  // inside the channel manager; no-ops while no channel is enabled.
+  if (channelsMgr) channelsMgr.broadcast({ kind: 'taskDone' });
   if (!windowHidden()) return; // user is watching
   notify(t(lang(), 'notify.taskDone'), t(lang(), 'notify.taskDoneBody'));
 }
 
-function onApprovalRequested(frame) {
-  if (!windowHidden()) return;
+function onApprovalRequested(frame, rpcId) {
   const tool = frame.toolName || '';
+  // IM push (C5/C6): approval cards carry a one-shot token (120s TTL) whose
+  // payload keeps the runtime routing fields (rpcId/sessionId/approvalId) —
+  // the token redemption hook answers POST /api/respond with them.
+  if (channelsMgr) {
+    channelsMgr.broadcast({
+      kind: 'approval',
+      tool,
+      rpcId: rpcId || '',
+      sessionId: frame.sessionId || '',
+      approvalId: frame.approvalId || '',
+    });
+  }
+  if (!windowHidden()) return;
   notify(t(lang(), 'notify.approval'), t(lang(), 'notify.approvalBody', { tool }));
 }
 
-function onQuestionRequested() {
+function onQuestionRequested(frame, rpcId) {
+  // IM push (C5/C6): question cards carry a one-shot reply token (120s TTL)
+  // keeping the rpcId/sessionId/question shape for the /api/respond answer.
+  if (channelsMgr) {
+    channelsMgr.broadcast({
+      kind: 'question',
+      question: (frame && frame.questions && frame.questions[0] && frame.questions[0].question) || '',
+      rpcId: rpcId || '',
+      sessionId: (frame && frame.sessionId) || '',
+      questions: (frame && frame.questions) || [],
+    });
+  }
   if (!windowHidden()) return;
   notify(t(lang(), 'notify.question'), t(lang(), 'notify.questionBody'));
+}
+
+/**
+ * Answer a pending runtime server-request (approval / question) through
+ * POST /api/respond with a client-response echoing the mux rpcId. Runtime
+ * business errors come back 200 + {accepted:false}; both shapes map to the
+ * {ok, reason} the channel dispatcher replies with over IM.
+ */
+async function respondToRuntime({ rpcId, value, what }) {
+  if (!runtimeUrl) return { ok: false, reason: 'runtime offline' };
+  if (!rpcId || !value) {
+    log(`[channels] ${what || 'respond'} dropped: missing runtime routing id`);
+    return { ok: false, reason: 'no rpc id' };
+  }
+  try {
+    const base = runtimeUrl.endsWith('/') ? runtimeUrl : `${runtimeUrl}/`;
+    const res = await fetch(`${base}api/respond`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-response', rpcId, result: { ok: true, value } }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 200 && body && body.accepted === true) {
+      log(`[channels] ${what || 'respond'} accepted by runtime`);
+      return { ok: true };
+    }
+    const reason = (body && body.reason) || `HTTP ${res.status}`;
+    log(`[channels] ${what || 'respond'} refused: ${reason}`);
+    return { ok: false, reason };
+  } catch (e) {
+    log(`[channels] ${what || 'respond'} error: ${e.message}`);
+    return { ok: false, reason: e.message };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2428,12 +3009,88 @@ if (!gotLock) {
     // the app to be ready. The runtime URL may still be null while booting -
     // setRuntimeUrl() below feeds it as soon as the URL line appears.
     remote = new RemoteControl({ userDataDir: app.getPath('userData'), safeStorage, log });
+    // C7 public-remote helper: pure detection + cloudflared child process
+    // management; lazy, nothing probes until the settings window asks.
+    publicRemote = createPublicRemote({ log });
+    // C7 posture follows the persisted switch (off by default; a saved "on"
+    // restores the tightened TTL / proxy-IP keys / no-IP-grant posture).
+    remote.setPublicMode(!!settings.get().remotePublic);
+    // Model provider panel (C2): same safeStorage-after-ready constraint as
+    // the gateway above. All key writes/tests stay in this process.
+    modelsMgr = createModelsManager({
+      settings,
+      dshHome: dshHomeOf,
+      userDataDir: app.getPath('userData'),
+      safeStorage,
+      log,
+    });
     if (settings.get().remoteControl) {
       remote.setRuntimeUrl(runtimeUrl);
       remote.start({ port: settings.get().remotePort, compat: !!settings.get().remoteCompat })
         .then((s) => { if (!s.running) notify(t(lang(), 'notify.remoteFailed'), t(lang(), 'notify.remoteFailedBody')); })
         .catch((e) => log(`[remote] start failed: ${e.message}`));
     }
+    // IM channels hub (C5 skeleton + C6 protocol implementations). Same
+    // safeStorage-after-ready constraint as the gateway; feishu/wecom/dingtalk
+    // ship real adapters now, whatsapp stays a placeholder slot.
+    channelsMgr = createChannelManager({
+      settings,
+      userDataDir: app.getPath('userData'),
+      safeStorage,
+      log,
+      lang,
+      // free text from IM → the shared headless runner (Quick Ask / scheduler
+      // use the same path); sticky per (channel, sender) sessions live in the
+      // channel manager itself
+      runPrompt: ({ text }) => runHeadless({
+        dshBin: activeDshBin(),
+        nodeBin: bestNodeBin(),
+        dshHome: dshHomeOf(),
+        workspace: settings.effective().workspace || os.homedir(),
+        logDir: ensureLogDir(),
+        prompt: text,
+      }),
+      // Approval/question decisions verified via one-shot token land here and
+      // are answered through the runtime's POST /api/respond (client-response
+      // echoing the mux server-request rpcId — same wire the web UI uses).
+      onApprovalDecision: ({ decision, tool, payload }) =>
+        respondToRuntime({
+          rpcId: payload && payload.rpcId,
+          value: payload && payload.sessionId && payload.approvalId ? {
+            sessionId: payload.sessionId,
+            approvalId: payload.approvalId,
+            outcome: decision === 'approve' ? 'allowed-once' : 'rejected',
+          } : null,
+          what: `approval ${decision} for "${tool || '(unknown tool)'}"`,
+        }),
+      onQuestionAnswer: ({ text: answer, payload }) => {
+        // match the reply against the first question's option labels; a hit
+        // becomes a selection, anything else rides `custom` free text
+        const q = payload && Array.isArray(payload.questions) ? payload.questions[0] : null;
+        const labels = (q && q.options || []).map((o) => o && o.label).filter(Boolean);
+        const hit = labels.find((l) => l === String(answer || '').trim());
+        const answers = [{
+          id: (q && q.id) || 'unknown',
+          selected: hit ? [hit] : [],
+          ...(hit ? {} : { custom: String(answer || '') }),
+        }];
+        return respondToRuntime({
+          rpcId: payload && payload.rpcId,
+          value: payload && payload.sessionId ? { sessionId: payload.sessionId, answer: { answers } } : null,
+          what: 'question answer',
+        });
+      },
+    });
+    channelsMgr.register('feishu', FeishuChannel, (c) => testFeishuConnection({ appId: c.appId, appSecret: c.appSecret }));
+    channelsMgr.register('wecom', WecomChannel, (c) => testWecomConnection({ botId: c.botId, secret: c.secret }));
+    channelsMgr.register('dingtalk', DingtalkChannel, (c) => testDingtalkConnection({ clientId: c.clientId, clientSecret: c.clientSecret }));
+    // push channel state changes (online/offline/backoff) to every open window
+    channelsMgr.onState(() => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        try { if (!w.isDestroyed()) w.webContents.send('channels:changed'); } catch { /* ignore */ }
+      }
+    });
+    channelsMgr.startEnabled();
     broadcastTheme(); // push the resolved theme once settings are ready
     // Registry write on Windows; not needed before the first window.
     setTimeout(() => app.setLoginItemSettings({ openAtLogin: !!settings.get().autoStart }), 3_000);
@@ -2465,6 +3122,11 @@ if (!gotLock) {
     }
     registerQuickAskHotkey();
     startScheduler();
+    // official balance polling (C1): startup-delayed + every-5-min fallback;
+    // turn ends hook in via onTurnEnd()
+    initBalanceMonitor();
+    // compaction tracking (C3): same 5s cadence as the token widget, stat-gated
+    initCompactTracking();
     // require('electron-updater') pulls a large dependency tree out of the
     // asar (hundreds of files, each an AV scan on Windows) — defer it well
     // past the first window; checkShellUpdate() lazy-inits if user is faster.
@@ -2497,6 +3159,7 @@ if (!gotLock) {
     setTimeout(async () => {
       const stats = await collectStats();
       costSnapshot(stats);
+      primeTurnBaseline(stats); // seed the per-turn cost baseline (C1)
       const diag = diagnosticsInfo();
       if (diag.crashCount > 0) {
         notify(t(lang(), 'notify.crashReminder'), t(lang(), 'notify.crashReminderBody', { n: diag.crashCount }));
@@ -2546,9 +3209,13 @@ if (!gotLock) {
 
   app.on('will-quit', () => {
     if (trayPeakTimer) { clearInterval(trayPeakTimer); trayPeakTimer = null; }
+    if (balanceTimer) { clearInterval(balanceTimer); balanceTimer = null; }
+    if (compactTimer) { clearInterval(compactTimer); compactTimer = null; }
     globalShortcut.unregisterAll();
     if (scheduler) scheduler.stop();
     if (remote) remote.stop();
+    if (publicRemote) publicRemote.stopTunnel(); // C7: cloudflared child never outlives the app (taskkill /T /F inside)
+    if (channelsMgr) channelsMgr.stopAll();
     if (logStream) logStream.end();
   });
 }

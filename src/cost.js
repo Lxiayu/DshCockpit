@@ -14,6 +14,67 @@ const HISTORY_MAX_DAYS = 90;
 // hours (9-12 and 14-18 Beijing time); user-configurable as a string.
 const DEFAULT_WINDOWS = [[9, 12], [14, 18]];
 
+// Official DeepSeek price matrix (¥ per 1M tokens): model x time-of-day.
+// Peak pricing took effect 2026-08-17 00:00 Beijing time (peak hours above);
+// peak = off-peak x 2 across every dimension. Cache writes are NOT billed by
+// the official API (only hit/miss/output are), so cacheWritePerM is 0.
+// Verified against api-docs.deepseek.com + billing research 2026-08-18;
+// user-set cost*PerM settings keys still override these for the estimate
+// views (manual override path kept intact).
+const PRICE_MATRIX = {
+  'deepseek-v4-flash': {
+    offPeak: { inputPerM: 1.5, outputPerM: 4.5, cacheReadPerM: 0.05, cacheWritePerM: 0 },
+    peak: { inputPerM: 3, outputPerM: 9, cacheReadPerM: 0.1, cacheWritePerM: 0 },
+  },
+  'deepseek-v4-pro': {
+    offPeak: { inputPerM: 4.5, outputPerM: 13.5, cacheReadPerM: 0.15, cacheWritePerM: 0 },
+    peak: { inputPerM: 9, outputPerM: 27, cacheReadPerM: 0.3, cacheWritePerM: 0 },
+  },
+};
+const DEFAULT_MODEL = 'deepseek-v4-flash';
+
+/** Map any model name to a PRICE_MATRIX key. The legacy deepseek-chat /
+ * deepseek-reasoner names (retired 2026-07-24) mapped onto v4-flash, and any
+ * unknown name prices conservatively at the flash tier. */
+function normalizeModel(name) {
+  const n = String(name || '').toLowerCase();
+  if (n.includes('pro')) return 'deepseek-v4-pro';
+  return 'deepseek-v4-flash';
+}
+
+/** Official rates (¥/1M) for a model and time-of-day; `isPeak` picks the
+ * bucket. Always returns a complete rate set (never null). */
+function modelRates(model, isPeak) {
+  const m = PRICE_MATRIX[normalizeModel(model)];
+  return isPeak ? m.peak : m.offPeak;
+}
+
+/** One turn's cost at official prices. `totals` carries dsh usage buckets —
+ * input = cache-miss tokens, cacheRead = cache-hit tokens, output includes
+ * reasoning tokens (billed at the output rate). When peak/offPeak sub-buckets
+ * are present each bucket is priced in its own window; otherwise everything
+ * is priced off-peak (events without a time bucket go off-peak upstream).
+ * Also returns the cache savings: hit tokens priced at the hit rate instead
+ * of the miss rate. */
+function turnCost(totals, model) {
+  const buckets = totals && totals.peak && totals.offPeak
+    ? [['peak', true], ['offPeak', false]]
+    : null;
+  const list = buckets
+    ? buckets.map(([k, isPeak]) => ({ usage: totals[k], rates: modelRates(model, isPeak) }))
+    : [{ usage: totals, rates: modelRates(model, false) }];
+  let cost = 0, saved = 0;
+  let input = 0, output = 0, cacheRead = 0;
+  for (const { usage, rates } of list) {
+    const miss = usage.input || 0, hit = usage.cacheRead || 0, out = usage.output || 0;
+    cost += (miss * rates.inputPerM + hit * rates.cacheReadPerM + out * rates.outputPerM
+      + (usage.cacheWrite || 0) * rates.cacheWritePerM) / 1e6;
+    saved += hit * (rates.inputPerM - rates.cacheReadPerM) / 1e6;
+    input += miss; output += out; cacheRead += hit;
+  }
+  return { cost, saved, inputTokens: input, outputTokens: output, cacheReadTokens: cacheRead };
+}
+
 // In-memory cache of the parsed history file so the 5s token poll does not
 // re-read + JSON.parse the whole file every tick (perf #5). Keyed by path;
 // invalidated by mtime. Cleared after updateHistory writes.
@@ -173,4 +234,4 @@ function budgetStatus(monthCost, budget) {
   return null;
 }
 
-module.exports = { todayKey, costOf, loadHistory, updateHistory, summarize, budgetStatus, HISTORY_MAX_DAYS, DEFAULT_WINDOWS, parseWindows, isPeakTime, peakStatus, costOfSplit };
+module.exports = { todayKey, costOf, loadHistory, updateHistory, summarize, budgetStatus, HISTORY_MAX_DAYS, DEFAULT_WINDOWS, parseWindows, isPeakTime, peakStatus, costOfSplit, PRICE_MATRIX, DEFAULT_MODEL, normalizeModel, modelRates, turnCost };

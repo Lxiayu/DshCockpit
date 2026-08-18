@@ -61,6 +61,8 @@ function sumUsage(text, windows) {
   const offPeak = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   const bucketed = !!(windows && windows.length);
   let lines = 0;
+  // prompt side of the MOST RECENT usage event (context pressure basis, C3)
+  let lastUsage = null;
   let start = 0;
   // Walk line-by-line via indexOf instead of text.split('\n') — avoids
   // allocating a huge array for MB-sized session logs.
@@ -83,13 +85,14 @@ function sumUsage(text, windows) {
     const ui = usage.inputTokens || 0, uo = usage.outputTokens || 0;
     const ucr = usage.cacheReadTokens || 0, ucw = usage.cacheWriteTokens || 0;
     input += ui; output += uo; cacheRead += ucr; cacheWrite += ucw;
+    lastUsage = { input: ui, output: uo, cacheRead: ucr, cacheWrite: ucw };
     if (bucketed) {
       const dst = (typeof ev.time === 'number' && isPeakTime(ev.time, windows)) ? peak : offPeak;
       dst.input += ui; dst.output += uo; dst.cacheRead += ucr; dst.cacheWrite += ucw;
     }
     if (nl === -1) break;
   }
-  return { input, output, cacheRead, cacheWrite, lines, peak, offPeak };
+  return { input, output, cacheRead, cacheWrite, lines, peak, offPeak, lastUsage };
 }
 
 /** Decode a session log file to text; null on failure. Used by session-search. */
@@ -168,6 +171,7 @@ async function parseSessionLogAsync(file, windows) {
       t.input += inc.input; t.output += inc.output;
       t.cacheRead += inc.cacheRead; t.cacheWrite += inc.cacheWrite;
       t.lines += inc.lines;
+      if (inc.lastUsage) t.lastUsage = inc.lastUsage;
       if (t.peak && t.offPeak) {
         t.peak.input += inc.peak.input; t.peak.output += inc.peak.output;
         t.peak.cacheRead += inc.peak.cacheRead; t.peak.cacheWrite += inc.peak.cacheWrite;
@@ -315,4 +319,18 @@ function fmt(n) {
   return String(n);
 }
 
-module.exports = { collect, fmt, isEmptyTotals, decodeSessionLog, parseSessionLogAsync, walkSessionFiles };
+/** Context pressure of a session = the prompt side (input + cacheRead +
+ * cacheWrite) of the MOST RECENT provider-reported usage — the size of the
+ * last actual request, not the cumulative history. v0.2.4 (C3): the pill
+ * previously summed the session's lifetime input, which on long sessions
+ * read far above the real context occupancy. */
+function pressureOf(usage) {
+  const u = usage && usage.lastUsage;
+  if (!u) return 0;
+  return (u.input || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0);
+}
+
+module.exports = {
+  collect, fmt, isEmptyTotals, decodeSessionLog, decodeSessionLogAsync,
+  parseSessionLogAsync, walkSessionFiles, walkSessionFilesAsync, pressureOf,
+};

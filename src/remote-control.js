@@ -31,6 +31,13 @@
 // The runtime keeps binding loopback: its unauthenticated surface never leaves
 // this machine. Brute-force guard: 5 wrong pairing attempts lock an IP for
 // 5 minutes. Logs never contain the token or pairing query strings.
+//
+// C7 public mode (setPublicMode, off by default): when the gateway is reached
+// through a public path (Tailscale tailnet / cloudflared quick tunnel) the
+// auth posture tightens — pairing TTL 5 min, cookie-less IP grant disabled
+// (a proxied "IP" is the proxy itself and would admit everyone behind it),
+// brute-force/session keys taken from trusted proxy headers only when the
+// socket originates from loopback, and pairing/revoke events audited.
 'use strict';
 
 const https = require('node:https');
@@ -44,6 +51,7 @@ const path = require('node:path');
 const COOKIE_NAME = 'dsh_remote';
 const PAIR_PATH = '/__dsh_pair';
 const PAIR_TTL_MS = 10 * 60 * 1000;
+const PAIR_TTL_PUBLIC_MS = 5 * 60 * 1000; // public mode (C7): tightened from 10 min
 const PAIR_MAX_FAILS = 5;
 const PAIR_LOCK_MS = 5 * 60 * 1000;
 const CERT_DAYS = 397; // stay under the 398-day ceiling some mobile browsers enforce
@@ -85,6 +93,21 @@ function stripCookieValue(header, name) {
     return !(eq >= 0 && part.slice(0, eq).trim() === name);
   });
   return kept.length ? kept.join('; ') : undefined;
+}
+
+/** Loopback check for the socket-level source (local proxy scenario). */
+function isLoopbackAddr(addr) {
+  return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+}
+
+/**
+ * Loose IP shape check for proxy-forwarded header values (XFF first hop /
+ * CF-Connecting-IP). These values become map keys and log fields, so the
+ * charset is pinned to IP characters only — anything else is treated as
+ * "no usable header" and the socket address is used instead.
+ */
+function looksLikeIp(v) {
+  return /^[0-9a-fA-F.:]+$/.test(v) && (v.includes('.') || v.includes(':'));
 }
 
 /**
@@ -165,6 +188,9 @@ class TokenStore {
   load() {
     let raw;
     try { raw = fs.readFileSync(this.file); } catch { return this.regenerate(); }
+    // legacy file written before the 0600 rule: tighten on the read path
+    // (best effort — a chmod failure must not block the gateway)
+    try { fs.chmodSync(this.file, 0o600); } catch { /* win: no-op */ }
     try {
       const text = raw.toString('utf8');
       if (text.startsWith('plain:')) {
@@ -193,7 +219,10 @@ class TokenStore {
       if (usable) payload = this.safeStorage.encryptString(token);
       else payload = Buffer.from(`plain:${token}`, 'utf8');
       const tmp = `${this.file}.tmp`;
-      fs.writeFileSync(tmp, payload);
+      // 0600 like .credentials.yaml: without safeStorage this file is the
+      // only copy of the long-lived pairing token (plaintext fallback).
+      fs.writeFileSync(tmp, payload, { mode: 0o600 });
+      try { fs.chmodSync(tmp, 0o600); } catch { /* win: no-op */ }
       fs.renameSync(tmp, this.file);
     } catch (e) {
       this.log(`[remote] token persist failed: ${e.message}`);
@@ -217,6 +246,7 @@ class RemoteControl {
     this.port = null;
     this.secure = true; // true = self-signed HTTPS, false = plain HTTP (scanner compat mode)
     this.runtimePort = null;
+    this.publicMode = false; // C7: public-network posture (TTL/proxy-IP keys/no IP grant)
     this.pairing = null; // { code, expiresAt, used }
     this.pairFails = new Map(); // ip -> { fails, lockUntil }
     this.pairSucceededAt = null; // { ip, at } of the last success, for the stranded-pair diagnostic
@@ -331,10 +361,38 @@ class RemoteControl {
 
   // ------------------------------------------------------------------ auth
 
+  /**
+   * C7 public-network posture switch. Tightens the pairing TTL to 5 minutes,
+   * disables the cookie-less IP session fallback, switches brute-force /
+   * session keys to trusted proxy headers (see clientIp), and turns on audit
+   * logging. Any pending pairing code is voided so a long-TTL LAN code can
+   * never survive into public exposure.
+   */
+  setPublicMode(on) {
+    const next = !!on;
+    if (next === this.publicMode) return this.status();
+    this.publicMode = next;
+    this.pairing = null;
+    // Log directly (not via audit()): by the time audit() runs, publicMode is
+    // already false on disable and would swallow the "disabled" line.
+    this.log(`[remote-audit] public-mode ${next ? 'enabled' : 'disabled'}`);
+    return this.status();
+  }
+
+  /** Audit line, public mode only. Never contains the token or a pairing code. */
+  audit(event, detail) {
+    if (!this.publicMode) return;
+    this.log(`[remote-audit] ${event}${detail ? ` ${detail}` : ''}`);
+  }
+
   authorized(req) {
     const raw = String(req.headers.cookie || '');
     const m = raw.match(new RegExp(`(?:^|;\\s*)${COOKIE_NAME}=([A-Za-z0-9]+)`));
     if (m && safeEqualHex(m[1], this.tokens.value)) return true;
+    // Public mode: no cookie-less IP fallback. Behind a tunnel every proxied
+    // client shares the proxy's loopback key — granting it once would admit
+    // everyone behind the proxy (RESEARCH §7.1-2). Token cookie only.
+    if (this.publicMode) return false;
     // Cookie-less fallback: some in-app browsers (WeChat XWeb/X5) refuse to
     // store cookies for raw-IP hosts, so the token cookie never comes back.
     // Pairing therefore also grants the device's IP a sliding in-memory
@@ -351,8 +409,29 @@ class RemoteControl {
     return true;
   }
 
+  /**
+   * The client identity used for brute-force locks and IP sessions. In
+   * public mode behind a local proxy (cloudflared quick tunnel / tailscale
+   * serve), every proxied client shares the proxy's loopback remoteAddress —
+   * so the real client IP is taken from CF-Connecting-IP / the first
+   * X-Forwarded-For hop. Those headers are trusted ONLY when the socket
+   * really originates from loopback (the proxy runs on this machine): a LAN
+   * or tailnet client spoofing XFF over a direct connection must not forge
+   * or dodge the brute-force lock. Direct tailnet connections (no proxy)
+   * carry no such headers and keep using their own source address.
+   */
   clientIp(req) {
-    return (req.socket && req.socket.remoteAddress) || 'unknown';
+    const remote = (req.socket && req.socket.remoteAddress) || 'unknown';
+    if (this.publicMode && isLoopbackAddr(remote)) {
+      const cf = req.headers['cf-connecting-ip'];
+      if (typeof cf === 'string' && looksLikeIp(cf)) return cf.trim();
+      const xff = req.headers['x-forwarded-for'];
+      if (typeof xff === 'string') {
+        const first = xff.split(',')[0].trim();
+        if (looksLikeIp(first)) return first;
+      }
+    }
+    return remote;
   }
 
   pairingLocked(ip) {
@@ -364,7 +443,8 @@ class RemoteControl {
   refreshPairingCode() {
     this.pairing = {
       code: String(crypto.randomInt(0, 1_000_000)).padStart(6, '0'),
-      expiresAt: Date.now() + PAIR_TTL_MS,
+      // Public mode tightens the one-shot window from 10 to 5 minutes (C7).
+      expiresAt: Date.now() + (this.publicMode ? PAIR_TTL_PUBLIC_MS : PAIR_TTL_MS),
       used: false,
     };
     return this.pairing;
@@ -412,13 +492,18 @@ class RemoteControl {
       this.pairFails.delete(ip);
       this.pairSucceededAt = { ip, at: Date.now() };
       this.log(`[remote] pairing succeeded (${ip})`);
+      this.audit('pair-success', `ip=${ip}`);
       // Trust this device's IP as a session carrier: cookie-less browsers
       // (WeChat XWeb) never return the token cookie, so the grant below is
       // what keeps the phone inside the app after the landing page navigates.
-      if (!this.grants.has(ip) && this.grants.size >= MAX_GRANTS) {
-        this.grants.delete(this.grants.keys().next().value); // drop the oldest
+      // NOT in public mode: behind a tunnel the "device IP" would be the
+      // proxy's loopback address shared by every proxied client.
+      if (!this.publicMode) {
+        if (!this.grants.has(ip) && this.grants.size >= MAX_GRANTS) {
+          this.grants.delete(this.grants.keys().next().value); // drop the oldest
+        }
+        this.grants.set(ip, Date.now() + GRANT_TTL_MS);
       }
-      this.grants.set(ip, Date.now() + GRANT_TTL_MS);
       // Secure only over TLS: in compat (plain HTTP) mode a Secure cookie would
       // never be stored, breaking the just-paired session. A compat-paired
       // (non-Secure) cookie is still sent over https, so switching the mode
@@ -443,6 +528,9 @@ class RemoteControl {
       rec.lockUntil = Date.now() + PAIR_LOCK_MS;
       rec.fails = 0;
       this.log(`[remote] pairing brute-force lock (${ip})`);
+      this.audit('pair-lock', `ip=${ip}`);
+    } else {
+      this.audit('pair-fail', `ip=${ip} fails=${rec.fails}`);
     }
     this.pairFails.set(ip, rec);
     res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'" });
@@ -605,6 +693,7 @@ class RemoteControl {
       running: this.running,
       port: this.port,
       secure: this.secure,
+      publicMode: this.publicMode,
       urls: (this.running ? lanAddresses() : []).map((ip) => `${scheme}://${ip}:${this.port}`),
       pairingCode: pairing ? pairing.code : null,
       pairingExpiresAt: pairing ? pairing.expiresAt : null,
@@ -621,6 +710,7 @@ class RemoteControl {
       try { sock.destroy(); } catch { /* ignore */ }
     }
     this.clientSockets.clear();
+    this.audit('token-revoke');
     this.log('[remote] token revoked; all paired devices must re-pair');
     return this.status();
   }

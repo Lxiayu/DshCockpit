@@ -110,6 +110,34 @@
     box-shadow: 0 18px 48px rgba(0,0,0,.45); }
   dialog#auto-dialog::backdrop { background: rgba(0,0,0,.5); }
   dialog#auto-dialog h3 { margin: 0 0 14px; font-size: 15px; color: var(--text-1); }
+  dialog#skills-dialog { background: var(--bg-panel, var(--bg-overlay)); color: var(--text-1);
+    border: 1px solid var(--border-1); border-radius: 14px; padding: 20px 22px; width: min(680px, 92vw);
+    box-shadow: 0 18px 48px rgba(0,0,0,.45); }
+  dialog#skills-dialog::backdrop { background: rgba(0,0,0,.5); }
+  dialog#skills-dialog h3 { margin: 0 0 8px; font-size: 15px; color: var(--text-1); }
+  dialog#skills-dialog .note { margin: 0 0 10px; }
+  #skills-dlg-content { margin: 10px 0; padding: 12px 14px; border: 1px solid var(--border-1);
+    border-radius: 8px; background: var(--bg-input); color: var(--text-2);
+    font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap;
+    word-break: break-word; max-height: 300px; overflow: auto; }
+  .skill-cand { display: flex; align-items: center; gap: 12px; padding: 9px 0;
+    border-bottom: 1px solid var(--border-1); }
+  .skill-cand:last-child { border-bottom: 0; }
+  .skill-cand .info { flex: 1; min-width: 0; }
+  .skill-cand .name { font-family: var(--mono); color: var(--text-1); font-size: 13px; }
+  .skill-cand .desc { color: var(--text-3); font-size: 12px; margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .skill-cand button, #skills-dlg-list + .btnrow button { flex-shrink: 0; }
+  .skill-inst-row { display: flex; align-items: flex-start; gap: 10px; padding: 11px 0;
+    border-bottom: 1px solid var(--border-1); }
+  .skill-inst-row:last-child { border-bottom: 0; }
+  .skill-inst-row .info { flex: 1; min-width: 0; }
+  .skill-inst-row .name { font-family: var(--mono); color: var(--text-1); font-size: 13px; word-break: break-all; }
+  .skill-inst-row .desc { color: var(--text-3); font-size: 12px; margin-top: 2px; line-height: 1.5; }
+  .skill-inst-row .meta { color: var(--text-4); font-size: 11px; margin-top: 3px; }
+  .skill-inst-row .meta a { color: var(--acc); text-decoration: none; }
+  .skill-inst-row .ops { display: flex; gap: 6px; flex-shrink: 0; }
+  .skill-inst-row .ops button { padding: 4px 12px; font-size: 12px; }
   .auto-form { display: flex; flex-direction: column; gap: 12px; }
   .auto-field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--text-3); }
   .auto-field input, .auto-field textarea, .auto-field select { background: var(--bg-input); color: var(--text-1);
@@ -306,10 +334,14 @@
       <button class="nav-item" data-page="general"><span class="ico">🏠</span><span class="txt" data-i18n="nav.general">通用</span></button>
       <button class="nav-item" data-page="cost"><span class="ico">📊</span><span class="txt" data-i18n="nav.cost">用量与成本</span></button>
       <div class="group-label" data-i18n="group.workspace">工作</div>
+      <button class="nav-item" data-page="models"><span class="ico">🤖</span><span class="txt" data-i18n="nav.models">模型</span></button>
+      <button class="nav-item" data-page="longsession"><span class="ico">🧠</span><span class="txt" data-i18n="nav.longsession">长会话</span></button>
       <button class="nav-item" data-page="runtime"><span class="ico">⚙️</span><span class="txt" data-i18n="nav.runtime">运行时</span></button>
       <button class="nav-item" data-page="plugins"><span class="ico">🧩</span><span class="txt" data-i18n="nav.plugins">插件</span></button>
+      <button class="nav-item" data-page="skills"><span class="ico">✨</span><span class="txt" data-i18n="nav.skills">技能</span></button>
       <button class="nav-item" data-page="tasks"><span class="ico">⏰</span><span class="txt" data-i18n="nav.tasks">任务与自动化</span></button>
       <button class="nav-item" data-page="remote"><span class="ico">📱</span><span class="txt" data-i18n="nav.remote">手机远程</span></button>
+      <button class="nav-item" data-page="channels"><span class="ico">💬</span><span class="txt" data-i18n="nav.channels">渠道</span></button>
       <div class="group-label" data-i18n="group.system">系统</div>
       <button class="nav-item" data-page="data"><span class="ico">💾</span><span class="txt" data-i18n="nav.data">数据与备份</span></button>
       <button class="nav-item" data-page="update"><span class="ico">⬆️</span><span class="txt" data-i18n="nav.update">更新</span></button>
@@ -376,6 +408,16 @@
           <p data-i18n="page.cost.d">API 费率、峰谷分时与预算</p>
         </div>
         <div class="card">
+          <h3 data-i18n="card.balance">账户余额（官方）</h3>
+          <div class="status" id="balance-status"></div>
+          <div class="setting">
+            <div class="setting-info">
+              <span class="desc" data-i18n="balance.hint">官方数据，与本地估算口径可能有差异（赠款 / 失败请求）。</span>
+            </div>
+            <div class="setting-ctrl"><button class="secondary" id="btn-balance-refresh" data-i18n="btn.balanceRefresh">刷新余额</button></div>
+          </div>
+        </div>
+        <div class="card">
           <h3 data-i18n="card.costRates">谷时费率（默认）</h3>
           <div class="setting">
             <div class="setting-info"><label data-i18n="cost.inputRate">输入 ¥/百万</label></div>
@@ -435,6 +477,142 @@
           <h3 data-i18n="card.costUsage">用量统计</h3>
           <div class="status" id="cost-status"></div>
           <div class="note" data-i18n="cost.ratesHint">费用按你配置的价格估算，仅供参考，不构成实际计费。</div>
+        </div>
+      </div>
+
+      <!-- ------------------------- page: models (C2) -->
+      <div class="page" id="page-models">
+        <div class="page-head">
+          <h2 data-i18n="nav.models">模型</h2>
+          <p data-i18n="page.models.d">第三方模型服务商、API Key 与默认模型</p>
+        </div>
+        <div class="card">
+          <h3 data-i18n="models.ollamaTitle">Ollama 本地模型</h3>
+          <div class="status" id="ollama-status"></div>
+          <div id="ollama-body" style="margin-top:8px"></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="models.providersTitle">模型服务商</h3>
+          <div id="models-list" style="display:flex;flex-direction:column;gap:6px"></div>
+          <div class="btnrow">
+            <button class="secondary" id="btn-models-add" data-i18n="models.add">添加服务商</button>
+          </div>
+          <div id="models-form" style="display:none; border-top:1px solid var(--line); margin-top:10px; padding-top:10px">
+            <div class="setting">
+              <div class="setting-info"><label data-i18n="models.f.preset">预设</label></div>
+              <div class="setting-ctrl"><select id="models-f-preset"></select></div>
+            </div>
+            <div class="setting">
+              <div class="setting-info">
+                <label data-i18n="models.f.name">名称</label>
+                <span class="desc" id="models-f-keyenv" style="font-family:ui-monospace,Consolas,monospace"></span>
+              </div>
+              <div class="setting-ctrl"><input type="text" id="models-f-name" style="width:200px" /></div>
+            </div>
+            <div class="setting">
+              <div class="setting-info">
+                <label data-i18n="models.f.baseurl">API 地址（Base URL）</label>
+                <span class="desc" id="models-f-note"></span>
+              </div>
+              <div class="setting-ctrl"><input type="text" class="mono" id="models-f-baseurl" style="width:320px" placeholder="https://api.example.com/v1" /></div>
+            </div>
+            <div class="setting">
+              <div class="setting-info">
+                <label data-i18n="models.f.key">API Key</label>
+                <span class="desc" id="models-f-links"></span>
+              </div>
+              <div class="setting-ctrl"><input type="password" class="mono" id="models-f-key" style="width:320px" autocomplete="off" data-i18n-placeholder="models.f.keyPh" placeholder="粘贴 API Key（不回显）" /></div>
+            </div>
+            <div class="setting">
+              <div class="setting-info">
+                <label data-i18n="models.f.models">模型列表</label>
+                <span class="desc" data-i18n="models.f.modelsHint">测试成功后可拉取列表勾选，或手动添加模型 ID。</span>
+              </div>
+              <div class="setting-ctrl" style="flex:1">
+                <div id="models-f-models" style="font-size:12px;line-height:2;max-height:180px;overflow:auto"></div>
+                <div class="btnrow" style="margin-top:6px">
+                  <input type="text" class="mono" id="models-f-manual" style="width:220px" data-i18n-placeholder="models.f.manualPh" placeholder="手动添加模型 ID" />
+                  <button class="secondary" id="btn-models-add-manual" data-i18n="models.f.addManual">添加</button>
+                </div>
+              </div>
+            </div>
+            <div class="btnrow">
+              <button class="secondary" id="btn-models-test" data-i18n="models.f.test">测试连接</button>
+              <button id="btn-models-save" data-i18n="models.f.save">保存</button>
+              <button class="secondary" id="btn-models-cancel" data-i18n="models.f.cancel">取消</button>
+              <button class="danger" id="btn-models-delete" data-i18n="models.f.delete">删除</button>
+            </div>
+            <div class="status" id="models-test-result"></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="models.defaultTitle">默认模型</h3>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="models.defaultProvider">服务商</label></div>
+            <div class="setting-ctrl"><select id="models-default-provider"></select></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="models.defaultModel">模型</label></div>
+            <div class="setting-ctrl"><select id="models-default-model"></select></div>
+          </div>
+          <div class="note" data-i18n="models.defaultHint">对新会话生效；已打开的会话保持原模型。</div>
+          <div class="btnrow">
+            <button class="secondary" id="btn-models-set-default" data-i18n="models.setDefault">保存为默认模型</button>
+          </div>
+          <div class="status" id="models-default-status"></div>
+        </div>
+        <div class="card">
+          <details>
+            <summary style="cursor:pointer;color:var(--text-2)" data-i18n="models.securityTitle">Key 存储与安全</summary>
+            <div class="note" style="margin-top:8px" data-i18n="models.securityNote">API Key 在桌面壳内经系统加密存储（macOS 钥匙串 / Windows DPAPI）；同时以明文写入 DSH_HOME 的 .credentials.yaml（0600、原子写、保留其他键）供运行时读取——这是 dsh 官方的凭证机制，运行时会热加载、无需重启。会话备份不含该文件。连接测试与模型拉取全部在主进程完成，Key 不进入网页层。</div>
+          </details>
+        </div>
+      </div>
+
+      <!-- ------------------------- page: longsession (C3) -->
+      <div class="page" id="page-longsession">
+        <div class="page-head">
+          <h2 data-i18n="nav.longsession">长会话</h2>
+          <p data-i18n="page.longsession.d">上下文压缩与记忆文件（AGENTS.md）</p>
+        </div>
+        <div class="card">
+          <h3 data-i18n="compact.cardTitle">上下文压缩</h3>
+          <div class="status" id="compact-status"></div>
+          <div class="btnrow">
+            <button id="btn-compact-now" data-i18n="compact.now">压缩当前会话</button>
+          </div>
+          <div class="note" data-i18n="compact.hint">压缩会用一段结构化摘要替换较早的对话，当前任务可以继续。运行时会在上下文压力约 80% 时自动压缩；你也可以随时手动触发，或在对话输入框直接输入 /compact（仅空闲时可执行）。</div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="compact.historyTitle">最近压缩记录</h3>
+          <div id="compact-history" style="display:flex;flex-direction:column;gap:4px"></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="memory.cardTitle">记忆文件（AGENTS.md）</h3>
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="memory.scope">文件</label>
+              <span class="desc mono" id="memory-path"></span>
+            </div>
+            <div class="setting-ctrl">
+              <select id="memory-scope">
+                <option value="project" data-i18n="memory.scopeProject">项目（工作区根目录）</option>
+                <option value="global" data-i18n="memory.scopeGlobal">全局（DSH_HOME）</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="memory.editor">内容（Markdown）</label></div>
+            <div class="setting-ctrl" style="flex:1">
+              <textarea id="memory-editor" rows="10" class="mono" style="width:100%;resize:vertical" data-i18n-placeholder="memory.editorPh" placeholder="# 写给 Agent 的长期记忆…（Markdown）"></textarea>
+            </div>
+          </div>
+          <div class="btnrow">
+            <button id="btn-memory-save" data-i18n="memory.save">保存</button>
+            <button class="danger" id="btn-memory-delete" data-i18n="memory.delete">删除</button>
+          </div>
+          <div class="status" id="memory-status"></div>
+          <div class="note" data-i18n="memory.hint">记忆文件在【新会话】开始时被读取（进行中的会话不受影响）。写入仅限工作区根目录与 DSH_HOME 下的 AGENTS.md 两个白名单路径。</div>
         </div>
       </div>
 
@@ -541,6 +719,41 @@
         </div>
       </div>
 
+      <!-- ------------------------- page: skills (技能中心) -->
+      <div class="page" id="page-skills">
+        <div class="page-head">
+          <h2 data-i18n="nav.skills">技能</h2>
+          <p data-i18n="page.skills.d">发现与管理 dsh 技能（SKILL.md 指令包）</p>
+        </div>
+        <div class="card">
+          <h3 data-i18n="skills.marketTitle">技能市场</h3>
+          <div class="plugin-tools">
+            <input type="text" id="skill-search" data-i18n-placeholder="skills.searchPh" placeholder="搜索技能（名称 / 描述）…" />
+            <button class="icon-btn" id="skill-refresh" data-i18n-title="skills.refresh" aria-label="刷新" title="刷新">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12a9 9 0 1 1-2.64-6.36"></path><path d="M21 3v6h-6"></path>
+              </svg>
+            </button>
+            <span id="skill-count"></span>
+          </div>
+          <div class="note" id="skills-market-source"></div>
+          <div class="note" data-i18n="skills.note">技能来自社区精选列表 awesome-dsh-plugin 的 Skills 分区；技能正文会进入模型上下文，安装前请先预览全文，只安装你信任的技能。</div>
+        </div>
+        <div class="card">
+          <h3><span data-i18n="skills.installedTitle">已安装</span> · <span id="skill-installed-count"></span></h3>
+          <div id="skill-installed"></div>
+          <div class="btnrow">
+            <button class="secondary" id="skill-import" data-i18n="skills.import">导入本地技能…</button>
+          </div>
+          <div class="note" data-i18n="skills.sessionHint">技能安装/卸载即时生效：新会话中立即可用（输入 / 唤出技能菜单），无需重启运行时。</div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="skills.discoverTitle">发现</h3>
+          <div class="status" id="skills-status" style="display:none"></div>
+          <div id="skill-list"></div>
+        </div>
+      </div>
+
       <!-- ------------------------- page: tasks → automation center -->
       <div class="page" id="page-tasks">
         <div class="page-head page-head-row">
@@ -616,7 +829,60 @@
             <button class="secondary" id="btn-remote-copy" data-i18n="remote.copy">复制</button>
           </div>
         </div>
+
+        <!-- ------------------ C7: public remote (Tailscale / cloudflared) -->
+        <div class="card">
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="remote.publicMode">访问模式</label>
+              <div class="note" data-i18n="remote.publicModeHint">公网模式默认关闭：开启需二次确认，且配对码有效期收紧为 5 分钟、停用无 Cookie 兜底会话</div>
+            </div>
+            <div class="setting-ctrl">
+              <select id="remotePublicMode" style="width:220px">
+                <option value="lan" data-i18n="remote.publicLan">仅局域网（默认）</option>
+                <option value="tailscale" data-i18n="remote.publicTs">Tailscale 公网</option>
+                <option value="cloudflare" data-i18n="remote.publicCf">Cloudflare 临时隧道</option>
+              </select>
+            </div>
+          </div>
+          <div class="btnrow">
+            <button class="danger" id="btn-public-enable" data-i18n="remote.btnPublicOn">开启公网访问</button>
+            <button class="secondary" id="btn-public-disable" style="display:none" data-i18n="remote.btnPublicOff">关闭公网访问</button>
+            <button class="secondary" id="btn-ts-refresh" data-i18n="remote.btnTsRefresh">重新检测 Tailscale</button>
+            <button class="secondary" id="btn-tunnel-start" data-i18n="remote.btnTunnelStart">启动临时隧道</button>
+            <button class="danger" id="btn-tunnel-stop" style="display:none" data-i18n="remote.btnTunnelStop">停止隧道</button>
+          </div>
+          <div class="status" id="public-remote-status"></div>
+          <div id="remote-ts-link-row" style="display:none; align-items:center; gap:8px; margin-top:8px">
+            <span style="min-width:110px; color:var(--dim); font-size:12px" data-i18n="remote.linkTs">Tailscale（IP）</span>
+            <span id="remote-ts-link" style="flex:1; word-break:break-all; user-select:all; font-family:ui-monospace,Consolas,monospace; font-size:12px"></span>
+            <button class="secondary" id="btn-remote-ts-copy" data-i18n="remote.copy">复制</button>
+          </div>
+          <div id="remote-tsdns-link-row" style="display:none; align-items:center; gap:8px; margin-top:8px">
+            <span style="min-width:110px; color:var(--dim); font-size:12px" data-i18n="remote.linkTsDns">Tailscale（MagicDNS）</span>
+            <span id="remote-tsdns-link" style="flex:1; word-break:break-all; user-select:all; font-family:ui-monospace,Consolas,monospace; font-size:12px"></span>
+            <button class="secondary" id="btn-remote-tsdns-copy" data-i18n="remote.copy">复制</button>
+          </div>
+          <div id="remote-tunnel-link-row" style="display:none; align-items:center; gap:8px; margin-top:8px">
+            <span style="min-width:110px; color:var(--dim); font-size:12px" data-i18n="remote.linkTunnel">临时隧道</span>
+            <span id="remote-tunnel-link" style="flex:1; word-break:break-all; user-select:all; font-family:ui-monospace,Consolas,monospace; font-size:12px"></span>
+            <button class="secondary" id="btn-remote-tunnel-copy" data-i18n="remote.copy">复制</button>
+          </div>
+        </div>
         <div class="note" data-i18n="remote.note">安全说明：默认开启「微信/抖音打开兼容模式」时网关走明文 HTTP，配对码与长期令牌在局域网内明文传输（微信、抖音内置浏览器无法打开自签名 HTTPS，故提供此模式）；关闭兼容模式后为自签名 HTTPS，手机首次访问会提示「不受信任」，系统浏览器选择继续访问即可。配对码 10 分钟内一次性有效；长期令牌经系统加密存储、不进入设置与备份。运行时本身仍只监听 127.0.0.1，局域网只能到达此网关。请勿在公共网络下开启。</div>
+        <div class="note" data-i18n="remote.publicNote">公网模式安全说明：Tailscale 路线零公网暴露（流量 WireGuard 端到端加密，仅 tailnet 内设备可达）；Cloudflare 临时隧道无账号、免装 App，但 URL 每次启动变化、无 SLA、200 并发上限，仅适合临时分享。公网模式下：配对码有效期收紧为 5 分钟；无 Cookie 浏览器的 IP 兜底会话被禁用（仅令牌 Cookie 有效）；防爆破锁定与审计按真实来源 IP（仅信任本机代理注入的 X-Forwarded-For / CF-Connecting-IP）记录；配对与吊销事件写入审计日志（不含令牌与配对码）。手机装 Tailscale 并登录同账号后，4G/公网与 Wi-Fi 无感切换、会话不丢。</div>
+      </div>
+
+      <!-- ------------------------- page: channels (IM 渠道 C5) -->
+      <div class="page" id="page-channels">
+        <div class="page-head">
+          <h2 data-i18n="nav.channels">渠道</h2>
+          <p data-i18n="page.channels.d">把任务完成、审批与提问推送到 IM，并在 IM 内遥控</p>
+        </div>
+        <div class="card">
+          <div class="note" data-i18n="channels.note">消息由本机直连各平台（出站长连接，无需公网 IP），不经过任何第三方服务器；渠道凭据经系统加密存储，不进入设置与备份。审批与提问按钮带一次性令牌，120 秒内有效。</div>
+        </div>
+        <div id="channels-list"></div>
       </div>
 
       <!-- ------------------------- page: data (was 数据与安全) -->
@@ -817,6 +1083,20 @@
   </div>
 </dialog>
 
+<!-- ------------------------- skills preview / install dialog -->
+<dialog id="skills-dialog">
+  <h3 id="skills-dlg-title"></h3>
+  <div class="note" id="skills-dlg-meta"></div>
+  <div class="status warn" id="skills-dlg-warn" style="display:none"></div>
+  <div id="skills-dlg-list"></div>
+  <pre id="skills-dlg-content"></pre>
+  <div class="note" id="skills-dlg-hint" data-i18n="skills.previewHint">安装前请阅读全文：技能正文会进入模型上下文（提示注入面）。</div>
+  <div class="btnrow" style="justify-content:flex-end">
+    <button class="secondary" id="skills-dlg-cancel" data-i18n="btn.cancel">取消</button>
+    <button id="skills-dlg-install" data-i18n="skills.confirmInstall">确认安装</button>
+  </div>
+</dialog>
+
 <script>
   const $ = (id) => document.getElementById(id);
   let current = null;
@@ -935,6 +1215,62 @@
       remote_pairing_none: '当前没有有效配对码，点击「刷新配对码」',
       remote_pairing_fmt: '配对码：{code}（{min} 分钟内有效，一次性）',
       remote_revoke_confirm: '确定撤销所有已配对设备？所有手机需要重新配对。',
+      // ---- public remote (C7): Tailscale + cloudflared quick tunnel
+      remote_publicMode: '访问模式',
+      remote_publicModeHint: '公网模式默认关闭：开启需二次确认，开启后配对码有效期收紧为 5 分钟、停用无 Cookie 兜底会话',
+      remote_publicLan: '仅局域网（默认）',
+      remote_publicTs: 'Tailscale 公网',
+      remote_publicCf: 'Cloudflare 临时隧道',
+      remote_btnPublicOn: '开启公网访问', remote_btnPublicOff: '关闭公网访问',
+      remote_btnTsRefresh: '重新检测 Tailscale',
+      remote_btnTunnelStart: '启动临时隧道', remote_btnTunnelStop: '停止隧道',
+      remote_linkTs: 'Tailscale（IP）', remote_linkTsDns: 'Tailscale（MagicDNS）', remote_linkTunnel: '临时隧道',
+      remote_publicOff: '公网访问：未开启',
+      remote_publicOn: '公网访问：已开启（{mode}）',
+      remote_warnPublic: '警告：开启后 Agent 控制台将可从本机局域网之外访问（Tailscale 虚拟网络 / 互联网临时链接），任何拿到配对链接的人都可能尝试连接。\n\n请勿把链接或二维码转发给不信任的人；请勿在公共或不可信网络下长期开启。\n\n确定开启？',
+      remote_publicPickMode: '请先在「访问模式」中选择 Tailscale 或 Cloudflare',
+      remote_publicEnableFail: '开启失败：缺少确认标志，请重试',
+      remote_publicGatewayDown: '网关未运行——请先在上方启用「手机控制」',
+      remote_tsState_notInstalled: 'Tailscale：未安装',
+      remote_tsState_notLoggedIn: 'Tailscale：已安装，未登录',
+      remote_tsOnline: 'Tailscale：已登录 {ip}{dns}',
+      remote_tsInstall: '安装引导：官网 https://tailscale.com/download ；macOS 终端执行 brew install --cask tailscale；Windows 执行 winget install Tailscale.Tailscale。手机端在 App Store / Google Play 安装 Tailscale。',
+      remote_tsLoginHint: '请点击菜单栏/系统托盘的 Tailscale 图标登录（或执行 tailscale login），完成后点「重新检测 Tailscale」。',
+      remote_tsPhoneHint: '手机需安装 Tailscale 并登录同一账号（或被邀入网络）——装好后 4G/公网与 Wi-Fi 无感切换、会话不丢，用下方链接或上方局域网链接均可配对。',
+      remote_tunnelIdle: 'cloudflared：已安装（临时隧道未运行）',
+      remote_tunnelNotInstalled: 'cloudflared：未安装——请手动安装（官网 https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ ；macOS brew install cloudflared；Windows winget install Cloudflare.cloudflared）。需网关处于 HTTP 兼容模式。',
+      remote_tunnelRunning: '临时隧道：{url}',
+      remote_tunnelStartFail: '临时隧道启动失败：{reason}',
+      remote_publicNote: '公网模式安全说明：Tailscale 路线零公网暴露（流量 WireGuard 端到端加密，仅 tailnet 内设备可达）；Cloudflare 临时隧道无账号、免装 App，但 URL 每次启动变化、无 SLA、200 并发上限，仅适合临时分享。公网模式下：配对码有效期收紧为 5 分钟；无 Cookie 浏览器的 IP 兜底会话被禁用（仅令牌 Cookie 有效）；防爆破锁定与审计按真实来源 IP（仅信任本机代理注入的 X-Forwarded-For / CF-Connecting-IP）记录；配对与吊销事件写入审计日志（不含令牌与配对码）。手机装 Tailscale 并登录同账号后，4G/公网与 Wi-Fi 无感切换、会话不丢。',
+      // ---- IM channels (C5)
+      nav_channels: '渠道',
+      page_channels_d: '把任务完成、审批与提问推送到 IM，并在 IM 内遥控',
+      channels_note: '消息由本机直连各平台（出站长连接，无需公网 IP），不经过任何第三方服务器；渠道凭据经系统加密存储，不进入设置与备份。审批与提问按钮带一次性令牌，120 秒内有效。',
+      channels_state_offline: '离线', channels_state_connecting: '连接中…',
+      channels_state_online: '在线', channels_state_backoff: '退避重连中（第 {n} 次）',
+      channels_notInstalled: '协议实现将于渠道接入后提供',
+      channels_allowFrom: '白名单（allowFrom）',
+      channels_allowFromHint: '允许使用本渠道的用户/群 ID，逗号分隔；支持前缀通配（如 user_*）。留空 = 配对模式（默认拒绝所有，接入后可配对放行）。',
+      channels_credentials: '凭据配置',
+      channels_credentialsHint: '凭据经系统加密存储，不进入设置与备份；保存后启用渠道即自动连接。',
+      channels_credentialsConfigured: '已配置',
+      channels_credentialsMissing: '未配置',
+      channels_type_feishu: '飞书', channels_type_wecom: '企业微信',
+      channels_type_dingtalk: '钉钉', channels_type_whatsapp: 'WhatsApp',
+      channels_savedOk: '✅ 已保存', channels_saveFailed: '❌ 保存失败：{reason}',
+      channels_cfg_save: '保存凭据', channels_cfg_saved: '✅ 凭据已保存', channels_cfg_clear: '清除',
+      channels_cfg_test: '测试连接', channels_cfg_testing: '⏳ 测试中…',
+      channels_cfg_testOk: '✅ 连接成功', channels_cfg_testFail: '❌ 连接失败：{reason}',
+      channels_cfg_errCredentials: '凭证错误', channels_cfg_errNetwork: '网络错误', channels_cfg_errProtocol: '协议错误',
+      channels_cfg_guide: '接入引导',
+      channels_cfg_missing: '请先填写凭据',
+      channels_feishu_appId: 'App ID', channels_feishu_appSecret: 'App Secret',
+      channels_feishu_guide: '在飞书开放平台创建企业自建应用 → 事件订阅选「使用长连接模式」→ 订阅 im.message.receive_v1 与 card.action.trigger → 权限开启「以应用身份发消息」→ 发布应用。回调地址留空（走本机长连接，无需公网）。',
+      channels_wecom_botId: '机器人 ID', channels_wecom_secret: '机器人 Secret',
+      channels_wecom_guide: '企业微信管理后台 → 应用管理 → 创建智能机器人（AI Bot）→ 复制机器人 ID 与 Secret。WebSocket 长连接接入，无需公网回调。',
+      channels_dingtalk_clientId: 'Client ID', channels_dingtalk_clientSecret: 'Client Secret',
+      channels_dingtalk_guide: '钉钉开放平台 → 创建企业内部应用 → 消息推送选「Stream 模式」→ 复制 Client ID / Client Secret → 完成版本发布与可用范围。Stream 走本机 WebSocket，无需公网回调。',
+      channels_whatsapp_guide: 'WhatsApp 渠道规划中（Cloud API 需公网 webhook），敬请期待。',
       schedule_enabled: '启用', schedule_delete: '删除',
       btn_cancel: '取消', btn_saveTask: '保存任务',
       auto_manualNew: '手动新建', auto_askCreate: '在对话中创建',
@@ -993,9 +1329,129 @@
       page_tasks_d: '配置和管理自动化任务，让 AI 按计划执行工作流。', page_data_d: '备份、存储与隐私',
       page_update_d: '运行时更新通道与版本', page_about_d: '版本、诊断与帮助',
       card_costRates: '谷时费率（默认）', card_costPeak: '峰谷分时计价', card_costUsage: '用量统计',
+      card_balance: '账户余额（官方）',
+      balance_hint: '官方数据，与本地估算口径可能有差异（赠款 / 失败请求）。',
+      balance_total: '总额', balance_granted: '赠送余额', balance_toppedUp: '充值余额',
+      balance_updatedJust: '刚刚刷新', balance_updatedAgo: '{n} 分钟前刷新',
+      balance_unavailable: '⚠ 余额已不足以调用 API（is_available=false）',
+      balance_none: '暂无余额数据（尚未配置 API Key 或未刷新）',
+      balance_refreshing: '正在刷新…', balance_fetchFailed: '刷新失败：{reason}',
+      btn_balanceRefresh: '刷新余额',
+      cost_turnTitle: '本轮对话（按官方价估算）',
+      cost_turnCost: '本轮花费', cost_turnSaved: '缓存节省',
       card_backup: '会话备份', card_storage: '存储占用', card_privacy: '隐私与安全',
       card_updateChannel: '通道与来源', card_updateOps: '版本操作', card_aboutVersions: '版本信息',
       card_appearance: '外观',
+      // ---- models (C2)
+      nav_models: '模型', page_models_d: '第三方模型服务商、API Key 与默认模型',
+      models_ollamaTitle: 'Ollama 本地模型',
+      models_ollamaChecking: '正在检测本机 Ollama…',
+      models_ollamaNotInstalled: '未检测到 Ollama（默认端口 11434 无响应）',
+      models_ollamaGuide: '未安装或未启动时，可先安装：',
+      models_ollamaSite: '官网 ollama.com',
+      models_ollamaVersion: 'Ollama {v} · 本机已安装 {n} 个模型',
+      models_ollamaVersionRegistered: 'Ollama {v} · 已注册为服务商（{n} 个模型）',
+      models_ollamaSelectHint: '勾选要注册到 dsh 的本地模型：',
+      models_ollamaNoModels: '尚无本地模型，先执行 ollama pull 拉取一个。',
+      models_ollamaRegister: '注册为服务商',
+      models_ollamaPickFirst: '请至少勾选一个模型',
+      models_ollamaDone: '✅ Ollama 已注册，模型列表已更新',
+      models_providersTitle: '模型服务商',
+      models_add: '添加服务商',
+      models_empty: '尚未配置任何服务商。点击「添加服务商」从预设开始，或先在上方接入 Ollama。',
+      models_ollamaTag: 'Ollama', models_builtinTag: '预设', models_customTag: '自定义',
+      models_defaultBadge: '默认',
+      models_keyConfigured: '✓ Key 已配置', models_keyMissing: '⚠ 未配置 Key',
+      models_modelsCount: '{n} 个模型',
+      models_edit: '编辑',
+      models_f_preset: '预设', models_f_name: '名称', models_f_baseurl: 'API 地址（Base URL）',
+      models_f_key: 'API Key', models_f_keyPh: '粘贴 API Key（不回显）', models_f_keyStored: '已存储（留空保持不变）',
+      models_f_getKey: '获取 Key', models_f_docs: '文档',
+      models_f_models: '模型列表', models_f_modelsHint: '测试成功后可拉取列表勾选，或手动添加模型 ID。',
+      models_f_modelsEmpty: '（尚未选择模型）',
+      models_f_manualPh: '手动添加模型 ID', models_f_addManual: '添加',
+      models_f_test: '测试连接', models_f_testing: '正在测试…',
+      models_f_save: '保存', models_f_cancel: '取消', models_f_delete: '删除',
+      models_f_needModels: '请至少选择或输入一个模型 ID',
+      models_f_deleteConfirm: '确定删除该服务商？将同时清除已存的 API Key 与运行时配置。',
+      models_test_ok: '✅ 连接成功，{n} 个可用模型（已加入下方列表）',
+      models_test_noKey: '缺少 API Key，请先填写',
+      models_test_invalidKey: 'API Key 无效或未授权（401/403）',
+      models_test_quota: '余额不足或已限流（HTTP {status}）',
+      models_test_network: '网络错误：无法连接到该地址',
+      models_test_endpoint: '地址无效，或响应不是 OpenAI 兼容的 /models 格式',
+      models_test_server: '服务端错误（HTTP {status}）',
+      models_test_other: '失败：{reason}',
+      models_defaultTitle: '默认模型', models_defaultProvider: '服务商', models_defaultModel: '模型',
+      models_defaultHint: '对新会话生效；已打开的会话保持原模型。',
+      models_setDefault: '保存为默认模型',
+      models_defaultEmpty: '先添加至少一个服务商，再设置默认模型。',
+      models_defaultCurrent: '当前默认：{p} · {m}',
+      models_defaultSaved: '✅ 默认模型已保存（新会话生效）',
+      models_savedOk: '✅ 服务商已保存',
+      models_securityTitle: 'Key 存储与安全',
+      models_securityNote: 'API Key 在桌面壳内经系统加密存储（macOS 钥匙串 / Windows DPAPI）；同时以明文写入 DSH_HOME 的 .credentials.yaml（0600、原子写、保留其他键）供运行时读取——这是 dsh 官方的凭证机制，运行时会热加载、无需重启。会话备份不含该文件。连接测试与模型拉取全部在主进程完成，Key 不进入网页层。',
+      models_preset_siliconflow: 'SiliconFlow（硅基流动）', models_preset_moonshot: 'Moonshot（月之暗面）',
+      models_preset_zhipu: '智谱 GLM', models_preset_dashscope: '阿里云百炼',
+      models_preset_volcark: '火山方舟', models_preset_openrouter: 'OpenRouter',
+      models_preset_custom: '自定义', models_preset_ollama: 'Ollama（本机）',
+      models_note_dashscope: '使用 OpenAI 兼容模式（compatible-mode）地址',
+      models_note_volcark: '接入点 ID（ep-…）或方舟模型 ID 均可',
+      // long-session center (C3): compaction + AGENTS.md memory files
+      nav_longsession: '长会话', page_longsession_d: '上下文压缩与记忆文件（AGENTS.md）',
+      compact_cardTitle: '上下文压缩', compact_now: '压缩当前会话',
+      compact_hint: '压缩会用一段结构化摘要替换较早的对话，当前任务可以继续。运行时会在上下文压力约 80% 时自动压缩；你也可以随时手动触发，或在对话输入框直接输入 /compact（仅空闲时可执行）。',
+      compact_historyTitle: '最近压缩记录',
+      compact_running: '压缩中…', compact_statusRunning: '⟳ 正在压缩上下文…',
+      compact_agentBusy: '⚠ Agent 正忙，压缩需等待当前任务完成',
+      compact_empty: '暂无压缩记录', compact_row: '{time} · {before} → {after} tokens · 节省 ¥{saved}/轮',
+      compact_submitting: '正在提交压缩命令…', compact_submitted: '✅ 压缩命令已提交，等待运行时处理',
+      compact_failed: '压缩失败',
+      memory_cardTitle: '记忆文件（AGENTS.md）',
+      memory_scope: '文件', memory_scopeProject: '项目（工作区根目录）', memory_scopeGlobal: '全局（DSH_HOME）',
+      memory_editor: '内容（Markdown）', memory_editorPh: '# 写给 Agent 的长期记忆…（Markdown）',
+      memory_save: '保存',
+      memory_hint: '记忆文件在【新会话】开始时被读取（进行中的会话不受影响）。写入仅限工作区根目录与 DSH_HOME 下的 AGENTS.md 两个白名单路径。',
+      memory_notExists: '文件不存在，保存后将创建', memory_saving: '正在保存…',
+      memory_savedOk: '✅ 保存成功', memory_denied: '⚠ 禁止写入非白名单路径', memory_saveFailed: '❌ 保存失败：',
+      memory_delete: '删除', memory_deleteConfirm: '确定删除该记忆文件（AGENTS.md）吗？此操作不可恢复。',
+      memory_deletedOk: '✅ 已删除', memory_deleteFailed: '❌ 删除失败：',
+      // skills center (C4): SKILL.md packs — market / installed / preview
+      nav_skills: '技能', page_skills_d: '发现与管理 dsh 技能（SKILL.md 指令包）',
+      skills_marketTitle: '技能市场',
+      skills_searchPh: '搜索技能（名称 / 描述）…', skills_refresh: '刷新',
+      skills_note: '技能来自社区精选列表 awesome-dsh-plugin 的 Skills 分区；技能正文会进入模型上下文，安装前请先预览全文，只安装你信任的技能。',
+      skills_installedTitle: '已安装', skills_installedCount: '{n} 个技能',
+      skills_emptyInstalled: '尚未安装任何技能；在下方发现列表点击「安装」，或导入本地技能目录。',
+      skills_import: '导入本地技能…',
+      skills_sessionHint: '技能安装/卸载即时生效：新会话中立即可用（输入 / 唤出技能菜单），无需重启运行时。',
+      skills_discoverTitle: '发现',
+      skills_loading: '正在从 GitHub 加载技能列表…', skills_loadFail: '❌ 加载失败：', skills_retry: '重试',
+      skills_empty: '没有找到匹配的技能。', skills_shownCount: '已显示 {n}/{t} 个',
+      skills_install: '安装', skills_reinstall: '重新安装', skills_remove: '卸载', skills_upgrade: '升级',
+      skills_removeConfirm: '确定卸载技能 {name}？新会话将不再加载它。',
+      skills_installing: '正在安装 {name}…', skills_removing: '正在卸载 {name}…', skills_upgrading: '正在升级 {name}…',
+      skills_stageResolve: '解析仓库', skills_stageDownload: '下载', skills_stageVerify: '校验', skills_stageWrite: '写入',
+      skills_doneInstall: '✅ {name} 已安装（新会话生效）',
+      skills_doneRemove: '✅ {name} 已卸载',
+      skills_doneUpgrade: '✅ {name} 已升级到 {c}',
+      skills_actionFailed: '❌ 操作失败：',
+      skills_previewHint: '安装前请阅读全文：技能正文会进入模型上下文（提示注入面）。',
+      skills_confirmInstall: '确认安装',
+      skills_multiTitle: '选择要安装的技能', skills_installAll: '全部安装',
+      skills_pickHint: '该仓库包含多个技能；点击条目查看全文，可单独安装或全部安装。',
+      skills_invalidCand: '无效：{reason}',
+      skills_sourceLocal: '本地导入', skills_dlgRepo: '来源：',
+      skills_e1: '未找到 SKILL.md：这不是一个技能包（可能是普通文档仓库或 dsh 插件）',
+      skills_e2: 'SKILL.md 缺少 YAML frontmatter（文件需以 --- 开头的 name/description 块开始）',
+      skills_e3: 'frontmatter 缺少必填字段：{field}。技能需要 name 和 description 才能被 dsh 发现',
+      skills_e4: '技能名 "{name}" 无效：仅允许小写字母、数字、连字符，且不超过 64 字符',
+      skills_e5: 'SKILL.md 的 YAML 解析失败：{msg}。请检查缩进与引号',
+      skills_e6: '下载技能失败：{msg}（网络问题请稍后重试）',
+      skills_e7: 'frontmatter 使用了不支持的写法 "{key}"：请改写为 {canonical}，否则 dsh 会忽略整个技能',
+      skills_w1: '目录名与技能名不一致，已自动对齐为 {name}（跨平台兼容）',
+      skills_w2: '该技能附带可执行脚本或命令类指令，安装后 agent 可能请求运行它们（每次经 dsh 审批）',
+      skills_pluginForm: '该仓库是插件型技能包（package.json + dsh bundle），请通过插件市场安装',
     },
     en: {
       title: 'DshCockpit Settings',
@@ -1107,6 +1563,62 @@
       remote_pairing_none: 'No active pairing code; click "Refresh pairing code"',
       remote_pairing_fmt: 'Pairing code: {code} (one-shot, valid {min} min)',
       remote_revoke_confirm: 'Revoke every paired device? Phones will need to pair again.',
+      // ---- public remote (C7): Tailscale + cloudflared quick tunnel
+      remote_publicMode: 'Access mode',
+      remote_publicModeHint: 'Public mode is off by default: enabling asks for confirmation, tightens the pairing-code validity to 5 minutes and disables the cookie-less fallback session',
+      remote_publicLan: 'LAN only (default)',
+      remote_publicTs: 'Tailscale public',
+      remote_publicCf: 'Cloudflare quick tunnel',
+      remote_btnPublicOn: 'Enable public access', remote_btnPublicOff: 'Disable public access',
+      remote_btnTsRefresh: 'Re-detect Tailscale',
+      remote_btnTunnelStart: 'Start quick tunnel', remote_btnTunnelStop: 'Stop tunnel',
+      remote_linkTs: 'Tailscale (IP)', remote_linkTsDns: 'Tailscale (MagicDNS)', remote_linkTunnel: 'Quick tunnel',
+      remote_publicOff: 'Public access: off',
+      remote_publicOn: 'Public access: on ({mode})',
+      remote_warnPublic: 'Warning: enabling this exposes the agent console beyond your LAN (Tailscale virtual network / a temporary internet URL) — anyone who obtains the pairing link may try to connect.\n\nNever share the link or QR code with untrusted people; do not leave it on while on public or untrusted networks.\n\nEnable anyway?',
+      remote_publicPickMode: 'Pick Tailscale or Cloudflare in "Access mode" first',
+      remote_publicEnableFail: 'Failed to enable: confirmation flag missing, try again',
+      remote_publicGatewayDown: 'Gateway not running — enable "Phone control" above first',
+      remote_tsState_notInstalled: 'Tailscale: not installed',
+      remote_tsState_notLoggedIn: 'Tailscale: installed, not logged in',
+      remote_tsOnline: 'Tailscale: logged in {ip}{dns}',
+      remote_tsInstall: 'Install guide: https://tailscale.com/download ; macOS: brew install --cask tailscale; Windows: winget install Tailscale.Tailscale. On the phone install Tailscale from the App Store / Google Play.',
+      remote_tsLoginHint: 'Log in via the Tailscale menu-bar/tray icon (or run tailscale login), then press "Re-detect Tailscale".',
+      remote_tsPhoneHint: 'The phone needs Tailscale logged into the same account (or invited into the tailnet) — then 4G/public and Wi-Fi switch seamlessly without losing the session; pair via the link below or the LAN link above.',
+      remote_tunnelIdle: 'cloudflared: installed (quick tunnel not running)',
+      remote_tunnelNotInstalled: 'cloudflared: not installed — install it manually (https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ ; macOS: brew install cloudflared; Windows: winget install Cloudflare.cloudflared). The gateway must be in HTTP compat mode.',
+      remote_tunnelRunning: 'Quick tunnel: {url}',
+      remote_tunnelStartFail: 'Quick tunnel failed to start: {reason}',
+      remote_publicNote: 'Public-mode security: the Tailscale route has zero public exposure (WireGuard end-to-end encrypted, reachable only inside your tailnet); the Cloudflare quick tunnel needs no account or app but its URL changes on every start, has no SLA and caps at 200 concurrent requests — for temporary sharing only. In public mode: pairing codes expire in 5 minutes; the cookie-less IP fallback session is disabled (token cookie only); brute-force locks and audits use the real source IP (only X-Forwarded-For / CF-Connecting-IP injected by the local proxy are trusted); pairing and revoke events go to the audit log (no tokens or codes). With Tailscale on the phone logged into the same account, 4G/public and Wi-Fi switch seamlessly without losing the session.',
+      // ---- IM channels (C5)
+      nav_channels: 'Channels',
+      page_channels_d: 'Push task results, approvals and questions to IM, and remote-control from it',
+      channels_note: 'Messages travel from this machine straight to each platform (outbound long connections, no public IP needed), never through third-party servers; channel credentials are OS-encrypted and stay out of settings and backups. Approval and question buttons carry one-shot tokens valid for 120 seconds.',
+      channels_state_offline: 'Offline', channels_state_connecting: 'Connecting…',
+      channels_state_online: 'Online', channels_state_backoff: 'Reconnecting (attempt {n})',
+      channels_notInstalled: 'The protocol implementation arrives with the channel integration',
+      channels_allowFrom: 'Allowlist (allowFrom)',
+      channels_allowFromHint: 'User/chat ids allowed to use this channel, comma separated; prefix wildcards supported (e.g. user_*). Empty = pairing mode (reject all by default until paired).',
+      channels_credentials: 'Credentials',
+      channels_credentialsHint: 'Secrets are OS-encrypted and never enter settings or backups; after saving, enabling the channel connects automatically.',
+      channels_credentialsConfigured: 'Configured',
+      channels_credentialsMissing: 'Not configured',
+      channels_type_feishu: 'Feishu (Lark)', channels_type_wecom: 'WeCom',
+      channels_type_dingtalk: 'DingTalk', channels_type_whatsapp: 'WhatsApp',
+      channels_savedOk: '✅ Saved', channels_saveFailed: '❌ Save failed: {reason}',
+      channels_cfg_save: 'Save credentials', channels_cfg_saved: '✅ Credentials saved', channels_cfg_clear: 'Clear',
+      channels_cfg_test: 'Test connection', channels_cfg_testing: '⏳ Testing…',
+      channels_cfg_testOk: '✅ Connection OK', channels_cfg_testFail: '❌ Connection failed: {reason}',
+      channels_cfg_errCredentials: 'Credentials error', channels_cfg_errNetwork: 'Network error', channels_cfg_errProtocol: 'Protocol error',
+      channels_cfg_guide: 'Setup guide',
+      channels_cfg_missing: 'Fill in the credentials first',
+      channels_feishu_appId: 'App ID', channels_feishu_appSecret: 'App Secret',
+      channels_feishu_guide: 'Feishu Open Platform → create a custom app → event subscription "Long connection mode" → subscribe to im.message.receive_v1 and card.action.trigger → enable im:message:send_as_bot → publish. Leave the callback URL empty (local outbound connection, no public network).',
+      channels_wecom_botId: 'Bot ID', channels_wecom_secret: 'Bot Secret',
+      channels_wecom_guide: 'WeCom admin console → App management → create an AI Bot (智能机器人) → copy the Bot ID and Secret. Outbound WebSocket; no public callback needed.',
+      channels_dingtalk_clientId: 'Client ID', channels_dingtalk_clientSecret: 'Client Secret',
+      channels_dingtalk_guide: 'DingTalk Open Platform → create an internal app → message delivery "Stream mode" → copy the Client ID / Client Secret → publish with an availability scope. Stream uses an outbound local WebSocket; no public callback.',
+      channels_whatsapp_guide: 'WhatsApp channel is planned (Cloud API needs a public webhook) — coming soon.',
       schedule_enabled: 'Enabled', schedule_delete: 'Delete',
       btn_cancel: 'Cancel', btn_saveTask: 'Save task',
       auto_manualNew: 'New manually', auto_askCreate: 'Create in chat',
@@ -1165,9 +1677,129 @@
       page_tasks_d: 'Configure and manage automation tasks — AI workflows on a schedule.', page_data_d: 'Backups, storage & privacy',
       page_update_d: 'Runtime update channel & versions', page_about_d: 'Versions, diagnostics & help',
       card_costRates: 'Off-peak rates (default)', card_costPeak: 'Peak & off-peak pricing', card_costUsage: 'Usage',
+      card_balance: 'Account balance (official)',
+      balance_hint: 'Official data; may differ from local estimates (grants / failed requests).',
+      balance_total: 'Total', balance_granted: 'Granted', balance_toppedUp: 'Topped up',
+      balance_updatedJust: 'updated just now', balance_updatedAgo: 'updated {n} min ago',
+      balance_unavailable: '⚠ Balance insufficient for API calls (is_available=false)',
+      balance_none: 'No balance data yet (API key not configured or not refreshed)',
+      balance_refreshing: 'Refreshing…', balance_fetchFailed: 'Refresh failed: {reason}',
+      btn_balanceRefresh: 'Refresh balance',
+      cost_turnTitle: 'Last turn (official-price estimate)',
+      cost_turnCost: 'Last turn cost', cost_turnSaved: 'Cache saved',
       card_backup: 'Session backups', card_storage: 'Storage', card_privacy: 'Privacy & security',
       card_updateChannel: 'Channel & source', card_updateOps: 'Version actions', card_aboutVersions: 'Versions',
       card_appearance: 'Appearance',
+      // ---- models (C2)
+      nav_models: 'Models', page_models_d: 'Third-party providers, API keys and the default model',
+      models_ollamaTitle: 'Ollama local models',
+      models_ollamaChecking: 'Probing local Ollama…',
+      models_ollamaNotInstalled: 'Ollama not detected (no response on port 11434)',
+      models_ollamaGuide: 'Not installed or not running? Install it first:',
+      models_ollamaSite: 'ollama.com',
+      models_ollamaVersion: 'Ollama {v} · {n} local model(s) installed',
+      models_ollamaVersionRegistered: 'Ollama {v} · registered as a provider ({n} models)',
+      models_ollamaSelectHint: 'Pick the local models to register with dsh:',
+      models_ollamaNoModels: 'No local models yet — pull one with ollama pull first.',
+      models_ollamaRegister: 'Register as provider',
+      models_ollamaPickFirst: 'Select at least one model',
+      models_ollamaDone: '✅ Ollama registered; model list updated',
+      models_providersTitle: 'Model providers',
+      models_add: 'Add provider',
+      models_empty: 'No providers configured yet. Start from a preset via "Add provider", or connect Ollama above.',
+      models_ollamaTag: 'Ollama', models_builtinTag: 'preset', models_customTag: 'custom',
+      models_defaultBadge: 'default',
+      models_keyConfigured: '✓ key configured', models_keyMissing: '⚠ no key',
+      models_modelsCount: '{n} model(s)',
+      models_edit: 'Edit',
+      models_f_preset: 'Preset', models_f_name: 'Name', models_f_baseurl: 'API base URL',
+      models_f_key: 'API Key', models_f_keyPh: 'Paste API key (not echoed)', models_f_keyStored: 'Stored (leave blank to keep)',
+      models_f_getKey: 'Get key', models_f_docs: 'Docs',
+      models_f_models: 'Models', models_f_modelsHint: 'Fetch and tick models after a successful test, or add model IDs manually.',
+      models_f_modelsEmpty: '(no models selected yet)',
+      models_f_manualPh: 'Add a model ID manually', models_f_addManual: 'Add',
+      models_f_test: 'Test connection', models_f_testing: 'Testing…',
+      models_f_save: 'Save', models_f_cancel: 'Cancel', models_f_delete: 'Delete',
+      models_f_needModels: 'Select or enter at least one model ID',
+      models_f_deleteConfirm: 'Delete this provider? Its stored API key and runtime config will be removed too.',
+      models_test_ok: '✅ Connected — {n} models available (added to the list below)',
+      models_test_noKey: 'API key missing — fill it in first',
+      models_test_invalidKey: 'API key invalid or unauthorized (401/403)',
+      models_test_quota: 'Out of balance or rate-limited (HTTP {status})',
+      models_test_network: 'Network error: cannot reach that address',
+      models_test_endpoint: 'Invalid address, or the response is not an OpenAI-compatible /models payload',
+      models_test_server: 'Server error (HTTP {status})',
+      models_test_other: 'Failed: {reason}',
+      models_defaultTitle: 'Default model', models_defaultProvider: 'Provider', models_defaultModel: 'Model',
+      models_defaultHint: 'Applies to new sessions; open sessions keep their model.',
+      models_setDefault: 'Save as default',
+      models_defaultEmpty: 'Add at least one provider before setting a default model.',
+      models_defaultCurrent: 'Current default: {p} · {m}',
+      models_defaultSaved: '✅ Default model saved (new sessions)',
+      models_savedOk: '✅ Provider saved',
+      models_securityTitle: 'Key storage & security',
+      models_securityNote: 'API keys are stored encrypted by the OS inside the shell (macOS Keychain / Windows DPAPI); a plaintext copy is also written to DSH_HOME/.credentials.yaml (0600, atomic, other keys preserved) for the runtime to read — this is dsh\u0027s official credential mechanism, hot-reloaded without restart. Session backups exclude that file. Connection tests and model fetching run entirely in the main process; the key never reaches the web layer.',
+      models_preset_siliconflow: 'SiliconFlow', models_preset_moonshot: 'Moonshot',
+      models_preset_zhipu: 'Zhipu GLM', models_preset_dashscope: 'Alibaba Bailian',
+      models_preset_volcark: 'Volcengine Ark', models_preset_openrouter: 'OpenRouter',
+      models_preset_custom: 'Custom', models_preset_ollama: 'Ollama (local)',
+      models_note_dashscope: 'Uses the OpenAI compatible-mode endpoint',
+      models_note_volcark: 'Either an endpoint ID (ep-…) or an Ark model ID works',
+      // long-session center (C3): compaction + AGENTS.md memory files
+      nav_longsession: 'Long Session', page_longsession_d: 'Context compression & memory files (AGENTS.md)',
+      compact_cardTitle: 'Context Compression', compact_now: 'Compact Current Session',
+      compact_hint: 'Compaction replaces earlier conversation with a structured summary; the current task keeps running. The runtime auto-compacts at ~80% context pressure; you can also trigger it anytime, or type /compact in the composer (idle only).',
+      compact_historyTitle: 'Recent Compactions',
+      compact_running: 'Compacting…', compact_statusRunning: '⟳ Compacting context…',
+      compact_agentBusy: '⚠ Agent is busy; compaction waits for the current task to finish',
+      compact_empty: 'No compaction records yet', compact_row: '{time} · {before} → {after} tokens · saves ¥{saved}/turn',
+      compact_submitting: 'Submitting /compact…', compact_submitted: '✅ /compact submitted, waiting for the runtime',
+      compact_failed: 'Compaction failed',
+      memory_cardTitle: 'Memory Files (AGENTS.md)',
+      memory_scope: 'File', memory_scopeProject: 'Project (workspace root)', memory_scopeGlobal: 'Global (DSH_HOME)',
+      memory_editor: 'Content (Markdown)', memory_editorPh: '# Long-term memory for the agent… (Markdown)',
+      memory_save: 'Save',
+      memory_hint: 'Memory files are read when a NEW session starts (running sessions are unaffected). Writes are limited to the two whitelisted paths: workspace root and DSH_HOME AGENTS.md.',
+      memory_notExists: 'File does not exist yet; saving will create it', memory_saving: 'Saving…',
+      memory_savedOk: '✅ Saved', memory_denied: '⚠ Writing outside the whitelist is forbidden', memory_saveFailed: '❌ Save failed: ',
+      memory_delete: 'Delete', memory_deleteConfirm: 'Delete this memory file (AGENTS.md)? This cannot be undone.',
+      memory_deletedOk: '✅ Deleted', memory_deleteFailed: '❌ Delete failed: ',
+      // skills center (C4): SKILL.md packs — market / installed / preview
+      nav_skills: 'Skills', page_skills_d: 'Discover and manage dsh skills (SKILL.md instruction packs)',
+      skills_marketTitle: 'Skill Market',
+      skills_searchPh: 'Search skills (name / description)…', skills_refresh: 'Refresh',
+      skills_note: 'Skills come from the Skills section of the awesome-dsh-plugin curated list; skill bodies enter the model context — always preview the full text before installing, and only install skills you trust.',
+      skills_installedTitle: 'Installed', skills_installedCount: '{n} skills',
+      skills_emptyInstalled: 'No skills installed yet; click "Install" in the list below, or import a local skill folder.',
+      skills_import: 'Import local skill…',
+      skills_sessionHint: 'Skill installs/removals apply instantly: available in NEW sessions (type / to open the skill menu) — no runtime restart needed.',
+      skills_discoverTitle: 'Discover',
+      skills_loading: 'Loading the skill list from GitHub…', skills_loadFail: '❌ Load failed: ', skills_retry: 'Retry',
+      skills_empty: 'No matching skills found.', skills_shownCount: 'Showing {n} of {t}',
+      skills_install: 'Install', skills_reinstall: 'Reinstall', skills_remove: 'Remove', skills_upgrade: 'Upgrade',
+      skills_removeConfirm: 'Remove skill {name}? New sessions will no longer load it.',
+      skills_installing: 'Installing {name}…', skills_removing: 'Removing {name}…', skills_upgrading: 'Upgrading {name}…',
+      skills_stageResolve: 'resolving repo', skills_stageDownload: 'downloading', skills_stageVerify: 'verifying', skills_stageWrite: 'writing',
+      skills_doneInstall: '✅ {name} installed (new sessions)',
+      skills_doneRemove: '✅ {name} removed',
+      skills_doneUpgrade: '✅ {name} upgraded to {c}',
+      skills_actionFailed: '❌ Action failed: ',
+      skills_previewHint: 'Read the full text before installing: skill bodies enter the model context (prompt-injection surface).',
+      skills_confirmInstall: 'Install',
+      skills_multiTitle: 'Pick the skills to install', skills_installAll: 'Install all',
+      skills_pickHint: 'This repo contains multiple skills; click an entry to read its full text, then install one or all.',
+      skills_invalidCand: 'Invalid: {reason}',
+      skills_sourceLocal: 'Local import', skills_dlgRepo: 'Source: ',
+      skills_e1: 'No SKILL.md found: this is not a skill package (maybe a plain docs repo or a dsh plugin)',
+      skills_e2: 'SKILL.md is missing its YAML frontmatter (the file must start with a --- block containing name/description)',
+      skills_e3: 'frontmatter is missing required field(s): {field}. A skill needs both name and description for dsh to discover it',
+      skills_e4: 'Skill name "{name}" is invalid: only lowercase letters, digits and hyphens are allowed, up to 64 chars',
+      skills_e5: 'Failed to parse the SKILL.md YAML: {msg}. Check indentation and quotes',
+      skills_e6: 'Failed to download the skill: {msg} (network issue — retry later)',
+      skills_e7: 'frontmatter uses the unsupported key "{key}": rewrite it as {canonical}, otherwise dsh drops the whole skill',
+      skills_w1: 'Directory name differs from the skill name; aligned automatically to {name} (cross-platform compatibility)',
+      skills_w2: 'This skill bundles executable scripts or command-style instructions; the agent may ask to run them after install (each run goes through dsh approval)',
+      skills_pluginForm: 'This repo is a bundle-plugin skill pack (package.json + dsh bundle); install it from the plugin market',
     },
   };
 
@@ -1200,10 +1832,11 @@
     document.title = tr('title');
     filterNav(); // nav labels changed with the language — re-apply the filter
     renderAutoTpl(); // template cards are built from I18N at runtime
+    if (channelsCache.length) renderChannels(channelsCache); // channel cards are tr-built too
   }
 
   // ------------------------------------------------------------- routing
-  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'tasks', 'remote', 'data', 'update', 'about'];
+  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'skills', 'tasks', 'remote', 'channels', 'models', 'longsession', 'data', 'update', 'about'];
   function pageFromHash() {
     const p = (location.hash || '').replace(/^#\/?/, '');
     return PAGES.includes(p) ? p : 'general';
@@ -1217,8 +1850,21 @@
     // plugins is a low-traffic page with a network-backed list — load lazily
     // on first visit so opening the settings window stays offline-fast
     if (p === 'plugins' && !plug.loaded) { plug.loaded = true; loadPlugins(); }
+    // skills center: network-backed market — load lazily on first visit
+    if (p === 'skills' && !sk.loaded) { sk.loaded = true; loadSkills(); }
     // automation center: refresh the task list on every visit (cheap, local)
     if (p === 'tasks') renderAuto();
+    // phone remote: refresh the public-access card on every visit (detectors
+    // are cached 60s on the main-process side, so this stays cheap)
+    if (p === 'remote') refreshPublicRemote();
+    // channel center (C5): state lamps are live-pushed, reload on every visit
+    if (p === 'channels') refreshChannels();
+    // cost center: refresh the official balance card + per-turn cost on visit
+    if (p === 'cost') { refreshCost(); refreshBalance(); }
+    // model panel: local profile list is cheap; the Ollama probe is async
+    if (p === 'models') refreshModels();
+    // long-session center: refresh the compaction state/history + memory file
+    if (p === 'longsession') { refreshCompact(); loadMemory(); }
   }
   window.addEventListener('hashchange', () => showPage(pageFromHash(), false));
   document.querySelectorAll('.nav-item').forEach((a) => {
@@ -1273,6 +1919,7 @@
     ['remoteControl', 'remoteControl', (el) => el.checked],
     ['remotePort', 'remotePort', (el) => Math.min(65535, Math.max(1024, Number(el.value) || 31780))],
     ['remoteCompat', 'remoteCompat', (el) => el.checked],
+    ['remotePublicMode', 'remotePublicMode', (el) => el.value],
   ];
   for (const [id, key, pick] of AUTO_FIELDS) {
     $(id).addEventListener('change', async () => {
@@ -1356,6 +2003,7 @@
     $('remoteControl').checked = !!s.remoteControl;
     $('remotePort').value = s.remotePort || 31780;
     $('remoteCompat').checked = !!s.remoteCompat;
+    $('remotePublicMode').value = s.remotePublicMode || 'lan';
     $('costPeakEnabled').checked = !!s.costPeakEnabled;
     $('costPeakWindows').value = s.costPeakWindows || '9-12,14-18';
     $('costPeakInputPerM').value = s.costPeakInputPerM;
@@ -1821,6 +2469,385 @@
     try { renderRemote(await window.dshShell.remoteRevoke()); } catch (e) { /* ignore */ }
   });
 
+  // ------------------------------------------ public remote (C7)
+  // Tailscale direct tailnet access (main route) + cloudflared quick tunnel
+  // (aux route). The switch defaults to OFF and enabling requires an explicit
+  // second confirmation with the public-network warning.
+  function publicModeLabel(mode) {
+    if (mode === 'tailscale') return tr('remote_publicTs');
+    if (mode === 'cloudflare') return tr('remote_publicCf');
+    return tr('remote_publicLan');
+  }
+
+  function renderPublicLink(rowId, linkId, url) {
+    const row = $(rowId);
+    if (!row) return;
+    if (url) {
+      $(linkId).textContent = url;
+      row.style.display = 'flex';
+    } else {
+      row.style.display = 'none';
+    }
+  }
+
+  function renderPublicRemote(st) {
+    const el = $('public-remote-status');
+    if (!st) { el.textContent = '-'; return; }
+    const lines = [];
+    lines.push(st.publicMode ? tr('remote_publicOn', { mode: publicModeLabel(st.mode) }) : tr('remote_publicOff'));
+    const ts = st.tailscale;
+    if (ts) {
+      if (ts.state === 'loggedIn') {
+        lines.push(tr('remote_tsOnline', { ip: ts.ipv4 || '?', dns: ts.dnsName ? ` (${ts.dnsName})` : '' }));
+      } else if (ts.state === 'notLoggedIn') {
+        lines.push(tr('remote_tsState_notLoggedIn'));
+        lines.push(tr('remote_tsLoginHint'));
+      } else {
+        lines.push(tr('remote_tsState_notInstalled'));
+        lines.push(tr('remote_tsInstall'));
+      }
+    }
+    const cf = st.cloudflared;
+    if (cf) {
+      if (st.tunnel && st.tunnel.running && st.tunnel.url) {
+        lines.push(tr('remote_tunnelRunning', { url: st.tunnel.url }));
+      } else if (cf.installed) {
+        lines.push(tr('remote_tunnelIdle'));
+      } else {
+        lines.push(tr('remote_tunnelNotInstalled'));
+      }
+    }
+    if (st.publicMode && st.mode === 'tailscale') {
+      if (!st.gateway || !st.gateway.running) lines.push(tr('remote_publicGatewayDown'));
+      if (ts && ts.state === 'loggedIn') lines.push(tr('remote_tsPhoneHint'));
+    }
+    setStatus(el, lines.join('\n'), st.publicMode ? 'warn' : undefined);
+    // switch + tunnel buttons
+    $('btn-public-enable').style.display = st.publicMode ? 'none' : '';
+    $('btn-public-disable').style.display = st.publicMode ? '' : 'none';
+    $('btn-tunnel-stop').style.display = (st.tunnel && st.tunnel.running) ? '' : 'none';
+    // pairing links: LAN link lives in renderRemote; the public forms here
+    renderPublicLink('remote-ts-link-row', 'remote-ts-link', st.links && st.links.tailscale);
+    renderPublicLink('remote-tsdns-link-row', 'remote-tsdns-link', st.links && st.links.tailscaleDns);
+    renderPublicLink('remote-tunnel-link-row', 'remote-tunnel-link', st.links && st.links.tunnel);
+  }
+
+  async function refreshPublicRemote(force) {
+    try { renderPublicRemote(await window.dshShell.publicRemoteStatus(force)); } catch (e) { /* ignore */ }
+  }
+
+  $('btn-public-enable').addEventListener('click', async () => {
+    const mode = $('remotePublicMode').value;
+    if (mode === 'lan') { flash(tr('remote_publicPickMode')); return; }
+    // explicit second confirm: public-network warning (zh/en via I18N)
+    if (!confirm(tr('remote_warnPublic'))) return;
+    try {
+      const r = await window.dshShell.publicRemoteEnable(mode, true);
+      if (!r || !r.ok) { flash(tr('remote_publicEnableFail')); return; }
+      await refreshRemote();
+      await refreshPublicRemote();
+    } catch (e) { /* ignore */ }
+  });
+
+  $('btn-public-disable').addEventListener('click', async () => {
+    try { await window.dshShell.publicRemoteDisable(); } catch (e) { /* ignore */ }
+    await refreshRemote();
+    await refreshPublicRemote();
+  });
+
+  $('btn-ts-refresh').addEventListener('click', () => refreshPublicRemote(true));
+  // mode select auto-saves via AUTO_FIELDS; refresh the derived links too
+  $('remotePublicMode').addEventListener('change', () => refreshPublicRemote());
+
+  async function copyPublicLink(btnId, spanId) {
+    const url = $(spanId).textContent;
+    if (!url) return;
+    try {
+      await window.dshShell.copyText(url);
+      const btn = $(btnId);
+      const label = btn.textContent;
+      btn.textContent = tr('remote_copied');
+      setTimeout(() => { btn.textContent = label; }, 1500);
+    } catch (e) { /* ignore */ }
+  }
+  $('btn-remote-ts-copy').addEventListener('click', () => copyPublicLink('btn-remote-ts-copy', 'remote-ts-link'));
+  $('btn-remote-tsdns-copy').addEventListener('click', () => copyPublicLink('btn-remote-tsdns-copy', 'remote-tsdns-link'));
+  $('btn-remote-tunnel-copy').addEventListener('click', () => copyPublicLink('btn-remote-tunnel-copy', 'remote-tunnel-link'));
+
+  $('btn-tunnel-start').addEventListener('click', async () => {
+    try {
+      const r = await window.dshShell.tunnelStart();
+      if (!r || !r.ok) flash(tr('remote_tunnelStartFail', { reason: (r && r.reason) || '?' }));
+    } catch (e) { /* ignore */ }
+    await refreshPublicRemote(true);
+  });
+
+  $('btn-tunnel-stop').addEventListener('click', async () => {
+    try { await window.dshShell.tunnelStop(); } catch (e) { /* ignore */ }
+    await refreshPublicRemote();
+  });
+
+  // ------------------------------------------------------ IM channels (C5+C6)
+  // Card list is fully data-driven from the main process (statusAll()).
+  // C6: feishu/wecom/dingtalk render real credential forms (values only ever
+  // travel renderer→main; stored secrets never come back); whatsapp keeps
+  // the "coming soon" placeholder. State lamps re-render on every
+  // channels:changed push from the lifecycle manager.
+  const CHANNEL_TYPE_KEYS = {
+    feishu: 'channels_type_feishu', wecom: 'channels_type_wecom',
+    dingtalk: 'channels_type_dingtalk', whatsapp: 'channels_type_whatsapp',
+  };
+  const CHANNEL_FIELDS = {
+    feishu: [
+      { key: 'appId', trKey: 'channels_feishu_appId', secret: false },
+      { key: 'appSecret', trKey: 'channels_feishu_appSecret', secret: true },
+    ],
+    wecom: [
+      { key: 'botId', trKey: 'channels_wecom_botId', secret: false },
+      { key: 'secret', trKey: 'channels_wecom_secret', secret: true },
+    ],
+    dingtalk: [
+      { key: 'clientId', trKey: 'channels_dingtalk_clientId', secret: false },
+      { key: 'clientSecret', trKey: 'channels_dingtalk_clientSecret', secret: true },
+    ],
+  };
+  const CHANNEL_DOT_CLASS = { offline: 'var(--text-3)', connecting: '#d29922', online: '#28a745', backoff: '#d29922' };
+  let channelsCache = [];
+
+  function channelStateText(st) {
+    if (!st) return tr('channels_state_offline');
+    if (st.state === 'online') return tr('channels_state_online');
+    if (st.state === 'connecting') return tr('channels_state_connecting');
+    if (st.state === 'backoff') return tr('channels_state_backoff', { n: st.attempts });
+    // offline: show the readable park reason (e.g. "implementation not installed")
+    return st.lastError ? `${tr('channels_state_offline')} — ${st.lastError}` : tr('channels_state_offline');
+  }
+
+  function renderChannels(list) {
+    channelsCache = list || [];
+    const wrap = $('channels-list');
+    wrap.textContent = '';
+    for (const ch of channelsCache) {
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      // header row: name + state lamp + enable toggle
+      const head = document.createElement('div');
+      head.className = 'setting';
+      const info = document.createElement('div');
+      info.className = 'setting-info';
+      const label = document.createElement('label');
+      label.textContent = CHANNEL_TYPE_KEYS[ch.type] ? tr(CHANNEL_TYPE_KEYS[ch.type]) : ch.type;
+      const stateRow = document.createElement('div');
+      stateRow.className = 'desc';
+      const dot = document.createElement('span');
+      dot.textContent = '●';
+      dot.style.color = CHANNEL_DOT_CLASS[(ch.status && ch.status.state) || 'offline'] || 'var(--text-3)';
+      dot.style.marginRight = '6px';
+      const stateText = document.createElement('span');
+      stateText.textContent = channelStateText(ch.status) + (ch.installed ? '' : ` · ${tr('channels_notInstalled')}`);
+      stateRow.appendChild(dot);
+      stateRow.appendChild(stateText);
+      info.appendChild(label);
+      info.appendChild(stateRow);
+      const ctrl = document.createElement('div');
+      ctrl.className = 'setting-ctrl';
+      const toggle = document.createElement('input');
+      toggle.type = 'checkbox';
+      toggle.className = 'toggle';
+      toggle.checked = !!ch.enabled;
+      toggle.addEventListener('change', async () => {
+        toggle.disabled = true;
+        try {
+          await window.dshShell.channelsToggle(ch.id, toggle.checked);
+          refreshChannels();
+        } catch (e) {
+          flash(tr('saved_fail') + e.message);
+          toggle.checked = !toggle.checked;
+        } finally {
+          toggle.disabled = false;
+        }
+      });
+      ctrl.appendChild(toggle);
+      head.appendChild(info);
+      head.appendChild(ctrl);
+      card.appendChild(head);
+
+      // allowFrom editor (pairing-mode default = empty = reject-all)
+      const af = document.createElement('div');
+      af.className = 'setting';
+      af.style.flexDirection = 'column';
+      af.style.alignItems = 'stretch';
+      af.style.gap = '6px';
+      const afLabel = document.createElement('label');
+      afLabel.textContent = tr('channels_allowFrom');
+      const afHint = document.createElement('span');
+      afHint.className = 'desc';
+      afHint.textContent = tr('channels_allowFromHint');
+      const afInput = document.createElement('input');
+      afInput.type = 'text';
+      afInput.placeholder = 'user_123, chat_456';
+      afInput.value = (ch.allowFrom || []).join(', ');
+      afInput.style.width = '100%';
+      afInput.addEventListener('change', async () => {
+        try {
+          const r = await window.dshShell.channelsAllowFrom(ch.id, afInput.value);
+          if (r && r.ok) flash(tr('channels_savedOk'));
+          else flash(tr('channels_saveFailed', { reason: (r && r.reason) || '' }));
+        } catch (e) {
+          flash(tr('channels_saveFailed', { reason: e.message }));
+        }
+      });
+      af.appendChild(afLabel);
+      af.appendChild(afHint);
+      af.appendChild(afInput);
+      card.appendChild(af);
+
+      // credential entry: per-channel fields + save/test + setup guide (C6)
+      const cred = document.createElement('div');
+      cred.className = 'setting';
+      cred.style.flexDirection = 'column';
+      cred.style.alignItems = 'stretch';
+      cred.style.gap = '6px';
+      const credHead = document.createElement('div');
+      credHead.className = 'setting-info';
+      const credLabel = document.createElement('label');
+      credLabel.textContent = tr('channels_credentials');
+      const credHint = document.createElement('span');
+      credHint.className = 'desc';
+      credHint.textContent = tr('channels_credentialsHint') + ' · '
+        + (ch.credentialsConfigured ? tr('channels_credentialsConfigured') : tr('channels_credentialsMissing'));
+      credHead.appendChild(credLabel);
+      credHead.appendChild(credHint);
+      cred.appendChild(credHead);
+
+      const fields = CHANNEL_FIELDS[ch.type];
+      if (!fields) {
+        // whatsapp (and future slots): keep the placeholder, no form yet
+        const soon = document.createElement('span');
+        soon.className = 'desc';
+        soon.textContent = tr('channels_whatsapp_guide');
+        cred.appendChild(soon);
+      } else {
+        const inputs = {};
+        for (const f of fields) {
+          const row = document.createElement('div');
+          row.className = 'setting';
+          const fInfo = document.createElement('div');
+          fInfo.className = 'setting-info';
+          const fLabel = document.createElement('label');
+          fLabel.textContent = tr(f.trKey);
+          fInfo.appendChild(fLabel);
+          const fCtrl = document.createElement('div');
+          fCtrl.className = 'setting-ctrl';
+          const input = document.createElement('input');
+          input.type = f.secret ? 'password' : 'text';
+          input.autocomplete = 'off';
+          input.placeholder = ch.credentialsConfigured ? '••••••••' : '';
+          input.style.width = '240px';
+          inputs[f.key] = input;
+          fCtrl.appendChild(input);
+          row.appendChild(fInfo);
+          row.appendChild(fCtrl);
+          cred.appendChild(row);
+        }
+        const btnRow = document.createElement('div');
+        btnRow.className = 'setting';
+        btnRow.style.justifyContent = 'flex-end';
+        btnRow.style.gap = '8px';
+        const saveBtn = document.createElement('button');
+        saveBtn.textContent = tr('channels_cfg_save');
+        saveBtn.addEventListener('click', async () => {
+          const values = {};
+          for (const f of fields) {
+            const v = inputs[f.key].value.trim();
+            if (!v) { flash(tr('channels_cfg_missing')); return; }
+            values[f.key] = v;
+          }
+          saveBtn.disabled = true;
+          try {
+            const r = await window.dshShell.channelsConfigure(ch.id, values);
+            if (r && r.ok) { flash(tr('channels_cfg_saved')); refreshChannels(); }
+            else flash(tr('channels_saveFailed', { reason: (r && r.reason) || '' }));
+          } catch (e) {
+            flash(tr('channels_saveFailed', { reason: e.message }));
+          } finally { saveBtn.disabled = false; }
+        });
+        const clearBtn = document.createElement('button');
+        clearBtn.className = 'secondary';
+        clearBtn.textContent = tr('channels_cfg_clear');
+        clearBtn.addEventListener('click', async () => {
+          try {
+            await window.dshShell.channelsConfigure(ch.id, null);
+            for (const f of fields) inputs[f.key].value = '';
+            flash(tr('channels_cfg_saved'));
+            refreshChannels();
+          } catch (e) { flash(tr('channels_saveFailed', { reason: e.message })); }
+        });
+        const testBtn = document.createElement('button');
+        testBtn.className = 'secondary';
+        testBtn.textContent = tr('channels_cfg_test');
+        testBtn.addEventListener('click', async () => {
+          const values = {};
+          let filled = true;
+          for (const f of fields) {
+            const v = inputs[f.key].value.trim();
+            if (v) values[f.key] = v;
+            else filled = false;
+          }
+          if (!filled && !ch.credentialsConfigured) { flash(tr('channels_cfg_missing')); return; }
+          testBtn.disabled = true;
+          testBtn.textContent = tr('channels_cfg_testing');
+          try {
+            // partial input = test the form values; empty = test stored creds
+            const r = await window.dshShell.channelsTest(ch.id, filled ? values : undefined);
+            if (r && r.ok) flash(tr('channels_cfg_testOk'));
+            else {
+              const kind = r && r.kind === 'credentials' ? tr('channels_cfg_errCredentials')
+                : r && r.kind === 'network' ? tr('channels_cfg_errNetwork')
+                  : r && r.kind === 'protocol' ? tr('channels_cfg_errProtocol') : '';
+              flash(tr('channels_cfg_testFail', { reason: (kind ? `${kind} — ` : '') + ((r && r.reason) || '') }));
+            }
+          } catch (e) {
+            flash(tr('channels_cfg_testFail', { reason: e.message }));
+          } finally {
+            testBtn.disabled = false;
+            testBtn.textContent = tr('channels_cfg_test');
+          }
+        });
+        btnRow.appendChild(testBtn);
+        btnRow.appendChild(clearBtn);
+        btnRow.appendChild(saveBtn);
+        cred.appendChild(btnRow);
+
+        // setup guide: collapsed by default (details/summary)
+        const guide = document.createElement('details');
+        const guideSummary = document.createElement('summary');
+        guideSummary.textContent = tr('channels_cfg_guide');
+        const guideBody = document.createElement('span');
+        guideBody.className = 'desc';
+        guideBody.style.display = 'block';
+        guideBody.style.marginTop = '4px';
+        guideBody.textContent = tr(`channels_${ch.type}_guide`);
+        guide.appendChild(guideSummary);
+        guide.appendChild(guideBody);
+        cred.appendChild(guide);
+      }
+      card.appendChild(cred);
+
+      wrap.appendChild(card);
+    }
+  }
+
+  async function refreshChannels() {
+    try {
+      const r = await window.dshShell.channelsList();
+      renderChannels((r && r.channels) || []);
+    } catch (e) { /* main not ready */ }
+  }
+
+  window.dshShell.onChannelsChanged(() => refreshChannels());
+
   // ------------------------------------------------------- cost & diagnostics
   function renderCost(info) {
     if (!info) return;
@@ -1832,6 +2859,13 @@
       row(tr('cost.week'), info.week),
       row(tr('cost.month'), info.month),
     ];
+    // official-price cost of the most recent turn + cache savings (C1)
+    if (info.lastTurn && info.lastTurn.cost > 0) {
+      const lt = info.lastTurn;
+      lines.push('— ' + tr('cost_turnTitle'));
+      lines.push(`  ${tr('cost_turnCost')}: ${info.currency}${lt.cost.toFixed(4)} · ${tr('cost_turnSaved')}: ${info.currency}${lt.saved.toFixed(4)}`);
+      lines.push(`  in ${fmtTok(lt.inputTokens)} (hit ${fmtTok(lt.cacheReadTokens)}) / out ${fmtTok(lt.outputTokens)}`);
+    }
     if (info.perWorkspace && info.perWorkspace.length) {
       lines.push('— ' + tr('cost.perWorkspace'));
       for (const w of info.perWorkspace.slice(0, 8)) {
@@ -1844,6 +2878,132 @@
   async function refreshCost() {
     try { renderCost(await window.dshShell.costInfo()); } catch (e) { /* ignore */ }
   }
+
+  // ------------------------------------------------------- official balance
+  function renderBalance(res) {
+    if (!res) return;
+    const el = $('balance-status');
+    const snap = res.snapshot;
+    if (!snap) { setStatus(el, tr('balance_none')); return; }
+    const sym = snap.currency === 'USD' ? '$' : '¥';
+    const num = (v) => sym + Number(v || 0).toFixed(2);
+    const min = Math.max(0, Math.round((Date.now() - snap.fetchedAt) / 60000));
+    const lines = [
+      `${tr('balance_total')}: ${num(snap.total)}`,
+      `${tr('balance_granted')}: ${num(snap.granted)} · ${tr('balance_toppedUp')}: ${num(snap.toppedUp)}`,
+      min <= 0 ? tr('balance_updatedJust') : tr('balance_updatedAgo', { n: min }),
+    ];
+    // is_available=false -> red banner line + red tint
+    if (!snap.isAvailable) lines.splice(1, 0, tr('balance_unavailable'));
+    setStatus(el, lines.join('\n'), snap.isAvailable ? undefined : 'bad');
+  }
+
+  async function refreshBalance() {
+    try { renderBalance(await window.dshShell.balanceInfo()); } catch (e) { /* ignore */ }
+  }
+
+  $('btn-balance-refresh').addEventListener('click', async () => {
+    setStatus($('balance-status'), tr('balance_refreshing'));
+    try {
+      const r = await window.dshShell.balanceRefresh();
+      if (r && r.ok) renderBalance({ snapshot: r.snapshot });
+      else setStatus($('balance-status'), tr(r && r.reason && r.reason.indexOf('DEEPSEEK_API_KEY') !== -1 ? 'balance_none' : 'balance_fetchFailed', { reason: (r && r.reason) || '' }), 'warn');
+    } catch (e) {
+      setStatus($('balance-status'), tr('balance_fetchFailed', { reason: e.message }), 'warn');
+    }
+  });
+
+  // ------------------------------------------------- long-session center (C3)
+  const fmtTokC = (n) => (n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n == null ? 0 : n));
+
+  function renderCompact(st, hist) {
+    const btn = $('btn-compact-now');
+    const running = !!(st && st.compacting);
+    btn.disabled = running;
+    btn.textContent = running ? tr('compact_running') : tr('compact_now');
+    const busyNote = st && st.sessionRunning ? tr('compact_agentBusy') : '';
+    setStatus($('compact-status'), running ? tr('compact_statusRunning') : busyNote, running || busyNote ? 'warn' : undefined);
+    const el = $('compact-history');
+    el.innerHTML = '';
+    if (!hist || !hist.length) {
+      const d = document.createElement('div');
+      d.className = 'note';
+      d.textContent = tr('compact_empty');
+      el.appendChild(d);
+      return;
+    }
+    for (const r of hist) {
+      const row = document.createElement('div');
+      row.className = 'note';
+      row.textContent = tr('compact_row', {
+        time: r.at ? new Date(r.at).toLocaleString() : '—',
+        before: fmtTokC(r.beforeTokens),
+        after: fmtTokC(r.afterTokens),
+        saved: Number(r.savedYuan || 0).toFixed(2),
+      });
+      el.appendChild(row);
+    }
+  }
+
+  async function refreshCompact() {
+    try {
+      const [st, hist] = await Promise.all([window.dshShell.compactStatus(), window.dshShell.compactHistory()]);
+      renderCompact(st, hist || []);
+    } catch (e) { /* ignore */ }
+  }
+
+  $('btn-compact-now').addEventListener('click', async () => {
+    const btn = $('btn-compact-now');
+    btn.disabled = true;
+    setStatus($('compact-status'), tr('compact_submitting'));
+    try {
+      const r = await window.dshShell.compactNow();
+      if (r && r.ok) setStatus($('compact-status'), tr('compact_submitted'));
+      else setStatus($('compact-status'), '❌ ' + ((r && r.reason) || tr('compact_failed')), 'warn');
+    } catch (e) {
+      setStatus($('compact-status'), '❌ ' + e.message, 'warn');
+    } finally {
+      refreshCompact();
+    }
+  });
+
+  async function loadMemory() {
+    try {
+      const r = await window.dshShell.memoryGet($('memory-scope').value);
+      if (!r || !r.ok) return;
+      $('memory-path').textContent = r.path || '';
+      $('memory-editor').value = r.exists ? r.content : '';
+      setStatus($('memory-status'), r.exists ? '' : tr('memory_notExists'));
+    } catch (e) { /* ignore */ }
+  }
+
+  $('memory-scope').addEventListener('change', loadMemory);
+
+  $('btn-memory-save').addEventListener('click', async () => {
+    setStatus($('memory-status'), tr('memory_saving'));
+    try {
+      const r = await window.dshShell.memorySave($('memory-scope').value, $('memory-editor').value);
+      if (r && r.ok) setStatus($('memory-status'), tr('memory_savedOk'));
+      else if (r && r.code === 'denied') setStatus($('memory-status'), tr('memory_denied'), 'warn');
+      else setStatus($('memory-status'), tr('memory_saveFailed') + ' ' + ((r && (r.reason || r.code)) || ''), 'warn');
+    } catch (e) {
+      setStatus($('memory-status'), tr('memory_saveFailed') + ' ' + e.message, 'warn');
+    }
+  });
+
+  $('btn-memory-delete').addEventListener('click', async () => {
+    if (!confirm(tr('memory_deleteConfirm'))) return;
+    try {
+      const r = await window.dshShell.memoryDelete($('memory-scope').value);
+      if (r && r.ok) { await loadMemory(); setStatus($('memory-status'), tr('memory_deletedOk')); }
+      else if (r && r.code === 'denied') setStatus($('memory-status'), tr('memory_denied'), 'warn');
+      else setStatus($('memory-status'), tr('memory_deleteFailed') + ' ' + ((r && (r.reason || r.code)) || ''), 'warn');
+    } catch (e) {
+      setStatus($('memory-status'), tr('memory_deleteFailed') + ' ' + e.message, 'warn');
+    }
+  });
+
+  window.dshShell.onCompactStatus(() => refreshCompact());
 
   async function refreshDiagnostics() {
     try {
@@ -2197,6 +3357,737 @@
   $('plugin-go').addEventListener('click', runPluginSearch);
   $('plugin-refresh').addEventListener('click', () => { plug.limit = PLUGIN_PAGE; loadPlugins(plug.mode === 'market'); });
 
+  // ---------------------------------------------------- skills center (C4)
+  // SKILL.md packs are pure files under <DSH_HOME>/skills — installs and
+  // removals hot-reload (new sessions pick them up), so there is no restart
+  // hint here. Every install passes the mandatory full-content preview
+  // dialog first: skill bodies enter the model context (prompt injection).
+  const SKILL_STAGE_KEYS = {
+    resolve: 'skills.stageResolve', download: 'skills.stageDownload',
+    verify: 'skills.stageVerify', write: 'skills.stageWrite',
+  };
+  const sk = {
+    loaded: false,    // lazy-load latch: first showPage('skills') fetches
+    acting: false,    // one skill op at a time (mirrors main's guard)
+    stage: '', tail: '',
+    items: [],        // market skills (category 'skills' of the curated list)
+    installed: [],    // live scan of <DSH_HOME>/skills
+    source: '', fetchedAt: 0,
+    seq: 0,           // drops stale list responses
+    dlg: null,        // open dialog ctx: {mode:'market'|'local', fullName?, dir?, commit, candidates}
+  };
+
+  function skillStatus(text, cls) {
+    const el = $('skills-status');
+    el.style.display = text ? '' : 'none';
+    el.textContent = text;
+    el.className = 'status' + (cls ? ' ' + cls : '');
+  }
+
+  /** [{code, params}] → readable localized lines (E1–E7 / W1–W2). */
+  function skillIssueText(list) {
+    return (Array.isArray(list) ? list : [])
+      .map((e) => tr(`skills.${e.code}`, e.params || {})).join('；');
+  }
+
+  function renderSkillSource() {
+    const el = $('skills-market-source');
+    const time = sk.fetchedAt ? new Date(sk.fetchedAt) : null;
+    const stamp = time ? `${time.getFullYear()}-${String(time.getMonth() + 1).padStart(2, '0')}-${String(time.getDate()).padStart(2, '0')}` : '';
+    el.textContent = tr('market.source') + ' ';
+    const a = document.createElement('a');
+    a.href = 'https://github.com/awesome-dsh-plugin/awesome-dsh-plugin';
+    a.target = '_blank';
+    a.rel = 'noreferrer';
+    a.textContent = 'awesome-dsh-plugin';
+    el.append(a, ' (CC0)');
+    if (sk.source === 'stale') el.append(' · ' + tr('market.stale'));
+    else if (sk.source === 'fallback') el.append(' · ' + tr('market.fallback'));
+    else if (stamp) el.append(' · ' + tr('market.updated', { time: stamp }));
+  }
+
+  /** Installed rows: name/description + source repo/commit + upgrade/remove. */
+  function renderSkillInstalled() {
+    const el = $('skill-installed');
+    el.innerHTML = '';
+    $('skill-installed-count').textContent = tr('skills.installedCount', { n: sk.installed.length });
+    if (!sk.installed.length) {
+      const d = document.createElement('div');
+      d.className = 'note';
+      d.textContent = tr('skills.emptyInstalled');
+      el.appendChild(d);
+      return;
+    }
+    for (const s of sk.installed) {
+      const row = document.createElement('div');
+      row.className = 'skill-inst-row';
+      const info = document.createElement('div');
+      info.className = 'info';
+      const nm = document.createElement('div');
+      nm.className = 'name';
+      nm.textContent = s.name;
+      const ds = document.createElement('div');
+      ds.className = 'desc';
+      ds.textContent = s.description || '—';
+      ds.title = s.description || '';
+      const mt = document.createElement('div');
+      mt.className = 'meta';
+      if (s.repo) {
+        const a = document.createElement('a');
+        a.href = `https://github.com/${s.repo}`;
+        a.target = '_blank';
+        a.rel = 'noreferrer';
+        a.textContent = s.repo;
+        mt.append(a);
+        if (s.commit) mt.append(` @ ${String(s.commit).slice(0, 7)}`);
+      } else {
+        mt.textContent = tr('skills.sourceLocal');
+      }
+      if (s.installedAt) mt.append(` · ${String(s.installedAt).slice(0, 10)}`);
+      info.appendChild(nm); info.appendChild(ds); info.appendChild(mt);
+      const ops = document.createElement('div');
+      ops.className = 'ops';
+      if (s.repo) {
+        const up = document.createElement('button');
+        up.className = 'secondary';
+        up.textContent = tr('skills.upgrade');
+        up.addEventListener('click', () => skillAct('upgrade', s.name, up));
+        ops.appendChild(up);
+      }
+      const rm = document.createElement('button');
+      rm.className = 'secondary';
+      rm.textContent = tr('skills.remove');
+      rm.addEventListener('click', () => {
+        if (!confirm(tr('skills.removeConfirm', { name: s.name }))) return;
+        skillAct('remove', s.name, rm);
+      });
+      ops.appendChild(rm);
+      row.appendChild(info); row.appendChild(ops);
+      el.appendChild(row);
+    }
+  }
+
+  /** Market rows: fullName / description / stars + the preview→install button. */
+  function renderSkillMarket() {
+    const el = $('skill-list');
+    el.innerHTML = '';
+    const kw = ($('skill-search').value || '').trim().toLowerCase();
+    const items = sk.items.filter((p) => !kw
+      || p.fullName.toLowerCase().includes(kw)
+      || String(p.description || '').toLowerCase().includes(kw)
+      || String(p.descriptionEn || '').toLowerCase().includes(kw));
+    $('skill-count').textContent = tr('skills.shownCount', { n: items.length, t: sk.items.length });
+    if (!items.length) {
+      const d = document.createElement('div');
+      d.className = 'plugin-empty';
+      d.textContent = '✨ ' + tr('skills.empty');
+      el.appendChild(d);
+      return;
+    }
+    const useEn = resolvedLang === 'en';
+    for (const p of items) {
+      const row = document.createElement('div');
+      row.className = 'plugin-item';
+      const info = document.createElement('div');
+      info.className = 'plugin-info';
+      const nm = document.createElement('div');
+      nm.className = 'plugin-name';
+      nm.textContent = p.fullName;
+      const ds = document.createElement('div');
+      ds.className = 'plugin-desc';
+      const desc = useEn ? (p.descriptionEn || p.description) : (p.description || p.descriptionEn);
+      ds.textContent = desc || '—';
+      ds.title = desc || '';
+      const mt = document.createElement('div');
+      mt.className = 'plugin-meta';
+      const stars = p.stars == null ? '—' : String(p.stars);
+      mt.innerHTML = `★ ${escapeHtml(stars)}${p.updated ? ' · ' + escapeHtml(p.updated) : ''}`
+        + (p.installed ? ` · <span class="cat-badge">${escapeHtml(tr('skills.installedTitle'))}</span>` : '');
+      const btn = document.createElement('button');
+      if (p.installed) { btn.className = 'secondary'; btn.textContent = tr('skills.reinstall'); }
+      else btn.textContent = tr('skills.install');
+      btn.addEventListener('click', () => openSkillPreview(p.fullName));
+      info.appendChild(nm); info.appendChild(ds); info.appendChild(mt);
+      row.appendChild(info); row.appendChild(btn);
+      el.appendChild(row);
+    }
+  }
+
+  async function loadSkills(force = false) {
+    if (sk.acting) return;
+    const seq = ++sk.seq;
+    skillStatus(tr('skills.loading'));
+    try {
+      const r = await window.dshShell.skillsList(force);
+      if (seq !== sk.seq) return; // a newer refresh superseded this response
+      if (!r.ok) throw new Error(r.reason || 'GitHub API error');
+      sk.items = r.skills || [];
+      sk.installed = r.installed || [];
+      sk.source = r.source || '';
+      sk.fetchedAt = r.fetchedAt || 0;
+      skillStatus('');
+      renderSkillSource();
+      renderSkillInstalled();
+      renderSkillMarket();
+    } catch (e) {
+      if (seq !== sk.seq) return;
+      skillStatus(tr('skills.loadFail') + e.message, 'bad');
+      const retry = document.createElement('button');
+      retry.className = 'secondary';
+      retry.style.marginTop = '8px';
+      retry.textContent = tr('skills.retry');
+      retry.addEventListener('click', () => loadSkills(true));
+      const st = $('skills-status');
+      st.appendChild(document.createElement('br'));
+      st.appendChild(retry);
+      $('skill-list').innerHTML = '';
+    }
+  }
+
+  function setSkillButtons(disabled) {
+    document.querySelectorAll('#skill-list button, #skill-installed button, #skill-import')
+      .forEach((b) => { b.disabled = disabled; });
+  }
+
+  // live stage/tail pushed by the main process while a skill op runs
+  window.dshShell.onSkillsProgress((d) => {
+    if (!sk.acting || !d) return;
+    if (d.stage && SKILL_STAGE_KEYS[d.stage]) sk.stage = d.stage;
+    if (d.tail) sk.tail = d.tail;
+    const base = tr(sk.opKey, { name: sk.opName });
+    const stage = sk.stage ? ' · ' + tr(SKILL_STAGE_KEYS[sk.stage]) : '';
+    const tail = sk.tail ? ` · ${sk.tail}` : '';
+    skillStatus(`${base}${stage}${tail}…`);
+  });
+
+  /** Serialized skill ops (install/remove/upgrade/import). `arg` is the repo
+   * fullName for install, the skill name for remove/upgrade, the local dir
+   * for import; `pick` selects one candidate dir or 'all'. */
+  async function skillAct(op, arg, btn, pick) {
+    if (sk.acting) return;
+    sk.acting = true;
+    sk.opKey = op === 'remove' ? 'skills.removing' : op === 'upgrade' ? 'skills.upgrading' : 'skills.installing';
+    sk.opName = arg;
+    sk.stage = ''; sk.tail = '';
+    setSkillButtons(true);
+    if (btn) btn.innerHTML = '<span class="spin"></span>';
+    skillStatus(tr(sk.opKey, { name: arg }));
+    let r;
+    try {
+      if (op === 'install') r = await window.dshShell.skillsInstall(arg, pick);
+      else if (op === 'remove') r = await window.dshShell.skillsRemove(arg);
+      else if (op === 'upgrade') r = await window.dshShell.skillsUpgrade(arg);
+      else r = await window.dshShell.skillsImport(arg, pick);
+    } catch (e) { r = { ok: false, reason: e.message }; }
+    sk.acting = false;
+    if (r.ok) {
+      const names = (r.installed || []).map((i) => i.name).join(', ') || arg;
+      skillStatus(tr(op === 'remove' ? 'skills.doneRemove' : op === 'upgrade' ? 'skills.doneUpgrade' : 'skills.doneInstall',
+        { name: names, c: String(r.commit || '').slice(0, 7) }), 'ok');
+      closeSkillDialog();
+      loadSkills(); // refresh market marks + the installed scan
+    } else {
+      // main already mapped errors to a readable reason; close the modal so
+      // the inline status line is visible again
+      closeSkillDialog();
+      skillStatus(tr('skills.actionFailed') + (r.reason || r.code || ''), 'bad');
+      renderSkillMarket();
+      renderSkillInstalled(); // re-render also re-enables all buttons
+    }
+  }
+
+  // ------------------------------------------------ skills preview dialog
+  function closeSkillDialog() {
+    const dlg = $('skills-dialog');
+    if (dlg.open) dlg.close();
+    sk.dlg = null;
+    $('skills-dlg-install').disabled = false;
+  }
+
+  /** Fill + open the preview dialog. Single candidate: full text + confirm;
+   * multiple: candidate list (per-row install + install-all) with the
+   * selected row's text shown below. */
+  function openSkillDialog(ctx) {
+    sk.dlg = ctx;
+    const cands = ctx.candidates || [];
+    const multi = cands.length > 1;
+    const single = cands[0] || null;
+    $('skills-dlg-title').textContent = multi
+      ? tr('skills.multiTitle')
+      : (single && single.name) || ctx.fullName || ctx.dir || '';
+    const meta = $('skills-dlg-meta');
+    meta.textContent = '';
+    if (ctx.fullName) {
+      meta.append(tr('skills.dlgRepo'));
+      const a = document.createElement('a');
+      a.href = `https://github.com/${ctx.fullName}`;
+      a.target = '_blank';
+      a.rel = 'noreferrer';
+      a.textContent = ctx.fullName;
+      meta.append(a);
+      if (ctx.commit) meta.append(` · ${String(ctx.commit).slice(0, 7)}`);
+    } else if (ctx.dir) {
+      meta.textContent = ctx.dir;
+    }
+    const warns = cands.flatMap((c) => c.warnings || []);
+    const warnEl = $('skills-dlg-warn');
+    warnEl.style.display = warns.length ? '' : 'none';
+    warnEl.textContent = warns.length ? '⚠ ' + skillIssueText(warns) : '';
+    const list = $('skills-dlg-list');
+    list.innerHTML = '';
+    const show = (c) => { $('skills-dlg-content').textContent = (c && c.content) || ''; };
+    if (multi) {
+      for (const c of cands) {
+        const row = document.createElement('div');
+        row.className = 'skill-cand';
+        row.style.cursor = 'pointer';
+        const info = document.createElement('div');
+        info.className = 'info';
+        const nm = document.createElement('div');
+        nm.className = 'name';
+        nm.textContent = c.name;
+        const ds = document.createElement('div');
+        ds.className = 'desc';
+        ds.textContent = c.valid ? (c.description || '—') : tr('skills.invalidCand', { reason: skillIssueText(c.errors) });
+        info.appendChild(nm); info.appendChild(ds);
+        row.appendChild(info);
+        if (c.valid) {
+          const btn = document.createElement('button');
+          btn.className = 'secondary';
+          btn.textContent = tr('skills.install');
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (ctx.mode === 'local') skillAct('import', ctx.dir, btn, c.dir);
+            else skillAct('install', ctx.fullName, btn, c.dir);
+          });
+          row.appendChild(btn);
+        }
+        row.addEventListener('click', () => show(c));
+        list.appendChild(row);
+      }
+      $('skills-dlg-install').textContent = tr('skills.installAll');
+      $('skills-dlg-install').disabled = !cands.some((c) => c.valid);
+      show(cands[0]);
+    } else {
+      $('skills-dlg-install').textContent = tr('skills.confirmInstall');
+      $('skills-dlg-install').disabled = !single || !single.valid;
+      if (single && !single.valid) {
+        warnEl.style.display = '';
+        warnEl.textContent = '⚠ ' + tr('skills.invalidCand', { reason: skillIssueText(single.errors) });
+      }
+      show(single);
+    }
+    $('skills-dialog').showModal();
+  }
+
+  /** Security gate: every market install opens the full-content preview first. */
+  async function openSkillPreview(fullName) {
+    if (sk.acting) return;
+    skillStatus(tr('skills.loading'));
+    let r;
+    try { r = await window.dshShell.skillsPreview(fullName); }
+    catch (e) { r = { ok: false, reason: e.message }; }
+    if (!r.ok) {
+      skillStatus(tr('skills.actionFailed') + (r.reason || r.code || ''), 'bad');
+      return;
+    }
+    skillStatus('');
+    openSkillDialog({ mode: 'market', fullName, commit: r.commit, candidates: r.candidates || [] });
+  }
+
+  $('skills-dlg-install').addEventListener('click', () => {
+    const ctx = sk.dlg;
+    if (!ctx || sk.acting) return;
+    const cands = ctx.candidates || [];
+    const pick = cands.length > 1 ? 'all' : ((cands[0] && cands[0].dir) || null);
+    if (ctx.mode === 'local') skillAct('import', ctx.dir, null, pick);
+    else skillAct('install', ctx.fullName, null, pick);
+  });
+  $('skills-dlg-cancel').addEventListener('click', closeSkillDialog);
+  $('skills-dialog').addEventListener('close', () => { sk.dlg = null; });
+
+  // local import: folder picker → same validation pipeline (multi → picker)
+  $('skill-import').addEventListener('click', async () => {
+    if (sk.acting) return;
+    let picked;
+    try { picked = await window.dshShell.pickFolder('skills'); }
+    catch { return; }
+    if (!picked || !picked.path) return;
+    let r;
+    try { r = await window.dshShell.skillsImport(picked.path); }
+    catch (e) { r = { ok: false, reason: e.message }; }
+    if (r.ok) {
+      const names = (r.installed || []).map((i) => i.name).join(', ');
+      skillStatus(tr('skills.doneInstall', { name: names }), 'ok');
+      loadSkills();
+      return;
+    }
+    if (r.code === 'multi') {
+      openSkillDialog({ mode: 'local', dir: picked.path, commit: '', candidates: r.candidates || [] });
+      return;
+    }
+    skillStatus(tr('skills.actionFailed') + (r.reason || r.code || ''), 'bad');
+  });
+
+  $('skill-refresh').addEventListener('click', () => loadSkills(true));
+  $('skill-search').addEventListener('input', renderSkillMarket);
+
+  // ---------------------------------------------------- model panel (C2)
+  // Provider profiles + presets + Ollama + default model. The API key is
+  // typed once into a password field, sent for one save/test call, and never
+  // rendered back — "configured" state comes from the main process.
+  const modelsState = { list: null, editing: null, checked: new Set() };
+
+  function modelsTestText(r) {
+    if (!r) return '';
+    if (r.ok) return tr('models.test.ok', { n: r.models ? r.models.length : 0 });
+    const map = {
+      'no-key': tr('models.test.noKey'),
+      'invalid-key': tr('models.test.invalidKey'),
+      quota: tr('models.test.quota', { status: r.status || '' }),
+      network: tr('models.test.network'),
+      endpoint: tr('models.test.endpoint'),
+      server: tr('models.test.server', { status: r.status || '' }),
+    };
+    return map[r.kind] || tr('models.test.other', { reason: r.reason || r.kind || '' });
+  }
+
+  function modelsFillPresets() {
+    const sel = $('models-f-preset');
+    const presets = (modelsState.list && modelsState.list.presets) || [];
+    sel.innerHTML = '';
+    for (const p of presets) {
+      const o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = p.id === 'custom' ? tr('models.preset.custom') : tr(p.nameKey);
+      sel.appendChild(o);
+    }
+  }
+
+  function modelsPresetById(id) {
+    return ((modelsState.list && modelsState.list.presets) || []).find((p) => p.id === id) || null;
+  }
+
+  function modelsApplyPreset(id, keepValues) {
+    const p = modelsPresetById(id);
+    if (!p) return;
+    if (p.id !== 'custom' && !keepValues) {
+      $('models-f-name').value = tr(p.nameKey);
+      $('models-f-baseurl').value = p.baseURL || '';
+    }
+    $('models-f-keyenv').textContent = p.keyEnv ? `→ ${p.keyEnv}` : '';
+    const noteEl = $('models-f-note');
+    noteEl.textContent = p.noteKey ? tr(p.noteKey) : '';
+    const links = [];
+    if (p.portalUrl) links.push(`<a href="${escapeHtml(p.portalUrl)}" target="_blank" rel="noreferrer">${escapeHtml(tr('models.f.getKey'))}</a>`);
+    if (p.docsUrl) links.push(`<a href="${escapeHtml(p.docsUrl)}" target="_blank" rel="noreferrer">${escapeHtml(tr('models.f.docs'))}</a>`);
+    $('models-f-links').innerHTML = links.join(' · ');
+    const key = $('models-f-key');
+    key.placeholder = modelsState.editing && modelsState.editing.keyConfigured
+      ? tr('models.f.keyStored') : tr('models.f.keyPh');
+  }
+
+  function modelsRenderChecks() {
+    const box = $('models-f-models');
+    box.innerHTML = '';
+    for (const m of modelsState.checked) {
+      const lab = document.createElement('label');
+      lab.style.cssText = 'display:flex;align-items:center;gap:6px';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = true;
+      cb.addEventListener('change', () => {
+        if (cb.checked) modelsState.checked.add(m); else modelsState.checked.delete(m);
+      });
+      const sp = document.createElement('span');
+      sp.textContent = m;
+      sp.style.fontFamily = 'ui-monospace,Consolas,monospace';
+      lab.appendChild(cb);
+      lab.appendChild(sp);
+      box.appendChild(lab);
+    }
+    if (!modelsState.checked.size) box.textContent = tr('models.f.modelsEmpty');
+  }
+
+  function modelsOpenForm(profile) {
+    modelsState.editing = profile || null;
+    modelsState.checked = new Set(profile ? profile.models || [] : []);
+    modelsFillPresets();
+    const presetId = profile ? (profile.preset || 'custom') : 'siliconflow';
+    $('models-f-preset').value = presetId;
+    $('models-f-name').value = profile ? profile.name : '';
+    $('models-f-baseurl').value = profile ? profile.baseURL : '';
+    $('models-f-key').value = '';
+    $('models-f-manual').value = '';
+    $('models-f-preset').disabled = !!profile && profile.ollama; // ollama row is fixed
+    modelsApplyPreset(profile && profile.preset ? profile.preset : presetId, !!profile);
+    if (profile) $('models-f-keyenv').textContent = `→ ${profile.apiKeyRef}`;
+    modelsRenderChecks();
+    setStatus($('models-test-result'), '');
+    $('btn-models-delete').style.display = profile ? '' : 'none';
+    $('models-form').style.display = '';
+    $('models-form').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  function modelsCloseForm() {
+    modelsState.editing = null;
+    $('models-form').style.display = 'none';
+  }
+
+  function renderModelsList() {
+    const box = $('models-list');
+    const list = (modelsState.list && modelsState.list.profiles) || [];
+    const def = modelsState.list && modelsState.list.default;
+    box.innerHTML = '';
+    if (!list.length) {
+      box.textContent = tr('models.empty');
+      box.style.color = 'var(--text-3)';
+      box.style.fontSize = '12px';
+      return;
+    }
+    for (const p of list) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;font-size:13px;flex-wrap:wrap';
+      const name = document.createElement('span');
+      name.textContent = p.name;
+      name.style.color = 'var(--text-1)';
+      row.appendChild(name);
+      const tag = document.createElement('span');
+      tag.textContent = p.ollama ? tr('models.ollamaTag') : (p.preset ? tr('models.builtinTag') : tr('models.customTag'));
+      tag.style.cssText = 'font-size:11px;color:var(--text-3);border:1px solid var(--line);border-radius:4px;padding:0 5px';
+      row.appendChild(tag);
+      if (def && def.provider === p.id) {
+        const d = document.createElement('span');
+        d.textContent = tr('models.defaultBadge');
+        d.style.cssText = 'font-size:11px;color:var(--acc, #58a6ff)';
+        row.appendChild(d);
+      }
+      const keyState = document.createElement('span');
+      keyState.textContent = p.keyConfigured ? tr('models.keyConfigured') : tr('models.keyMissing');
+      keyState.style.cssText = 'font-size:11px;color:' + (p.keyConfigured ? 'var(--good, #2ea043)' : 'var(--warn, #d29922)');
+      row.appendChild(keyState);
+      const cnt = document.createElement('span');
+      cnt.textContent = tr('models.modelsCount', { n: (p.models || []).length });
+      cnt.style.cssText = 'font-size:11px;color:var(--text-3)';
+      row.appendChild(cnt);
+      const spacer = document.createElement('span');
+      spacer.style.flex = '1';
+      row.appendChild(spacer);
+      const btn = document.createElement('button');
+      btn.className = 'secondary';
+      btn.textContent = tr('models.edit');
+      btn.addEventListener('click', () => modelsOpenForm(p));
+      row.appendChild(btn);
+      box.appendChild(row);
+    }
+  }
+
+  function renderModelsDefault() {
+    const provSel = $('models-default-provider');
+    const modelSel = $('models-default-model');
+    const list = (modelsState.list && modelsState.list.profiles) || [];
+    const def = modelsState.list && modelsState.list.default;
+    provSel.innerHTML = '';
+    modelSel.innerHTML = '';
+    if (!list.length) {
+      setStatus($('models-default-status'), tr('models.defaultEmpty'));
+      $('btn-models-set-default').disabled = true;
+      return;
+    }
+    $('btn-models-set-default').disabled = false;
+    setStatus($('models-default-status'), def ? tr('models.defaultCurrent', { p: def.provider, m: def.model }) : '');
+    for (const p of list) {
+      const o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = `${p.name} (${p.id})`;
+      provSel.appendChild(o);
+    }
+    provSel.value = def && list.some((p) => p.id === def.provider) ? def.provider : list[0].id;
+    const fillModels = () => {
+      modelSel.innerHTML = '';
+      const p = list.find((x) => x.id === provSel.value);
+      for (const m of (p && p.models) || []) {
+        const o = document.createElement('option');
+        o.value = m;
+        o.textContent = m;
+        modelSel.appendChild(o);
+      }
+      if (def && def.provider === provSel.value && def.model) modelSel.value = def.model;
+    };
+    fillModels();
+    provSel.onchange = fillModels;
+  }
+
+  async function refreshModels() {
+    try {
+      modelsState.list = await window.dshShell.modelsList();
+      renderModelsList();
+      renderModelsDefault();
+    } catch (e) { /* ignore */ }
+    refreshOllama();
+  }
+
+  async function refreshOllama() {
+    const stEl = $('ollama-status');
+    const body = $('ollama-body');
+    try {
+      setStatus(stEl, tr('models.ollamaChecking'));
+      const st = await window.dshShell.ollamaStatus();
+      body.innerHTML = '';
+      if (!st.installed) {
+        setStatus(stEl, tr('models.ollamaNotInstalled'), 'warn');
+        const note = document.createElement('div');
+        note.className = 'note';
+        note.innerHTML = escapeHtml(tr('models.ollamaGuide')) + '<br>'
+          + '<span style="font-family:ui-monospace,Consolas,monospace">brew install ollama</span> · '
+          + '<span style="font-family:ui-monospace,Consolas,monospace">winget install Ollama.Ollama</span> · '
+          + `<a href="https://ollama.com" target="_blank" rel="noreferrer">${escapeHtml(tr('models.ollamaSite'))}</a>`;
+        body.appendChild(note);
+        return;
+      }
+      setStatus(stEl, tr(st.registered ? 'models.ollamaVersionRegistered' : 'models.ollamaVersion', {
+        v: st.version || '?', n: (st.models || []).length,
+      }), 'ok');
+      const registered = ((modelsState.list && modelsState.list.profiles) || []).find((p) => p.ollama || p.id === 'ollama');
+      const checked = new Set(registered ? registered.models || [] : (st.models || []).slice(0, 1));
+      const hint = document.createElement('div');
+      hint.className = 'desc';
+      hint.textContent = tr('models.ollamaSelectHint');
+      hint.style.marginBottom = '4px';
+      body.appendChild(hint);
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'font-size:12px;line-height:2;max-height:160px;overflow:auto';
+      for (const m of st.models || []) {
+        const lab = document.createElement('label');
+        lab.style.cssText = 'display:flex;align-items:center;gap:6px;margin-right:14px';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = checked.has(m);
+        cb.dataset.ollamaModel = m;
+        lab.appendChild(cb);
+        const sp = document.createElement('span');
+        sp.textContent = m;
+        sp.style.fontFamily = 'ui-monospace,Consolas,monospace';
+        lab.appendChild(sp);
+        wrap.appendChild(lab);
+      }
+      if (!(st.models || []).length) wrap.textContent = tr('models.ollamaNoModels');
+      body.appendChild(wrap);
+      const btnrow = document.createElement('div');
+      btnrow.className = 'btnrow';
+      btnrow.style.marginTop = '6px';
+      const btn = document.createElement('button');
+      btn.className = 'secondary';
+      btn.textContent = tr('models.ollamaRegister');
+      btn.addEventListener('click', async () => {
+        const picked = [...wrap.querySelectorAll('input[type=checkbox]')]
+          .filter((c) => c.checked)
+          .map((c) => c.dataset.ollamaModel);
+        if (!picked.length) { setStatus(stEl, tr('models.ollamaPickFirst'), 'warn'); return; }
+        const r = await window.dshShell.modelsSave(
+          { id: 'ollama', preset: 'ollama', name: 'Ollama', baseURL: 'http://localhost:11434/v1', models: picked, ollama: true },
+          'ollama',
+        );
+        if (r.ok) { setStatus(stEl, tr('models.ollamaDone'), 'ok'); refreshModels(); }
+        else setStatus(stEl, tr('models.test.other', { reason: r.reason || '' }), 'bad');
+      });
+      btnrow.appendChild(btn);
+      body.appendChild(btnrow);
+    } catch (e) {
+      setStatus(stEl, tr('models.ollamaNotInstalled'), 'warn');
+    }
+  }
+
+  $('btn-models-add').addEventListener('click', () => modelsOpenForm(null));
+  $('btn-models-cancel').addEventListener('click', modelsCloseForm);
+  $('models-f-preset').addEventListener('change', () => modelsApplyPreset($('models-f-preset').value));
+  $('btn-models-add-manual').addEventListener('click', () => {
+    const v = $('models-f-manual').value.trim();
+    if (v) { modelsState.checked.add(v); $('models-f-manual').value = ''; modelsRenderChecks(); }
+  });
+  $('models-f-manual').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); $('btn-models-add-manual').click(); }
+  });
+
+  $('btn-models-test').addEventListener('click', async () => {
+    const el = $('models-test-result');
+    setStatus(el, tr('models.f.testing'));
+    const target = {
+      baseURL: $('models-f-baseurl').value.trim(),
+      profileId: modelsState.editing ? modelsState.editing.id : undefined,
+    };
+    const key = $('models-f-key').value;
+    if (key) target.apiKey = key; // only when freshly typed; else main falls back to the stored key
+    try {
+      const r = await window.dshShell.modelsTest(target);
+      setStatus(el, modelsTestText(r), r.ok ? 'ok' : 'bad');
+      if (r.ok && r.models) {
+        for (const m of r.models) modelsState.checked.add(m);
+        modelsRenderChecks();
+      }
+    } catch (e) {
+      setStatus(el, tr('models.test.other', { reason: e.message }), 'bad');
+    }
+  });
+
+  $('btn-models-save').addEventListener('click', async () => {
+    const el = $('models-test-result');
+    const editing = modelsState.editing;
+    const presetId = $('models-f-preset').value || 'custom';
+    const models = [...modelsState.checked];
+    if (!models.length) { setStatus(el, tr('models.f.needModels'), 'warn'); return; }
+    let id = editing ? editing.id : (presetId !== 'custom' ? presetId : '');
+    if (!id) {
+      id = $('models-f-name').value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      if (!id) id = 'custom';
+      if (/^[0-9]/.test(id)) id = `p-${id}`;
+    }
+    const profile = {
+      id,
+      preset: presetId,
+      name: $('models-f-name').value.trim() || id,
+      baseURL: $('models-f-baseurl').value.trim(),
+      models,
+      ollama: editing ? editing.ollama : presetId === 'ollama',
+    };
+    const key = $('models-f-key').value;
+    try {
+      const r = await window.dshShell.modelsSave(profile, key || undefined);
+      if (!r.ok) { setStatus(el, tr('models.test.other', { reason: r.reason || '' }), 'bad'); return; }
+      modelsCloseForm();
+      await refreshModels();
+      setStatus($('models-default-status'), tr('models.savedOk'), 'ok');
+    } catch (e) {
+      setStatus(el, tr('models.test.other', { reason: e.message }), 'bad');
+    }
+  });
+
+  $('btn-models-delete').addEventListener('click', async () => {
+    if (!modelsState.editing) return;
+    if (!confirm(tr('models.f.deleteConfirm'))) return;
+    try {
+      const r = await window.dshShell.modelsRemove(modelsState.editing.id);
+      if (r.ok) { modelsCloseForm(); refreshModels(); }
+      else setStatus($('models-test-result'), tr('models.test.other', { reason: r.reason || '' }), 'bad');
+    } catch (e) { /* ignore */ }
+  });
+
+  $('btn-models-set-default').addEventListener('click', async () => {
+    const el = $('models-default-status');
+    const p = $('models-default-provider').value;
+    const m = $('models-default-model').value;
+    if (!p || !m) return;
+    try {
+      const r = await window.dshShell.modelsSetDefault(p, m);
+      if (r.ok) {
+        setStatus(el, tr('models.defaultSaved'), 'ok');
+        await refreshModels();
+      } else setStatus(el, tr('models.test.other', { reason: r.reason || '' }), 'bad');
+    } catch (e) {
+      setStatus(el, tr('models.test.other', { reason: e.message }), 'bad');
+    }
+  });
+
   async function refreshInfo() {
     try {
       const info = await window.dshShell.runtimeInfo();
@@ -2219,6 +4110,7 @@
     } catch (e) { /* ignore */ }
     renderSnapshots();
     refreshCost();
+    refreshBalance();
     refreshDiagnostics();
     renderInstalled();
     renderAuto();
@@ -2251,8 +4143,9 @@
     await refreshInfo();
     // Keep the pairing code / link display live: expiry and one-shot
     // consumption happen server-side, and a stale link is exactly the trap
-    // that strands a phone on the pairing page.
-    setInterval(refreshRemote, 5000);
+    // that strands a phone on the pairing page. The public-remote card joins
+    // the same cadence (its detectors self-cache for 60s on the main side).
+    setInterval(() => { refreshRemote(); refreshPublicRemote(); }, 5000);
   })();
 </script>
 </body>

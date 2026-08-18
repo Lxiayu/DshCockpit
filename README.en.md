@@ -6,7 +6,7 @@
 
 **Turn DeepSeek Harness into a resident background Agent cockpit**
 
-Cost control · Usage monitoring · Auto-update · Scheduled tasks · Quick Ask · LAN phone remote control · Data safety
+Cost control · Usage monitoring · Official balance · IM remote control · Public-network remote · Model manager · Auto-update · Scheduled tasks · Quick Ask · LAN phone remote control · Data safety
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)](#)

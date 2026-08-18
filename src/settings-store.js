@@ -27,13 +27,13 @@ const DEFAULTS = {
   costInputPerM: 2,         // ¥ per 1M input tokens (estimate, user-adjustable)
   costOutputPerM: 8,        // ¥ per 1M output tokens
   costCacheReadPerM: 0.5,   // ¥ per 1M cache-read tokens
-  costCacheWritePerM: 2,    // ¥ per 1M cache-write tokens
+  costCacheWritePerM: 0,    // official API bills cache writes at 0 (hit/miss/output only)
   costPeakEnabled: false,   // split pricing by peak/off-peak event time
   costPeakWindows: '9-12,14-18', // peak hour ranges, Beijing time
   costPeakInputPerM: 4,     // peak ¥ per 1M input tokens (default = 2x off-peak)
   costPeakOutputPerM: 16,   // peak ¥ per 1M output tokens
   costPeakCacheReadPerM: 1, // peak ¥ per 1M cache-read tokens
-  costPeakCacheWritePerM: 4,// peak ¥ per 1M cache-write tokens
+  costPeakCacheWritePerM: 0,// official API bills cache writes at 0
   monthlyBudget: 0,         // ¥/month budget; 0 = disabled
   quickAskHotkey: 'CommandOrControl+Alt+Space',
   scheduledTasks: [],       // { id, name, prompt, kind: every|daily|weekly, everySeconds?|dailyTime?|weeklyDay?+weeklyTime?, templateId?, enabled, nextRunAt, lastRunAt }
@@ -43,12 +43,16 @@ const DEFAULTS = {
   remoteControl: false,     // phone remote-control gateway (TLS proxy to the runtime)
   remotePort: 31780,        // gateway listen port (auto-increments on conflict)
   remoteCompat: true,       // serve the gateway over plain HTTP so WeChat/Douyin scanners can open it (LAN cleartext)
+  remotePublic: false,      // C7 public-network access switch: OFF by default; enabling requires an explicit confirm (shell:public-remote-enable)
+  remotePublicMode: 'lan',  // C7 access route: lan | tailscale | cloudflare
+  modelProviders: [],       // model provider profiles (C2): { id, name, baseURL, apiKeyRef, models[], preset, ollama?, createdAt }
+  imChannels: [],           // IM channel configs (C5): { id, type, enabled, allowFrom[] } — credentials stay in channel-secrets.json
 };
 
 const NUMERIC_KEYS = ['keepVersions', 'port', 'contextWindow', 'costInputPerM', 'costOutputPerM', 'costCacheReadPerM', 'costCacheWritePerM', 'costPeakInputPerM', 'costPeakOutputPerM', 'costPeakCacheReadPerM', 'costPeakCacheWritePerM', 'monthlyBudget', 'backupKeep', 'remotePort'];
-const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'tokenWidget', 'shellAutoUpdate', 'costPeakEnabled', 'remoteControl', 'remoteCompat'];
-const STRING_KEYS = ['channel', 'pinnedVersion', 'registry', 'workspace', 'dshHome', 'nodeBin', 'dshBin', 'language', 'themeMode', 'quickAskHotkey', 'costPeakWindows'];
-const ARRAY_KEYS = ['recentWorkspaces', 'installedPlugins', 'scheduledTasks', 'scheduledHistory'];
+const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'tokenWidget', 'shellAutoUpdate', 'costPeakEnabled', 'remoteControl', 'remoteCompat', 'remotePublic'];
+const STRING_KEYS = ['channel', 'pinnedVersion', 'registry', 'workspace', 'dshHome', 'nodeBin', 'dshBin', 'language', 'themeMode', 'quickAskHotkey', 'costPeakWindows', 'remotePublicMode'];
+const ARRAY_KEYS = ['recentWorkspaces', 'installedPlugins', 'scheduledTasks', 'scheduledHistory', 'modelProviders', 'imChannels'];
 
 class SettingsStore {
   constructor(userDataDir) {

@@ -6,7 +6,7 @@
 
 **把 DeepSeek Harness 变成一台常驻后台的 Agent 驾驶舱**
 
-成本控制 · 用量监控 · 自动更新 · 定时任务 · 快捷问询 · 局域网手机操控 · 数据安全
+成本控制 · 用量监控 · 官方余额 · IM 遥控 · 公网远程 · 模型管理 · 自动更新 · 定时任务 · 快捷问询 · 局域网手机操控 · 数据安全
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)](#)
@@ -155,6 +155,8 @@ DshCockpit (Electron)
 
 ## 🗺️ 路线图
 
+> 完整竞争分析与验收标准见 [`ROADMAP.md`](ROADMAP.md)。
+
 - [x] 运行时/壳双层自动更新 + 回滚
 - [x] Token 监控 + 成本中心 + 预算报警
 - [x] Quick Ask + 定时任务 + 任务/审批通知
@@ -171,7 +173,7 @@ DshCockpit (Electron)
 
 ## 🤝 贡献
 
-欢迎 PR！请先跑 `npm test`（100 项单元测试）。架构细节见 [`DESIGN.md`](DESIGN.md)，功能清单见 [`FEATURES.md`](FEATURES.md)。
+欢迎 PR！请先跑 `npm test`（196 项单元测试）。架构细节见 [`DESIGN.md`](DESIGN.md)，功能清单见 [`FEATURES.md`](FEATURES.md)。
 
 ## 📄 许可证
 
@@ -180,4 +182,5 @@ DshCockpit (Electron)
 ## 🙏 致谢
 
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — 本项目所驱动的 Agent 运行时与 Web UI
+- IM 渠道设计参考 [dsh-im-bridge](https://github.com/search?q=dsh-im-bridge) 等 MIT 项目；余额展示范式参考 dms-deepseekbalance（MIT）；技能生态兼容 [Claude Skill](https://agentskills.io) 格式（Anthropic）
 - 所有贡献过社区桌壳与插件的开发者

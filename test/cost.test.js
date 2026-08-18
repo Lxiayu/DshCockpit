@@ -128,3 +128,74 @@ test('updateHistory stores peakCost and summarize accumulates it', () => {
   assert.strictEqual(cost.summarize([{ date: '2000-01-01', cost: 1 }], 1).peakCost, 0);
   fs.rmSync(path.dirname(file), { recursive: true, force: true });
 });
+
+// ---- official price matrix (C1, peak pricing effective 2026-08-17) --------
+
+test('PRICE_MATRIX holds the official v4 flash/pro peak/off-peak prices', () => {
+  const m = cost.PRICE_MATRIX;
+  assert.deepStrictEqual(m['deepseek-v4-flash'].offPeak, { inputPerM: 1.5, outputPerM: 4.5, cacheReadPerM: 0.05, cacheWritePerM: 0 });
+  assert.deepStrictEqual(m['deepseek-v4-flash'].peak, { inputPerM: 3, outputPerM: 9, cacheReadPerM: 0.1, cacheWritePerM: 0 });
+  assert.deepStrictEqual(m['deepseek-v4-pro'].offPeak, { inputPerM: 4.5, outputPerM: 13.5, cacheReadPerM: 0.15, cacheWritePerM: 0 });
+  assert.deepStrictEqual(m['deepseek-v4-pro'].peak, { inputPerM: 9, outputPerM: 27, cacheReadPerM: 0.3, cacheWritePerM: 0 });
+  // cache writes are never billed; peak is exactly 2x off-peak in every dimension
+  for (const tiers of Object.values(m)) {
+    for (const k of ['inputPerM', 'outputPerM', 'cacheReadPerM', 'cacheWritePerM']) {
+      assert.strictEqual(tiers.peak[k], tiers.offPeak[k] * 2, `${k} peak must be 2x off-peak`);
+    }
+  }
+});
+
+test('modelRates normalizes legacy and unknown model names', () => {
+  assert.strictEqual(cost.normalizeModel('deepseek-v4-flash'), 'deepseek-v4-flash');
+  assert.strictEqual(cost.normalizeModel('deepseek-v4-pro'), 'deepseek-v4-pro');
+  assert.strictEqual(cost.normalizeModel('DEEPSEEK-V4-PRO'), 'deepseek-v4-pro');
+  assert.strictEqual(cost.normalizeModel('deepseek-chat'), 'deepseek-v4-flash'); // retired 2026-07-24
+  assert.strictEqual(cost.normalizeModel('deepseek-reasoner'), 'deepseek-v4-flash');
+  assert.strictEqual(cost.normalizeModel(''), 'deepseek-v4-flash');
+  assert.strictEqual(cost.normalizeModel(undefined), 'deepseek-v4-flash');
+  assert.strictEqual(cost.modelRates('deepseek-v4-pro', true).outputPerM, 27);
+  assert.strictEqual(cost.modelRates('anything', false).inputPerM, 1.5);
+});
+
+test('turnCost: input = hit×hit价 + miss×miss价, output at output价, cache write free', () => {
+  // flat (off-peak) totals on v4-flash: 1M miss + 1M hit + 1M out + 1M cacheWrite
+  const tc = cost.turnCost(
+    { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 1_000_000 },
+    'deepseek-v4-flash',
+  );
+  assert.ok(Math.abs(tc.cost - (1.5 + 0.05 + 4.5 + 0)) < 1e-9);
+  // savings = hit tokens x (miss price - hit price)
+  assert.ok(Math.abs(tc.saved - (1.5 - 0.05)) < 1e-9);
+  assert.strictEqual(tc.inputTokens, 1_000_000);
+  assert.strictEqual(tc.cacheReadTokens, 1_000_000);
+  assert.strictEqual(tc.outputTokens, 1_000_000);
+  // peak/off-peak sub-buckets price in their own window (v4-pro)
+  const split = cost.turnCost({
+    peak: { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 },
+    offPeak: { input: 0, output: 1_000_000, cacheRead: 0, cacheWrite: 0 },
+  }, 'deepseek-v4-pro');
+  assert.ok(Math.abs(split.cost - (9 + 13.5)) < 1e-9);
+});
+
+test('JSONL usage → turn cost caliber (inputTokens=miss, cacheReadTokens=hit, peak/off-peak by event time)', async () => {
+  const tokenStats = require('../src/token-stats');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-turn-'));
+  const file = path.join(dir, 'session.jsonl');
+  const peakTime = Date.UTC(2026, 7, 17, 1, 0); // Beijing 17 Aug 09:00 → peak
+  const lines = [
+    JSON.stringify({ id: 't', cwd: '/tmp' }),
+    JSON.stringify({ type: 'assistant/message', time: peakTime, data: { usage: { inputTokens: 100_000, outputTokens: 50_000, cacheReadTokens: 400_000, cacheWriteTokens: 10_000 } } }),
+    JSON.stringify({ type: 'assistant/message', data: { usage: { inputTokens: 100_000, outputTokens: 50_000, cacheReadTokens: 0, cacheWriteTokens: 0 } } }), // no time → off-peak
+  ];
+  fs.writeFileSync(file, lines.join('\n') + '\n');
+  const r = await tokenStats.parseSessionLogAsync(file, [[9, 12], [14, 18]]);
+  assert.strictEqual(r.totals.peak.input, 100_000);
+  assert.strictEqual(r.totals.peak.cacheRead, 400_000);
+  assert.strictEqual(r.totals.offPeak.input, 100_000);
+  const tc = cost.turnCost(r.totals, 'deepseek-v4-flash');
+  // peak: (100k×3 + 400k×0.1 + 50k×9)/1e6 = 0.79 ; off-peak: (100k×1.5 + 50k×4.5)/1e6 = 0.375
+  assert.ok(Math.abs(tc.cost - (0.79 + 0.375)) < 1e-9);
+  // savings: 400k × (3 − 0.1)/1e6 = 1.16
+  assert.ok(Math.abs(tc.saved - 1.16) < 1e-9);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

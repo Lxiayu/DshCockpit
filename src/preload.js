@@ -73,6 +73,7 @@ let chromeTop = 10;
 let chromeRight = 12;
 let dragState = null;
 let userDragged = false;
+let pillLang = 'zh'; // language of the last chrome:tokens push (pill menu labels)
 
 function applyPos(top, right) {
   chromeTop = top;
@@ -135,6 +136,11 @@ function injectChrome() {
     'background:rgba(20,23,28,.85); color:#8b949e; border:1px solid rgba(255,255,255,.12);',
     'border-radius:999px; padding:3px 10px; white-space:nowrap;',
   ].join(' ');
+  // pill context menu -> compact the current session (C3)
+  pill.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    showPillMenu(e.clientX, e.clientY);
+  });
 
   // settings button
   const gear = document.createElement('button');
@@ -201,6 +207,50 @@ function injectChrome() {
   scheduleSmartReposition(saved);
 }
 
+// pill context menu: "compact the current session" (C3). Rendered in-page
+// (the pill lives in the renderer); the click routes through the existing
+// chrome:* IPC channel so all gating stays in the main process.
+const PILL_MENU_ID = 'dsh-shell-pill-menu';
+
+function hidePillMenu() {
+  const m = document.getElementById(PILL_MENU_ID);
+  if (m) m.remove();
+}
+
+function showPillMenu(x, y) {
+  hidePillMenu();
+  const menu = document.createElement('div');
+  menu.id = PILL_MENU_ID;
+  menu.style.cssText = [
+    'position:fixed; z-index:2147483647;',
+    `left:${Math.max(4, Math.min(x, window.innerWidth - 190))}px; top:${Math.max(4, y)}px;`,
+    'background:rgba(20,23,28,.97); border:1px solid rgba(255,255,255,.14); border-radius:10px;',
+    'padding:4px; min-width:170px; box-shadow:0 6px 24px rgba(0,0,0,.4);',
+    'font:12px/1.4 "Segoe UI","Microsoft YaHei",system-ui,sans-serif; color:#e6edf3;',
+    'cursor:pointer; user-select:none;',
+  ].join(' ');
+  const item = document.createElement('div');
+  item.textContent = pillLang === 'en' ? '⟳ Compact current session' : '⟳ 压缩当前会话';
+  item.style.cssText = 'padding:6px 10px; border-radius:6px; white-space:nowrap;';
+  item.addEventListener('mouseenter', () => { item.style.background = 'rgba(88,166,255,.25)'; });
+  item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
+  item.addEventListener('click', () => {
+    hidePillMenu();
+    ipcRenderer.send('chrome:compact-now');
+  });
+  menu.appendChild(item);
+  document.body.appendChild(menu);
+  // any pointerdown outside the item dismisses the menu
+  setTimeout(() => {
+    const close = (e) => {
+      if (e.target === item || menu.contains(e.target)) return;
+      hidePillMenu();
+      document.removeEventListener('pointerdown', close, true);
+    };
+    document.addEventListener('pointerdown', close, true);
+  }, 0);
+}
+
 function updatePill(tokens) {
   injectChrome();
   const pill = document.getElementById('dsh-shell-tokens');
@@ -241,20 +291,24 @@ function updatePill(tokens) {
   }
   const cur = tokens.current;
   const tot = tokens.totals;
+  const compacting = !!tokens.compacting;
+  pillLang = tokens.lang === 'en' ? 'en' : 'zh';
   if (!cur) {
-    pill.textContent = lang === 'en' ? '⛁ no sessions' : '⛁ 暂无会话';
+    pill.textContent = pillLang === 'en' ? '⛁ no sessions' : '⛁ 暂无会话';
     pill.title = '';
     return;
   }
-  pill.textContent = `⛁ ${fmt(cur.input)}→${fmt(cur.output)}`;
-  const pressureLine = lang === 'en' ? `Context pressure: ${pct}%` : `上下文压力：${pct}%`;
-  const lines = (lang === 'en'
+  pill.textContent = `${compacting ? '⟳ ' : ''}⛁ ${fmt(cur.input)}→${fmt(cur.output)}`;
+  const pressureLine = pillLang === 'en' ? `Context pressure: ${pct}%` : `上下文压力：${pct}%`;
+  const compactLine = pillLang === 'en' ? 'Compacting…' : '压缩中…';
+  const lines = (pillLang === 'en'
     ? [pressureLine,
        `Current: in ${fmt(cur.input)} · out ${fmt(cur.output)} · cache ${fmt(cur.cacheRead + cur.cacheWrite)}`,
        `All (${tokens.sessionCount}): in ${fmt(tot.input)} · out ${fmt(tot.output)} · cache ${fmt(tot.cacheRead + tot.cacheWrite)}`]
     : [pressureLine,
        `当前会话：输入 ${fmt(cur.input)} · 输出 ${fmt(cur.output)} · 缓存 ${fmt(cur.cacheRead + cur.cacheWrite)}`,
        `全部会话（${tokens.sessionCount} 个）：输入 ${fmt(tot.input)} · 输出 ${fmt(tot.output)} · 缓存 ${fmt(tot.cacheRead + tot.cacheWrite)}`]);
+  if (compacting) lines.unshift(compactLine);
   pill.title = lines.join('\n');
 }
 
