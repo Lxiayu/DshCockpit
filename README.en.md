@@ -6,104 +6,41 @@
 
 **Turn DeepSeek Harness into a resident background Agent cockpit**
 
-Cost control · Usage monitoring · Official balance · IM channel remote control · Public-network remote · Model manager · Long-session compaction · Skills marketplace · Auto-update · Scheduled tasks · Quick Ask · LAN phone remote control · Data safety
-
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)](#)
 [![Powered by](https://img.shields.io/badge/powered%20by-DeepSeek%20Harness-4D6BFE)](https://github.com/deepseek-ai/deepseek-harness)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
 
-*From "a browser tab you must keep open" to "a double-click, always-on, self-updating desktop console that knows what your agents cost."*
+> **Harness owns the workspace. DshCockpit owns the operating layer.**
+
+DshCockpit is an open-source desktop control plane (Electron) for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`): double-click to launch, tray-resident, self-updating, cost-aware. Harness keeps its 100% native workspace; all monitoring, automation, and runtime management live in the independent Cockpit layer. Bundled runtime — no Node.js install needed. Windows portable zip + macOS dmg (arm64/x64).
 
 </div>
 
 ---
 
-## ✨ Why DshCockpit?
+## 🚀 Features
 
-Other shells wrap the `dsh web` UI **inside a window**. DshCockpit treats `dsh` as a **background service** and keeps the Harness workspace native while adding an independent Edge Rail and Cockpit Control Center:
+### 🎛️ Monitoring
+- **Token / Context**: always-on Edge Rail shows usage and context pressure; click for detail (input/output/cache), warnings at 60%/85%, built-in one-click compaction
+- **Cost center**: per day/week/month/workspace stats, monthly budget 80%/100% alarms, peak/off-peak pricing
+- **Official balance**: live DeepSeek account balance (total/granted/topped-up) and exact per-turn spend
 
-| | `dsh web` in browser | Other desktop shells | **DshCockpit** |
-|---|---|---|---|
-| Close the window | ❌ session dies | ✅ tray-resident | ✅ tray-resident + background tasks keep running |
-| Runtime updates | ❌ manual npm | ❌ none | ✅ **auto-update pipeline + smoke-test guard + one-click rollback** |
-| Token usage | ❌ flashes once | ❌ none | ✅ **Edge Rail status + Token Peek + context-pressure warning** |
-| What it costs | ❌ unknown | ❌ none | ✅ **cost center: per day/week/month/workspace + budget alarms** |
-| Quick questions | ❌ open browser | ❌ none | ✅ **global-hotkey Quick Ask (runs in background)** |
-| Scheduled tasks | ❌ none | ❌ none | ✅ **shell-level scheduler (interval/daily + notifications)** |
-| History search | ❌ manual digging | ❌ none | ✅ **`Ctrl+K` full-text search across all sessions** |
-| IM remote | ❌ none | ❌ none | ✅ **Feishu / WeCom / DingTalk official long connections — approve/ask/control from chat** |
-| Public network | ❌ none | ❌ none | ✅ **Tailscale / Cloudflare tunnel — remote from anywhere** |
-| What it costs | ❌ unknown | ❌ none | ✅ **official account balance + exact per-turn spend** |
-| Model choice | ❌ default only | ❌ none | ✅ **third-party providers + local Ollama model manager** |
-| Data safety | ✅ local | ✅ local | ✅ local + **auto-backup + privacy statement + backups exclude credentials** |
+### 📡 Remote & automation
+- **Phone remote control**: full dsh UI in a phone browser (sessions, messages, approvals, questions); one-tap LAN pairing, plus Tailscale / Cloudflare tunnels for anywhere access
+- **IM channel remote control**: Feishu / WeCom / DingTalk official long connections — task completion, approvals, and questions land in your chat, handled right from the conversation
+- **Quick Ask**: `Ctrl+Alt+Space` global hotkey — ask anything, runs in the background, notified when done
+- **Scheduled tasks**: daily/weekly/interval reports, run history included
 
-**In one sentence: they build "windows", we build a "console".**
-
----
-
-## 🚀 Feature Panorama
-
-### 🎛️ Cockpit-grade monitoring (unique)
-- **Independent Edge Rail**: Harness owns the native workspace; DshCockpit keeps only Token / Context, Cockpit, and Settings visible at the edge. It stays tiny until you ask for more.
-- **Token Peek**: click Token / Context for input, output, cache, session count, and context pressure. Thresholds at 60%/85% provide quiet/high-risk warnings without opening a full page.
-- **Cockpit Control Center**: live Runtime, usage, cost, and background-task status plus direct actions for Quick Ask, Tasks, Session Search, Remote, and Integrations. Persistent configuration stays in Settings.
-- **Cost control center**: tokens & estimated cost per day/week/month (unit prices configurable), broken down **per workspace**; **monthly budget + 80%/100% alarms** — no more scary end-of-month invoices.
-- **Official account balance**: live total/granted/topped-up balance from the DeepSeek API, low-balance highlight; **exact per-turn spend** (input/output/cache split + cache savings).
-- **Peak/off-peak pricing**: tray shows ⚡peak/🌙off-peak state and current unit price; cost stats bucketed per event time (synced with the official Aug-2026 time-of-day pricing).
-
-### 📱 IM channel remote control (unique)
-Connect your agent to the IMs you already use — **task completion, tool approvals, and agent questions are pushed straight into your chat**, where you approve/decline, answer questions, or send commands from the conversation.
-- All three channels use **official long connections** (Feishu long connection / WeCom AI Bot / DingTalk Stream Mode): **no public IP, no port mapping, no third-party relay servers**
-- Per-channel allowlist (pairing-based access) — strangers can't reach your agent
-- Approval buttons carry **one-time tokens (120s TTL, single-use)**, replay-proof; channel credentials encrypted at rest (Keychain / DPAPI)
-- Settings → Channels: step-by-step setup guide + connection test
-
-### 🌐 Public-network remote (unique)
-Take phone control beyond "same Wi-Fi" — two options:
-- **Tailscale (recommended)**: auto-detects local Tailscale; when logged in, generates an `http://100.x.y.z:31780` pairing link (with QR); install Tailscale on your phone, log into the same account, and control over 4G/5G
-- **Cloudflare quick tunnel**: one-click free cloudflared tunnel — **no app needed on the phone**, just open the trycloudflare.com link in a browser
-- Secure defaults: public mode **off by default**, requires explicit double-confirm with a public-network warning; pairing TTL tightens to 5 minutes; all public pairing events are audit-logged
-
-### 🧠 Model manager
-- 6 built-in third-party templates (SiliconFlow / Kimi / Zhipu / Tongyi / Volcano Ark / OpenRouter) + custom: fill in baseURL and key, **connection test + model-list fetch**
-- **One-click Ollama**: auto-registers local Ollama as a provider; use local models as the default — run your agent for free
-- API keys encrypted at rest; runtime config hot-reloads (applies to new sessions, no restart)
-
-### 📚 Long-session management
-- **One-click compaction** (Settings long-session section): uses the runtime RPC to target the latest non-blank active session, then shows **before/after tokens and estimated savings** without Harness DOM coupling.
-- Pressure warnings now use the **real context footprint of the most recent request** (previously cumulative history — long sessions showed false red)
-- **AGENTS.md memory files**: edit workspace-level and global memory online; new sessions pick them up automatically
-
-### 🧩 Skills marketplace
-- Browse / search the GitHub skills ecosystem, **preview SKILL.md in full before installing** (injection-safe)
-- **Claude Skill compatible** (SKILL.md frontmatter validation, readable errors otherwise); import local directories
-- Installed skills take effect immediately (hot-reload, visible in new sessions); failed installs auto-clean
-
-### 🔄 Update system (two decoupled layers — a bad version never activates)
-- **Runtime updates**: registry check → install → **`--dump-config` smoke-test guard** (a broken version is never activated) → pending → switch (DSH_HOME snapshotted automatically) → **one-click rollback**. Installs have a **10-minute hard timeout + Node engines pre-check**; updates show an **in-app progress terminal** (live stage + elapsed seconds) so long installs never look hung.
-- **Shell self-update**: automatic checks (on start + every 4h) → **release-notes dialog** (renders the GitHub Release body) → restart now.
-
-### ⚡ Background agent services (unique)
-- **Quick Ask (global hotkey)**: default `Ctrl+Alt+Space` pops a mini window; ask anything → runs in a headless background session → completion notification. Ask without leaving your editor.
-- **Scheduled tasks**: run a fixed prompt daily/weekly/at an interval (daily reports, weekly reports, cleanup) with automatic execution + system notifications + run history.
-- **Task notifications**: with the window minimized, you're notified when the agent finishes a long task, when an approval is needed, or when a question awaits your answer.
-- **LAN phone remote control**: the Control Center Remote surface handles status, pairing, device revoke, and access links; Settings stores port and compatibility configuration. After pairing, use the full dsh Web UI (streaming output, messages, **approve tool calls, answer questions**). The runtime still listens only on 127.0.0.1 (see DESIGN.md §17).
-
-### 🔍 History & search
-- **`Ctrl+K` full-text session search**: keyword search across all past sessions (highlighted snippets + one-click copy).
-- **Automatic session backups**: on exit + manual, keeps the last N; DSH_HOME snapshots on upgrade/rollback.
+### 🛠️ Runtime & data
+- **Runtime management**: auto-update + smoke-test guard + one-click rollback, live install progress
+- **Session search**: `Ctrl+K` full-text search across all sessions; auto-backup on exit
+- **Long sessions**: one-click `/compact` with before/after token comparison and estimated savings; AGENTS.md memory files editable online
 
 ### 🧩 Ecosystem & experience
-- **Plugin marketplace**: powered by the **awesome-dsh-plugin curated list** (CC0-1.0) with **14 categories** + search, embedded in Settings → Plugins; installs show progress with self-healing and residue cleanup.
-- **Bilingual UI** (中文 / English, follow-system); tray, notifications, and settings fully localized.
-- Shortcuts (`Ctrl+,` settings / `Ctrl+K` search / `Ctrl+R` reload / `Ctrl+Shift+I` devtools).
-- First-run guide, window-position memory, crash auto-restart (3-in-60s loop protection), **orphan-process watchdog** (cleans up the runtime if the shell crashes — no ghost processes).
-- Storage management (usage visualization + one-click cleanup), crash diagnostics.
-
-### 🛡️ Data & privacy
-- **Runs fully locally.** The settings UI states it explicitly: we **do not collect, upload, or store** your personal info, API keys, session content, or usage data.
-- Backups deliberately **exclude API credentials** (prevents plaintext keys from spreading); runtime downloads are sha512-verified; the harness's own file sandbox and approval mechanisms are preserved untouched.
+- **Model manager**: 6 third-party templates + custom + local Ollama, connection test before use
+- **Plugin + Skills marketplaces**: 14-category community plugins and Claude Skill skills, preview before install
+- Bilingual UI, dark/light themes, fully local data (no collection, no upload, backups exclude credentials)
 
 ---
 
@@ -121,14 +58,10 @@ Download the matching `.dmg` from [Releases](https://github.com/Lxiayu/DshCockpi
 
 Double-click to mount → drag **DshCockpit** into **Applications** → launch.
 
-> ⚠️ **First launch shows "damaged" or "unidentified developer"**: the macOS build is **not yet signed/notarized** (no Apple Developer certificate yet). This is a normal Gatekeeper block — the app is fine. Either:
-> - **GUI**: double-click once (Cancel on the dialog) → System Settings → Privacy & Security → scroll down → "Open Anyway" → "Open".
-> - **Terminal (fastest)**:
->   ```bash
->   xattr -dr com.apple.quarantine /Applications/DshCockpit.app
->   ```
->
-> One clearance is permanent. This prompt disappears once signing/notarization is in place.
+> ⚠️ **First launch shows "damaged" or "unidentified developer"**: the macOS build is **not yet signed/notarized** (no Apple Developer certificate yet). This is a normal Gatekeeper block — the app is fine. Run this once in Terminal to clear it permanently:
+> ```bash
+> xattr -dr com.apple.quarantine /Applications/DshCockpit.app
+> ```
 
 ### Option 3: from source (developers)
 ```bash
@@ -141,7 +74,7 @@ npm start
 
 After first launch:
 1. Configure your DeepSeek API key in the native Harness settings (gear icon, red-dot hint);
-2. Choose a workspace from the independent Edge Rail Settings or workspace action;
+2. Choose a workspace from the Edge Rail Settings or workspace action;
 3. Start chatting — the Edge Rail keeps Context status visible, while Cockpit opens the operating layer when needed.
 
 ---
@@ -150,59 +83,20 @@ After first launch:
 
 <div align="center">
 
-<img src="photo/preview-1.png?v=0.2.4" width="720" alt="DshCockpit main window — native DeepSeek Harness workspace with Edge Rail and Context status" />
+<img src="photo/preview-1.png?v=0.2.5" width="720" alt="DshCockpit main window — native DeepSeek Harness workspace with Edge Rail and Context status" />
 
 <table><tr>
-<td><img src="photo/preview-2.png?v=0.2.4" width="280" alt="Cost center — token cost tracking & budget alerts" /></td>
-<td><img src="photo/preview-3.png?v=0.2.4" width="280" alt="Settings & plugin marketplace" /></td>
+<td><img src="photo/preview-2.png?v=0.2.5" width="280" alt="Cost center — token cost tracking & budget alerts" /></td>
+<td><img src="photo/preview-3.png?v=0.2.5" width="280" alt="Settings & plugin marketplace" /></td>
 </tr></table>
 
 </div>
 
 ---
 
-## 🏗️ Architecture
-
-```
-DshCockpit (Electron)
- ├─ Runtime management: versioned dirs + update pipeline (Arborist install / smoke test / switch / rollback)
- ├─ Data layer: session parsing (zstd), cost history, official balance, full-text search, backup/snapshot
- ├─ Event stream: subscribes to the runtime WebSocket (task done / approvals / questions)
- ├─ Services: Quick Ask, task scheduler, plugin/skills marketplace, model manager, crash watchdog
- ├─ Channels: IM channel manager (Feishu / WeCom / DingTalk long connections) + phone remote gateway (LAN/public)
- └─ UI: native Harness workspace + independent Edge Rail / Peek / Cockpit Control Center / Settings
-```
-
-- **Shell and runtime fully decoupled**: runtime versions coexist under `userData/runtime/` without interference;
-- Deliberately small interface surface: spawn args, URL line, HTTP/WS — upstream changes don't break the shell.
-
----
-
-## 🗺️ Roadmap
-
-- [x] Two-layer auto-update (runtime + shell) with rollback
-- [x] Token monitoring + cost center + budget alarms
-- [x] Quick Ask + scheduled tasks + task/approval notifications
-- [x] Full-text session search + auto-backup + privacy statement
-- [x] Plugin marketplace + bilingual UI + portable packaging (bundled runtime)
-- [x] macOS builds (CI produces arm64 + x64)
-- [x] LAN phone remote control (secure pairing gateway: pairing + approvals + sessions)
-- [x] IM channel remote control (Feishu / WeCom / DingTalk official long connections)
-- [x] Public-network remote (Tailscale / Cloudflare tunnels)
-- [x] Official account balance + exact per-turn spend
-- [x] Model manager (third-party templates + local Ollama)
-- [x] Long-session compaction + AGENTS.md memory files
-- [x] Skills marketplace
-- [ ] macOS code signing & notarization
-- [ ] Windows Authenticode signing
-- [ ] System keychain integration (encrypted credentials)
-- [ ] More workflows
-
----
-
 ## 🤝 Contributing
 
-PRs welcome! Please run `npm test` first (230 unit tests). See [`DESIGN.md`](DESIGN.md) for architecture and [`FEATURES.md`](FEATURES.md) for the feature list.
+PRs welcome! Please run `npm test` first. See [`DESIGN.md`](DESIGN.md) for architecture, [`PHILOSOPHY.md`](PHILOSOPHY.md) for the product philosophy, and [`FEATURES.md`](FEATURES.md) for the feature list.
 
 ## 📄 License
 
@@ -211,4 +105,34 @@ PRs welcome! Please run `npm test` first (230 unit tests). See [`DESIGN.md`](DES
 ## 🙏 Acknowledgements
 
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — the agent runtime & Web UI this project drives
+- IM channel design references MIT projects such as dsh-im-bridge; balance display paradigm references dms-deepseekbalance (MIT); skills ecosystem is [Claude Skill](https://agentskills.io) compatible (Anthropic)
 - Everyone building community shells and plugins for the ecosystem
+
+---
+
+## 💡 Product Philosophy
+
+<details>
+<summary><b>Not another Harness UI — Harness owns the workspace. DshCockpit owns the operating layer.</b></summary>
+
+DshCockpit is not designed to replace, redesign, or modify the Harness WebUI. Harness owns the workspace (talk to agents, inspect files, write code, complete tasks); DshCockpit owns the **operating layer** around it: monitoring, Quick Ask, background tasks, cost, runtime management, session search, remote control, integrations, and desktop-level automation.
+
+Core interaction principle:
+
+> **Invisible when working. Obvious when needed.**
+
+Three product disciplines:
+
+- **The Cockpit, not the Settings page**: high-frequency capabilities stay visible (Token / Cockpit / Quick Ask / Tasks); status and actions live in the Control Center; Settings is reserved for persistent configuration — *Settings is not a feature hub, it is a configuration center*
+- **Progressive disclosure**: `Default → Peek → Cockpit → Full configuration` — never open a big dashboard to answer a small question
+- **Agent ≠ the current window**: the Agent is a continuously manageable desktop service — background runs, scheduled tasks, remote commands, usage accumulation, runtime updates — independent of whether the workspace is in front
+
+Engineering stays **zero-invasive**: only stable boundaries (HTTP / WebSocket / IPC / filesystem / explicit runtime interfaces), never Harness DOM, CSS, or component internals. Compatibility is a product feature — **Harness can change. DshCockpit should remain useful.**
+
+In one sentence:
+
+> **DshCockpit is a desktop control plane for DeepSeek Harness.**
+> Harness owns the workspace. DshCockpit owns the operating layer.
+
+Full philosophy → [`PHILOSOPHY.md`](PHILOSOPHY.md).
+</details>

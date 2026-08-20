@@ -2,75 +2,59 @@
 
 | 平台 | 文件 |
 |---|---|
-| Windows x64 | `DshCockpit-0.2.4-win-x64.zip` |
-| Apple Silicon（M1/M2/M3/M4） | `DshCockpit-0.2.4-mac-arm64.dmg` |
-| Intel Mac | `DshCockpit-0.2.4-mac-x64.dmg` |
+| Windows x64 | `DshCockpit-0.2.5-win-x64.zip` |
+| Apple Silicon（M1/M2/M3/M4） | `DshCockpit-0.2.5-mac-arm64.dmg` |
+| Intel Mac | `DshCockpit-0.2.5-mac-x64.dmg` |
 
-v0.2.4 是一次**远程操控与生态大版本**：IM 渠道遥控、公网远程、官方余额级计费、模型管理、长会话压缩、技能市场六大新能力一次到位。
+v0.2.5 是一次**桌面控制层重构**：Harness 保持 100% 原生工作区，DshCockpit 通过独立 Cockpit 控制层提供监控、自动化与运行时管理——**不再向 Harness 注入任何 UI**。
 
-## 新功能一：IM 渠道遥控（飞书 / 企业微信 / 钉钉）
+> **Harness owns the workspace. DshCockpit owns the operating layer.**
+> **Invisible when working. Obvious when needed.**
 
-把 Agent 接进你每天都在用的 IM——**任务完成、工具审批、Agent 提问三类事件直接推送到群里**，在 IM 里点按钮就能批准/拒绝审批、回答提问，还能直接发消息让 Agent 后台干活。
+## 新功能一：独立 Cockpit 控制层（Edge Rail）
 
-- 三渠道均走**官方长连接**（飞书长连接 / 企微智能机器人 / 钉钉 Stream Mode），**无需公网 IP、无需端口映射、不经任何第三方服务器**
-- 每个渠道独立白名单（配对准入），陌生联系人无法触达你的 Agent
-- 审批按钮携带**一次性令牌（120 秒有效、用后即焚）**，防重放
-- 渠道凭据全部经系统加密存储（Keychain / DPAPI），不进设置文件、不进备份
-- 设置 → 渠道：分步接入引导（在哪建应用、勾哪些权限一页说清）+ 连接测试
+- 右上角常驻极窄 **Edge Rail**：Token / Context、Cockpit、Settings 三个入口，占用极小、随主窗口锚定，不遮挡 Harness 内容区
+- **Token Peek**：点击即看输入/输出/缓存/上下文压力，底部提供显式 Compact 动作，无需打开完整页面
+- **Cockpit Panel**：Runtime 状态、用量与今日成本、任务概览、Quick Actions（Quick Ask / Tasks / 会话搜索 / 成本 / 运行时 / 远程 / 集成）
+- **Onboarding**：指向真实产品入口（高亮真实 Rail / Token / Cockpit），只引导一次
+- **彻底移除 Harness DOM 注入**：不依赖任何选择器、CSS 类、React 组件内部结构；未来 Harness 改版不影响 Cockpit
 
-> WhatsApp 因官方 API 需要商业验证与公网回调，本版暂未接入（页面留有说明）。
+## 新功能二：Control Center 与 Settings 职责拆分
 
-## 新功能二：公网远程（出门在外也能遥控）
+- **Control Center** 只做状态查看与即时操作（成本 / 任务 / 运行时 / 远程 / 渠道 / 插件技能）
+- **Settings** 只做持久配置（通用 / 模型 / 数据 / 更新 / 关于）
+- 空导航分组自动隐藏；两个入口职责互斥、不再重复
 
-手机遥控突破「同一 Wi-Fi」限制，两种方式任选：
+## 新功能三：Task Peek
 
-- **Tailscale（推荐）**：壳自动检测本机 Tailscale 状态，已登录即生成 `http://100.x.y.z:31780` 配对链接（含二维码）；手机装 Tailscale 登录同账号，4G/5G 下即可完整使用——看会话、发消息、审批、提问
-- **Cloudflare 临时隧道**：一键启动 cloudflared 免费隧道，手机**无需装任何 App**，浏览器打开 trycloudflare.com 链接即用（适合临时场景，地址每次启动会变）
-- 安全默认值：公网模式**默认关闭**，开启需二次确认并展示公共网络警告；开启后配对码有效期收紧至 5 分钟、禁用 IP 兜底会话、审计日志记录所有公网配对事件
+- 从 Cockpit 先看 Running / Scheduled / Completed / Failed 概览，再选择「新建任务」或「完整管理」，一步直达
 
-## 新功能三：官方级计费（余额 + 单轮精确花费）
+## 新功能四：Compact 迁移到 Harness RPC（零 DOM 依赖）
 
-- **账户余额卡片**：接入 DeepSeek 官方接口，实时显示总额 / 赠送余额 / 充值余额与刷新时间，余额不足标红提醒
-- **单轮对话精确花费**：每轮结束显示本轮输入/输出/缓存命中拆分的花费金额与**缓存节省额**
-- **低余额提醒**：低于阈值（预算相关）系统通知一次，不骚扰
-- 单价表升级为 **v4-flash / v4-pro × 峰谷分时**矩阵（与官方 2026-08 分时计价同步），本地估算口径不变
+- `/compact` 从 DOM 注入改为 **session.list + commands/execute 原生 RPC**，自动选择最近活动的非空会话
+- 兼容 rc.7 / rc.8 两种请求形状，只在参数形状错误时回退；网络/权限错误返回可读提示，不盲目重试
+- 即使 Harness 改版布局与组件，压缩能力依然稳定
 
-## 新功能四：模型管理 + 本地模型
+## 新功能五：Runtime 生命周期状态统一
 
-设置新增「模型」子页：
+- 单一状态入口：`healthy / starting / restarting / offline`，覆盖首次启动、手动重启、健康检查、崩溃恢复全路径
+- Cockpit 实时反映运行时状态；单个模块失败不影响整体面板
 
-- 内置 6 家常用第三方模板（硅基流动 / Kimi / 智谱 / 通义 / 火山方舟 / OpenRouter）+ 自定义：填 baseURL 和 Key 即可，**连接测试 + 模型列表拉取**
-- **Ollama 一键接入**：检测到本机 Ollama 自动注册为 provider，本地模型当默认模型用，零成本跑 Agent
-- API Key 系统加密存储，运行时配置热加载（新会话生效，无需重启）
+## 新功能六：Quick Ask 全局快捷键可配置
 
-## 新功能五：长会话管理（压缩 + 记忆文件）
-
-- **一键压缩当前会话**（Token 胶囊右键 / 设置页）：调用运行时原生 `/compact`，完成后显示**前后 token 对比与预估节省金额**
-- 压力预警口径修正：按「最近一次请求的真实上下文占用」计算（此前按全历史累计，长会话下误报偏红）
-- **AGENTS.md 记忆文件管理**：工作区级与全局记忆文件在线编辑，新会话自动生效
-
-## 新功能六：技能（Skills）市场
-
-设置新增「技能」子页，与插件市场同心智：
-
-- 浏览 / 搜索 GitHub 技能生态，**安装前可预览 SKILL.md 全文**（防注入）
-- 兼容 **Claude Skill 格式**（SKILL.md frontmatter 校验，不兼容给可读错误）；支持本地目录导入
-- 安装即生效（运行时热加载，新会话可见），失败自动清理不留半成品
+- 设置 → 通用：`Ctrl+Alt+Space`（默认）/ `Ctrl+Shift+Space` / `Alt+Space` / 禁用
+- 注册失败自动回退旧快捷键并提示，杜绝重复注册
 
 ## 其他改进
 
-- **更新流程加固**：安装 10 分钟硬超时 + Node engines 预检（拒绝不满足要求的运行时）+ 非法版本过滤，杜绝「点击检查更新后程序整个卡住」；「已是最新」时自动收起安装进度框
-- **安装进度实时终端**：更新下载/安装时弹出程序内终端，实时显示阶段与已用秒数（如 `2 packages resolved · 45s`），长安装不再像卡死；安装完成自动同步「应用更新」按钮状态
-- **设置页性能优化**：Token 统计与存储大小改为 TTL 缓存、备份信息改为异步 I/O、页面分区异步渲染互不阻塞——打开设置页不再卡顿（macOS 明显改善，Windows + 杀软环境避免彻底卡死）
-- **插件安装容错**：GitHub 子包探测失败时保留已装结果并正常重启，不再误报「安装失败」；所有插件操作异常统一转为可读错误，不再出现原始报错刷屏
-- **IM 渠道接入教程细化**：三个渠道每个输入框的取值位置、官方后台分步操作（中英文）
-- 测试扩充至 **230 项**（余额/单价矩阵/压缩事件链/技能校验/渠道协议/更新超时与失败/公网安全等 130 项新增），全部通过
-- 敏感文件（令牌库 / 渠道凭据 / 模型 Key）统一 0600 权限原子写；zip 下载加超时保护
-- 渠道/公网/压缩全量 i18n 中英双语文案
+- DshCockpit 自有品牌 Logo，不再借用网站资源
+- 清理废弃 `tokenWidget` 设置、旧 `chrome:*` IPC、DOM 注入桥接与过时文档
+- 测试大幅扩充（Cockpit bounds / snapshot / UI、RPC compact、Runtime 状态、快捷键管理等新增），全部通过
+- Harness 原生工作区与既有核心功能（远程 / 渠道 / 任务 / 成本 / 插件技能）零回归
 
 ## Windows 安装
 
-用 **7-Zip / WinRAR** 解压 `DshCockpit-0.2.4-win-x64.zip` → 双击根目录的 `DshCockpit.exe`。
+用 **7-Zip / WinRAR** 解压 `DshCockpit-0.2.5-win-x64.zip` → 双击根目录的 `DshCockpit.exe`。
 - 内置 dsh 运行时，无需安装 Node/dsh、无需联网下载。
 - 首次启动若 `DSH_HOME` 尚未初始化，会多花约 20–30 秒建立 profile。
 - 若内置运行时被解压工具截断（极少见），应用会自动从 npm registry 兜底安装。
@@ -87,5 +71,3 @@ v0.2.4 是一次**远程操控与生态大版本**：IM 渠道遥控、公网远
 ---
 
 macOS 的 `.zip` 包供 electron-updater 自动更新使用，普通用户下载 `.dmg` 即可。
-
-> 🙏 本版 IM 渠道与公网方案的设计参考了社区开源项目（dsh-im-bridge、dms-deepseekbalance 等，均 MIT），致谢列表见 README。
