@@ -3,6 +3,7 @@
   "version": "0.2.5",
   "description": "Desktop shell for DeepSeek Harness (dsh web): double-click to launch, tray resident, embedded runtime",
   "main": "src/main.js",
+  "runtimeVersion": "0.1.0-rc.8",
   "scripts": {
     "start": "electron .",
     "build": "node scripts/build.js --publish never",

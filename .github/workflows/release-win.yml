@@ -26,22 +26,32 @@ jobs:
 
       - run: npm install
 
-      # Reuse the ~256MB bundled dsh runtime across runs when the seed script
-      # is unchanged. Key is platform-scoped (runtime-win-*) so it never
-      # collides with the mac workflow's cache (sharp binary differs per OS).
+      # Single source of truth for the bundled runtime: package.json
+      # "runtimeVersion". Never "latest from registry" — a DeepSeek rc.9/rc.10
+      # must NOT change what this release bundles.
+      - name: Resolve runtime version
+        id: rtv
+        shell: bash
+        run: echo "runtime_version=$(node -p "require('./package.json').runtimeVersion")" >> "$GITHUB_OUTPUT"
+
+      # Cache the FINAL installed+validated seed (not just the npm download
+      # cache): cold build installs once per OS/arch/version, warm builds skip
+      # npm install entirely. Key is OS+arch+version scoped so a mac arm64 rc.8
+      # seed (sharp/node-pty natives) never collides with Windows x64 rc.8 or
+      # mac arm64 rc.7. v2 = manual cache-schema bump (see scripts/).
       - name: Cache bundled runtime
         uses: actions/cache@v4
         with:
           path: vendor/runtime
-          key: runtime-win-${{ hashFiles('scripts/prepare-runtime.js') }}
+          key: runtime-${{ runner.os }}-${{ runner.arch }}-${{ steps.rtv.outputs.runtime_version }}-v2
 
       # arborist reify of the dsh runtime (sharp etc.) can exceed Node's
-      # default ~2GB V8 heap on CI — raise it for this step (and any build
-      # scripts it spawns) or prepare-runtime OOMs.
+      # default ~2GB V8 heap on CI — raise it for this step only; the packaging
+      # step must not inherit it.
       - name: Prepare bundled runtime
         env:
           NODE_OPTIONS: --max-old-space-size=4096
-        run: node scripts/prepare-runtime.js
+        run: node scripts/prepare-runtime.js --version ${{ steps.rtv.outputs.runtime_version }}
 
       - run: node scripts/build.js --win --x64 --publish never
 

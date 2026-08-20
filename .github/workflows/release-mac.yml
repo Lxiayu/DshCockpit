@@ -32,19 +32,30 @@ jobs:
 
       - run: npm install
 
+      # Single source of truth for the bundled runtime: package.json
+      # "runtimeVersion". Never "latest from registry" — a DeepSeek rc.9/rc.10
+      # must NOT change what this release bundles.
+      - name: Resolve runtime version
+        id: rtv
+        shell: bash
+        run: echo "runtime_version=$(node -p "require('./package.json').runtimeVersion")" >> "$GITHUB_OUTPUT"
+
+      # Cache the FINAL installed+validated seed (not just the npm download
+      # cache): cold build installs once per OS/arch/version, warm builds skip
+      # npm install entirely. v2 = manual cache-schema bump (see scripts/).
       - name: Cache bundled runtime
         uses: actions/cache@v4
         with:
           path: vendor/runtime
-          key: runtime-mac-arm64-${{ hashFiles('scripts/prepare-runtime.js') }}
+          key: runtime-${{ runner.os }}-${{ runner.arch }}-${{ steps.rtv.outputs.runtime_version }}-v2
 
-      # arborist reify of the dsh runtime (sharp etc.) can exceed Node's
-      # default ~2GB V8 heap on CI — raise it for this step (and any build
-      # scripts it spawns) or prepare-runtime OOMs with "abort trap: 6".
+      # NODE_OPTIONS is scoped to this step only (npm cold install on the arm64
+      # runner can exceed Node's default ~2GB heap; the packaging step does not
+      # need it and must not inherit it).
       - name: Prepare bundled runtime
         env:
           NODE_OPTIONS: --max-old-space-size=4096
-        run: node scripts/prepare-runtime.js
+        run: node scripts/prepare-runtime.js --version ${{ steps.rtv.outputs.runtime_version }}
 
       - run: node scripts/build.js --mac --arm64 --publish never
 
@@ -69,16 +80,21 @@ jobs:
 
       - run: npm install
 
+      - name: Resolve runtime version
+        id: rtv
+        shell: bash
+        run: echo "runtime_version=$(node -p "require('./package.json').runtimeVersion")" >> "$GITHUB_OUTPUT"
+
       - name: Cache bundled runtime
         uses: actions/cache@v4
         with:
           path: vendor/runtime
-          key: runtime-mac-x64-${{ hashFiles('scripts/prepare-runtime.js') }}
+          key: runtime-${{ runner.os }}-${{ runner.arch }}-${{ steps.rtv.outputs.runtime_version }}-v2
 
       - name: Prepare bundled runtime
         env:
           NODE_OPTIONS: --max-old-space-size=4096
-        run: node scripts/prepare-runtime.js
+        run: node scripts/prepare-runtime.js --version ${{ steps.rtv.outputs.runtime_version }}
 
       - run: node scripts/build.js --mac --x64 --publish never
 
