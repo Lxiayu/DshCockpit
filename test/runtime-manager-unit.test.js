@@ -6,7 +6,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-
+const { EventEmitter } = require('node:events');
 const { SettingsStore } = require('../src/settings-store');
 const { RuntimeManager } = require('../src/runtime-manager');
 
@@ -57,6 +57,52 @@ test('installVersion returns the managed copy without re-installing', async () =
   manager.saveState();
   const entry = await manager.installVersion('9.9.9');
   assert.strictEqual(entry.source, 'managed'); // no arborist run, no network
+  fs.rmSync(ud, { recursive: true, force: true });
+});
+
+test('installVersion rejects invalid versions before touching the runtime directory', async () => {
+  const { ud, manager } = makeManager();
+  await assert.rejects(manager.installVersion('../escape'), /invalid runtime version/);
+  assert.strictEqual(fs.existsSync(path.join(ud, 'escape')), false);
+  fs.rmSync(ud, { recursive: true, force: true });
+});
+
+test('loadState normalizes malformed collection fields', () => {
+  const { ud, settings } = makeManager();
+  fs.writeFileSync(path.join(ud, 'runtime-state.json'), JSON.stringify({
+    installed: [{ version: 'bad', path: 42, source: 'managed' }, { version: 'ok', path: '/tmp/ok', source: 'managed' }],
+    broken: {}, knownIssues: [],
+  }));
+  const manager = new RuntimeManager({
+    userDataDir: ud,
+    settings,
+    log: () => {},
+    resolveNodeBin: () => ({ bin: process.execPath, runAsNode: false }),
+  });
+  assert.deepStrictEqual(manager.state.installed, [{ version: 'ok', path: '/tmp/ok', source: 'managed' }]);
+  assert.deepStrictEqual(manager.state.broken, []);
+  assert.deepStrictEqual(manager.state.knownIssues, {});
+  fs.rmSync(ud, { recursive: true, force: true });
+});
+
+test('installVersion adopts a complete interrupted install left on disk', async () => {
+  const { ud, manager } = makeManager();
+  const version = '0.1.0-rc.8';
+  const target = path.join(ud, 'runtime', version);
+  fs.mkdirSync(target, { recursive: true });
+  fs.writeFileSync(path.join(target, 'package.json'), JSON.stringify({
+    name: 'dsh-runtime', private: true, dependencies: { '@deepseek-ai/dsh': version },
+  }));
+  fakeInstall(target, version);
+  fs.writeFileSync(path.join(target, 'node_modules', '.package-lock.json'), JSON.stringify({
+    name: 'dsh-runtime', lockfileVersion: 3, packages: { '': { dependencies: { '@deepseek-ai/dsh': version } } },
+  }));
+  manager._installRunner = () => { throw new Error('must not reinstall a complete tree'); };
+
+  const entry = await manager.installVersion(version);
+  assert.strictEqual(entry.source, 'managed');
+  assert.strictEqual(entry.path, target);
+  assert.strictEqual(manager.state.installed.some((e) => e.version === version && e.source === 'managed'), true);
   fs.rmSync(ud, { recursive: true, force: true });
 });
 
@@ -122,6 +168,67 @@ test('installVersion times out when arborist reify stalls', async () => {
   // timeout must not leave a zombie install lock behind (retry is possible)
   assert.strictEqual(manager._installLocks.has(version), false);
   fs.rmSync(ud, { recursive: true, force: true });
+});
+
+test('installVersion cancels the underlying install operation on timeout', async () => {
+  const { ud, manager } = makeManager();
+  manager.installTimeoutMs = 25;
+  let cancelled = 0;
+  let stop;
+  manager._installRunner = () => ({
+    promise: new Promise((_resolve, reject) => { stop = reject; }),
+    cancel: () => { cancelled += 1; stop(new Error('cancelled')); },
+  });
+  await assert.rejects(manager.installVersion('0.1.0-rc.8'), /install timed out after 0s/);
+  assert.strictEqual(cancelled, 1, 'timed out install is actively cancelled');
+  fs.rmSync(ud, { recursive: true, force: true });
+});
+
+test('cancelInstall stops an active install worker and releases its lock', async () => {
+  const { ud, manager } = makeManager();
+  let cancelled = 0;
+  let stop;
+  manager._installRunner = () => ({
+    promise: new Promise((_resolve, reject) => { stop = reject; }),
+    cancel: () => { cancelled += 1; stop(new Error('cancelled by quit')); },
+  });
+  const pending = manager.installVersion('0.1.0-rc.8');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.strictEqual(manager.cancelInstall('0.1.0-rc.8'), true);
+  await assert.rejects(pending, /cancelled by quit/);
+  assert.strictEqual(cancelled, 1);
+  assert.strictEqual(manager.cancelInstall('0.1.0-rc.8'), false);
+  fs.rmSync(ud, { recursive: true, force: true });
+});
+
+test('default installs run Arborist in an isolated Electron Node worker', async () => {
+  const { ud, manager } = makeManager();
+  const calls = [];
+  manager._spawn = (bin, args, opts) => {
+    calls.push({ bin, args, opts });
+    const child = new EventEmitter();
+    child.pid = 4242;
+    child.stderr = new EventEmitter();
+    child.kill = () => {};
+    setImmediate(() => child.emit('close', 0, null));
+    return child;
+  };
+  const entry = await manager.installVersion('0.1.0-rc.8');
+  assert.strictEqual(entry.source, 'managed');
+  assert.strictEqual(calls.length, 1);
+  assert.match(calls[0].args[0], /runtime-install-worker\.js$/);
+  assert.strictEqual(calls[0].opts.env.ELECTRON_RUN_AS_NODE, '1');
+  const workerArgs = JSON.parse(calls[0].args[1]);
+  assert.strictEqual(workerArgs.registry, 'https://registry.npmjs.org/');
+  assert.strictEqual(workerArgs.cacheDir, path.join(ud, 'npm-cache'));
+  fs.rmSync(ud, { recursive: true, force: true });
+});
+
+test('install worker is configured for explicit registry/cache and emits heartbeats', () => {
+  const worker = fs.readFileSync(path.join(__dirname, '..', 'src', 'runtime-install-worker.js'), 'utf8');
+  assert.match(worker, /registry:\s*args\.registry/);
+  assert.match(worker, /cache:\s*args\.cacheDir/);
+  assert.match(worker, /heartbeat/);
 });
 
 test('installVersion reports live progress frames (preparing/installing/finalizing)', async () => {
@@ -296,8 +403,6 @@ test('snapshotDshHome excludes profiles/node_modules', async () => {
 });
 
 // -------------------------------------------------- update failure/timeout
-
-const { EventEmitter } = require('node:events');
 
 /** Spawn stub with a controllable child (mirrors node:child_process). */
 function fakeChild({ exitCode = null, error = null, stdout = '' } = {}) {

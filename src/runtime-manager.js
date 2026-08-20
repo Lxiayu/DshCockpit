@@ -38,7 +38,9 @@ class RuntimeManager {
     this.smokeTimeoutMs = SMOKE_TIMEOUT_MS; // injectable for tests
     this.nodeProbeTimeoutMs = 5_000; // `node --version` probe deadline (tests)
     this._arborist = null; // injectable for tests (defaults to @npmcli/arborist)
+    this._installRunner = null; // injectable install operation for tests
     this._spawn = spawn; // injectable for tests (defaults to node:child_process)
+    this._activeInstalls = new Map(); // version -> cancellable install operation
     this.state = { activeVersion: null, previousVersion: null, pendingVersion: null, installed: [], broken: [], knownIssues: {}, lastSnapshot: null };
     this.loadState();
   }
@@ -47,7 +49,17 @@ class RuntimeManager {
   loadState() {
     try {
       const raw = JSON.parse(fs.readFileSync(this.stateFile, 'utf8'));
-      this.state = { ...this.state, ...raw };
+      const next = { ...this.state, ...(raw && typeof raw === 'object' ? raw : {}) };
+      // A truncated/hand-edited state file must not turn an update into a
+      // type error (or feed an arbitrary path into fs.rmSync below).
+      if (!Array.isArray(next.installed)) next.installed = [];
+      next.installed = next.installed.filter((entry) => entry && typeof entry.version === 'string'
+        && typeof entry.path === 'string'
+        && ['managed', 'bundled', 'bootstrap'].includes(entry.source));
+      if (!Array.isArray(next.broken)) next.broken = [];
+      next.broken = next.broken.filter((version) => typeof version === 'string');
+      if (!next.knownIssues || typeof next.knownIssues !== 'object' || Array.isArray(next.knownIssues)) next.knownIssues = {};
+      this.state = next;
     } catch { /* first run */ }
   }
 
@@ -104,6 +116,38 @@ class RuntimeManager {
     const e = this.entry(version);
     if (!e) return null;
     return fs.existsSync(path.join(e.path, 'node_modules', PACKAGE, 'lib', 'bin.js')) ? e : null;
+  }
+
+  /** A worker can finish writing a tree after the shell is closed. Adopt only
+   * trees with the expected root package, dsh version, lockfile, and bin. */
+  isCompleteInstall(version, targetDir) {
+    try {
+      const root = JSON.parse(fs.readFileSync(path.join(targetDir, 'package.json'), 'utf8'));
+      const dsh = JSON.parse(fs.readFileSync(path.join(targetDir, 'node_modules', PACKAGE, 'package.json'), 'utf8'));
+      const lock = JSON.parse(fs.readFileSync(path.join(targetDir, 'node_modules', '.package-lock.json'), 'utf8'));
+      return root.dependencies && root.dependencies[PACKAGE] === version
+        && dsh.version === version
+        && lock && typeof lock.packages === 'object'
+        && fs.existsSync(path.join(targetDir, 'node_modules', PACKAGE, 'lib', 'bin.js'));
+    } catch {
+      return false;
+    }
+  }
+
+  adoptCompleteInstall(version, onProgress) {
+    const targetDir = path.join(this.runtimeDir, version);
+    if (!this.isCompleteInstall(version, targetDir)) return null;
+    const existing = this.state.installed.find((e) => e.version === version && e.source === 'managed');
+    if (existing && existing.path === targetDir) return existing;
+    this.state.installed = this.state.installed.filter((e) => !(e.version === version && e.source === 'managed'));
+    const entry = { version, path: targetDir, source: 'managed' };
+    this.state.installed.push(entry);
+    this.saveState();
+    this.log(`[runtime] adopted completed install ${version} -> ${targetDir}`);
+    if (typeof onProgress === 'function') {
+      try { onProgress({ stage: 'finalizing', recovered: true, elapsedMs: 0 }); } catch { /* UI must not break recovery */ }
+    }
+    return entry;
   }
 
   /** Whether the active version is served from an owned dir (managed or bundled seed). */
@@ -302,23 +346,28 @@ class RuntimeManager {
 
   // --------------------------------------------------------------- install
   /**
-   * Install a version into runtime/<version> via arborist (respects registry + cache .npmrc).
+   * Install a version into runtime/<version> via Arborist with explicit registry/cache options.
    * @param {string} version
    * @param {(p: {stage: string, pkgCount?: number}) => void} [onProgress] live progress
    *   callback so the UI can render an install console instead of dead air
    *   (the rc runtime is a 60+ package monorepo and can take minutes).
    */
   async installVersion(version, onProgress) {
+    if (typeof version !== 'string' || !semver.valid(version)) {
+      throw new Error(`invalid runtime version: ${String(version)}`);
+    }
     // short-circuit only on a managed copy; a bootstrap path reference is not
     // enough (materialization must actually install into userData)
     const existingManaged = this.state.installed.find((e) => e.version === version && e.source === 'managed');
-    if (existingManaged) {
+    if (existingManaged && this.liveEntry(version)) {
       this.log(`[runtime] version ${version} already installed (managed)`);
       return existingManaged;
     }
     // Dedupe concurrent installs of the same version (guided first-run vs the
     // delayed background update check) so arborist never reifies one dir twice.
     if (this._installLocks.has(version)) return this._installLocks.get(version);
+    const recovered = this.adoptCompleteInstall(version, onProgress);
+    if (recovered) return recovered;
     const promise = this._doInstall(version, onProgress).finally(() => this._installLocks.delete(version));
     this._installLocks.set(version, promise);
     return promise;
@@ -328,6 +377,14 @@ class RuntimeManager {
     const report = (p) => { if (typeof onProgress === 'function') { try { onProgress(p); } catch { /* UI must not break installs */ } } };
     report({ stage: 'preparing' });
     const targetDir = path.join(this.runtimeDir, version);
+    // A previous worker may have been killed after creating a partial tree.
+    // Adopt validated complete trees above; rebuild unknown half-installs.
+    this.state.installed = this.state.installed.filter((e) => !(e.version === version && e.source === 'managed'));
+    if (fs.existsSync(targetDir)) {
+      try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch (err) {
+        throw new Error(`cannot clear interrupted install ${version}: ${err.message}`);
+      }
+    }
     fs.mkdirSync(targetDir, { recursive: true });
     fs.writeFileSync(
       path.join(targetDir, 'package.json'),
@@ -342,7 +399,7 @@ class RuntimeManager {
 
     this.log(`[runtime] installing ${PACKAGE}@${version} -> ${targetDir}`);
     const Arborist = this._arborist || require('@npmcli/arborist');
-    const arb = new Arborist({ path: targetDir });
+    const arb = this._arborist ? new Arborist({ path: targetDir, registry, cache: this.cacheDir }) : null;
     // Deadline around reify(): arborist can stall on a slow registry, a locked
     // npm cache or a broken postinstall hook, and it has no built-in timeout.
     // Without this the "check update" flow hangs forever (force-quit required).
@@ -352,25 +409,62 @@ class RuntimeManager {
     });
     // While reify runs, surface liveness: count resolved top-level packages in
     // node_modules so the console shows progress ("installed N packages…")
-    // instead of dead air. readdirSync on the top level only stays cheap even
-    // for large trees.
+    // instead of dead air. The async probe avoids adding synchronous filesystem
+    // work to the Electron process while npm is busy.
     let pkgCount = 0;
     let probe = null;
+    let probeBusy = false;
     const startedAt = Date.now();
     if (typeof onProgress === 'function') {
       probe = setInterval(() => {
+        if (probeBusy) return;
+        probeBusy = true;
         const nm = path.join(targetDir, 'node_modules');
-        try { pkgCount = fs.readdirSync(nm).length; } catch { /* not created yet */ }
-        // arborist materializes node_modules late; elapsed time is the honest
-        // liveness signal (a bare "0 packages" for minutes looks like a hang)
-        report({ stage: 'installing', pkgCount, elapsedMs: Date.now() - startedAt });
+        fs.promises.readdir(nm).then((entries) => {
+          pkgCount = entries.length;
+        }).catch(() => { /* not created yet */ }).finally(() => {
+          probeBusy = false;
+          // arborist materializes node_modules late; elapsed time is the honest
+          // liveness signal (a bare "0 packages" for minutes looks like a hang)
+          report({ stage: 'installing', pkgCount, elapsedMs: Date.now() - startedAt });
+        });
       }, 500);
     }
+    let operation = null;
+    let cancelRequested = false;
+    let cancelCalled = false;
+    const active = {
+      cancel: () => {
+        if (cancelCalled) return;
+        cancelCalled = true;
+        cancelRequested = true;
+        try { if (operation && typeof operation.cancel === 'function') operation.cancel(); } catch { /* best effort */ }
+      },
+    };
+    this._activeInstalls.set(version, active);
+    let installPromise;
     try {
-      await Promise.race([arb.reify({ save: false }), deadline]);
+      if (this._installRunner) {
+        operation = this._installRunner({ targetDir, registry, cacheDir: this.cacheDir, version, onProgress: report });
+        installPromise = operation && operation.promise ? operation.promise : operation;
+      } else if (arb) {
+        installPromise = arb.reify({ save: false });
+      } else {
+        operation = this._startInstallWorker({ targetDir, registry, cacheDir: this.cacheDir, version, onProgress: report });
+        installPromise = operation.promise;
+      }
+      if (cancelRequested && operation && typeof operation.cancel === 'function') operation.cancel();
+      await Promise.race([installPromise, deadline]);
+    } catch (err) {
+      // A timeout must stop the underlying work as well as reject the caller.
+      // Promise.race alone leaves Arborist/npm running after the UI has given up,
+      // which can keep the Electron process and npm cache under heavy pressure.
+      active.cancel();
+      throw err;
     } finally {
       clearTimeout(timer);
       if (probe) clearInterval(probe);
+      this._activeInstalls.delete(version);
     }
     this.log(`[runtime] install finished for ${version}`);
 
@@ -379,6 +473,77 @@ class RuntimeManager {
     this.saveState();
     report({ stage: 'finalizing', pkgCount, elapsedMs: Date.now() - startedAt });
     return entry;
+  }
+
+  /** Run npm Arborist outside Electron's main process. Arborist performs a
+   * substantial amount of synchronous filesystem/metadata work internally;
+   * keeping it in a child process protects window IPC and rendering from npm
+   * install stalls. The returned cancel() terminates the worker on timeout. */
+  _startInstallWorker({ targetDir, registry, cacheDir, version, onProgress }) {
+    const worker = path.join(__dirname, 'runtime-install-worker.js');
+    // Use Electron's own Node runtime so the worker can require dependencies
+    // from app.asar in packaged builds. The worker performs npm work only; the
+    // active Harness runtime continues to use the user's configured Node bin.
+    const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
+    const child = this._spawn(process.execPath, [worker, JSON.stringify({ targetDir, registry, cacheDir, version })], {
+      cwd: targetDir,
+      env,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    this.log(`[runtime] install worker started pid=${child.pid || 'unknown'} version=${version}`);
+    let settled = false;
+    let stderr = '';
+    let stdout = '';
+    const promise = new Promise((resolve, reject) => {
+      child.stdout && child.stdout.on('data', (d) => {
+        stdout += String(d);
+        const lines = stdout.split(/\r?\n/);
+        stdout = lines.pop() || '';
+        for (const line of lines) {
+          try {
+            const frame = JSON.parse(line);
+            if (frame.type === 'heartbeat' && typeof onProgress === 'function') {
+              onProgress({ stage: 'installing', phase: frame.phase || 'dependency-resolution', elapsedMs: frame.elapsedMs || 0 });
+            }
+          } catch { /* ignore non-protocol worker output */ }
+        }
+      });
+      child.stderr && child.stderr.on('data', (d) => { stderr = (stderr + String(d)).slice(-4000); });
+      child.on('error', (err) => { if (!settled) { settled = true; reject(err); } });
+      child.on('close', (code, signal) => {
+        if (settled) return;
+        settled = true;
+        if (code === 0) resolve();
+        else reject(new Error(stderr.trim() || `runtime install worker exited ${signal || code}`));
+      });
+    });
+    return {
+      promise,
+      cancel: () => {
+        if (settled) return;
+        this.log(`[runtime] stopping install worker pid=${child.pid || 'unknown'}`);
+        try { child.kill('SIGTERM'); } catch { /* ignore */ }
+        setTimeout(() => { try { if (!settled) child.kill('SIGKILL'); } catch { /* ignore */ } }, 2_000).unref?.();
+      },
+    };
+  }
+
+  cancelInstall(version) {
+    const active = this._activeInstalls.get(version);
+    if (!active) return false;
+    active.cancel();
+    return true;
+  }
+
+  cancelAllInstalls() {
+    let count = 0;
+    for (const [version, active] of this._activeInstalls) {
+      active.cancel();
+      count += 1;
+      this.log(`[runtime] cancelled install ${version}`);
+    }
+    return count;
   }
 
   // ------------------------------------------------------------ smoke test

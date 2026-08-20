@@ -48,6 +48,25 @@ function objectLiteral(src, name) {
   throw new Error(`unbalanced braces while slicing the ${name} literal`);
 }
 
+/** Slice a static HTML element by id while balancing nested tags of the same
+ * type. This lets ownership tests assert real containment instead of relying
+ * on a regex that can accidentally cross into a sibling section. */
+function elementById(html, id) {
+  const openRe = new RegExp(`<([a-z][a-z0-9-]*)\\b[^>]*\\bid="${id}"[^>]*>`, 'i');
+  const hit = openRe.exec(html);
+  assert.ok(hit, `#${id} element not found`);
+  const tag = hit[1];
+  const tokenRe = new RegExp(`<\\/?${tag}\\b[^>]*>`, 'gi');
+  tokenRe.lastIndex = hit.index;
+  let depth = 0;
+  let token;
+  while ((token = tokenRe.exec(html))) {
+    depth += token[0][1] === '/' ? -1 : 1;
+    if (depth === 0) return html.slice(hit.index, tokenRe.lastIndex);
+  }
+  throw new Error(`#${id} has no balanced closing </${tag}>`);
+}
+
 /** A CSS custom property is declared in a block body: `--bg:` etc. */
 const hasVar = (block, name) => new RegExp(`--${name}\\s*:`).test(block);
 
@@ -235,6 +254,91 @@ test('settings / loading / quickask / search all link theme.css', () => {
     assert.ok(read(f).includes('<link rel="stylesheet" href="theme.css"'),
       `${f} does not <link> the shared theme.css token source`);
   }
+});
+
+// ------------------------------------- Control Center / Settings separation
+
+test('shared centers use mutually exclusive operation and configuration sections', () => {
+  const sections = {
+    'cost-overview': 'control',
+    'cost-config': 'settings',
+    'runtime-operations': 'control',
+    'runtime-config': 'settings',
+    'remote-operations': 'control',
+    'remote-config': 'settings',
+    'channels-list': 'control',
+    'channels-config': 'settings',
+  };
+  for (const [id, scope] of Object.entries(sections)) {
+    const section = elementById(settingsHtml, id);
+    assert.match(section.split('>')[0], new RegExp(`data-center-scope="${scope}"`), `#${id} has wrong scope`);
+  }
+
+  const costControl = elementById(settingsHtml, 'cost-overview');
+  for (const id of ['balance-status', 'btn-balance-refresh', 'cost-status']) assert.match(costControl, new RegExp(`id="${id}"`));
+  const costConfig = elementById(settingsHtml, 'cost-config');
+  for (const id of ['costInputPerM', 'costPeakWindows', 'monthlyBudget']) assert.match(costConfig, new RegExp(`id="${id}"`));
+
+  const remoteConfig = elementById(settingsHtml, 'remote-config');
+  for (const id of ['remoteControl', 'remotePort', 'remoteCompat', 'remotePublicMode']) assert.match(remoteConfig, new RegExp(`id="${id}"`));
+  const remoteOps = elementById(settingsHtml, 'remote-operations');
+  for (const id of ['btn-remote-pair', 'btn-remote-revoke', 'btn-public-enable', 'btn-public-disable', 'btn-tunnel-start', 'btn-tunnel-stop']) {
+    assert.match(remoteOps, new RegExp(`id="${id}"`));
+  }
+
+  const runtimeOps = elementById(settingsHtml, 'runtime-operations');
+  for (const id of ['btn-runtime-restart', 'btn-check', 'btn-apply', 'btn-rollback', 'install-console']) assert.match(runtimeOps, new RegExp(`id="${id}"`));
+  const runtimeConfig = elementById(settingsHtml, 'runtime-config');
+  for (const id of ['workspace', 'dshHome', 'port', 'contextWindow']) assert.match(runtimeConfig, new RegExp(`id="${id}"`));
+});
+
+test('mode routing hides empty nav groups and reruns visibility after search filtering', () => {
+  assert.match(settingsJs, /const SETTINGS_PAGES = new Set\(\[[^\]]*'cost'/);
+  assert.match(settingsJs, /function syncCenterScopes\(\)/);
+  assert.match(settingsJs, /function syncNavGroups\(\)/);
+  assert.match(settingsJs, /applyCenterMode[\s\S]*syncCenterScopes\(\)[\s\S]*syncNavGroups\(\)/);
+  const searchHandler = settingsJs.slice(settingsJs.indexOf("$('nav-search')"));
+  assert.match(searchHandler, /syncNavGroups\(\)/, 'nav search must recalculate empty group labels');
+  assert.match(settingsJs, /function navGroupHasVisibleItems\(items\)/, 'group visibility should be testable independently');
+});
+
+test('channels render different controls for control and settings modes', () => {
+  assert.match(settingsJs, /function renderChannelOperations\(/);
+  assert.match(settingsJs, /function renderChannelConfiguration\(/);
+  assert.match(settingsJs, /centerMode === 'control'[\s\S]*renderChannelOperations/);
+  assert.match(settingsJs, /centerMode === 'settings'[\s\S]*renderChannelConfiguration/);
+  assert.doesNotMatch(elementById(settingsHtml, 'channels-list'), /credentials|allowFrom/i);
+});
+
+test('moved control operations guard duplicate clicks and refresh authoritative state after failure', () => {
+  assert.match(settingsJs, /async function runControlOperation\(button, operation, refresh\)/);
+  assert.match(settingsJs, /button\.disabled\s*=\s*true/);
+  assert.match(settingsJs, /finally[\s\S]*button\.disabled\s*=\s*false/);
+  assert.match(settingsJs, /catch[\s\S]*await refresh\(\)/);
+});
+
+test('Control Runtime renders all lifecycle states from the main-process contract', () => {
+  assert.match(settingsJs, /const RUNTIME_STATE_KEYS = Object\.freeze\(\{/);
+  for (const state of ['starting', 'healthy', 'restarting', 'offline']) {
+    assert.match(settingsJs, new RegExp(`${state}:\\s*'runtime\\.state`));
+  }
+  assert.match(settingsJs, /RUNTIME_STATE_KEYS\[info\.state\]/);
+  assert.doesNotMatch(settingsJs, /info\.activeVersion\s*\?\s*tr\('runtime\.stateHealthy'/);
+});
+
+test('Quick Ask shortcut is a Settings-only preset with a disabled option and failure rollback', () => {
+  assert.match(settingsHtml, /id="quickAskHotkey"/);
+  assert.match(settingsHtml, /value="CommandOrControl\+Alt\+Space"/);
+  assert.match(settingsHtml, /value="CommandOrControl\+Shift\+Space"/);
+  assert.match(settingsHtml, /value="Alt\+Space"/);
+  assert.match(settingsHtml, /option value=""/);
+  assert.match(settingsJs, /setQuickAskShortcut\(selected\)/);
+  assert.match(settingsJs, /result\.active/);
+  const preload = read('settings-preload.js');
+  assert.match(preload, /getQuickAskShortcut:/);
+  assert.match(preload, /setQuickAskShortcut:/);
+  assert.match(settingsJs, /getQuickAskShortcut\(\)/);
+  assert.match(settingsJs, /active\.active/);
 });
 
 // ------------------------------------------------- automation center (tasks)

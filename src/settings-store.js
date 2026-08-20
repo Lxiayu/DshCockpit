@@ -3,6 +3,8 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { normalizeQuickAskShortcut } = require('./quickask-shortcut');
+const LEGACY_TOKEN_WIDGET_KEY = ['token', 'Widget'].join('');
 
 const DEFAULTS = {
   channel: 'rc',            // rc | latest | pinned
@@ -21,7 +23,7 @@ const DEFAULTS = {
   themeMode: 'system',      // system | dark | light (shell theme)
   backupOnQuit: true,       // back up sessions when quitting
   backupKeep: 5,            // number of backups to retain
-  tokenWidget: true,        // show the in-window token widget
+  cockpitOnboarded: false,  // first-run Cockpit recognition flow completed
   shellAutoUpdate: true,    // auto-check the shell itself for updates
   contextWindow: 128000,    // assumed model context window for the pressure meter
   costInputPerM: 2,         // ¥ per 1M input tokens (estimate, user-adjustable)
@@ -50,7 +52,7 @@ const DEFAULTS = {
 };
 
 const NUMERIC_KEYS = ['keepVersions', 'port', 'contextWindow', 'costInputPerM', 'costOutputPerM', 'costCacheReadPerM', 'costCacheWritePerM', 'costPeakInputPerM', 'costPeakOutputPerM', 'costPeakCacheReadPerM', 'costPeakCacheWritePerM', 'monthlyBudget', 'backupKeep', 'remotePort'];
-const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'tokenWidget', 'shellAutoUpdate', 'costPeakEnabled', 'remoteControl', 'remoteCompat', 'remotePublic'];
+const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'cockpitOnboarded', 'shellAutoUpdate', 'costPeakEnabled', 'remoteControl', 'remoteCompat', 'remotePublic'];
 const STRING_KEYS = ['channel', 'pinnedVersion', 'registry', 'workspace', 'dshHome', 'nodeBin', 'dshBin', 'language', 'themeMode', 'quickAskHotkey', 'costPeakWindows', 'remotePublicMode'];
 const ARRAY_KEYS = ['recentWorkspaces', 'installedPlugins', 'scheduledTasks', 'scheduledHistory', 'modelProviders', 'imChannels'];
 
@@ -65,6 +67,7 @@ class SettingsStore {
     try {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
       this.data = { ...DEFAULTS, ...raw };
+      delete this.data[LEGACY_TOKEN_WIDGET_KEY];
     } catch {
       // first run or corrupt file: keep defaults
     }
@@ -98,7 +101,10 @@ class SettingsStore {
       } else if (BOOLEAN_KEYS.includes(k)) {
         allowed[k] = !!v;
       } else if (STRING_KEYS.includes(k)) {
-        if (typeof v === 'string') allowed[k] = v;
+        if (k === 'quickAskHotkey') {
+          const hotkey = normalizeQuickAskShortcut(v);
+          if (hotkey !== null) allowed[k] = hotkey;
+        } else if (typeof v === 'string') allowed[k] = v;
       } else if (ARRAY_KEYS.includes(k)) {
         if (Array.isArray(v)) allowed[k] = v;
       }

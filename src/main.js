@@ -25,6 +25,7 @@ const http = require('node:http');
 
 const { SettingsStore } = require('./settings-store');
 const { RuntimeManager } = require('./runtime-manager');
+const { createRuntimeStateController } = require('./runtime-state');
 const { t, resolveLanguage } = require('./i18n');
 const { backupNow, backupInfo } = require('./backup');
 const tokenStats = require('./token-stats');
@@ -39,10 +40,14 @@ const { RemoteControl, PAIR_PATH } = require('./remote-control');
 const { createPublicRemote, buildPairUrl } = require('./public-remote');
 const { createModelsManager, PRESETS: MODELS_PRESETS, OLLAMA_PRESET: MODELS_OLLAMA_PRESET } = require('./models-manager');
 const compact = require('./compact');
+const { createHarnessRpcClient } = require('./harness-rpc');
+const { createQuickAskShortcutManager } = require('./quickask-shortcut');
 const { createMemoryFiles } = require('./memory-files');
 const { createPluginOpGuard, failureCode, shouldCleanupAfterFailure, summarizeOutput, inferStage, parsePnpmBlockedPackage, upsertOnlyBuiltDependencies, pickSubpackage, resolveDepKey, pruneBundles, sanitizeProfile } = require('./plugin-flow');
 const { createSkillsManager, buildSkillsMarketPayload } = require('./skills');
 const { createChannelManager } = require('./channels/channel-manager');
+const { computeCockpitBounds } = require('./cockpit-bounds');
+const { buildSnapshot } = require('./cockpit-snapshot');
 const { FeishuChannel } = require('./channels/receivers/feishu');
 const { testFeishuConnection } = require('./channels/senders/feishu');
 const { WecomChannel } = require('./channels/receivers/wecom');
@@ -63,6 +68,7 @@ const KILL_GRACE_MS = 4_000;
 
 let mainWindow = null;
 let settingsWindow = null;
+let cockpitWindow = null;
 let tray = null;
 let runtimeChild = null;
 let runtimeUrl = null;
@@ -71,7 +77,6 @@ let logStream = null;
 let runtimeLogPath = null;
 let urlPollTimer = null;
 let updateInFlight = false;
-let tokenWidgetLogged = false;
 let crashCount = 0;
 let lastCrashAt = 0;
 let eventsFeed = [];
@@ -80,6 +85,7 @@ let lastTaskNotifyAt = 0;
 let eventsFeedLiveLogged = false;
 let windowStateSaveTimer = null;
 let lastCostUpdateAt = 0;
+let latestCostSnapshot = { stats: null, key: '', data: null };
 let quickAskWindow = null;
 let quickAskRunning = false;
 let searchWindow = null;
@@ -97,6 +103,21 @@ let compactTimer = null; // 5-second compaction scan cadence
 let sessionRunning = false; // live host/session-status frames (C3 busy check)
 let guidedInstallInProgress = false;
 let mainWindowPending = false; // guided first-run: runtime booting, main window not open yet
+let cockpitRuntimeState = 'starting';
+const runtimeStateController = createRuntimeStateController({
+  initial: cockpitRuntimeState,
+  onState: (state) => { cockpitRuntimeState = state; },
+  onInvalidate: () => invalidateCockpitSnapshot(),
+  onBroadcast: () => broadcastCockpitSnapshot(),
+});
+let cockpitSyncTimer = null;
+let cockpitMode = 'rail';
+let cockpitOffset = { x: 0, y: 0 };
+let returnToCockpitPending = false;
+let cockpitHiddenForAuxWindow = false;
+let cockpitSnapshotCache = { at: 0, snapshot: null };
+const COCKPIT_SNAPSHOT_TTL_MS = 250;
+let lastLoginItemSetting = null;
 const pluginGuard = createPluginOpGuard(); // one dsh plugin op at a time (profile safety)
 const skillsGuard = createPluginOpGuard(); // one skill install/upgrade at a time (atomic writes)
 const scheduledRunning = new Set();
@@ -104,6 +125,7 @@ const budgetNotified = new Set();
 const materializing = new Set();
 
 const settings = new SettingsStore(app.getPath('userData'));
+const quickAskShortcut = createQuickAskShortcutManager({ globalShortcut, onTrigger: () => openQuickAsk() });
 const noTray = process.env.DSH_DESKTOP_NO_TRAY === '1';
 const lang = () => resolveLanguage(settings.get().language);
 const backupDir = () => path.join(app.getPath('userData'), 'backups');
@@ -119,6 +141,26 @@ const TOKEN_POLL_MS = 5_000;
 function peakWindowsOf(cfg) {
   if (!cfg || !cfg.costPeakEnabled) return null;
   return cost.parseWindows(cfg.costPeakWindows) || cost.DEFAULT_WINDOWS;
+}
+
+/** Register the shell as a login item at most once per effective value. Some
+ * macOS environments reject this API (for example unsigned dev builds); that
+ * warning must never abort settings saves or startup. */
+function syncLoginItemSetting(enabled) {
+  const value = !!enabled;
+  if (lastLoginItemSetting === value || !['darwin', 'win32'].includes(process.platform)) return;
+  if (process.platform === 'darwin' && !app.isPackaged) {
+    // Electron's login-item API is rejected for unsigned development builds;
+    // don't invoke the native API just to emit a predictable warning.
+    lastLoginItemSetting = value;
+    return;
+  }
+  try {
+    app.setLoginItemSettings({ openAtLogin: value });
+    lastLoginItemSetting = value;
+  } catch (err) {
+    log(`[shell] login item update skipped: ${err.message}`);
+  }
 }
 
 /** One collect shared by the 5s poll, manual refresh, cost-info IPC and the
@@ -471,6 +513,7 @@ function selfHealProfile() {
 }
 
 function spawnRuntime() {
+  const generation = runtimeStateController.begin('starting');
   const dshBin = activeDshBin();
   if (!dshBin) {
     dialog.showErrorBox(APP_NAME, t(lang(), 'dialog.noRuntime'));
@@ -487,7 +530,10 @@ function spawnRuntime() {
 
   try { fs.mkdirSync(cwd, { recursive: true }); } catch { /* best effort */ }
 
-  const args = [dshBin, '--profile', 'web', '--port', String(port)];
+  // The Harness web profile opens the system browser by default. DshCockpit
+  // owns the desktop surface, so keep that handoff disabled and load the same
+  // runtime URL in the Electron BrowserWindow below.
+  const args = [dshBin, '--profile', 'web', '--port', String(port), '--no-open'];
   const candidates = nodeCandidates();
 
   // Runtime stdout/stderr go straight into a file via an fd (no pipes; the URL
@@ -520,20 +566,28 @@ function spawnRuntime() {
     try { lastLogText = fs.readFileSync(runtimeLogPath, 'utf8'); } catch { return; }
     const m = lastLogText.match(URL_LINE_RE);
     if (m) {
+      if (!runtimeStateController.isCurrent(generation)) return;
       runtimeUrl = m[1];
       crashCount = 0; // a healthy boot resets the auto-restart counter
       log(`[shell] runtime URL: ${runtimeUrl}`);
       if (remote) remote.setRuntimeUrl(runtimeUrl); // phone gateway follows the runtime port
-      waitForHealth(runtimeUrl).then((ok) => {
-        if (!ok) return;
+      const bootUrl = runtimeUrl;
+      waitForHealth(bootUrl).then((ok) => {
+        if (!runtimeStateController.isCurrent(generation) || runtimeUrl !== bootUrl) return;
+        if (!ok) {
+          runtimeStateController.transition('offline', generation);
+          return;
+        }
+        runtimeStateController.transition('healthy', generation);
         startEventsFeed();
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(runtimeUrl);
-        else createWindow(runtimeUrl);
+        if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.loadURL(bootUrl); createCockpitWindow(); showCockpitInactive(); }
+        else createWindow(bootUrl);
       });
     }
   }, 500);
 
   const fail = (message) => {
+    runtimeStateController.transition('offline', generation);
     if (urlPollTimer) { clearInterval(urlPollTimer); urlPollTimer = null; }
     if (outFd !== -1) { try { fs.closeSync(outFd); } catch { /* ignore */ } outFd = -1; }
     if (!mainWindow) {
@@ -578,6 +632,7 @@ function spawnRuntime() {
         launch();
         return;
       }
+      runtimeStateController.transition('offline', generation);
       fail(t(lang(), 'dialog.spawnFailed', { msg: err.message }));
     });
     child.on('close', (code, signal) => {
@@ -589,6 +644,9 @@ function spawnRuntime() {
       // A superseded child (killed by restart/update/rollback/workspace switch)
       // must NOT touch the NEW child's poller or state (H1).
       if (!wasCurrent || quitting || retrying) return;
+      runtimeUrl = null;
+      if (remote) remote.setRuntimeUrl(null);
+      runtimeStateController.transition('offline', generation);
       if (urlPollTimer) { clearInterval(urlPollTimer); urlPollTimer = null; }
       if (!mainWindow) {
         fail(t(lang(), 'dialog.runtimeDied', { code, signal, path: runtimeLogPath }));
@@ -700,6 +758,15 @@ function createWindow(url) {
     },
   });
 
+  mainWindow.on('show', () => { createCockpitWindow(); syncCockpitBounds(); showCockpitInactive(); });
+  mainWindow.on('restore', () => { createCockpitWindow(); syncCockpitBounds(); showCockpitInactive(); });
+  mainWindow.on('hide', () => hideCockpit());
+  mainWindow.on('minimize', () => hideCockpit());
+  mainWindow.on('maximize', () => syncCockpitBounds());
+  mainWindow.on('unmaximize', () => syncCockpitBounds());
+  mainWindow.on('enter-full-screen', () => { hideCockpit(); setTimeout(() => { syncCockpitBounds(); showCockpitInactive(); }, 80); });
+  mainWindow.on('leave-full-screen', () => { setTimeout(() => { syncCockpitBounds(); showCockpitInactive(); }, 80); });
+
   mainWindow.loadURL(url);
   mainWindow.on('close', (e) => {
     if (!quitting && !noTray && settings.get().trayOnClose && tray) {
@@ -715,16 +782,178 @@ function createWindow(url) {
     if (mainWindow && !mainWindow.isDestroyed()) windowState.save(windowStateFile(), mainWindow.getBounds());
   };
   mainWindow.on('resize', () => {
+    scheduleCockpitSync();
     clearTimeout(windowStateSaveTimer);
     windowStateSaveTimer = setTimeout(saveBounds, 500);
   });
   mainWindow.on('move', () => {
+    scheduleCockpitSync();
     clearTimeout(windowStateSaveTimer);
     windowStateSaveTimer = setTimeout(saveBounds, 500);
   });
   mainWindow.on('close', saveBounds);
 
   if (tray) tray.setToolTip(`${APP_NAME} — ${runtimeUrl || 'starting…'}`);
+  setTimeout(() => { createCockpitWindow(); showCockpitInactive(); }, 0);
+}
+
+function cockpitDisplay() {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  try { return screen.getDisplayMatching(mainWindow.getBounds()); } catch { return screen.getPrimaryDisplay(); }
+}
+
+function syncCockpitBounds() {
+  if (!cockpitWindow || cockpitWindow.isDestroyed() || !mainWindow || mainWindow.isDestroyed()) return;
+  const display = cockpitDisplay();
+  if (!display) return;
+  const bounds = computeCockpitBounds(mainWindow.getBounds(), display.workArea, cockpitMode, undefined, cockpitOffset);
+  cockpitWindow.setBounds(bounds, false);
+}
+
+function scheduleCockpitSync() {
+  clearTimeout(cockpitSyncTimer);
+  cockpitSyncTimer = setTimeout(() => { cockpitSyncTimer = null; syncCockpitBounds(); }, 40);
+}
+
+function showCockpitInactive() {
+  if (!cockpitWindow || cockpitWindow.isDestroyed() || !mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow.isVisible() || mainWindow.isMinimized()) return;
+  // Never place the rail over an active auxiliary or configuration window.
+  if (settingsWindow && !settingsWindow.isDestroyed()) return;
+  if (quickAskWindow && !quickAskWindow.isDestroyed()) return;
+  if (searchWindow && !searchWindow.isDestroyed()) return;
+  syncCockpitBounds();
+  try { cockpitWindow.showInactive(); } catch { cockpitWindow.show(); }
+}
+
+function hideCockpit() {
+  if (cockpitWindow && !cockpitWindow.isDestroyed()) cockpitWindow.hide();
+}
+
+function prepareCockpitForAuxWindow() {
+  // Auxiliary windows temporarily own the foreground. Remember only cases
+  // where the visible main window can safely receive the rail back later.
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized()
+      && !(settingsWindow && !settingsWindow.isDestroyed())) {
+    cockpitHiddenForAuxWindow = true;
+  }
+  cockpitMode = 'rail';
+  hideCockpit();
+}
+
+function restoreCockpitRail() {
+  if (!cockpitHiddenForAuxWindow) return;
+  // Do not reveal the rail underneath another auxiliary or settings window.
+  if (settingsWindow && !settingsWindow.isDestroyed()) return;
+  if (quickAskWindow && !quickAskWindow.isDestroyed()) return;
+  if (searchWindow && !searchWindow.isDestroyed()) return;
+  cockpitHiddenForAuxWindow = false;
+  cockpitMode = 'rail';
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMinimized()) return;
+  createCockpitWindow();
+  showCockpitInactive();
+}
+
+function createCockpitWindow() {
+  if (cockpitWindow && !cockpitWindow.isDestroyed()) return cockpitWindow;
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  cockpitWindow = new BrowserWindow({
+    parent: mainWindow,
+    modal: false,
+    frame: false,
+    transparent: true,
+    show: false,
+    skipTaskbar: true,
+    resizable: false,
+    fullscreenable: false,
+    focusable: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(__dirname, 'cockpit-preload.js'),
+    },
+  });
+  cockpitWindow.loadFile(path.join(__dirname, 'cockpit.html'));
+  cockpitWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+  cockpitWindow.on('will-move', (_event, nextBounds) => {
+    const display = cockpitDisplay();
+    if (!display || !nextBounds) return;
+    const base = computeCockpitBounds(mainWindow.getBounds(), display.workArea, cockpitMode);
+    cockpitOffset = { x: nextBounds.x - base.x, y: nextBounds.y - base.y };
+  });
+  cockpitWindow.on('moved', () => {
+    const display = cockpitDisplay();
+    if (!display || !mainWindow || mainWindow.isDestroyed()) return;
+    const base = computeCockpitBounds(mainWindow.getBounds(), display.workArea, cockpitMode);
+    const current = cockpitWindow.getBounds();
+    cockpitOffset = { x: current.x - base.x, y: current.y - base.y };
+  });
+  cockpitWindow.on('blur', () => {
+    if (cockpitMode !== 'rail' && cockpitMode !== 'onboarding') {
+      cockpitMode = 'rail';
+      cockpitWindow.webContents.send('cockpit:mode', 'rail');
+      syncCockpitBounds();
+    }
+  });
+  cockpitWindow.on('closed', () => { cockpitWindow = null; cockpitMode = 'rail'; });
+  syncCockpitBounds();
+  return cockpitWindow;
+}
+
+function cockpitNavigate(mode, page, intent) {
+  const allowed = {
+    control: ['cost', 'tasks', 'runtime', 'remote', 'plugins', 'skills', 'channels', 'longsession'],
+    settings: ['general', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about'],
+  };
+  const m = mode === 'control' || mode === 'settings' ? mode : 'settings';
+  const p = allowed[m].includes(page) ? page : (m === 'control' ? 'tasks' : 'general');
+  const safeIntent = m === 'control' && p === 'tasks' && intent === 'new-task' ? 'new-task' : '';
+  const route = safeIntent === 'new-task'
+    ? { mode: m, page: p, intent: 'new-task' }
+    : { mode: m, page: p, intent: '' };
+  createSettingsWindow(route);
+  hideCockpit();
+}
+
+function buildCockpitSnapshot() {
+  const now = Date.now();
+  if (cockpitSnapshotCache.snapshot && now - cockpitSnapshotCache.at < COCKPIT_SNAPSHOT_TTL_MS) {
+    return cockpitSnapshotCache.snapshot;
+  }
+  const cfg = settings.get();
+  const runtime = manager.getInfo();
+  let usage = null;
+  let costData = null;
+  try { usage = costCache.data; } catch { /* no-op */ }
+  try { costData = usage ? costSnapshot(usage) : null; } catch { /* no-op */ }
+  const tasks = cfg.scheduledTasks || [];
+  const history = cfg.scheduledHistory || [];
+  const snapshot = buildSnapshot({
+    runtime: { state: cockpitRuntimeState, child: !!runtimeChild, url: runtimeUrl, restarting: cockpitRuntimeState === 'restarting', version: runtime.activeVersion, activeVersion: runtime.activeVersion },
+    usage,
+    contextWindow: cfg.contextWindow,
+    cost: costData,
+    monthlyBudget: cfg.monthlyBudget,
+    tasks,
+    history,
+    running: [...scheduledRunning],
+    remote: remote ? { ...remote.status(), enabled: !!cfg.remoteControl, publicMode: cfg.remotePublicMode } : null,
+    shell: { version: APP_VERSION, language: lang(), theme: resolvedTheme(), needsSetup: !fs.existsSync(path.join(dshHomeOf(), '.credentials.yaml')), onboardingComplete: !!cfg.cockpitOnboarded },
+  });
+  cockpitSnapshotCache = { at: now, snapshot };
+  return snapshot;
+}
+
+function invalidateCockpitSnapshot() {
+  cockpitSnapshotCache.at = 0;
+}
+
+function broadcastCockpitSnapshot() {
+  if (!cockpitWindow || cockpitWindow.isDestroyed()) return;
+  try { cockpitWindow.webContents.send('cockpit:snapshot', buildCockpitSnapshot()); } catch { /* ignore */ }
 }
 
 /** Keep restored bounds at least partially visible on some display. */
@@ -738,8 +967,9 @@ function safeBounds(saved) {
   return ok ? saved : null;
 }
 
-function createSettingsWindow() {
+function createSettingsWindow(route) {
   if (settingsWindow && !settingsWindow.isDestroyed()) {
+    if (route && route.mode) settingsWindow.webContents.send('center:navigate', { mode: route.mode, page: route.page || '', intent: route.intent === 'new-task' ? 'new-task' : '' });
     settingsWindow.focus();
     return settingsWindow;
   }
@@ -761,9 +991,19 @@ function createSettingsWindow() {
       preload: path.join(__dirname, 'settings-preload.js'),
     },
   });
-  settingsWindow.loadFile(path.join(__dirname, 'settings.html'));
+  const query = route && route.mode ? `?mode=${encodeURIComponent(route.mode)}&page=${encodeURIComponent(route.page || '')}${route.intent === 'new-task' ? '&intent=new-task' : ''}` : '';
+  settingsWindow.loadFile(path.join(__dirname, 'settings.html'), { search: query });
   settingsWindow.webContents.on('will-navigate', (e) => e.preventDefault());
-  settingsWindow.on('closed', () => { settingsWindow = null; });
+  settingsWindow.on('closed', () => {
+    settingsWindow = null;
+    const returnPanel = returnToCockpitPending;
+    returnToCockpitPending = false;
+    cockpitMode = returnPanel ? 'panel' : 'rail';
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized()) {
+      createCockpitWindow();
+      showCockpitInactive();
+    }
+  });
   settingsWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
     if (level >= 2) log(`[settings:console] ${message} (${sourceId}:${line})`);
   });
@@ -833,7 +1073,7 @@ function updateTray() {
     { label: t(L, 'tray.open'), click: () => showMain() },
     ...peakItems,
     { label: t(L, 'tray.settings'), click: () => createSettingsWindow() },
-    { label: t(L, 'tray.quickAsk'), accelerator: settings.get().quickAskHotkey || '', click: () => createQuickAsk() },
+    { label: t(L, 'tray.quickAsk'), accelerator: quickAskShortcut.current(), click: () => openQuickAsk() },
     { type: 'separator' },
     {
       label: t(L, 'tray.checkUpdates'),
@@ -908,6 +1148,7 @@ function showMain() {
 
 function restartRuntime() {
   log('[shell] restart requested');
+  runtimeStateController.begin('restarting');
   stopEventsFeed();
   eventsFeedLiveLogged = false;
   if (runtimeChild) { runtimeChild.kill(); runtimeChild = null; }
@@ -937,7 +1178,7 @@ function buildAppMenu() {
       label: t(L, 'menu.file'),
       submenu: [
         { label: t(L, 'tray.settings'), accelerator: 'CmdOrCtrl+,', click: () => createSettingsWindow() },
-        { label: t(L, 'menu.search'), accelerator: 'CmdOrCtrl+K', click: () => createSearchWindow() },
+        { label: t(L, 'menu.search'), accelerator: 'CmdOrCtrl+K', click: () => openSearchWindow() },
         { type: 'separator' },
         { label: t(L, 'tray.quit'), accelerator: 'CmdOrCtrl+Q', click: () => { quitting = true; app.quit(); } },
       ],
@@ -983,16 +1224,18 @@ function broadcastUpdateProgress(p) {
   }
   if (stage === 'installing') {
     const now = Date.now();
-    const pkg = p.pkgCount || 0;
-    if (lastInstLogAt === 0 || (pkg > 0 && pkg !== lastInstPkg) || now - lastInstLogAt >= 10_000) {
+    const pkg = Number.isFinite(p.pkgCount) && p.pkgCount > 0 ? p.pkgCount : null;
+    if (lastInstLogAt === 0 || (pkg !== null && pkg !== lastInstPkg) || now - lastInstLogAt >= 10_000) {
       lastInstLogAt = now;
-      lastInstPkg = pkg;
-      log(`[update] installing: ${pkg} packages · ${Math.round((p.elapsedMs || 0) / 1000)}s`);
+      lastInstPkg = pkg === null ? -1 : pkg;
+      const phase = p.phase === 'scripts' ? 'install scripts' : 'dependency tree';
+      const progress = pkg === null ? phase : `${pkg} packages`;
+      log(`[update] installing: ${progress} · ${Math.round((p.elapsedMs || 0) / 1000)}s`);
     }
   }
 }
 
-async function runUpdateCheck(notifyUser) {
+async function runUpdateCheck(notifyUser, { install = notifyUser } = {}) {
   if (updateInFlight || guidedInstallInProgress) {
     log(`[update] check skipped: already running (inFlight=${updateInFlight} guided=${guidedInstallInProgress})`);
     return { ok: false, reason: 'already running' };
@@ -1014,6 +1257,15 @@ async function runUpdateCheck(notifyUser) {
       }
       updateTray();
       return report;
+    }
+    if (!install) {
+      // Startup checks must remain read-only. Installing a large runtime via
+      // npm while the user is working can consume enough CPU/RAM to make the
+      // shell appear frozen; the tray/settings action is the explicit install
+      // affordance.
+      log(`[update] update available; install deferred until user action (${report.target})`);
+      updateTray();
+      return { ...report, deferred: true };
     }
     notify(t(lang(), 'notify.newVersion'), t(lang(), 'notify.downloading', { a: report.current, b: report.target }));
     // Live progress → every window's update console (a long rc install must
@@ -1184,10 +1436,14 @@ function registerIpc() {
   }));
   ipcMain.handle('shell:save-settings', (_e, partial) => {
     const before = settings.get();
-    const saved = settings.patch(partial || {});
-    app.setLoginItemSettings({ openAtLogin: !!saved.autoStart });
+    const safePartial = { ...(partial || {}) };
+    // Quick Ask owns a registration transaction; generic saves must not be
+    // able to persist a shortcut that was never registered successfully.
+    delete safePartial.quickAskHotkey;
+    const saved = settings.patch(safePartial);
+    if (saved.autoStart !== before.autoStart) syncLoginItemSetting(saved.autoStart);
     // log only the changed keys, never values (M12: no prompts/secrets in logs)
-    log(`[shell] settings saved keys: ${Object.keys(partial || {}).join(', ')}`);
+    log(`[shell] settings saved keys: ${Object.keys(safePartial).join(', ')}`);
     broadcastTheme(); // a saved themeMode override may change every window
     updateTray();
     if (remote && (saved.remoteControl !== before.remoteControl || saved.remotePort !== before.remotePort || saved.remoteCompat !== before.remoteCompat)) {
@@ -1200,6 +1456,13 @@ function registerIpc() {
     }
     return saved;
   });
+  ipcMain.handle('shell:quickask-shortcut-get', () => ({ active: quickAskShortcut.current(), configured: settings.get().quickAskHotkey }));
+  ipcMain.handle('shell:quickask-shortcut-set', (_e, value) => {
+    const result = quickAskShortcut.set(value, (next) => settings.patch({ quickAskHotkey: next }));
+    if (result.ok) updateTray();
+    log(`[shell] quick-ask shortcut ${result.ok ? (result.active || 'disabled') : `FAILED (${result.code})`}`);
+    return result;
+  });
   ipcMain.handle('shell:get-theme', () => resolvedTheme());
   ipcMain.handle('shell:pick-folder', async (_e, kind) => {
     const res = await dialog.showOpenDialog(settingsWindow || mainWindow, {
@@ -1210,7 +1473,7 @@ function registerIpc() {
     });
     return res.canceled ? null : { path: res.filePaths[0] };
   });
-  ipcMain.handle('shell:runtime-info', () => manager.getInfo());
+  ipcMain.handle('shell:runtime-info', () => ({ ...manager.getInfo(), state: cockpitRuntimeState }));
   ipcMain.handle('shell:check-update', () => runUpdateCheck(true));
   ipcMain.handle('shell:apply-update', () => applyPendingUpdate());
   ipcMain.handle('shell:rollback', () => doRollback());
@@ -1496,20 +1759,56 @@ function registerIpc() {
   });
   ipcMain.on('search:close', () => { if (searchWindow) searchWindow.close(); });
 
-  // injected window chrome
-  ipcMain.on('chrome:open-settings', () => createSettingsWindow());
-  ipcMain.on('chrome:refresh-tokens', async () => {
-    try {
-      const stats = await collectStats();
-      pushTokens(stats);
-      costSnapshot(stats);
-    } catch (e) { log(`[shell] manual token refresh failed: ${e.message}`); }
+  ipcMain.handle('cockpit:get-snapshot', () => buildCockpitSnapshot());
+  ipcMain.handle('cockpit:set-mode', (_e, mode) => {
+    cockpitMode = ['rail', 'peek', 'taskpeek', 'panel', 'onboarding'].includes(mode) ? mode : 'rail';
+    syncCockpitBounds();
+    return { ok: true, mode: cockpitMode };
   });
-  ipcMain.on('chrome:set-workspace', (_e, ws) => setWorkspace(ws));
-  ipcMain.on('chrome:report', (_e, info) => {
-    log(`[shell] chrome placed at top=${info.top} right=${info.right} (controls found: ${info.found}, saved pos: ${info.saved})`);
+  ipcMain.handle('cockpit:set-language', (_e, language) => {
+    const value = language === 'en' ? 'en' : 'zh';
+    settings.patch({ language: value });
+    invalidateCockpitSnapshot();
+    broadcastTheme();
+    broadcastCockpitSnapshot();
+    return { ok: true, language: value };
   });
-  ipcMain.on('chrome:compact-now', async () => { await compactNow(); }); // pill context menu (C3)
+  ipcMain.handle('cockpit:move-offset', (_e, dx, dy) => {
+    const x = Number(dx); const y = Number(dy);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return { ok: false };
+    cockpitOffset = { x: Math.max(-2000, Math.min(2000, cockpitOffset.x + x)), y: Math.max(-1200, Math.min(1200, cockpitOffset.y + y)) };
+    syncCockpitBounds();
+    return { ok: true, offset: cockpitOffset };
+  });
+  ipcMain.handle('cockpit:complete-onboarding', () => {
+    settings.patch({ cockpitOnboarded: true });
+    invalidateCockpitSnapshot();
+    broadcastCockpitSnapshot();
+    return { ok: true };
+  });
+  ipcMain.handle('cockpit:open-quick-ask', () => { openQuickAsk(); return { ok: true }; });
+  ipcMain.handle('cockpit:open-search', () => { openSearchWindow(); return { ok: true }; });
+  ipcMain.handle('cockpit:open-center', (_e, mode, page) => { cockpitNavigate(mode, page); return { ok: true }; });
+  ipcMain.handle('cockpit:new-task', () => { cockpitNavigate('control', 'tasks', 'new-task'); return { ok: true }; });
+  ipcMain.handle('cockpit:open-settings', () => { cockpitNavigate('settings', 'general'); return { ok: true }; });
+  ipcMain.handle('cockpit:set-workspace', (_e, ws) => {
+    if (typeof ws !== 'string' || !ws || ws.length > 2048) return { ok: false, reason: 'invalid workspace' };
+    return setWorkspace(ws);
+  });
+  ipcMain.on('cockpit:close', () => hideCockpit());
+  ipcMain.on('center:close', () => { if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close(); });
+  ipcMain.on('center:return-cockpit', () => {
+    if (settingsWindow && !settingsWindow.isDestroyed()) {
+      returnToCockpitPending = true;
+      settingsWindow.close();
+    } else {
+      returnToCockpitPending = false;
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
+    cockpitMode = 'panel';
+    if (cockpitWindow && !cockpitWindow.isDestroyed()) cockpitWindow.webContents.send('cockpit:mode', 'panel');
+    showCockpitInactive();
+  });
 
   // long-session center (C3): compaction + AGENTS.md memory files
   ipcMain.handle('shell:compact-now', async () => compactNow());
@@ -1556,10 +1855,19 @@ let storageCache = { at: 0, data: null };
 const STORAGE_CACHE_TTL_MS = 30_000;
 async function dirSizeMBAsync(p) {
   let total = 0;
-  let entries;
-  try { entries = await fsp.readdir(p, { recursive: true }); } catch { return 0; }
-  for (const f of entries) {
-    try { const st = await fsp.stat(path.join(p, f)); total += st.size; } catch { /* ignore */ }
+  const pending = [p]; let visited = 0;
+  while (pending.length) {
+    const dir = pending.pop();
+    let handle;
+    try { handle = await fsp.opendir(dir); } catch { continue; }
+    try {
+      for await (const ent of handle) {
+        const full = path.join(dir, ent.name);
+        if (ent.isDirectory()) pending.push(full);
+        else if (ent.isFile()) { try { total += (await fsp.stat(full)).size; } catch { /* ignore */ } }
+        if (++visited % 256 === 0) await new Promise((resolve) => setImmediate(resolve));
+      }
+    } finally { try { await handle.close(); } catch { /* ignore */ } }
   }
   return Math.round((total / 1e6) * 10) / 10;
 }
@@ -2251,54 +2559,35 @@ async function pluginAction(action, fullName) {
 function pushTokens(stats) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (!stats) return; // async collect now drives all callers; no sync fallback
-  if (!tokenWidgetLogged) {
-    tokenWidgetLogged = true;
-    log(`[shell] token widget: ${stats.sessionCount} session(s), current in=${stats.current ? stats.current.input : 0} out=${stats.current ? stats.current.output : 0}`);
-  }
-  const needsSetup = !fs.existsSync(path.join(dshHomeOf(), '.credentials.yaml'));
-  const cur = stats.current;
-  const tot = stats.totals;
-  // C3: context pressure = the prompt side of the MOST RECENT request's
-  // usage (stats.current.lastUsage), not the session's cumulative input —
-  // long sessions used to keep the pill yellow/red long after the actual
-  // context had been compacted or was far from full.
-  const pressure = tokenStats.pressureOf(cur);
-  const windowSize = Math.max(1024, settings.get().contextWindow || 128000);
-  const pressurePct = Math.min(100, Math.round((pressure / windowSize) * 100));
-  // Send only what the pill needs — the full sessions array was being
-  // serialized + shipped every tick (perf #4).
-  mainWindow.webContents.send('chrome:tokens', {
-    sessionCount: stats.sessionCount,
-    current: cur, totals: tot,
-    lang: lang(), needsSetup, pressurePct,
-    compacting: compactTracker ? compactTracker.isCompacting() : false,
-  });
+  // The Harness renderer is intentionally untouched. Cockpit consumes the
+  // normalized snapshot from its own window instead of receiving injected UI data.
+  invalidateCockpitSnapshot();
+  broadcastCockpitSnapshot();
 }
 
 // ---------------------------------------------------------------------------
 // long-session center (C3): manual /compact trigger + compaction tracking
 // ---------------------------------------------------------------------------
-/** Trigger `/compact` in the main window's composer (official dsh command
- * path, idle-only upstream). Refused with a readable reason while the agent
- * is running a turn or a compaction is already in progress. */
+/** Trigger `/compact` through the runtime command API. Refused with a readable
+ * reason while the agent is running a turn or a compaction is already in
+ * progress. The target is the latest active non-blank session, independent of
+ * whichever Harness page happens to be visible. */
 async function compactNow() {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    return { ok: false, code: 'no-window', reason: t(lang(), 'compact.noWindow') };
-  }
   if (sessionRunning || (compactTracker && compactTracker.isCompacting())) {
     return { ok: false, code: 'busy', reason: t(lang(), 'compact.busy') };
   }
-  const r = await compact.submitCompactCommand(mainWindow.webContents);
+  if (!runtimeUrl) return { ok: false, code: 'runtime-offline', reason: t(lang(), 'compact.noWindow') };
+  const info = manager.getInfo();
+  const client = createHarnessRpcClient({ baseUrl: runtimeUrl, version: info.activeVersion || '' });
+  const r = await client.compactLatestSession();
   if (!r.ok) {
-    const reason = r.code === 'no-input' || r.code === 'inject'
-      ? t(lang(), 'compact.injectFailed')
-      : t(lang(), 'compact.failedBody', { code: r.code });
-    log(`[compact] trigger failed: ${r.code}${r.detail ? ` (${r.detail})` : ''}`);
+    const reason = t(lang(), 'compact.failedBody', { code: r.code });
+    log(`[compact] RPC trigger failed: ${r.code}${r.reason ? ` (${r.reason})` : ''}`);
     notify(t(lang(), 'compact.failedTitle'), reason);
     return { ok: false, code: r.code, reason };
   }
-  log(`[compact] /compact submitted via composer (${r.selector}, ${r.method})`);
-  return { ok: true, selector: r.selector, method: r.method };
+  log(`[compact] /compact submitted to latest active session (${r.sessionId})`);
+  return { ok: true, sessionId: r.sessionId };
 }
 
 function broadcastCompactStatus() {
@@ -2321,6 +2610,15 @@ function todayMonthKey() {
 function costSnapshot(stats) {
   if (!stats) return; // async collect now drives all callers; no sync fallback
   const cfg = settings.get();
+  const snapshotKey = JSON.stringify({
+    input: cfg.costInputPerM, output: cfg.costOutputPerM,
+    cacheRead: cfg.costCacheReadPerM, cacheWrite: cfg.costCacheWritePerM,
+    peak: cfg.costPeakEnabled, peakInput: cfg.costPeakInputPerM,
+    peakOutput: cfg.costPeakOutputPerM, peakRead: cfg.costPeakCacheReadPerM,
+    peakWrite: cfg.costPeakCacheWritePerM, budget: cfg.monthlyBudget,
+    turn: lastTurn && lastTurn.at,
+  });
+  if (latestCostSnapshot.stats === stats && latestCostSnapshot.key === snapshotKey) return latestCostSnapshot.data;
   const rates = {
     inputPerM: cfg.costInputPerM || 0,
     outputPerM: cfg.costOutputPerM || 0,
@@ -2373,7 +2671,7 @@ function costSnapshot(stats) {
   checkBudget(month.cost);
   const windows = peakWindowsOf(cfg);
   const ps = windows ? cost.peakStatus(Date.now(), windows) : null;
-  return {
+  const result = {
     today: cost.summarize(history, 1),
     week: cost.summarize(history, 7),
     month,
@@ -2388,6 +2686,8 @@ function costSnapshot(stats) {
       outputRate: peakEnabled && ps && ps.peak ? peakRates.outputPerM : rates.outputPerM,
     },
   };
+  latestCostSnapshot = { stats, key: snapshotKey, data: result };
+  return result;
 }
 
 function checkBudget(monthCost) {
@@ -2591,8 +2891,16 @@ function createQuickAsk() {
   quickAskWindow.loadFile(path.join(__dirname, 'quickask.html'));
   quickAskWindow.webContents.on('will-navigate', (e) => e.preventDefault());
   quickAskWindow.once('ready-to-show', () => quickAskWindow.show());
-  quickAskWindow.on('closed', () => { quickAskWindow = null; });
+  quickAskWindow.on('closed', () => {
+    quickAskWindow = null;
+    restoreCockpitRail();
+  });
   return quickAskWindow;
+}
+
+function openQuickAsk() {
+  prepareCockpitForAuxWindow();
+  return createQuickAsk();
 }
 
 function createSearchWindow() {
@@ -2620,8 +2928,16 @@ function createSearchWindow() {
   searchWindow.loadFile(path.join(__dirname, 'search.html'));
   searchWindow.webContents.on('will-navigate', (e) => e.preventDefault());
   searchWindow.once('ready-to-show', () => searchWindow.show());
-  searchWindow.on('closed', () => { searchWindow = null; });
+  searchWindow.on('closed', () => {
+    searchWindow = null;
+    restoreCockpitRail();
+  });
   return searchWindow;
+}
+
+function openSearchWindow() {
+  prepareCockpitForAuxWindow();
+  return createSearchWindow();
 }
 
 // ---------------------------------------------------------------------------
@@ -2758,15 +3074,9 @@ function hasBrokenBundle() {
 }
 
 function registerQuickAskHotkey() {
-  const hotkey = settings.get().quickAskHotkey;
-  if (!hotkey) return;
-  try {
-    globalShortcut.unregister(hotkey);
-    const ok = globalShortcut.register(hotkey, () => createQuickAsk());
-    log(`[shell] quick-ask hotkey ${ok ? 'registered' : 'FAILED'}: ${hotkey}`);
-  } catch (e) {
-    log(`[shell] quick-ask hotkey error: ${e.message}`);
-  }
+  const result = quickAskShortcut.start(settings.get().quickAskHotkey);
+  log(`[shell] quick-ask shortcut ${result.ok ? (result.active || 'disabled') : `FAILED (${result.code})`}`);
+  return result;
 }
 
 async function handleQuickAskSubmit(prompt) {
@@ -2797,6 +3107,8 @@ function broadcastScheduled() {
   for (const w of BrowserWindow.getAllWindows()) {
     try { if (!w.isDestroyed()) w.webContents.send('scheduled:changed'); } catch { /* ignore */ }
   }
+  invalidateCockpitSnapshot();
+  broadcastCockpitSnapshot();
 }
 
 /** Run one scheduled task headlessly, record history, notify. Shared by the
@@ -3202,7 +3514,7 @@ if (!gotLock) {
     channelsMgr.startEnabled();
     broadcastTheme(); // push the resolved theme once settings are ready
     // Registry write on Windows; not needed before the first window.
-    setTimeout(() => app.setLoginItemSettings({ openAtLogin: !!settings.get().autoStart }), 3_000);
+    setTimeout(() => syncLoginItemSetting(settings.get().autoStart), 3_000);
     createTray();
     // refresh the tray's peak/off-peak countdown line once a minute (the
     // menu is only rebuilt when split pricing is actually enabled)
@@ -3262,9 +3574,8 @@ if (!gotLock) {
         if (!quitting) setTimeout(pollTokens, TOKEN_POLL_MS);
       }
     };
-    if (settings.get().tokenWidget) {
-      setTimeout(pollTokens, 2_000);
-    }
+    // Context is a core Cockpit rail signal, so polling stays active.
+    setTimeout(pollTokens, 2_000);
     setTimeout(async () => {
       const stats = await collectStats();
       costSnapshot(stats);
@@ -3277,7 +3588,7 @@ if (!gotLock) {
 
     // background update check (does not block boot)
     if (settings.get().checkUpdatesOnStartup) {
-      setTimeout(() => { runUpdateCheck(false); }, 15_000);
+      setTimeout(() => { runUpdateCheck(false, { install: false }); }, 15_000);
     }
   });
 
@@ -3313,6 +3624,7 @@ if (!gotLock) {
         log(`[shell] quit backup failed: ${err.message}`);
       }
     }
+    manager.cancelAllInstalls();
     killRuntime();
   });
 
@@ -3320,7 +3632,7 @@ if (!gotLock) {
     if (trayPeakTimer) { clearInterval(trayPeakTimer); trayPeakTimer = null; }
     if (balanceTimer) { clearInterval(balanceTimer); balanceTimer = null; }
     if (compactTimer) { clearInterval(compactTimer); compactTimer = null; }
-    globalShortcut.unregisterAll();
+    quickAskShortcut.shutdown();
     if (scheduler) scheduler.stop();
     if (remote) remote.stop();
     if (publicRemote) publicRemote.stopTunnel(); // C7: cloudflared child never outlives the app (taskkill /T /F inside)

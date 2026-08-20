@@ -4,4 +4,6 @@ out/
 *.log
 .DS_Store
 .trial/
+.superpowers/
+docs/
 vendor/runtime/

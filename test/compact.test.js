@@ -101,24 +101,15 @@ test('estimateSavings prices the saved context at cost.js rates (miss/hit blend,
   assert.strictEqual(none.savedYuan, 0);
 });
 
-// ------------------------------------------------- selector table fallback
+// ------------------------------------------------- stable runtime trigger gate
 
-test('firstMatch degrades through the selector table (null and throwing selectors skipped)', () => {
-  const table = ['a', 'b', 'c', 'd'];
-  const queries = { a: () => null, b: () => { throw new Error('bad selector'); }, c: () => ({ tag: 'el' }) };
-  const hit = compact.firstMatch(table, (s) => queries[s]());
-  assert.deepStrictEqual(hit, { selector: 'c', el: { tag: 'el' } });
-  assert.strictEqual(compact.firstMatch(['x'], () => null), null);
-});
-
-test('buildInjectScript embeds the selector table, native value setter and Enter fallback', () => {
-  const script = compact.buildInjectScript(['textarea.x'], ['button.y']);
-  assert.ok(script.includes(JSON.stringify(['textarea.x'])));
-  assert.ok(script.includes(JSON.stringify(['button.y'])));
-  assert.ok(script.includes("'/compact'"));
-  assert.ok(script.includes('HTMLTextAreaElement.prototype')); // React-controlled setter
-  assert.ok(script.includes('KeyboardEvent'));                 // Enter fallback path
-  assert.ok(script.includes('no-input'));                      // readable failure code
+test('compact trigger is isolated from Harness DOM selectors and wired through runtime RPC', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'compact.js'), 'utf8');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8');
+  assert.doesNotMatch(source, /COMPACT_INPUT_SELECTORS|COMPACT_SEND_SELECTORS|buildInjectScript|executeJavaScript/);
+  assert.match(main, /createHarnessRpcClient\(/);
+  assert.match(main, /compactLatestSession\(\)/);
+  assert.doesNotMatch(main, /compact\.submitCompactCommand/);
 });
 
 // ------------------------------------------------- AGENTS.md whitelist

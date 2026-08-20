@@ -2,11 +2,8 @@
 // tracking (v0.2.4 C3).
 //
 // dsh ships a full native compaction stack (dsh-compaction +
-// dsh-compaction-basic + dsh-command-compact; `/compact` in the web composer,
-// no arguments, idle-only, auto-compaction at a ~0.8 pressure ratio). The
-// shell stays thin on top of it:
-//   - trigger: drive the web UI's composer to submit `/compact` through the
-//     official command channel (selector table below, degrade one by one)
+// dsh-compaction-basic + dsh-command-compact; `/compact` is idle-only,
+// auto-compaction runs at a ~0.8 pressure ratio). The shell stays thin on top:
 //   - tracking: scan the active session JSONL for the event chain
 //     compaction/start -> compaction/summary (token accounting) ->
 //     user/message(surfaceOp:replace) -> compaction/end, and report the
@@ -21,87 +18,6 @@ const cost = require('./cost');
 const tokenStats = require('./token-stats');
 
 const HISTORY_MAX = 20;
-
-// ---------------------------------------------------------------------------
-// composer selector table — dsh web is a React SPA; candidates are ordered
-// from most to least specific and tried one by one so a front-end rework
-// only needs this table updated (research report §4.2).
-// ---------------------------------------------------------------------------
-const COMPACT_INPUT_SELECTORS = [
-  'textarea[placeholder]:not([disabled])',
-  'form textarea:not([disabled])',
-  'textarea:not([disabled])',
-  '[role="textbox"][contenteditable="true"]',
-  '[contenteditable="true"]',
-  'input[type="text"]:not([disabled])',
-];
-const COMPACT_SEND_SELECTORS = [
-  'button[type="submit"]:not([disabled])',
-  'button[aria-label*="send" i]:not([disabled])',
-  'form button:not([disabled])',
-];
-
-/** First selector that `queryFn` resolves to a truthy element (degrade one
- * by one); null when nothing matches. Pure — reused by tests. */
-function firstMatch(selectors, queryFn) {
-  for (const s of selectors) {
-    let el = null;
-    try { el = queryFn(s); } catch { el = null; }
-    if (el) return { selector: s, el };
-  }
-  return null;
-}
-
-/** Serialize the composer-driving script (runs inside the dsh web page).
- * Writes `/compact` through the native value setter (React-controlled
- * inputs only fire onChange that way), then clicks a send button when one
- * is enabled, else synthesizes Enter. Resolves {ok, selector, method}. */
-function buildInjectScript(inputs, sends) {
-  const INPUTS = JSON.stringify(inputs || COMPACT_INPUT_SELECTORS);
-  const SENDS = JSON.stringify(sends || COMPACT_SEND_SELECTORS);
-  return `(() => {
-  const INPUTS = ${INPUTS};
-  const SENDS = ${SENDS};
-  const visible = (el) => !!el && !el.disabled && !el.hidden
-    && (el.offsetParent !== null || el.getClientRects().length > 0);
-  const find = (sels) => {
-    for (const s of sels) { const el = document.querySelector(s); if (visible(el)) return { el, s }; }
-    return null;
-  };
-  const input = find(INPUTS);
-  if (!input) return { ok: false, code: 'no-input' };
-  const el = input.el;
-  const value = '/compact';
-  if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
-    const proto = el.tagName === 'TEXTAREA'
-      ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
-    Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value);
-  } else {
-    el.textContent = value;
-  }
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-  const btn = find(SENDS);
-  if (btn) {
-    try { btn.el.click(); return { ok: true, selector: input.s, method: 'click' }; } catch (e) { /* fall through */ }
-  }
-  const ke = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
-  el.dispatchEvent(new window.KeyboardEvent('keydown', ke));
-  el.dispatchEvent(new window.KeyboardEvent('keyup', ke));
-  return { ok: true, selector: input.s, method: 'enter' };
-})()`;
-}
-
-/** Submit `/compact` in a window's composer (official command path). */
-async function submitCompactCommand(webContents) {
-  let res;
-  try {
-    res = await webContents.executeJavaScript(buildInjectScript(), false);
-  } catch (e) {
-    return { ok: false, code: 'inject', detail: e && e.message };
-  }
-  if (res && res.ok) return { ok: true, selector: res.selector, method: res.method };
-  return { ok: false, code: (res && res.code) || 'inject', detail: res && res.detail };
-}
 
 // ---------------------------------------------------------------------------
 // compaction event chain (session JSONL scanner)
@@ -385,11 +301,6 @@ function createTracker(opts) {
 
 module.exports = {
   HISTORY_MAX,
-  COMPACT_INPUT_SELECTORS,
-  COMPACT_SEND_SELECTORS,
-  firstMatch,
-  buildInjectScript,
-  submitCompactCommand,
   promptSide,
   scanCompactions,
   estimateSavings,

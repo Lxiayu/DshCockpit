@@ -19,6 +19,11 @@
   #sidebar { width: 208px; flex-shrink: 0; background: var(--bg-panel);
     border-right: 1px solid var(--border-1); display: flex; flex-direction: column; }
   #content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #center-bar { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:42px; padding:8px 14px; border-bottom:1px solid var(--border-1); }
+  #center-bar h1 { margin:0; font-size:13px; color:var(--text-1); }
+  #center-bar .center-actions { display:flex; gap:5px; }
+  #center-bar button { width:28px; height:28px; border:0; border-radius:7px; background:var(--bg-hover); color:var(--text-2); cursor:pointer; }
+  #center-bar button:hover, #center-bar button:focus-visible { color:var(--text-1); outline:1px solid var(--acc); }
   #pages { flex: 1; overflow-y: auto; padding: 28px 32px 40px; scroll-behavior: smooth; }
   .page { max-width: 680px; margin: 0 auto; display: none; }
   .page.active { display: block; animation: pageIn 200ms var(--ease); }
@@ -339,6 +344,7 @@
   .term .err { color: #F87171; }
   #install-stage { font-weight: 600; }
   #install-stage::before { content: '▸ '; color: var(--acc); }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
@@ -372,6 +378,7 @@
 
   <!-- ============================== content ============================== -->
   <div id="content">
+    <div id="center-bar"><h1 id="center-title">DshCockpit</h1><div class="center-actions"><button id="center-return" title="Return to Cockpit" aria-label="Return to Cockpit">↩</button><button id="center-close" title="Close" aria-label="Close">×</button></div></div>
     <div id="pages">
 
       <!-- ------------------------- page: general (was 应用) -->
@@ -388,6 +395,20 @@
           <div class="setting">
             <div class="setting-info"><label data-i18n="autoStart">开机自启</label></div>
             <div class="setting-ctrl"><input type="checkbox" class="toggle" id="autoStart" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="quickAskHotkey">Quick Ask 全局快捷键</label>
+              <span class="desc" data-i18n="quickAskHotkey.hint">在 Harness 之外快速唤起，不影响当前工作区。</span>
+            </div>
+            <div class="setting-ctrl">
+              <select id="quickAskHotkey">
+                <option value="CommandOrControl+Alt+Space" data-i18n="quickAskHotkey.default">Ctrl/Cmd + Alt + Space</option>
+                <option value="CommandOrControl+Shift+Space" data-i18n="quickAskHotkey.alternate">Ctrl/Cmd + Shift + Space</option>
+                <option value="Alt+Space" data-i18n="quickAskHotkey.alt">Alt + Space</option>
+                <option value="" data-i18n="quickAskHotkey.disabled">禁用</option>
+              </select>
+            </div>
           </div>
           <div class="setting">
             <div class="setting-info"><label data-i18n="language">界面语言</label></div>
@@ -428,16 +449,24 @@
           <h2 data-i18n="nav.cost">用量与成本</h2>
           <p data-i18n="page.cost.d">API 费率、峰谷分时与预算</p>
         </div>
-        <div class="card">
-          <h3 data-i18n="card.balance">账户余额（官方）</h3>
-          <div class="status" id="balance-status"></div>
-          <div class="setting">
-            <div class="setting-info">
-              <span class="desc" data-i18n="balance.hint">官方数据，与本地估算口径可能有差异（赠款 / 失败请求）。</span>
+        <div id="cost-overview" data-center-scope="control">
+          <div class="card">
+            <h3 data-i18n="card.balance">账户余额（官方）</h3>
+            <div class="status" id="balance-status"></div>
+            <div class="setting">
+              <div class="setting-info">
+                <span class="desc" data-i18n="balance.hint">官方数据，与本地估算口径可能有差异（赠款 / 失败请求）。</span>
+              </div>
+              <div class="setting-ctrl"><button class="secondary" id="btn-balance-refresh" data-i18n="btn.balanceRefresh">刷新余额</button></div>
             </div>
-            <div class="setting-ctrl"><button class="secondary" id="btn-balance-refresh" data-i18n="btn.balanceRefresh">刷新余额</button></div>
+          </div>
+          <div class="card">
+            <h3 data-i18n="card.costUsage">用量统计</h3>
+            <div class="status" id="cost-status"></div>
+            <div class="note" data-i18n="cost.ratesHint">费用按你配置的价格估算，仅供参考，不构成实际计费。</div>
           </div>
         </div>
+        <div id="cost-config" data-center-scope="settings">
         <div class="card">
           <h3 data-i18n="card.costRates">谷时费率（默认）</h3>
           <div class="setting">
@@ -494,10 +523,6 @@
             <div class="setting-ctrl"><input type="number" id="costPeakCacheWritePerM" min="0" step="0.1" /></div>
           </div>
         </div>
-        <div class="card">
-          <h3 data-i18n="card.costUsage">用量统计</h3>
-          <div class="status" id="cost-status"></div>
-          <div class="note" data-i18n="cost.ratesHint">费用按你配置的价格估算，仅供参考，不构成实际计费。</div>
         </div>
       </div>
 
@@ -643,6 +668,32 @@
           <h2 data-i18n="nav.runtime">运行时</h2>
           <p data-i18n="page.runtime.d">工作区、端口与可执行文件路径</p>
         </div>
+        <div id="runtime-operations" data-center-scope="control">
+          <div class="card">
+            <h3 data-i18n="nav.runtime">运行时</h3>
+            <div class="kv"><span data-i18n="runtime.liveState">当前状态</span><b id="runtime-live-state">--</b></div>
+            <div class="kv"><span data-i18n="about.runtime">当前运行时</span><b id="runtime-live-version">--</b></div>
+            <div class="btnrow">
+              <button class="secondary" id="btn-runtime-restart" data-i18n="plugins.restartNow">立即重启</button>
+            </div>
+            <div class="status" id="runtime-operation-status"></div>
+          </div>
+          <div class="card">
+            <h3 data-i18n="card.updateOps">版本操作</h3>
+            <div class="btnrow">
+              <button id="btn-check" data-i18n="btn.check">检查更新</button>
+              <button id="btn-apply" disabled data-i18n="btn.apply">应用更新</button>
+              <button id="btn-rollback" class="secondary" disabled data-i18n="btn.rollback">回滚到上一版本</button>
+            </div>
+            <div class="status" id="update-status"></div>
+          </div>
+          <div class="card" id="install-console-card" style="display:none">
+            <h3 data-i18n="card.installConsole">安装进度</h3>
+            <div class="status" id="install-stage"></div>
+            <pre id="install-console" class="term" aria-live="polite"></pre>
+          </div>
+        </div>
+        <div id="runtime-config" data-center-scope="settings">
         <div class="card">
           <div class="setting">
             <div class="setting-info">
@@ -691,11 +742,12 @@
           <div class="setting">
             <div class="setting-info">
               <label data-i18n="settings.contextWindow">上下文窗口（估算）</label>
-              <span class="desc" data-i18n="settings.contextWindowHint">token 胶囊的「上下文压力」按此值估算；DeepSeek 模型通常 64k–128k</span>
+              <span class="desc" data-i18n="settings.contextWindowHint">Cockpit 的 Context 指示器按此值估算压力；DeepSeek 模型通常 64k–128k</span>
             </div>
             <div class="setting-ctrl"><input type="number" id="contextWindow" min="1024" max="10000000" step="1024" /></div>
           </div>
           <div class="note" data-i18n="runtime.hint">工作区 / DSH_HOME / 端口 / Node / dsh 路径的修改将在下次重启运行时后生效（托盘 → 重启运行时）。</div>
+        </div>
         </div>
       </div>
 
@@ -819,6 +871,7 @@
           <h2 data-i18n="nav.remote">手机远程</h2>
           <p data-i18n="page.remote.d">在手机浏览器中安全使用本机会话</p>
         </div>
+        <div id="remote-config" data-center-scope="settings">
         <div class="card">
           <div class="setting">
             <div class="setting-info">
@@ -837,7 +890,22 @@
             </div>
             <div class="setting-ctrl"><input type="checkbox" class="toggle" id="remoteCompat" /></div>
           </div>
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="remote.publicMode">访问模式</label>
+              <div class="note" data-i18n="remote.publicModeHint">公网模式默认关闭：开启需二次确认，且配对码有效期收紧为 5 分钟、停用无 Cookie 兜底会话</div>
+            </div>
+            <div class="setting-ctrl">
+              <select id="remotePublicMode" style="width:220px">
+                <option value="lan" data-i18n="remote.publicLan">仅局域网（默认）</option>
+                <option value="tailscale" data-i18n="remote.publicTs">Tailscale 公网</option>
+                <option value="cloudflare" data-i18n="remote.publicCf">Cloudflare 临时隧道</option>
+              </select>
+            </div>
+          </div>
         </div>
+        </div>
+        <div id="remote-operations" data-center-scope="control">
         <div class="card">
           <div class="note" data-i18n="remote.hint">手机与本机连同一 Wi-Fi；开关与端口改动即存即生效，再把下方配对链接发到手机、用浏览器打开，之后可完整使用会话、审批、提问</div>
           <div class="btnrow">
@@ -853,19 +921,6 @@
 
         <!-- ------------------ C7: public remote (Tailscale / cloudflared) -->
         <div class="card">
-          <div class="setting">
-            <div class="setting-info">
-              <label data-i18n="remote.publicMode">访问模式</label>
-              <div class="note" data-i18n="remote.publicModeHint">公网模式默认关闭：开启需二次确认，且配对码有效期收紧为 5 分钟、停用无 Cookie 兜底会话</div>
-            </div>
-            <div class="setting-ctrl">
-              <select id="remotePublicMode" style="width:220px">
-                <option value="lan" data-i18n="remote.publicLan">仅局域网（默认）</option>
-                <option value="tailscale" data-i18n="remote.publicTs">Tailscale 公网</option>
-                <option value="cloudflare" data-i18n="remote.publicCf">Cloudflare 临时隧道</option>
-              </select>
-            </div>
-          </div>
           <div class="btnrow">
             <button class="danger" id="btn-public-enable" data-i18n="remote.btnPublicOn">开启公网访问</button>
             <button class="secondary" id="btn-public-disable" style="display:none" data-i18n="remote.btnPublicOff">关闭公网访问</button>
@@ -892,6 +947,7 @@
         </div>
         <div class="note" data-i18n="remote.note">安全说明：默认开启「微信/抖音打开兼容模式」时网关走明文 HTTP，配对码与长期令牌在局域网内明文传输（微信、抖音内置浏览器无法打开自签名 HTTPS，故提供此模式）；关闭兼容模式后为自签名 HTTPS，手机首次访问会提示「不受信任」，系统浏览器选择继续访问即可。配对码 10 分钟内一次性有效；长期令牌经系统加密存储、不进入设置与备份。运行时本身仍只监听 127.0.0.1，局域网只能到达此网关。请勿在公共网络下开启。</div>
         <div class="note" data-i18n="remote.publicNote">公网模式安全说明：Tailscale 路线零公网暴露（流量 WireGuard 端到端加密，仅 tailnet 内设备可达）；Cloudflare 临时隧道无账号、免装 App，但 URL 每次启动变化、无 SLA、200 并发上限，仅适合临时分享。公网模式下：配对码有效期收紧为 5 分钟；无 Cookie 浏览器的 IP 兜底会话被禁用（仅令牌 Cookie 有效）；防爆破锁定与审计按真实来源 IP（仅信任本机代理注入的 X-Forwarded-For / CF-Connecting-IP）记录；配对与吊销事件写入审计日志（不含令牌与配对码）。手机装 Tailscale 并登录同账号后，4G/公网与 Wi-Fi 无感切换、会话不丢。</div>
+        </div>
       </div>
 
       <!-- ------------------------- page: channels (IM 渠道 C5) -->
@@ -903,7 +959,8 @@
         <div class="card">
           <div class="note" data-i18n="channels.note">消息由本机直连各平台（出站长连接，无需公网 IP），不经过任何第三方服务器；渠道凭据经系统加密存储，不进入设置与备份。审批与提问按钮带一次性令牌，120 秒内有效。</div>
         </div>
-        <div id="channels-list"></div>
+        <div id="channels-list" data-center-scope="control"></div>
+        <div id="channels-config" data-center-scope="settings"></div>
       </div>
 
       <!-- ------------------------- page: data (was 数据与安全) -->
@@ -1008,22 +1065,6 @@
             <div class="setting-ctrl"><input type="checkbox" class="toggle" id="checkUpdatesOnStartup" /></div>
           </div>
         </div>
-        <div class="card">
-          <h3 data-i18n="card.updateOps">版本操作</h3>
-          <div class="btnrow">
-            <button id="btn-check" data-i18n="btn.check">检查更新</button>
-            <button id="btn-apply" disabled data-i18n="btn.apply">应用更新</button>
-            <button id="btn-rollback" class="secondary" disabled data-i18n="btn.rollback">回滚到上一版本</button>
-          </div>
-          <div class="status" id="update-status"></div>
-        </div>
-        <!-- runtime install console: live progress so a long rc install never
-             looks like a hang (preparing → installing N packages… → smoke) -->
-        <div class="card" id="install-console-card" style="display:none">
-          <h3 data-i18n="card.installConsole">安装进度</h3>
-          <div class="status" id="install-stage"></div>
-          <pre id="install-console" class="term" aria-live="polite"></pre>
-        </div>
       </div>
 
       <!-- ------------------------- page: about (was 关于 + 首次使用) -->
@@ -1035,9 +1076,9 @@
         <div class="card firstrun-card" id="sec-firstrun" style="display:none">
           <h3 data-i18n="sec.firstrun">首次使用</h3>
           <ol>
-            <li data-i18n="firstrun.step1">在窗口的 Harness 界面中打开「设置」，配置 DeepSeek API Key</li>
-            <li data-i18n="firstrun.step2">回到此窗口，选择工作区目录（或把文件夹拖到右上角工具条）</li>
-            <li data-i18n="firstrun.step3">开始对话；右上角胶囊会实时显示 token 用量</li>
+            <li data-i18n="firstrun.step1">在 Harness 工作区完成 DeepSeek API 配置</li>
+            <li data-i18n="firstrun.step2">使用右上角 Cockpit 管理运行时与工作区</li>
+            <li data-i18n="firstrun.step3">开始对话；Context 指示器会持续显示压力</li>
           </ol>
         </div>
         <div class="card">
@@ -1063,7 +1104,7 @@
 
 <!-- ------------------------- automation task dialog -->
 <dialog id="auto-dialog">
-  <h3 id="auto-dlg-title">新建任务</h3>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><h3 id="auto-dlg-title">新建任务</h3><button class="secondary" id="auto-dlg-close" title="关闭" aria-label="关闭">×</button></div>
   <div class="auto-form">
     <label class="auto-field">
       <span data-i18n="schedule.name">任务名</span>
@@ -1073,7 +1114,7 @@
       <span data-i18n="schedule.prompt">提示词</span>
       <textarea id="auto-f-prompt" rows="7" maxlength="4000"></textarea>
     </label>
-    <div class="auto-sched-row">
+  <div class="auto-sched-row">
       <label class="auto-field">
         <span data-i18n="schedule.type">类型</span>
         <select id="auto-f-kind">
@@ -1105,6 +1146,7 @@
       </label>
     </div>
   </div>
+  <div class="status bad" id="auto-dialog-status" role="alert" aria-live="polite" hidden></div>
   <div class="btnrow" style="justify-content:flex-end">
     <button class="secondary" id="auto-f-cancel" data-i18n="btn.cancel">取消</button>
     <button id="auto-f-save" data-i18n="btn.saveTask">保存任务</button>
@@ -1130,6 +1172,12 @@
   let current = null;
   let updating = false;
   let resolvedLang = 'zh';
+  const RUNTIME_STATE_KEYS = Object.freeze({
+    starting: 'runtime.stateStarting',
+    healthy: 'runtime.stateHealthy',
+    restarting: 'runtime.stateRestarting',
+    offline: 'runtime.stateOffline',
+  });
 
   // ----------------------------------------------------------------- i18n
   const I18N = {
@@ -1146,7 +1194,12 @@
       dshHome_ph: '默认：~/.dsh', port: '端口', port_hint: '0 = 由系统自动分配（推荐）',
       nodeBin: 'Node 可执行文件', dshBin: 'dsh bin.js 路径', auto: '留空自动检测',
       runtime_hint: '工作区 / DSH_HOME / 端口 / Node / dsh 路径的修改将在下次重启运行时后生效（托盘 → 重启运行时）。',
+      runtime_liveState: '当前状态', runtime_stateStarting: '正在启动…', runtime_stateHealthy: '运行正常', runtime_stateOffline: '不可用',
+      runtime_stateRestarting: '正在重启…', runtime_restarted: '运行时重启已启动。',
+      control_operationFailed: '操作失败：{reason}',
       trayOnClose: '关闭窗口时最小化到托盘', autoStart: '开机自启',
+      quickAskHotkey: 'Quick Ask 全局快捷键', quickAskHotkey_hint: '在 Harness 之外快速唤起，不影响当前工作区。',
+      quickAskHotkey_default: 'Ctrl/Cmd + Alt + Space', quickAskHotkey_alternate: 'Ctrl/Cmd + Shift + Space', quickAskHotkey_alt: 'Alt + Space', quickAskHotkey_disabled: '禁用',
       language: '界面语言', language_system: '跟随系统', language_zh: '中文', language_en: 'English',
       themeMode: '主题', themeMode_hint: '跟随系统深浅色自动切换，也可手动固定',
       theme_system: '跟随系统', theme_dark: '深色', theme_light: '浅色',
@@ -1173,7 +1226,7 @@
       warn_mirror: '注意：非官方镜像由第三方维护，存在供应链信任风险；下载完整性仍会校验。',
       warn_port_hyperv: '⚠ 3070–3169 是 Windows Hyper-V/WSL2 的保留端口区间，启动可能失败（官方讨论区 #589），建议换用其他端口。',
       warn_path_ascii: '⚠ 路径含非 ASCII 字符：dsh 在 Windows 上有已知路径 bug（官方讨论区 #107），建议使用纯英文路径。',
-      sec_firstrun: '首次使用', firstrun_step1: '在窗口的 Harness 界面中打开「设置」，配置 DeepSeek API Key', firstrun_step2: '回到此窗口，选择工作区目录（或把文件夹拖到右上角工具条）', firstrun_step3: '开始对话；右上角胶囊会实时显示 token 用量',
+      sec_firstrun: '首次使用', firstrun_step1: '在 Harness 工作区完成 DeepSeek API 配置', firstrun_step2: '使用右上角 Cockpit 管理运行时与工作区', firstrun_step3: '开始对话；Context 指示器会持续显示压力',
       shellAutoUpdate: '自动检查壳更新',
       sec_plugins: '插件市场',
       plugins_searchPh: '搜索插件（名称 / 描述）…', plugins_refresh: '刷新', plugins_go: '搜索',
@@ -1312,7 +1365,7 @@
       auto_emptyHistory: '暂无执行记录；任务运行后会记录在这里。',
       auto_active: '运行中', auto_paused: '已暂停', auto_running: '执行中…',
       auto_runNow: '运行', auto_edit: '编辑',
-      auto_editTitle: '编辑任务', auto_newTitle: '新建任务',
+      auto_editTitle: '编辑任务', auto_newTitle: '新建任务', auto_unsavedConfirm: '放弃未保存的修改？',
       auto_useTpl: '使用模板', auto_askShort: '对话创建',
       auto_nextRun: '下次运行', auto_lastRun: '上次运行',
       auto_histCount: '共 {n} 条记录', auto_noOutput: '（无输出）',
@@ -1351,7 +1404,7 @@
       privacy_body: '本应用完全在本地运行。我们不会收集、上传或存储您的任何个人信息、API Key、会话内容或用量数据；所有数据仅保存在本机。仅在以下情况访问网络：更新检查（npm registry / GitHub Releases）、插件市场列表（GitHub）、运行时下载（npm registry）。费用估算基于您自行配置的价格参数，不构成计费依据。',
       about_diagnostics: '崩溃诊断', about_diagnosticsCount: '{n} 次（可在诊断目录查看）', about_diagnosticsNone: '无',
       btn_openDiagnostics: '打开诊断目录',
-      settings_contextWindow: '上下文窗口（估算）', settings_contextWindowHint: 'token 胶囊的「上下文压力」按此值估算；DeepSeek 模型通常 64k–128k',
+      settings_contextWindow: '上下文窗口（估算）', settings_contextWindowHint: 'Cockpit 的 Context 指示器按此值估算压力；DeepSeek 模型通常 64k–128k',
       nav_search: '搜索设置…',
       group_general: '常规', group_workspace: '工作', group_system: '系统',
       nav_general: '通用', nav_cost: '用量与成本', nav_runtime: '运行时', nav_plugins: '插件',
@@ -1499,7 +1552,12 @@
       dshHome_ph: 'Default: ~/.dsh', port: 'Port', port_hint: '0 = auto-assigned by the OS (recommended)',
       nodeBin: 'Node executable', dshBin: 'dsh bin.js path', auto: 'leave empty for auto-detect',
       runtime_hint: 'Workspace / DSH_HOME / port / Node / dsh path changes take effect after "Restart runtime" in the tray.',
+      runtime_liveState: 'Current state', runtime_stateStarting: 'Starting…', runtime_stateHealthy: 'Healthy', runtime_stateOffline: 'Unavailable',
+      runtime_stateRestarting: 'Restarting…', runtime_restarted: 'Runtime restart started.',
+      control_operationFailed: 'Operation failed: {reason}',
       trayOnClose: 'Minimize to tray on close', autoStart: 'Start at login',
+      quickAskHotkey: 'Quick Ask global shortcut', quickAskHotkey_hint: 'Open Quick Ask outside Harness without disturbing the current workspace.',
+      quickAskHotkey_default: 'Ctrl/Cmd + Alt + Space', quickAskHotkey_alternate: 'Ctrl/Cmd + Shift + Space', quickAskHotkey_alt: 'Alt + Space', quickAskHotkey_disabled: 'Disabled',
       language: 'Language', language_system: 'Follow system', language_zh: '中文', language_en: 'English',
       themeMode: 'Theme', themeMode_hint: 'Follow the system light/dark mode, or fix it manually',
       theme_system: 'Follow system', theme_dark: 'Dark', theme_light: 'Light',
@@ -1526,7 +1584,7 @@
       warn_mirror: 'Note: third-party mirrors are a supply-chain trust boundary; integrity is still verified.',
       warn_port_hyperv: '⚠ 3070–3169 is the Windows Hyper-V/WSL2 reserved port range; boot may fail (discussion #589), pick another port.',
       warn_path_ascii: '⚠ Non-ASCII path: dsh has known Windows path bugs (discussion #107); prefer ASCII-only paths.',
-      sec_firstrun: 'First run', firstrun_step1: 'Open the Harness "Settings" in the window and configure your DeepSeek API key', firstrun_step2: 'Back here, pick a workspace folder (or drag a folder onto the top-right bar)', firstrun_step3: 'Start chatting; the top-right pill shows live token usage',
+      sec_firstrun: 'First run', firstrun_step1: 'Finish DeepSeek API setup in the Harness workspace', firstrun_step2: 'Use Cockpit in the top-right to manage runtime and workspace', firstrun_step3: 'Start chatting; the Context indicator keeps pressure visible',
       shellAutoUpdate: 'Auto-check shell updates',
       sec_plugins: 'Plugin market',
       plugins_searchPh: 'Search plugins (name / description)…', plugins_refresh: 'Refresh', plugins_go: 'Search',
@@ -1665,7 +1723,7 @@
       auto_emptyHistory: 'No runs yet; results appear here after a task runs.',
       auto_active: 'Active', auto_paused: 'Paused', auto_running: 'Running…',
       auto_runNow: 'Run', auto_edit: 'Edit',
-      auto_editTitle: 'Edit task', auto_newTitle: 'New task',
+      auto_editTitle: 'Edit task', auto_newTitle: 'New task', auto_unsavedConfirm: 'Discard unsaved changes?',
       auto_useTpl: 'Use template', auto_askShort: 'In chat',
       auto_nextRun: 'Next run', auto_lastRun: 'Last run',
       auto_histCount: '{n} runs', auto_noOutput: '(no output)',
@@ -1704,7 +1762,7 @@
       privacy_body: 'This app runs fully locally. We never collect, upload or store your personal information, API keys, conversation contents or usage data; everything stays on this machine. Network is only touched for: update checks (npm registry / GitHub Releases), plugin market listing (GitHub), runtime downloads (npm registry). Cost estimates use the rates you configure and are not a billing basis.',
       about_diagnostics: 'Crash diagnostics', about_diagnosticsCount: '{n} (see diagnostics folder)', about_diagnosticsNone: 'none',
       btn_openDiagnostics: 'Open diagnostics',
-      settings_contextWindow: 'Context window (estimate)', settings_contextWindowHint: 'The pill\'s "context pressure" is estimated against this value; DeepSeek models are typically 64k–128k',
+      settings_contextWindow: 'Context window (estimate)', settings_contextWindowHint: 'The Cockpit Context indicator estimates pressure against this value; DeepSeek models are typically 64k–128k',
       nav_search: 'Search settings…',
       group_general: 'General', group_workspace: 'Workspace', group_system: 'System',
       nav_general: 'General', nav_cost: 'Usage & Cost', nav_runtime: 'Runtime', nav_plugins: 'Plugins',
@@ -1875,19 +1933,59 @@
 
   // ------------------------------------------------------------- routing
   const PAGES = ['general', 'cost', 'runtime', 'plugins', 'skills', 'tasks', 'remote', 'channels', 'models', 'longsession', 'data', 'update', 'about'];
+  const CONTROL_PAGES = new Set(['cost', 'tasks', 'runtime', 'remote', 'plugins', 'skills', 'channels', 'longsession']);
+  const SETTINGS_PAGES = new Set(['general', 'cost', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about']);
+  const CENTER_INTENTS = new Set(['new-task']);
+  const routeParams = new URLSearchParams(location.search);
+  let centerMode = routeParams.get('mode') === 'control' ? 'control' : 'settings';
+  let centerDirty = false;
+  function syncCenterScopes() {
+    document.documentElement.dataset.centerMode = centerMode;
+    document.querySelectorAll('[data-center-scope]').forEach((el) => {
+      el.hidden = el.dataset.centerScope !== centerMode;
+    });
+  }
+  function navGroupHasVisibleItems(items) {
+    return Array.from(items).some((item) => !item.hidden && !item.classList.contains('filtered'));
+  }
+  function syncNavGroups() {
+    document.querySelectorAll('.group-label').forEach((label) => {
+      const items = [];
+      let node = label.nextElementSibling;
+      while (node && !node.classList.contains('group-label')) {
+        if (node.classList.contains('nav-item')) items.push(node);
+        node = node.nextElementSibling;
+      }
+      label.hidden = !navGroupHasVisibleItems(items);
+    });
+  }
+  function applyCenterMode(mode, page) {
+    centerMode = mode === 'control' ? 'control' : 'settings';
+    const allowed = centerMode === 'control' ? CONTROL_PAGES : SETTINGS_PAGES;
+    const fallback = centerMode === 'control' ? 'tasks' : 'general';
+    const target = allowed.has(page) ? page : fallback;
+    $('center-title').textContent = centerMode === 'control' ? 'DshCockpit Control Center' : 'DshCockpit Settings';
+    $('center-return').style.display = centerMode === 'control' ? '' : 'none';
+    document.querySelectorAll('.nav-item').forEach((a) => { a.hidden = !allowed.has(a.dataset.page); });
+    syncCenterScopes();
+    filterNav();
+    syncNavGroups();
+    showPage(target, false);
+  }
   function pageFromHash() {
     const p = (location.hash || '').replace(/^#\/?/, '');
     return PAGES.includes(p) ? p : 'general';
   }
   function showPage(p, push) {
-    if (!PAGES.includes(p)) p = 'general';
+    const allowed = centerMode === 'control' ? CONTROL_PAGES : SETTINGS_PAGES;
+    if (!PAGES.includes(p) || !allowed.has(p)) p = centerMode === 'control' ? 'tasks' : 'general';
     document.querySelectorAll('.page').forEach((el) => el.classList.toggle('active', el.id === 'page-' + p));
     document.querySelectorAll('.nav-item').forEach((a) => a.classList.toggle('active', a.dataset.page === p));
     $('pages').scrollTop = 0;
     if (push && location.hash !== '#/' + p) location.hash = '#/' + p;
     // plugins is a low-traffic page with a network-backed list — load lazily
     // on first visit so opening the settings window stays offline-fast
-    if (p === 'plugins' && !plug.loaded) { plug.loaded = true; loadPlugins(); }
+    if (p === 'plugins') { if (!plug.loaded) { plug.loaded = true; loadPlugins(); } renderInstalled(); }
     // skills center: network-backed market — load lazily on first visit
     if (p === 'skills' && !sk.loaded) { sk.loaded = true; loadSkills(); }
     // automation center: refresh the task list on every visit (cheap, local)
@@ -1897,12 +1995,28 @@
     if (p === 'remote') refreshPublicRemote();
     // channel center (C5): state lamps are live-pushed, reload on every visit
     if (p === 'channels') refreshChannels();
+    if (p === 'runtime' && centerMode === 'control') refreshRuntimeOperations();
     // cost center: refresh the official balance card + per-turn cost on visit
     if (p === 'cost') { refreshCost(); refreshBalance(); }
     // model panel: local profile list is cheap; the Ollama probe is async
     if (p === 'models') refreshModels();
     // long-session center: refresh the compaction state/history + memory file
     if (p === 'longsession') { refreshCompact(); loadMemory(); }
+    if (p === 'data') { refreshStorageInfo(); renderSnapshots(); refreshBackupInfo(); }
+    if (p === 'about') refreshDiagnostics();
+  }
+  function consumeCenterIntent(intent) {
+    if (CENTER_INTENTS.has(intent) && centerMode === 'control') {
+      showPage('tasks', false);
+      openAutoDialog({});
+    }
+  }
+  function navigateCenter(route) {
+    const mode = route && route.mode === 'control' ? 'control' : 'settings';
+    const page = route && route.page;
+    if (!confirmCenterExit()) return;
+    applyCenterMode(mode, page);
+    consumeCenterIntent(route && route.intent);
   }
   window.addEventListener('hashchange', () => showPage(pageFromHash(), false));
   document.querySelectorAll('.nav-item').forEach((a) => {
@@ -1916,8 +2030,20 @@
       const label = (a.textContent || '').trim().toLowerCase();
       a.classList.toggle('filtered', !!q && !label.includes(q));
     });
+    syncNavGroups();
   }
   $('nav-search').addEventListener('input', filterNav);
+  function confirmCenterExit() {
+    const dirty = centerDirty || ($('auto-dialog').open && auto.dialogDirty);
+    if (dirty && !window.confirm(centerMode === 'control' ? 'Discard unsaved changes and leave?' : '放弃未保存的修改并离开？')) return false;
+    if ($('auto-dialog').open) $('auto-dialog').close();
+    centerDirty = false;
+    auto.dialogDirty = false;
+    return true;
+  }
+  $('center-close').addEventListener('click', () => { if (confirmCenterExit()) window.dshShell.closeCenter(); });
+  $('center-return').addEventListener('click', () => { if (confirmCenterExit()) window.dshShell.returnToCockpit(); });
+  window.dshShell.onCenterNavigate(navigateCenter);
 
   // ---------------------------------------------------- auto-save
   // Every persisted setting saves itself on change — there is no save
@@ -2002,6 +2128,22 @@
     el.className = 'status' + (cls ? ' ' + cls : '');
   }
 
+  async function runControlOperation(button, operation, refresh) {
+    if (button.disabled) return { ok: false, code: 'busy' };
+    button.disabled = true;
+    try {
+      const result = await operation();
+      if (result && result.ok === false) throw new Error(result.reason || result.code || 'operation failed');
+      return result || { ok: true };
+    } catch (e) {
+      flash(tr('control.operationFailed', { reason: e.message || String(e) }));
+      if (refresh) await refresh();
+      return { ok: false, code: 'failed', reason: e.message || String(e) };
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   // ------------------------------------------------------- input warnings
   function warn(el, key, show) {
     el.style.display = show ? 'block' : 'none';
@@ -2033,6 +2175,7 @@
     $('contextWindow').value = s.contextWindow || 128000;
     $('trayOnClose').checked = !!s.trayOnClose;
     $('autoStart').checked = !!s.autoStart;
+    $('quickAskHotkey').value = s.quickAskHotkey || '';
     $('language').value = s.language || 'system';
     $('theme-mode').value = s.themeMode || 'system';
     $('shellAutoUpdate').checked = !!s.shellAutoUpdate;
@@ -2060,6 +2203,15 @@
     applyI18n();
   }
 
+  async function refreshQuickAskShortcut() {
+    try {
+      const active = await window.dshShell.getQuickAskShortcut();
+      const value = active && typeof active.active === 'string' ? active.active : (current && current.quickAskHotkey) || '';
+      $('quickAskHotkey').value = value;
+      if (current) current.quickAskHotkey = value;
+    } catch { /* settings remain usable if the shortcut bridge is unavailable */ }
+  }
+
   // (v0.2.2 removed the whole-form save button: every setting auto-saves
   //  itself via AUTO_FIELDS; the remote controls join that list below.)
 
@@ -2074,9 +2226,47 @@
     if (v === 'zh' || v === 'en') resolvedLang = v;
     applyI18n();
   });
+  $('quickAskHotkey').addEventListener('change', async () => {
+    const selected = $('quickAskHotkey').value;
+    try {
+      const result = await window.dshShell.setQuickAskShortcut(selected);
+      $('quickAskHotkey').value = result.active || '';
+      if (result.ok) {
+        if (current) current.quickAskHotkey = result.active || '';
+      } else {
+        flash(tr('saved_fail') + (result.code === 'unavailable' ? 'Shortcut is already in use.' : result.code));
+      }
+    } catch (e) {
+      $('quickAskHotkey').value = current && current.quickAskHotkey || '';
+      flash(tr('saved_fail') + e.message);
+    }
+  });
   ['registry', 'port', 'workspace', 'dshHome'].forEach((id) => {
     $(id).addEventListener('input', validateWarnings);
     $(id).addEventListener('change', validateWarnings);
+  });
+
+  async function refreshRuntimeOperations() {
+    try {
+      const info = await window.dshShell.runtimeInfo();
+      $('runtime-live-version').textContent = info.activeVersion || '--';
+      $('runtime-live-state').textContent = tr(RUNTIME_STATE_KEYS[info.state] || 'runtime.stateOffline');
+      return info;
+    } catch {
+      $('runtime-live-version').textContent = '--';
+      $('runtime-live-state').textContent = tr('runtime.stateOffline');
+      return null;
+    }
+  }
+
+  $('btn-runtime-restart').addEventListener('click', async () => {
+    const button = $('btn-runtime-restart');
+    $('runtime-live-state').textContent = tr('runtime.stateRestarting');
+    const result = await runControlOperation(button, () => window.dshShell.restartRuntime(), refreshRuntimeOperations);
+    if (result.ok) {
+      setStatus($('runtime-operation-status'), tr('runtime.restarted'), 'ok');
+      await refreshRuntimeOperations();
+    }
   });
 
   // re-entry guard: a second click mid-install would hit the main-side
@@ -2185,7 +2375,10 @@
       case 'preparing': line = '$ dsh install…'; break;
       case 'installing': {
         const secs = Math.max(0, Math.round((p.elapsedMs || 0) / 1000));
-        line = `  ${p.pkgCount || 0} packages resolved · ${secs}s`;
+        const count = Number.isFinite(p.pkgCount) && p.pkgCount > 0
+          ? `${p.pkgCount} packages resolved`
+          : (p.phase === 'scripts' ? '  running install scripts' : '  resolving dependency tree');
+        line = `${count} · ${secs}s`;
         if (line === lastInstLine) return; // no new info — don't repeat
         break;
       }
@@ -2222,6 +2415,15 @@
     $('storage-list').textContent = lines.join('\n');
   }
 
+  let storageRefreshInFlight = false;
+  async function refreshStorageInfo() {
+    if (storageRefreshInFlight) return;
+    storageRefreshInFlight = true;
+    try { renderStorage(await window.dshShell.storageInfo()); }
+    catch (e) { dbg(`storageInfo failed: ${e.message}`); }
+    finally { storageRefreshInFlight = false; }
+  }
+
   $('btn-cleanup').addEventListener('click', async () => {
     if (!confirm(tr('cleanup_confirm'))) return;
     busy(true, '…');
@@ -2241,6 +2443,9 @@
     let text = tr('backup_info', { dir: info.dir, count: info.count, latest: info.latest, size: info.sizeMB });
     if (extra) text = extra + '\n' + text;
     setStatus($('backup-status'), text, cls);
+  }
+  async function refreshBackupInfo() {
+    try { renderBackup(await window.dshShell.backupInfo()); } catch (e) { dbg(`backupInfo failed: ${e.message}`); }
   }
 
   // ------------------------------------------------------------ profile snapshots / rescue
@@ -2484,24 +2689,50 @@
       : o.tpl ? tr('auto_tpl_' + o.tpl.id + '_name') : '';
     $('auto-f-prompt').value = o.task ? (o.task.prompt || '')
       : o.tpl ? tr('auto_tpl_' + o.tpl.id + '_prompt') : '';
+    auto.dialogDirty = false;
+    const dialogStatus = $('auto-dialog-status');
+    dialogStatus.hidden = true;
+    dialogStatus.textContent = '';
+    dialogStatus.className = 'status bad';
     schedToForm(o.task || (o.tpl ? o.tpl.sched : { kind: 'daily', dailyTime: '09:00' }));
     $('auto-dialog').showModal();
     $('auto-f-name').focus();
   }
-  $('auto-f-kind').addEventListener('change', () => schedToForm({ kind: $('auto-f-kind').value }));
-  $('auto-f-cancel').addEventListener('click', () => $('auto-dialog').close());
+  const markAutoDirty = () => { auto.dialogDirty = true; };
+  $('auto-f-name').addEventListener('input', markAutoDirty);
+  $('auto-f-prompt').addEventListener('input', markAutoDirty);
+  $('auto-f-kind').addEventListener('change', () => { markAutoDirty(); schedToForm({ kind: $('auto-f-kind').value }); });
+  $('auto-f-time').addEventListener('input', markAutoDirty);
+  $('auto-f-day').addEventListener('change', markAutoDirty);
+  $('auto-f-every').addEventListener('input', markAutoDirty);
+  function closeAutoDialog() {
+    if (auto.dialogDirty && !window.confirm(tr('auto.unsavedConfirm') || 'Discard unsaved changes?')) return;
+    $('auto-dialog').close();
+  }
+  $('auto-f-cancel').addEventListener('click', closeAutoDialog);
+  $('auto-dlg-close').addEventListener('click', closeAutoDialog);
+  $('auto-dialog').addEventListener('cancel', (e) => { e.preventDefault(); closeAutoDialog(); });
   $('auto-f-save').addEventListener('click', async () => {
     const name = $('auto-f-name').value.trim();
     const prompt = $('auto-f-prompt').value.trim();
     if (!name || !prompt) return;
     const task = { ...formToSched(), name, prompt, templateId: auto.tplId || undefined, enabled: true };
     if (auto.editId) task.id = auto.editId;
-    $('auto-dialog').close();
+    const saveButton = $('auto-f-save');
+    const dialogStatus = $('auto-dialog-status');
+    saveButton.disabled = true;
+    dialogStatus.hidden = true;
     try {
       await window.dshShell.scheduledUpsert(task);
+      auto.dialogDirty = false;
+      $('auto-dialog').close();
       renderAuto();
     } catch (e) {
-      alert(tr('saved_fail') + e.message);
+      dialogStatus.hidden = false;
+      setStatus(dialogStatus, tr('saved_fail') + e.message, 'bad');
+      $('auto-f-name').focus();
+    } finally {
+      saveButton.disabled = false;
     }
   });
 
@@ -2742,21 +2973,46 @@
     return st.lastError ? `${tr('channels_state_offline')} — ${st.lastError}` : tr('channels_state_offline');
   }
 
+  function renderChannelOperations(card, head, ch) {
+    card.appendChild(head);
+    const actions = document.createElement('div');
+    actions.className = 'btnrow';
+    const testBtn = document.createElement('button');
+    testBtn.className = 'secondary';
+    testBtn.textContent = tr('channels_cfg_test');
+    testBtn.addEventListener('click', () => runControlOperation(
+      testBtn,
+      () => window.dshShell.channelsTest(ch.id),
+      () => refreshChannels(),
+    ));
+    actions.appendChild(testBtn);
+    card.appendChild(actions);
+  }
+
+  function renderChannelConfiguration(card, head) {
+    const controls = head.querySelector('.setting-ctrl');
+    if (controls) controls.remove();
+    card.appendChild(head);
+  }
+
   function renderChannels(list, opts) {
     const preserve = !!(opts && opts.preserveInput);
     channelsCache = list || [];
-    const wrap = $('channels-list');
+    const controlWrap = $('channels-list');
+    const settingsWrap = $('channels-config');
+    const wrap = centerMode === 'control' ? controlWrap : settingsWrap;
     // Rebuilding the card list wipes in-progress credential/allowlist edits;
     // when this render is a passive state push (not a user action), snapshot
     // the field values first and restore them after.
     const prev = {};
     if (preserve) {
-      for (const inp of wrap.querySelectorAll('input[type="text"], input[type="password"]')) {
+      for (const inp of settingsWrap.querySelectorAll('input[type="text"], input[type="password"]')) {
         const k = inp.dataset.chField;
         if (k) prev[k] = inp.value;
       }
     }
-    wrap.textContent = '';
+    controlWrap.textContent = '';
+    settingsWrap.textContent = '';
     for (const ch of channelsCache) {
       const card = document.createElement('div');
       card.className = 'card';
@@ -2801,7 +3057,12 @@
       ctrl.appendChild(toggle);
       head.appendChild(info);
       head.appendChild(ctrl);
-      card.appendChild(head);
+      if (centerMode === 'control') {
+        renderChannelOperations(card, head, ch);
+        wrap.appendChild(card);
+        continue;
+      }
+      if (centerMode === 'settings') renderChannelConfiguration(card, head);
 
       // allowFrom editor (pairing-mode default = empty = reject-all)
       const af = document.createElement('div');
@@ -4273,20 +4534,6 @@
         dbg(`refreshInfo: backupInfo ok in ${Date.now() - t1}ms`);
       } catch (e) { dbg(`refreshInfo: backupInfo failed: ${e.message}`); }
     })();
-    (async () => {
-      try {
-        const t1 = Date.now();
-        renderStorage(await window.dshShell.storageInfo());
-        dbg(`refreshInfo: storageInfo ok in ${Date.now() - t1}ms`);
-      } catch (e) { dbg(`refreshInfo: storageInfo failed: ${e.message}`); }
-    })();
-    renderSnapshots();
-    refreshCost();
-    refreshBalance();
-    refreshDiagnostics();
-    renderInstalled();
-    renderAuto();
-    refreshRemote();
     dbg(`refreshInfo: all sections fired in ${Date.now() - t0}ms (no await — page keeps painting)`);
   }
 
@@ -4301,7 +4548,7 @@
   (async () => {
     const tBoot = Date.now();
     dbg('page init: start');
-    showPage(pageFromHash(), false);
+    applyCenterMode(centerMode, routeParams.get('page') || pageFromHash());
     // theme: apply the resolved theme early (before the form paints) and keep
     // it live when the system switches or the user saves a manual override.
     try { document.documentElement.dataset.theme = await window.dshShell.getTheme(); } catch { /* dark default */ }
@@ -4313,8 +4560,10 @@
     });
     const s = await window.dshShell.getSettings();
     fillForm(s);
+    refreshQuickAskShortcut();
     setStatus($('update-status'), tr('status_notChecked'));
     validateWarnings();
+    consumeCenterIntent(routeParams.get('intent') === 'new-task' ? 'new-task' : '');
     dbg(`page init: form painted in ${Date.now() - tBoot}ms — firing refreshInfo (not awaited)`);
     // not awaited: the page paints immediately, then each refreshInfo section
     // fills in as its IPC returns (slow storage/token scans don't gate the UI)

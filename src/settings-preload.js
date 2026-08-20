@@ -6,6 +6,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('dshShell', {
   getSettings: () => ipcRenderer.invoke('shell:get-settings'),
   saveSettings: (partial) => ipcRenderer.invoke('shell:save-settings', partial),
+  getQuickAskShortcut: () => ipcRenderer.invoke('shell:quickask-shortcut-get'),
+  setQuickAskShortcut: (value) => ipcRenderer.invoke('shell:quickask-shortcut-set', value),
   // renderer trace: page-open / async-render timings land in the main log
   log: (msg) => ipcRenderer.invoke('shell:log', msg),
   getTheme: () => ipcRenderer.invoke('shell:get-theme'),
@@ -88,4 +90,11 @@ contextBridge.exposeInMainWorld('dshShell', {
   onChannelsChanged: (cb) => ipcRenderer.on('channels:changed', () => cb()),
   // runtime install progress (update console): live frames from runUpdateCheck
   onUpdateProgress: (cb) => ipcRenderer.on('update:progress', (_e, p) => cb(p)),
+  onCenterNavigate: (cb) => ipcRenderer.on('center:navigate', (_e, route) => cb({
+    mode: route && route.mode === 'control' ? 'control' : 'settings',
+    page: route && typeof route.page === 'string' ? route.page : '',
+    intent: route && route.intent === 'new-task' ? 'new-task' : '',
+  })),
+  closeCenter: () => ipcRenderer.send('center:close'),
+  returnToCockpit: () => ipcRenderer.send('center:return-cockpit'),
 });

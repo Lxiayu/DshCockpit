@@ -66,8 +66,32 @@ test('recentWorkspaces patch round-trips', () => {
 test('DEFAULTS exposes all fields', () => {
   for (const k of ['channel', 'pinnedVersion', 'registry', 'keepVersions', 'workspace', 'dshHome',
     'port', 'trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'nodeBin', 'dshBin',
-    'language', 'backupOnQuit', 'backupKeep', 'tokenWidget', 'recentWorkspaces',
+    'language', 'backupOnQuit', 'backupKeep', 'quickAskHotkey', 'recentWorkspaces',
     'remoteControl', 'remoteCompat', 'remotePort']) {
     assert.ok(k in DEFAULTS, `missing default: ${k}`);
   }
+  assert.equal('tokenWidget' in DEFAULTS, false);
+});
+
+test('legacy tokenWidget is dropped when settings are loaded', () => {
+  const dir = tmpUserData();
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ tokenWidget: true, quickAskHotkey: '' }));
+  const s = new SettingsStore(dir);
+  assert.equal('tokenWidget' in s.get(), false);
+  assert.equal(s.get().quickAskHotkey, '');
+  s.save();
+  const persisted = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+  assert.equal('tokenWidget' in persisted, false);
+  assert.equal(persisted.quickAskHotkey, '');
+});
+
+test('quickAskHotkey accepts only supported presets including disabled', () => {
+  const dir = tmpUserData();
+  const s = new SettingsStore(dir);
+  s.patch({ quickAskHotkey: 'CommandOrControl+Shift+Space' });
+  assert.equal(s.get().quickAskHotkey, 'CommandOrControl+Shift+Space');
+  s.patch({ quickAskHotkey: '' });
+  assert.equal(s.get().quickAskHotkey, '');
+  s.patch({ quickAskHotkey: 'Alt+F4' });
+  assert.equal(s.get().quickAskHotkey, '');
 });

@@ -16,7 +16,9 @@
 - 预览版快速迭代期，这是最硬核的稳定性保障。
 
 ### 2. Token 用量与成本控制中心
-- 右上角实时胶囊：当前会话 输入→输出 token、**上下文压力进度**（按最近一次请求真实占用计算，快满变红提醒开新会话）；
+- 独立 Edge Rail：Harness 保持原生工作区，DshCockpit 只显示 Token / Context、Cockpit、Settings 三个轻量入口；
+- Token Peek：点击即可查看当前/全部会话输入输出、缓存、**上下文压力进度**（按最近一次请求真实占用计算，快满提示开新会话）；
+- Cockpit Control Center：从一个操作层进入 Runtime、成本、后台任务、Quick Ask、Remote、Session Search 和 Integrations；Settings 只承担持久配置；
 - **成本估算**：按天/周/月统计（换算金额），**按工作区**看谁在烧钱，**月度预算 + 80%/100% 报警**；
 - **官方余额（v0.2.4）**：接入 DeepSeek 官方接口，实时显示账户余额（总额/赠送/充值），每轮对话精确花费与**缓存命中节省额**，低余额提醒；
 - 单价表：v4-flash / v4-pro × 峰谷分时矩阵，与官方 2026-08 分时计价同步；
@@ -25,7 +27,13 @@
 ### 3. 后台 Agent 服务（Quick Ask + 定时任务）
 - **全局热键**（默认 Ctrl+Alt+Space）弹出快捷问询：随手提问 → 后台 headless 会话运行 → 完成通知；
 - **壳级定时任务**：每天/每间隔跑固定提示词（日报、总结、清理），到点自动执行 + 通知；
-- 窗口最小化照常工作——dsh 从"一个窗口"变成"常驻能力"。
+- 窗口最小化照常工作——dsh 从"一个窗口"变成"常驻能力"；Tasks 在 Cockpit 中先 Peek 状态，再进入完整管理。
+
+### 4. 独立桌面控制层
+- Harness owns the workspace：不修改 Harness DOM、CSS、Sidebar、Toolbar 或 React 组件；
+- DshCockpit owns the operating layer：Edge Rail、Overlay Peek、Control Center 和 Settings 通过 Electron IPC、HTTP/WebSocket、filesystem 与 Runtime 交互；
+- `/compact` 通过稳定 RPC 选择最新的非空活动会话，尽量抵抗 Harness UI 更新；Runtime 状态由生命周期控制器统一广播；
+- Control Center 负责即时操作，Settings 负责配置；Remote、Runtime、Channels 等不会在两个页面重复实现同一职责。
 
 ---
 

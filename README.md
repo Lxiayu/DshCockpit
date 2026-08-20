@@ -15,7 +15,7 @@
 
 *让 `dsh web` 从"终端里的一个标签页"变成"双击即用、后台常驻、自动更新、会算账的桌面控制台"*
 
-**English TL;DR** — DshCockpit is an open-source desktop cockpit (Electron) for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`): real-time **token usage & context-pressure alerts**, a **cost tracking center** with per-day/week/month/workspace stats, **official account balance** and per-turn exact spend, **IM channel remote control** (Feishu / WeCom / DingTalk long connections), **public-network remote** (Tailscale / Cloudflare), a **model manager** (third-party providers + local Ollama), **long-session compaction** and AGENTS.md memory files, a **Skills marketplace**, runtime **auto-update with smoke-test guard & one-click rollback**, a global-hotkey **Quick Ask** window, **scheduled agent tasks**, `Ctrl+K` **full-text session search**, and a community **plugin marketplace**. Bundled runtime — no Node.js install needed. Windows portable zip + macOS dmg (arm64/x64). *Full English readme → [README.en.md](README.en.md)*
+**English TL;DR** — DshCockpit is an open-source desktop control plane (Electron) for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`). Harness keeps its native workspace; DshCockpit adds an independent Edge Rail, Token Peek, Cockpit Control Center, Quick Ask, Tasks, cost/runtime monitoring, remote control, updates, and integrations. Bundled runtime — no Node.js install needed. Windows portable zip + macOS dmg (arm64/x64). *Full English readme → [README.en.md](README.en.md)*
 
 </div>
 
@@ -39,7 +39,7 @@
 |---|---|---|---|
 | 关闭窗口 | ❌ 会话就断 | ✅ 托盘常驻 | ✅ 托盘常驻 + 后台任务照跑 |
 | 运行时更新 | ❌ 手动 npm | ❌ 无 | ✅ **自动更新管道 + 冒烟守卫 + 一键回滚** |
-| Token 用量 | ❌ 只闪一下 | ❌ 无 | ✅ **实时胶囊 + 上下文压力预警** |
+| Token 用量 | ❌ 只闪一下 | ❌ 无 | ✅ **Edge Rail 状态 + Token Peek + 上下文压力预警** |
 | 花费多少 | ❌ 不知道 | ❌ 无 | ✅ **成本中心：按天/周/月/工作区统计 + 预算报警** |
 | 随手提问 | ❌ 要开浏览器 | ❌ 无 | ✅ **全局热键 Quick Ask（后台运行）** |
 | 定时任务 | ❌ 无 | ❌ 无 | ✅ **壳级定时任务（间隔/每天 + 通知）** |
@@ -57,7 +57,9 @@
 ## 🚀 功能全景
 
 ### 🎛️ 驾驶舱级监控
-- **Token 实时胶囊**：窗口右上角常驻显示当前会话 输入→输出 tokens；悬停看明细（当前/全部会话、缓存）；**上下文压力**达到 60%/85% 自动黄/红预警，提醒你"该开新会话了"。
+- **独立 Edge Rail**：Harness 保持原生工作区，DshCockpit 只在边缘显示 Token / Context、Cockpit 和 Settings 三个入口；默认占用极小，需要时再展开。
+- **Token Peek**：点击 Token / Context 即可查看输入、输出、缓存、会话数和上下文压力；达到 60%/85% 自动弱警告/高风险提示，工作中无需打开完整页面。
+- **Cockpit Control Center**：集中查看 Runtime、用量、成本和后台任务，并进入 Quick Ask、Tasks、Session Search、Remote、Integrations 等即时操作；持久配置留在 Settings。
 - **成本控制中心**：按天/周/月统计 token 与估算费用（单价可配），**按工作区**看谁在烧钱；**月度预算 + 80%/100% 报警**，再也不会月底收到吓人的账单。
 - **官方账户余额**：接入 DeepSeek 官方接口，实时显示总额/赠送/充值余额与刷新时间，余额不足标红提醒；**每轮对话精确花费**（输入/输出/缓存命中拆分 + 缓存节省额）。
 - **峰谷分时计价**：托盘实时显示 ⚡峰时/🌙谷时状态与现行单价，成本统计按事件时间分桶（与官方 2026-08 分时定价同步）。
@@ -81,7 +83,7 @@
 - API Key 系统加密存储，运行时配置热加载（新会话生效，无需重启）
 
 ### 📚 长会话管理
-- **一键压缩当前会话**（Token 胶囊右键 / 设置页）：调用运行时原生 `/compact`，完成后显示**前后 token 对比与预估节省金额**
+- **一键压缩当前会话**（Settings 长会话区）：通过运行时 RPC 选择最新的非空活动会话执行原生 `/compact`，完成后显示**前后 token 对比与预估节省金额**；不依赖 Harness DOM。
 - 压力预警按「最近一次请求的真实上下文占用」计算（此前按全历史累计，长会话下误报偏红）
 - **AGENTS.md 记忆文件管理**：工作区级与全局记忆文件在线编辑，新会话自动生效
 
@@ -98,7 +100,7 @@
 - **Quick Ask（全局快捷问询）**：默认 `Ctrl+Alt+Space` 弹出小窗，随手提问 → 后台无头会话运行 → 完成通知。写代码时不用切窗口就能问。
 - **定时任务**：每天/每周/每间隔跑固定提示词（日报、周报、清理），到点自动执行 + 系统通知 + 运行历史。
 - **任务完成通知**：窗口最小化时，agent 跑完长任务、有人要审批、有提问待回答，都会系统通知你。
-- **手机远程控制（局域网）**：手机连同一 Wi-Fi，把设置页显示的**配对链接**（含一次性配对码，可一键复制）发到手机、用浏览器打开即完成配对，之后可完整使用 dsh Web UI——查看会话流式输出、发消息/插话、**审批工具执行、回答提问**。默认「微信/抖音打开兼容模式（HTTP）」可直接打开；一次性配对码 + 加密长期令牌，运行时仍只监听 127.0.0.1（详见 DESIGN.md §17）。
+- **手机远程控制（局域网）**：Control Center 的 Remote Peek 负责查看服务状态、配对、设备撤销和访问链接；Settings 只保存端口、兼容模式等配置。手机完成配对后可完整使用 dsh Web UI——查看会话流式输出、发消息/插话、**审批工具执行、回答提问**。一次性配对码 + 加密长期令牌，运行时仍只监听 127.0.0.1（详见 DESIGN.md §17）。
 
 ### 🔍 历史与检索
 - **`Ctrl+K` 会话全文检索**：跨全部历史会话按关键词搜索（片段高亮 + 一键复制）。
@@ -150,9 +152,9 @@ npm start
 ```
 
 首次启动后：
-1. 在窗口的 Harness 设置里配置你的 DeepSeek API Key（右上角齿轮有红点提示）；
-2. 把工作区文件夹拖到右上角工具条（或设置里选择）；
-3. 开始对话——右上角胶囊实时显示 token 用量。
+1. 在原生 Harness 设置里配置你的 DeepSeek API Key（右上角齿轮有红点提示）；
+2. 通过独立 Edge Rail 的 Settings 或工作区入口选择工作区；
+3. 开始对话——Edge Rail 持续显示 Context 状态，需要时点击 Cockpit 管理 Agent。
 
 ---
 
@@ -160,7 +162,7 @@ npm start
 
 <div align="center">
 
-<img src="photo/preview-1.png?v=0.2.4" width="720" alt="DshCockpit main window — DeepSeek Harness (dsh) desktop cockpit with token usage capsule" />
+<img src="photo/preview-1.png?v=0.2.4" width="720" alt="DshCockpit main window — native DeepSeek Harness workspace with Edge Rail and Context status" />
 
 <table><tr>
 <td><img src="photo/preview-2.png?v=0.2.4" width="280" alt="Cost center — token cost tracking & budget alerts" /></td>
@@ -180,7 +182,7 @@ DshCockpit (Electron)
  ├─ 事件流：订阅运行时 WebSocket（任务完成 / 审批 / 提问）
  ├─ 服务：Quick Ask、定时任务调度器、插件/技能市场、模型管理、崩溃看门狗
  ├─ 渠道：IM 渠道管理器（飞书 / 企微 / 钉钉长连接）+ 手机远程网关（局域网/公网）
- └─ 界面：壳设置窗口 + 窗口内 chrome（token 胶囊 / 快捷入口）
+ └─ 界面：原生 Harness 工作区 + 独立 Edge Rail / Peek / Cockpit Control Center / Settings
 ```
 
 - **壳与运行时彻底解耦**：运行时版本化共存于 `userData/runtime/`，互不干扰；

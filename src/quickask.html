@@ -10,6 +10,9 @@
   body { margin: 0; background: var(--bg-app); color: var(--text-1);
     font: 13px/1.5 "Segoe UI","Microsoft YaHei",system-ui,sans-serif; }
   #box { padding: 12px; }
+  #topbar { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; color:var(--text-3); font-size:11px; }
+  #close { width:28px; height:28px; border:0; border-radius:7px; background:var(--bg-hover); color:var(--text-3); cursor:pointer; font-size:16px; line-height:1; }
+  #close:hover, #close:focus-visible { background:var(--bad); color:#fff; outline:none; }
   textarea { width: 100%; height: 64px; resize: none; background: var(--bg-panel); color: var(--text-1);
     border: 1px solid var(--border-1); border-radius: 8px; padding: 8px 10px; font: inherit; outline: none;
     transition: border-color 150ms var(--ease), box-shadow 150ms var(--ease); }
@@ -28,15 +31,18 @@
 </head>
 <body>
 <div id="box">
+  <div id="topbar"><span id="quickask-title">Quick Ask</span><button id="close" title="关闭" aria-label="关闭">×</button></div>
   <textarea id="prompt" rows="2" placeholder=""></textarea>
   <div id="status"></div>
 </div>
 <script>
   const ta = document.getElementById('prompt');
   const status = document.getElementById('status');
-  const L = { zh: { ph: '输入问题，回车提交（后台运行，完成后通知）', running: '运行中…（完成后会通知）', done: '✅ 完成', fail: '❌ 失败', empty: '⚠ 未返回结果' },
-              en: { ph: 'Ask anything, Enter to run in the background', running: 'Running… (you will be notified)', done: '✅ Done', fail: '❌ Failed', empty: '⚠ No result' } };
+  const closeBtn = document.getElementById('close');
+  const L = { zh: { title: '快速问答', close: '关闭', ph: '输入问题，回车提交（后台运行，完成后通知）', running: '运行中…（完成后会通知）', done: '✅ 完成', fail: '❌ 失败', empty: '⚠ 未返回结果' },
+              en: { title: 'Quick Ask', close: 'Close', ph: 'Ask anything, Enter to run in the background', running: 'Running… (you will be notified)', done: '✅ Done', fail: '❌ Failed', empty: '⚠ No result' } };
   let lang = 'zh';
+  let hasResult = false;
   (async () => {
     try { document.documentElement.dataset.theme = await window.dshQuickAsk.getTheme(); } catch { /* dark default */ }
     window.dshQuickAsk.onTheme((t) => {
@@ -46,12 +52,22 @@
       setTimeout(() => root.classList.remove('theme-anim'), 420);
     });
     try { const s = await window.dshQuickAsk.getSettings(); lang = s.resolvedLanguage === 'en' ? 'en' : 'zh'; } catch {}
+    document.getElementById('quickask-title').textContent = L[lang].title;
+    closeBtn.title = L[lang].close;
+    closeBtn.setAttribute('aria-label', L[lang].close);
     ta.placeholder = L[lang].ph;
     ta.focus();
   })();
   ta.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
     if (e.key === 'Escape') window.dshQuickAsk.close();
+  });
+  closeBtn.addEventListener('click', () => window.dshQuickAsk.close());
+  window.addEventListener('blur', () => {
+    if (!ta.disabled && !hasResult) {
+      ta.value = '';
+      window.dshQuickAsk.close();
+    }
   });
   async function submit() {
     const text = ta.value.trim();
@@ -72,6 +88,7 @@
       status.textContent = L[lang].fail + ' ' + e.message;
       status.className = 'err';
     } finally {
+      hasResult = true;
       ta.disabled = false;
     }
   }

@@ -21,13 +21,13 @@ Cost control · Usage monitoring · Official balance · IM channel remote contro
 
 ## ✨ Why DshCockpit?
 
-Other shells wrap the `dsh web` UI **inside a window**. DshCockpit treats `dsh` as a **background service** and builds cockpit-grade capabilities on top of it — features no other shell in the ecosystem currently offers:
+Other shells wrap the `dsh web` UI **inside a window**. DshCockpit treats `dsh` as a **background service** and keeps the Harness workspace native while adding an independent Edge Rail and Cockpit Control Center:
 
 | | `dsh web` in browser | Other desktop shells | **DshCockpit** |
 |---|---|---|---|
 | Close the window | ❌ session dies | ✅ tray-resident | ✅ tray-resident + background tasks keep running |
 | Runtime updates | ❌ manual npm | ❌ none | ✅ **auto-update pipeline + smoke-test guard + one-click rollback** |
-| Token usage | ❌ flashes once | ❌ none | ✅ **live capsule + context-pressure warning** |
+| Token usage | ❌ flashes once | ❌ none | ✅ **Edge Rail status + Token Peek + context-pressure warning** |
 | What it costs | ❌ unknown | ❌ none | ✅ **cost center: per day/week/month/workspace + budget alarms** |
 | Quick questions | ❌ open browser | ❌ none | ✅ **global-hotkey Quick Ask (runs in background)** |
 | Scheduled tasks | ❌ none | ❌ none | ✅ **shell-level scheduler (interval/daily + notifications)** |
@@ -45,7 +45,9 @@ Other shells wrap the `dsh web` UI **inside a window**. DshCockpit treats `dsh` 
 ## 🚀 Feature Panorama
 
 ### 🎛️ Cockpit-grade monitoring (unique)
-- **Live token capsule**: current-session input→output tokens, always visible in the top-right corner; hover for details (current/all sessions, cache). **Context pressure** turns yellow/red at 60%/85% — your cue to start a fresh session.
+- **Independent Edge Rail**: Harness owns the native workspace; DshCockpit keeps only Token / Context, Cockpit, and Settings visible at the edge. It stays tiny until you ask for more.
+- **Token Peek**: click Token / Context for input, output, cache, session count, and context pressure. Thresholds at 60%/85% provide quiet/high-risk warnings without opening a full page.
+- **Cockpit Control Center**: live Runtime, usage, cost, and background-task status plus direct actions for Quick Ask, Tasks, Session Search, Remote, and Integrations. Persistent configuration stays in Settings.
 - **Cost control center**: tokens & estimated cost per day/week/month (unit prices configurable), broken down **per workspace**; **monthly budget + 80%/100% alarms** — no more scary end-of-month invoices.
 - **Official account balance**: live total/granted/topped-up balance from the DeepSeek API, low-balance highlight; **exact per-turn spend** (input/output/cache split + cache savings).
 - **Peak/off-peak pricing**: tray shows ⚡peak/🌙off-peak state and current unit price; cost stats bucketed per event time (synced with the official Aug-2026 time-of-day pricing).
@@ -69,7 +71,7 @@ Take phone control beyond "same Wi-Fi" — two options:
 - API keys encrypted at rest; runtime config hot-reloads (applies to new sessions, no restart)
 
 ### 📚 Long-session management
-- **One-click compaction** (token capsule right-click / settings): runs the runtime's native `/compact`, then shows **before/after tokens and estimated savings**
+- **One-click compaction** (Settings long-session section): uses the runtime RPC to target the latest non-blank active session, then shows **before/after tokens and estimated savings** without Harness DOM coupling.
 - Pressure warnings now use the **real context footprint of the most recent request** (previously cumulative history — long sessions showed false red)
 - **AGENTS.md memory files**: edit workspace-level and global memory online; new sessions pick them up automatically
 
@@ -86,7 +88,7 @@ Take phone control beyond "same Wi-Fi" — two options:
 - **Quick Ask (global hotkey)**: default `Ctrl+Alt+Space` pops a mini window; ask anything → runs in a headless background session → completion notification. Ask without leaving your editor.
 - **Scheduled tasks**: run a fixed prompt daily/weekly/at an interval (daily reports, weekly reports, cleanup) with automatic execution + system notifications + run history.
 - **Task notifications**: with the window minimized, you're notified when the agent finishes a long task, when an approval is needed, or when a question awaits your answer.
-- **LAN phone remote control**: phone on the same Wi-Fi — open the **pairing link** (with one-time code, one-click copy) shown in settings, and use the full dsh Web UI (streaming output, messages, **approve tool calls, answer questions**). Default "WeChat/Douyin compatibility mode (HTTP)"; one-time pairing code + encrypted long-lived token; the runtime still listens only on 127.0.0.1 (see DESIGN.md §17).
+- **LAN phone remote control**: the Control Center Remote surface handles status, pairing, device revoke, and access links; Settings stores port and compatibility configuration. After pairing, use the full dsh Web UI (streaming output, messages, **approve tool calls, answer questions**). The runtime still listens only on 127.0.0.1 (see DESIGN.md §17).
 
 ### 🔍 History & search
 - **`Ctrl+K` full-text session search**: keyword search across all past sessions (highlighted snippets + one-click copy).
@@ -138,9 +140,9 @@ npm start
 ```
 
 After first launch:
-1. Configure your DeepSeek API key in the in-window Harness settings (gear icon, red-dot hint);
-2. Drag a workspace folder onto the top-right toolbar (or pick one in settings);
-3. Start chatting — the capsule in the top-right tracks token usage live.
+1. Configure your DeepSeek API key in the native Harness settings (gear icon, red-dot hint);
+2. Choose a workspace from the independent Edge Rail Settings or workspace action;
+3. Start chatting — the Edge Rail keeps Context status visible, while Cockpit opens the operating layer when needed.
 
 ---
 
@@ -148,7 +150,7 @@ After first launch:
 
 <div align="center">
 
-<img src="photo/preview-1.png?v=0.2.4" width="720" alt="DshCockpit main window — DeepSeek Harness (dsh) desktop cockpit with token usage capsule" />
+<img src="photo/preview-1.png?v=0.2.4" width="720" alt="DshCockpit main window — native DeepSeek Harness workspace with Edge Rail and Context status" />
 
 <table><tr>
 <td><img src="photo/preview-2.png?v=0.2.4" width="280" alt="Cost center — token cost tracking & budget alerts" /></td>
@@ -168,7 +170,7 @@ DshCockpit (Electron)
  ├─ Event stream: subscribes to the runtime WebSocket (task done / approvals / questions)
  ├─ Services: Quick Ask, task scheduler, plugin/skills marketplace, model manager, crash watchdog
  ├─ Channels: IM channel manager (Feishu / WeCom / DingTalk long connections) + phone remote gateway (LAN/public)
- └─ UI: shell settings window + in-window chrome (token capsule / quick entries)
+ └─ UI: native Harness workspace + independent Edge Rail / Peek / Cockpit Control Center / Settings
 ```
 
 - **Shell and runtime fully decoupled**: runtime versions coexist under `userData/runtime/` without interference;

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'unsafe-inline'" />
+<title>DshCockpit</title>
+<link rel="stylesheet" href="theme.css" />
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: transparent; color: var(--text-1); font: 12px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  body { padding: 6px; }
+  button { border: 0; color: inherit; font: inherit; cursor: pointer; -webkit-app-region: no-drag; }
+  .shell { position: relative; background: var(--bg-panel); border: 1px solid var(--border-2); border-radius: 8px; overflow: hidden; }
+  #drag-handle { -webkit-app-region: drag; cursor: grab; }
+  #rail #drag-handle { width: 8px; height: 28px; flex: 0 0 8px; }
+  #rail { height: 32px; display: flex; gap: 5px; align-items: center; }
+  .rail-btn { height: 28px; padding: 0 9px; background: transparent; border-radius: 7px; color: var(--text-2); white-space: nowrap; }
+  .rail-btn:hover, .rail-btn:focus-visible { background: var(--bg-hover); color: var(--text-1); outline: none; }
+  .rail-btn.onboarding-highlight { background: var(--bg-hover); color: var(--text-1); outline: 2px solid var(--acc); outline-offset: 1px; box-shadow: 0 0 0 4px rgba(89, 157, 255, .16); }
+  #token { font-family: var(--mono); color: var(--text-2); }
+  #cockpit { font-weight: 600; color: var(--text-1); }
+  #settings { width: 30px; padding: 0; font-size: 15px; }
+  .panel { padding: 14px; width: 100%; max-height: calc(100vh - 12px); overflow: auto; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .panel-head h1 { font-size: 14px; margin: 0; }
+  .icon-btn { width: 28px; height: 28px; border-radius: 7px; background: var(--bg-hover); color: var(--text-2); }
+  .icon-btn:hover, .icon-btn:focus-visible { color: var(--text-1); background: var(--border-2); outline: none; }
+  .eyebrow { color: var(--text-4); letter-spacing: .08em; font-size: 10px; margin: 10px 0 5px; }
+  .status-line { display: flex; justify-content: space-between; gap: 8px; color: var(--text-2); }
+  .status-line b { color: var(--text-1); }
+  .meter { height: 5px; background: var(--bg-input); border-radius: 999px; overflow: hidden; margin: 7px 0 8px; }
+  .meter i { display: block; height: 100%; background: var(--ok); transition: width .18s ease, background .18s ease; }
+  .meter.warn i { background: var(--warn); }
+  .meter.bad i { background: var(--bad); }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .stat { background: var(--bg-input); border: 1px solid var(--border-1); border-radius: 7px; padding: 8px; min-width: 0; }
+  .stat span { display: block; color: var(--text-4); font-size: 10px; }
+  .stat b { display: block; margin-top: 2px; overflow-wrap: anywhere; }
+  .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .action { text-align: left; padding: 8px; border-radius: 7px; background: var(--bg-hover); color: var(--text-2); }
+  .action:hover, .action:focus-visible { color: var(--text-1); outline: 1px solid var(--acc); }
+  .task { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border-1); }
+  .task small { color: var(--text-4); white-space: nowrap; }
+  .taskpeek-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
+  .taskpeek-summary .stat { padding: 7px 5px; text-align: center; }
+  .taskpeek-summary .stat b { font-size: 13px; }
+  .taskpeek-list { margin-top: 8px; }
+  .taskpeek-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+  .onboard { position: absolute; z-index: 3; top: 40px; left: 8px; right: 8px; bottom: 8px; padding: 16px; min-height: 240px; display: flex; flex-direction: column; justify-content: space-between; background: var(--bg-panel); border: 1px solid var(--border-2); border-radius: 8px; }
+  .onboard h1 { margin: 0 0 8px; font-size: 19px; }
+  .onboard p { color: var(--text-3); margin: 0; max-width: 34ch; }
+  .onboard-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .primary { background: var(--acc); color: white; border-radius: 7px; padding: 7px 12px; }
+  .quiet { background: transparent; color: var(--text-3); padding: 7px 4px; }
+  #cockpit img { width: 15px; height: 15px; border-radius: 4px; object-fit: cover; vertical-align: -3px; }
+  [hidden] { display: none !important; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="shell" id="app">
+  <div id="rail" aria-label="DshCockpit controls">
+    <span id="drag-handle" aria-hidden="true"></span><button class="rail-btn" id="token" title="Context" aria-label="Context"></button>
+    <button class="rail-btn" id="cockpit" title="Open Cockpit" aria-label="Open Cockpit"><img src="assets/cockpit-logo.jpg" alt="" aria-label="DshCockpit logo" /> <span id="cockpit-label">Cockpit</span></button>
+    <button class="rail-btn" id="settings" title="Settings" aria-label="Settings">⚙</button>
+  </div>
+  <section class="panel" id="peek" hidden aria-label="Context peek">
+    <div class="panel-head"><h1 id="peek-title">Context</h1><button class="icon-btn close" title="Close" aria-label="Close">×</button></div>
+    <div class="status-line"><b id="peek-pressure">—</b><span id="peek-total">—</span></div>
+    <div class="meter" id="peek-meter"><i></i></div>
+    <div class="grid"><div class="stat"><span id="input-label">Input</span><b id="peek-input">—</b></div><div class="stat"><span id="output-label">Output</span><b id="peek-output">—</b></div><div class="stat"><span id="cached-label">Cached</span><b id="peek-cache">—</b></div><div class="stat"><span id="sessions-label">Sessions</span><b id="peek-sessions">—</b></div></div>
+  </section>
+  <section class="panel" id="task-peek" hidden aria-label="Task peek">
+    <div class="panel-head"><h1 id="taskpeek-title">Tasks</h1><button class="icon-btn close" title="Close" aria-label="Close">×</button></div>
+    <div class="taskpeek-summary">
+      <div class="stat"><span>Running</span><b id="taskpeek-running">0</b></div>
+      <div class="stat"><span>Scheduled</span><b id="taskpeek-scheduled">0</b></div>
+      <div class="stat"><span>Completed</span><b id="taskpeek-completed">0</b></div>
+      <div class="stat"><span>Failed</span><b id="taskpeek-failed">0</b></div>
+    </div>
+    <div class="taskpeek-list" id="taskpeek-list"></div>
+    <div class="taskpeek-actions">
+      <button class="action" id="taskpeek-new">+ New Task</button>
+      <button class="action" id="taskpeek-manage">Manage All</button>
+    </div>
+  </section>
+  <section class="panel" id="panel" hidden aria-label="DshCockpit control center">
+    <div class="panel-head"><h1 id="panel-title">DshCockpit</h1><button class="icon-btn close" title="Close" aria-label="Close">×</button></div>
+    <div class="eyebrow" id="system-label">SYSTEM</div><div class="status-line"><span id="runtime-state">—</span><b id="runtime-version">—</b></div>
+    <div class="eyebrow" id="usage-label">USAGE</div><div class="grid"><div class="stat"><span id="tokens-label">Tokens</span><b id="usage-tokens">—</b></div><div class="stat"><span id="context-label">Context</span><b id="usage-pressure">—</b></div><div class="stat"><span id="today-label">Today</span><b id="usage-cost">—</b></div><div class="stat"><span id="tasks-label">Tasks</span><b id="usage-tasks">—</b></div></div>
+    <div class="eyebrow" id="automation-label">AUTOMATION</div><div id="tasks"></div>
+    <div class="eyebrow" id="actions-label">QUICK ACTIONS</div><div class="actions">
+      <button class="action" id="action-quickask" data-action="quickask">⚡ Quick Ask</button><button class="action" id="action-tasks" data-action="tasks">⏱ Tasks</button><button class="action" id="action-search" data-action="search">⌕ Session Search</button><button class="action" id="action-cost" data-action="cost">¥ Cost Center</button><button class="action" id="action-runtime" data-action="runtime">↻ Runtime</button><button class="action" id="action-remote" data-action="remote">⌁ Remote</button><button class="action" id="action-plugins" data-action="plugins">⌘ Integrations</button>
+    </div>
+  </section>
+  <section class="onboard" id="onboarding" hidden aria-live="polite"><div><div id="language-picker"><button class="quiet" id="language-zh">中文</button><button class="quiet" id="language-en">English</button></div><div class="eyebrow" id="onboard-step">01 / 03</div><h1 id="onboard-title"></h1><p id="onboard-copy"></p></div><div class="onboard-foot"><button class="quiet" id="onboard-skip"></button><button class="primary" id="onboard-next"></button></div></section>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const api = window.dshCockpit;
+  const state = { mode: 'rail', step: 0, snapshot: null, language: 'zh' };
+  const COPY = {
+    zh: { cockpit:'驾驶舱', settings:'设置', context:'上下文', input:'输入', output:'输出', cached:'缓存', sessions:'会话', system:'系统', usage:'用量', tokens:'Token', today:'今日', tasks:'任务', automation:'自动化', actions:'快捷操作', quickask:'快速问答', search:'会话搜索', cost:'成本中心', runtime:'运行时', remote:'远程', plugins:'集成', running:'运行中', scheduled:'已计划', emptyTasks:'暂无活动任务', close:'关闭', skip:'跳过', next:'下一步', enter:'进入 Harness', pressure:'上下文', states:{healthy:'运行正常',starting:'启动中',restarting:'重启中',offline:'离线',running:'运行中',scheduled:'已计划',completed:'已完成',failed:'失败',disabled:'已停用'}, onboard:[['欢迎使用 DshCockpit','Harness 已就绪。这里是独立的桌面控制层，可随时查看上下文状态。'],['你的运行与管理层','快速问答、后台任务、成本与运行时能力独立于 Harness 工作区。'],['准备就绪','使用 Ctrl + Alt + Space 唤起快速问答，或直接进入 Harness 开始工作。']] },
+    en: { cockpit:'Cockpit', settings:'Settings', context:'Context', input:'Input', output:'Output', cached:'Cached', sessions:'Sessions', system:'System', usage:'Usage', tokens:'Tokens', today:'Today', tasks:'Tasks', automation:'Automation', actions:'Quick actions', quickask:'Quick Ask', search:'Session Search', cost:'Cost Center', runtime:'Runtime', remote:'Remote', plugins:'Integrations', running:'running', scheduled:'scheduled', emptyTasks:'No active tasks', close:'Close', skip:'Skip', next:'Next', enter:'Enter Harness', pressure:'context', states:{healthy:'Runtime healthy',starting:'Starting',restarting:'Restarting',offline:'Offline',running:'Running',scheduled:'Scheduled',completed:'Completed',failed:'Failed',disabled:'Disabled'}, onboard:[['Welcome to DshCockpit','Harness is ready. This independent desktop control layer keeps context status in sight.'],['Your operating layer','Quick Ask, background tasks, cost, and runtime controls stay separate from the Harness workspace.'],['Ready when you are','Open Quick Ask with Ctrl + Alt + Space, or enter Harness and keep working.']] },
+  };
+  const fmt = (n) => { n = Number(n || 0); return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n); };
+  function applyMode(mode) { state.mode = ['rail', 'peek', 'taskpeek', 'panel', 'onboarding'].includes(mode) ? mode : 'rail'; $('rail').hidden = !['rail', 'onboarding'].includes(state.mode); $('peek').hidden = state.mode !== 'peek'; $('task-peek').hidden = state.mode !== 'taskpeek'; $('panel').hidden = state.mode !== 'panel'; $('onboarding').hidden = state.mode !== 'onboarding'; }
+  function requestMode(mode) { applyMode(mode); api.setMode(mode).catch(() => {}); }
+  function applyLanguage(language) { state.language = language === 'en' ? 'en' : 'zh'; const c = COPY[state.language]; document.documentElement.lang = state.language === 'zh' ? 'zh-CN' : 'en'; $('cockpit-label').textContent=c.cockpit; $('peek-title').textContent=c.context; $('panel-title').textContent='DshCockpit'; $('system-label').textContent=c.system; $('usage-label').textContent=c.usage; $('input-label').textContent=c.input; $('output-label').textContent=c.output; $('cached-label').textContent=c.cached; $('sessions-label').textContent=c.sessions; $('tokens-label').textContent=c.tokens; $('context-label').textContent=c.context; $('today-label').textContent=c.today; $('tasks-label').textContent=c.tasks; $('automation-label').textContent=c.automation; $('actions-label').textContent=c.actions; $('action-quickask').textContent='⚡ '+c.quickask; $('action-tasks').textContent='⏱ '+c.tasks; $('action-search').textContent='⌕ '+c.search; $('action-cost').textContent='¥ '+c.cost; $('action-runtime').textContent='↻ '+c.runtime; $('action-remote').textContent='⌁ '+c.remote; $('action-plugins').textContent='⌘ '+c.plugins; $('settings').title=c.settings; document.querySelectorAll('.close').forEach((b)=>{b.title=c.close;b.setAttribute('aria-label',c.close);}); if(state.snapshot) render(state.snapshot); if(state.mode==='onboarding') showOnboarding(); }
+  async function chooseLanguage(language) { applyLanguage(language); await api.setLanguage(language); }
+  function formatTaskTime(value) { const n = Number(value); if (!Number.isFinite(n)) return '--'; try { return new Intl.DateTimeFormat(state.language === 'en' ? 'en' : 'zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(n)); } catch { return '--'; } }
+  function renderTaskPeek(s) { const a = s && s.automation || {}; $('taskpeek-running').textContent = String(a.running || 0); $('taskpeek-scheduled').textContent = String(a.scheduled || 0); $('taskpeek-completed').textContent = String(a.completed || 0); $('taskpeek-failed').textContent = String(a.failed || 0); $('taskpeek-list').innerHTML = (a.items || []).map((t) => `<div class="task"><span>${t.state === 'running' ? '● ' : '○ '}${esc(t.name)}</span><small>${esc(COPY[state.language].states[t.state] || t.state)} · ${t.state === 'scheduled' ? formatTaskTime(t.nextRunAt) : formatTaskTime(t.lastRunAt)}</small></div>`).join('') || `<div class="task"><span>—</span><small>${esc(COPY[state.language].emptyTasks)}</small></div>`; }
+  function render(s) { state.snapshot = s; const c=COPY[state.language]; const u = s && s.usage; const pct = u ? u.pressurePct : 0; $('token').textContent = u && u.current ? `${fmt(u.pressureTokens)}  ${pct}%` : '—  —'; $('peek-pressure').textContent = u ? `${pct}% ${c.pressure}` : '—'; $('peek-total').textContent = u ? `${fmt(u.pressureTokens)} / ${fmt(u.contextWindow)}` : '—'; $('peek-input').textContent = u && u.current ? fmt(u.current.input) : '—'; $('peek-output').textContent = u && u.current ? fmt(u.current.output) : '—'; $('peek-cache').textContent = u && u.current ? fmt(u.current.cacheRead + u.current.cacheWrite) : '—'; $('peek-sessions').textContent = u ? String(u.sessionCount) : '—'; $('peek-meter').className = 'meter ' + (pct >= 85 ? 'bad' : pct >= 60 ? 'warn' : ''); $('peek-meter').firstElementChild.style.width = `${Math.min(100, pct)}%`; $('runtime-state').textContent = c.states[s.runtime.state] || s.runtime.state; $('runtime-version').textContent = s.runtime.activeVersion || '—'; $('usage-tokens').textContent = u ? fmt(u.totals.input + u.totals.output) : '—'; $('usage-pressure').textContent = u ? `${pct}%` : '—'; $('usage-cost').textContent = s.cost ? `${s.cost.currency}${s.cost.today.cost.toFixed(2)}` : '—'; $('usage-tasks').textContent = s.automation ? `${s.automation.running} ${c.running} · ${s.automation.scheduled} ${c.scheduled}` : '—'; $('tasks').innerHTML = (s.automation && s.automation.items || []).map((t) => `<div class="task"><span>${t.state === 'running' ? '● ' : '○ '}${esc(t.name)}</span><small>${esc(c.states[t.state] || t.state)}</small></div>`).join('') || `<div class="task"><span>—</span><small>${esc(c.emptyTasks)}</small></div>`; renderTaskPeek(s); }
+  function esc(v) { return String(v).replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])); }
+  function highlightOnboardingTarget(targetId) { ['token', 'cockpit'].forEach((id) => { const el = $(id); el.classList.remove('onboarding-highlight'); el.removeAttribute('aria-current'); }); if (!targetId) return; const target = $(targetId); if (target) { target.classList.add('onboarding-highlight'); target.setAttribute('aria-current', 'step'); } }
+  function showOnboarding() { const c=COPY[state.language]; $('onboard-step').textContent = `${String(state.step + 1).padStart(2, '0')} / 03`; $('onboard-title').textContent = c.onboard[state.step][0]; $('onboard-copy').textContent = c.onboard[state.step][1]; $('onboard-skip').textContent=c.skip; $('onboard-next').textContent=state.step===2?c.enter:c.next; $('language-picker').hidden=state.step!==0; if (state.step === 0) highlightOnboardingTarget('token'); else if (state.step === 1) highlightOnboardingTarget('cockpit'); else highlightOnboardingTarget(''); requestMode('onboarding'); }
+  function openPanel() { requestMode('panel'); }
+  $('token').addEventListener('click', () => { if (state.mode === 'onboarding') return; requestMode(state.mode === 'peek' ? 'rail' : 'peek'); });
+  $('cockpit').addEventListener('click', () => { if (state.mode === 'onboarding') return; openPanel(); });
+  $('settings').addEventListener('click', () => { if (state.mode === 'onboarding') return; api.openSettings(); });
+  $('language-zh').addEventListener('click', () => chooseLanguage('zh'));
+  $('language-en').addEventListener('click', () => chooseLanguage('en'));
+  document.querySelectorAll('.close').forEach((b) => b.addEventListener('click', () => requestMode('rail')));
+  document.querySelectorAll('[data-action]').forEach((b) => b.addEventListener('click', () => { const a = b.dataset.action; if (a === 'quickask') api.openQuickAsk(); else if (a === 'search') api.openSearch(); else if (a === 'tasks') { requestMode('taskpeek'); return; } else api.openControlPage(a); requestMode('rail'); }));
+  $('taskpeek-new').addEventListener('click', () => { api.newTask(); requestMode('rail'); });
+  $('taskpeek-manage').addEventListener('click', () => { api.openTasks(); requestMode('rail'); });
+  $('onboard-next').addEventListener('click', async () => { if (state.step < 2) { state.step += 1; showOnboarding(); } else { await api.completeOnboarding(); requestMode('rail'); } });
+  $('onboard-skip').addEventListener('click', async () => { await api.completeOnboarding(); requestMode('rail'); });
+  document.addEventListener('keydown', async (e) => { if (e.key !== 'Escape') return; if (state.mode === 'onboarding') await api.completeOnboarding(); requestMode('rail'); });
+  document.addEventListener('dragover', (e) => { if (state.mode !== 'rail') e.preventDefault(); });
+  document.addEventListener('drop', (e) => { if (state.mode !== 'rail') { e.preventDefault(); const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) api.setWorkspaceFromFile(f); } });
+  let dragPoint = null;
+  $('drag-handle').addEventListener('pointerdown', (e) => { dragPoint={x:e.screenX,y:e.screenY}; $('drag-handle').setPointerCapture(e.pointerId); });
+  $('drag-handle').addEventListener('pointermove', (e) => { if(!dragPoint)return; const dx=e.screenX-dragPoint.x,dy=e.screenY-dragPoint.y; if(dx||dy){dragPoint={x:e.screenX,y:e.screenY};api.moveOffset(dx,dy);} });
+  $('drag-handle').addEventListener('pointerup', () => { dragPoint=null; });
+  (async () => { try { document.documentElement.dataset.theme = await api.getTheme(); } catch {} const s = await api.getSnapshot(); applyLanguage(s.shell.language); render(s); if (!s.shell.onboardingComplete) showOnboarding(); })();
+  api.onSnapshot((s)=>{ if(s.shell && s.shell.language!==state.language) applyLanguage(s.shell.language); render(s); }); api.onMode(applyMode); api.onTheme((t) => { document.documentElement.dataset.theme = t; });
+</script>
+</body>
+</html>
