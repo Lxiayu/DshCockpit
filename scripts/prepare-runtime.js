@@ -10,10 +10,31 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync, spawnSync } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..');
 const VENDOR = path.join(ROOT, 'vendor', 'runtime');
+
+/** Run npm as a child process: streams progress straight to CI logs and has a
+ * hard timeout. arborist's silent reify() gave no logs and could hang forever
+ * on a slow/stuck registry (observed: 30min+ stall on Windows runner), so the
+ * build seed install deliberately uses npm's battle-tested CLI instead. */
+function execNpm(args, cwd, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    const child = spawn(npmCmd, args, { cwd, stdio: 'inherit', windowsHide: true });
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch { /* already gone */ }
+      reject(new Error(`npm install timed out after ${Math.round(timeoutMs / 60000)}min`));
+    }, timeoutMs);
+    child.on('error', (e) => { clearTimeout(timer); reject(e); });
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve();
+      else reject(new Error(`npm install exited with code ${code}`));
+    });
+  });
+}
 
 function firstLineOf(cmd, args) {
   try {
@@ -48,10 +69,8 @@ function dshBinMeta(binJs) {
 async function installFromRegistry(version, dest) {
   fs.mkdirSync(dest, { recursive: true });
   fs.writeFileSync(path.join(dest, 'package.json'), JSON.stringify({ name: 'dsh-runtime-seed', private: true, dependencies: { '@deepseek-ai/dsh': version } }, null, 2));
-  fs.writeFileSync(path.join(dest, '.npmrc'), ['registry=https://registry.npmjs.org/', 'fund=false', 'audit=false', 'loglevel=error'].join('\n') + '\n');
-  const Arborist = require('@npmcli/arborist');
-  const arb = new Arborist({ path: dest });
-  await arb.reify({ save: false });
+  fs.writeFileSync(path.join(dest, '.npmrc'), ['registry=https://registry.npmjs.org/', 'fund=false', 'audit=false', 'loglevel=http', 'maxsockets=10'].join('\n') + '\n');
+  await execNpm(['install', '--no-audit', '--no-fund'], dest, 20 * 60_000);
 }
 
 (async () => {
