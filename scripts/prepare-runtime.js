@@ -22,7 +22,9 @@ const VENDOR = path.join(ROOT, 'vendor', 'runtime');
 function execNpm(args, cwd, timeoutMs) {
   return new Promise((resolve, reject) => {
     const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-    const child = spawn(npmCmd, args, { cwd, stdio: 'inherit', windowsHide: true });
+    // shell:true required on Windows — spawn() cannot exec .cmd scripts directly
+    // (fails with EINVAL), and npm on all platforms is a shell/CLI shim.
+    const child = spawn(npmCmd, args, { cwd, stdio: 'inherit', windowsHide: true, shell: true });
     const timer = setTimeout(() => {
       try { child.kill('SIGKILL'); } catch { /* already gone */ }
       reject(new Error(`npm install timed out after ${Math.round(timeoutMs / 60000)}min`));
