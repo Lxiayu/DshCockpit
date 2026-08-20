@@ -35,7 +35,13 @@ jobs:
           path: vendor/runtime
           key: runtime-win-${{ hashFiles('scripts/prepare-runtime.js') }}
 
-      - run: node scripts/prepare-runtime.js
+      # arborist reify of the dsh runtime (sharp etc.) can exceed Node's
+      # default ~2GB V8 heap on CI — raise it for this step (and any build
+      # scripts it spawns) or prepare-runtime OOMs.
+      - name: Prepare bundled runtime
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: node scripts/prepare-runtime.js
 
       - run: node scripts/build.js --win --x64 --publish never
 
