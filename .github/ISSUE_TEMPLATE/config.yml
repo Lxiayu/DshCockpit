@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 讨论区 Discussions
+    url: https://github.com/Lxiayu/DshCockpit/discussions
+    about: 使用疑问、经验交流请到讨论区，而非提交 Issue
