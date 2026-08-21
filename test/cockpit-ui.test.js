@@ -197,6 +197,22 @@ test('session-heavy startup paths use the worker and defer optional services', (
   assert.match(main, /if \(!deferredServicesStarted\) \{ setTimeout\(startTokenPolling/);
 });
 
+test('main window can never stay hidden: ready-to-show fallback timer + limited load retry', () => {
+  const main = read('main.js');
+  assert.match(main, /mainWindow\.once\('ready-to-show', showMainWhenReady\)/);
+  assert.match(main, /ready-to-show timed out; forcing show/);
+  assert.match(main, /mainLoadRetries < 2/);
+  assert.match(main, /code === -3/); // ERR_ABORTED superseded loads ignored
+});
+
+test('runtime log tailing reads only appended bytes, never the whole file', () => {
+  const main = read('main.js');
+  assert.match(main, /st\.size === lastLogOffset\) return/); // no-growth short-circuit
+  assert.match(main, /fs\.openSync\(runtimeLogPath, 'r'\)/);
+  assert.match(main, /fs\.readSync\(fd, buf, 0, len, lastLogOffset\)/);
+  assert.match(main, /st\.size < lastLogOffset\) lastLogOffset = 0/); // truncation reset
+});
+
 test('Settings does not launch a recursive storage scan on every open', () => {
   const settings = read('settings.html');
   const start = settings.indexOf('function refreshInfo()');

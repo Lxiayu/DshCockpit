@@ -560,15 +560,31 @@ function spawnRuntime() {
   // (perf #8): on slow disks / long runtimes this avoids re-reading a
   // multi-MB file every 500ms during the boot window.
   if (urlPollTimer) clearInterval(urlPollTimer);
-  let lastLogSize = -1;
   let lastLogText = '';
+  let lastLogOffset = 0; // consumed byte offset — only new bytes are ever read
   urlPollTimer = setInterval(() => {
     if (runtimeUrl) { clearInterval(urlPollTimer); urlPollTimer = null; return; }
     let st;
     try { st = fs.statSync(runtimeLogPath); } catch { return; }
-    if (st.size === lastLogSize) return; // no new bytes since last poll
-    lastLogSize = st.size;
-    try { lastLogText = fs.readFileSync(runtimeLogPath, 'utf8'); } catch { return; }
+    if (st.size === lastLogOffset) return; // no new bytes since last poll
+    try {
+      // Read only the bytes appended since the last poll instead of re-reading
+      // the whole (potentially multi-MB) runtime log on every tick — on
+      // Windows + AV a full sync read in the boot window stalls the shell.
+      if (st.size < lastLogOffset) lastLogOffset = 0; // truncated / rewritten
+      if (st.size > lastLogOffset) {
+        const fd = fs.openSync(runtimeLogPath, 'r');
+        try {
+          const len = st.size - lastLogOffset;
+          const buf = Buffer.alloc(len);
+          const { bytesRead } = fs.readSync(fd, buf, 0, len, lastLogOffset);
+          lastLogText += buf.toString('utf8', 0, bytesRead);
+          lastLogOffset += bytesRead;
+        } finally {
+          fs.closeSync(fd);
+        }
+      }
+    } catch { return; }
     const m = lastLogText.match(URL_LINE_RE);
     if (m) {
       if (!runtimeStateController.isCurrent(generation)) return;
@@ -772,16 +788,40 @@ function createWindow(url) {
   mainWindow.on('leave-full-screen', () => { setTimeout(() => { syncCockpitBounds(); showCockpitInactive(); }, 80); });
 
   mainWindow.loadURL(url);
-  mainWindow.once('ready-to-show', () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
+  // Show + start deferred services when the page is truly paintable (no white
+  // flash). A timeout fallback covers Windows GPU / older-Electron combos that
+  // never emit ready-to-show even after a successful load, and a did-fail-load
+  // retry recovers transient load failures. Without the fallback a stuck main
+  // window would leave deferred services (token poll, scheduler, balance,
+  // compaction, …) disabled forever.
+  let mainShown = false;
+  let mainShowFallbackTimer = null;
+  const showMainWhenReady = () => {
+    if (mainShown || !mainWindow || mainWindow.isDestroyed()) return;
+    mainShown = true;
+    clearTimeout(mainShowFallbackTimer);
     mainWindow.show();
     if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.close();
     startDeferredServices();
-  });
+  };
+  mainWindow.once('ready-to-show', showMainWhenReady);
+  mainShowFallbackTimer = setTimeout(() => {
+    if (!mainShown) {
+      log('[shell] main window ready-to-show timed out; forcing show');
+      showMainWhenReady();
+    }
+  }, 15_000);
+  let mainLoadRetries = 0;
   mainWindow.webContents.on('did-fail-load', (_event, code, description) => {
+    if (code === -3) return; // ERR_ABORTED: superseded navigation, not a real failure
     log(`[shell] main window failed to load (${code}): ${description}`);
-    setLoading(t(lang(), 'loading.failed', { msg: description || code }));
-    if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.show();
+    if (mainLoadRetries < 2 && mainWindow && !mainWindow.isDestroyed()) {
+      mainLoadRetries += 1;
+      setTimeout(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(url); }, 1_000);
+    } else {
+      setLoading(t(lang(), 'loading.failed', { msg: description || code }));
+      if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.show();
+    }
   });
   mainWindow.on('close', (e) => {
     if (!quitting && !noTray && settings.get().trayOnClose && tray) {

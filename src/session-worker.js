@@ -9,6 +9,9 @@ const tokenStats = require('./token-stats');
 const compact = require('./compact');
 
 const compactTextCache = new Map();
+// Keep multi-MB decoded logs out of the cache: a giant active session would
+// otherwise pin several full decoded copies in worker memory for its lifetime.
+const MAX_CACHED_TEXT_LEN = 4 * 1024 * 1024;
 
 async function decodeForCompaction(file) {
   let st;
@@ -17,7 +20,7 @@ async function decodeForCompaction(file) {
   const hit = compactTextCache.get(file);
   if (hit && hit.key === key) return hit.text;
   const text = await tokenStats.decodeSessionLogAsync(file);
-  if (text !== null) {
+  if (text !== null && text.length <= MAX_CACHED_TEXT_LEN) {
     if (compactTextCache.size >= 8) compactTextCache.delete(compactTextCache.keys().next().value);
     compactTextCache.set(file, { key, text });
   }
