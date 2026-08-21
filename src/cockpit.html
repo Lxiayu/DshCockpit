@@ -10,10 +10,12 @@
   html, body { margin: 0; min-height: 100%; background: transparent; color: var(--text-1); font: 12px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
   body { padding: 6px; }
   button { border: 0; color: inherit; font: inherit; cursor: pointer; -webkit-app-region: no-drag; }
-  .shell { position: relative; background: var(--bg-panel); border: 1px solid var(--border-2); border-radius: 8px; overflow: hidden; }
-  #drag-handle { -webkit-app-region: drag; cursor: grab; }
-  #rail #drag-handle { width: 8px; height: 28px; flex: 0 0 8px; }
-  #rail { height: 32px; display: flex; gap: 5px; align-items: center; }
+  .shell { position: relative; background: var(--bg-panel); border: 1px solid var(--border-2); box-shadow: 0 0 0 1px var(--border-1); border-radius: 8px; overflow: hidden; }
+  #drag-handle { -webkit-app-region: drag; cursor: grab; touch-action: none; }
+  #rail #drag-handle { width: 28px; height: 32px; flex: 0 0 28px; border-right: 1px solid var(--border-1); }
+  #rail #drag-handle::after { content: '...'; display: block; color: var(--text-4); font-size: 12px; letter-spacing: 2px; line-height: 30px; text-align: center; }
+  #rail { height: 32px; display: flex; gap: 4px; align-items: center; padding: 0 3px; -webkit-app-region: drag; cursor: grab; }
+  #app.is-dragging { border-color: var(--acc); }
   .rail-btn { height: 28px; padding: 0 9px; background: transparent; border-radius: 7px; color: var(--text-2); white-space: nowrap; }
   .rail-btn:hover, .rail-btn:focus-visible { background: var(--bg-hover); color: var(--text-1); outline: none; }
   .rail-btn.onboarding-highlight { background: var(--bg-hover); color: var(--text-1); outline: 2px solid var(--acc); outline-offset: 1px; box-shadow: 0 0 0 4px rgba(89, 157, 255, .16); }
@@ -130,9 +132,13 @@
   document.addEventListener('dragover', (e) => { if (state.mode !== 'rail') e.preventDefault(); });
   document.addEventListener('drop', (e) => { if (state.mode !== 'rail') { e.preventDefault(); const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) api.setWorkspaceFromFile(f); } });
   let dragPoint = null;
-  $('drag-handle').addEventListener('pointerdown', (e) => { dragPoint={x:e.screenX,y:e.screenY}; $('drag-handle').setPointerCapture(e.pointerId); });
-  $('drag-handle').addEventListener('pointermove', (e) => { if(!dragPoint)return; const dx=e.screenX-dragPoint.x,dy=e.screenY-dragPoint.y; if(dx||dy){dragPoint={x:e.screenX,y:e.screenY};api.moveOffset(dx,dy);} });
-  $('drag-handle').addEventListener('pointerup', () => { dragPoint=null; });
+  const dragHandle = $('drag-handle');
+  const stopDrag = () => { dragPoint=null; $('app').classList.remove('is-dragging'); };
+  dragHandle.addEventListener('pointerdown', (e) => { dragPoint={x:e.screenX,y:e.screenY}; $('app').classList.add('is-dragging'); dragHandle.setPointerCapture(e.pointerId); });
+  dragHandle.addEventListener('pointermove', (e) => { if(!dragPoint)return; const dx=e.screenX-dragPoint.x,dy=e.screenY-dragPoint.y; if(dx||dy){dragPoint={x:e.screenX,y:e.screenY};api.moveOffset(dx,dy);} });
+  dragHandle.addEventListener('pointerup', stopDrag);
+  dragHandle.addEventListener('pointercancel', stopDrag);
+  dragHandle.addEventListener('lostpointercapture', stopDrag);
   (async () => { try { document.documentElement.dataset.theme = await api.getTheme(); } catch {} const s = await api.getSnapshot(); applyLanguage(s.shell.language); render(s); if (!s.shell.onboardingComplete) showOnboarding(); })();
   api.onSnapshot((s)=>{ if(s.shell && s.shell.language!==state.language) applyLanguage(s.shell.language); render(s); }); api.onMode(applyMode); api.onTheme((t) => { document.documentElement.dataset.theme = t; });
 </script>

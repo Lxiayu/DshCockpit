@@ -166,6 +166,37 @@ test('Cockpit rail is a single flat draggable surface without stacked window sha
   assert.match(main, /cockpitWindow\.on\('will-move'/);
 });
 
+test('Cockpit rail exposes a bordered, wide drag hit area with pointer-capture cleanup', () => {
+  const cockpit = read('cockpit.html');
+  assert.match(cockpit, /#rail #drag-handle\s*\{[^}]*width:\s*28px/s);
+  assert.match(cockpit, /#rail\s*\{[^}]*-webkit-app-region:\s*drag/s);
+  assert.match(cockpit, /border-right:\s*1px solid var\(--border-1\)/);
+  assert.match(cockpit, /setPointerCapture/);
+  assert.match(cockpit, /pointercancel/);
+  assert.match(cockpit, /lostpointercapture/);
+  assert.match(cockpit, /is-dragging/);
+});
+
+test('startup keeps the loading surface until the real page is ready and uses packaged assets', () => {
+  const main = read('main.js');
+  const loading = read('loading.html');
+  assert.match(main, /loadingWindow = new BrowserWindow\(\{[\s\S]*show:\s*false/);
+  assert.match(main, /loadingWindow\.once\('ready-to-show',/);
+  assert.match(main, /mainWindow\.once\('ready-to-show',/);
+  assert.match(main, /did-fail-load/);
+  assert.match(loading, /src="assets\/cockpit-logo\.jpg"/);
+});
+
+test('session-heavy startup paths use the worker and defer optional services', () => {
+  const main = read('main.js');
+  assert.match(main, /createSessionWorkerClient\(\)/);
+  assert.match(main, /sessionWorkerClient\.collect\(/);
+  assert.match(main, /scan:\s*sessionWorkerClient/);
+  assert.match(main, /startDeferredServices\(\)/);
+  assert.match(main, /deferredServicesStarted/);
+  assert.match(main, /if \(!deferredServicesStarted\) \{ setTimeout\(startTokenPolling/);
+});
+
 test('Settings does not launch a recursive storage scan on every open', () => {
   const settings = read('settings.html');
   const start = settings.indexOf('function refreshInfo()');

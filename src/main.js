@@ -29,6 +29,7 @@ const { createRuntimeStateController } = require('./runtime-state');
 const { t, resolveLanguage } = require('./i18n');
 const { backupNow, backupInfo } = require('./backup');
 const tokenStats = require('./token-stats');
+const { createSessionWorkerClient } = require('./session-worker-client');
 const windowState = require('./window-state');
 const { connectEvents } = require('./runtime-events');
 const cost = require('./cost');
@@ -100,6 +101,8 @@ let balanceTimer = null; // 5-minute fallback poll for the balance monitor
 let modelsMgr = null; // model provider panel state (constructed after app ready)
 let compactTracker = null; // compaction watcher (C3, constructed after app ready)
 let compactTimer = null; // 5-second compaction scan cadence
+let sessionWorkerClient = null;
+let deferredServicesStarted = false;
 let sessionRunning = false; // live host/session-status frames (C3 busy check)
 let guidedInstallInProgress = false;
 let mainWindowPending = false; // guided first-run: runtime booting, main window not open yet
@@ -184,7 +187,9 @@ async function collectStats(force = false) {
   }
   const t0 = Date.now();
   const windows = cost.parseWindows(settings.get().costPeakWindows) || cost.DEFAULT_WINDOWS;
-  const data = await tokenStats.collect(dshHomeOf(), { windows });
+  const data = sessionWorkerClient
+    ? await sessionWorkerClient.collect(dshHomeOf(), { windows })
+    : await tokenStats.collect(dshHomeOf(), { windows });
   log(`[perf] collectStats ${force ? 'forced ' : ''}recompute took ${Date.now() - t0}ms`);
   if (!force) costCache = { at: now, data };
   return data;
@@ -740,14 +745,13 @@ function waitForHealth(url, timeoutMs = HEALTH_TIMEOUT_MS) {
 // ---------------------------------------------------------------------------
 function createWindow(url) {
   mainWindowPending = false; // the main window is (about to be) open
-  // The splash has served its purpose; close it as the real window appears.
-  if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.close();
   const saved = windowState.load(windowStateFile());
   const bounds = safeBounds(saved) || { width: 1280, height: 840 };
   mainWindow = new BrowserWindow({
     ...bounds,
     backgroundColor: themeBackground(), // match the splash: no white flash before the web UI paints
     title: APP_NAME,
+    show: false,
     autoHideMenuBar: true,
     icon: iconPath(),
     webPreferences: {
@@ -768,6 +772,17 @@ function createWindow(url) {
   mainWindow.on('leave-full-screen', () => { setTimeout(() => { syncCockpitBounds(); showCockpitInactive(); }, 80); });
 
   mainWindow.loadURL(url);
+  mainWindow.once('ready-to-show', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.show();
+    if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.close();
+    startDeferredServices();
+  });
+  mainWindow.webContents.on('did-fail-load', (_event, code, description) => {
+    log(`[shell] main window failed to load (${code}): ${description}`);
+    setLoading(t(lang(), 'loading.failed', { msg: description || code }));
+    if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.show();
+  });
   mainWindow.on('close', (e) => {
     if (!quitting && !noTray && settings.get().trayOnClose && tray) {
       e.preventDefault();
@@ -795,6 +810,20 @@ function createWindow(url) {
 
   if (tray) tray.setToolTip(`${APP_NAME} — ${runtimeUrl || 'starting…'}`);
   setTimeout(() => { createCockpitWindow(); showCockpitInactive(); }, 0);
+}
+
+/** Start optional integrations only after the first real renderer is visible. */
+function startDeferredServices() {
+  if (deferredServicesStarted || quitting) return;
+  deferredServicesStarted = true;
+  if (channelsMgr) channelsMgr.startEnabled();
+  registerQuickAskHotkey();
+  startScheduler();
+  initBalanceMonitor();
+  initCompactTracking();
+  setTimeout(initAutoUpdater, 5_000);
+  setTimeout(seedInstalledPlugins, 2_000);
+  log('[perf] deferred services started after main window ready');
 }
 
 function cockpitDisplay() {
@@ -2823,6 +2852,7 @@ function initCompactTracking() {
     dshHomeOf,
     windows: () => cost.parseWindows(settings.get().costPeakWindows) || cost.DEFAULT_WINDOWS,
     log,
+    scan: sessionWorkerClient ? (file) => sessionWorkerClient.scanCompactions(file) : undefined,
     onStatus: () => broadcastCompactStatus(),
     onRecord: (rec) => {
       notify(t(lang(), 'notify.compactDone'), t(lang(), 'notify.compactDoneBody', {
@@ -2952,7 +2982,7 @@ function createLoadingWindow() {
     height: 260,
     frame: false,
     resizable: false,
-    show: true, // visible immediately — this is the boot feedback users stare at
+    show: false,
     backgroundColor: themeBackground(), // cover the first paint; the page bg matches
     webPreferences: {
       contextIsolation: true,
@@ -2963,12 +2993,23 @@ function createLoadingWindow() {
   });
   loadingWindow.loadFile(path.join(__dirname, 'loading.html'));
   loadingWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+  loadingWindow.once('ready-to-show', () => {
+    if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.show();
+  });
+  loadingWindow.webContents.on('did-fail-load', (_event, code, description) => {
+    log(`[shell] loading window failed to load (${code}): ${description}`);
+    setLoading(t(lang(), 'loading.failed', { msg: description || code }));
+  });
   // re-send the latest text once the page is ready (setLoading may have been
   // called before the renderer registered its IPC listener)
   loadingWindow.webContents.once('did-finish-load', () => {
     if (loadingWindow && !loadingWindow.isDestroyed()) {
       if (pendingLoadingText) loadingWindow.webContents.send('loading:progress', pendingLoadingText);
       loadingWindow.webContents.send('loading:meta', { version: app.getVersion() });
+      // `ready-to-show` is the normal path; this fallback covers older
+      // Electron/Windows GPU combinations that never emit it for a frameless
+      // window even though the document is fully loaded.
+      if (!loadingWindow.isVisible()) loadingWindow.show();
     }
   });
   loadingWindow.on('closed', () => { loadingWindow = null; pendingLoadingText = null; });
@@ -2977,7 +3018,13 @@ function createLoadingWindow() {
 
 function setLoading(text) {
   pendingLoadingText = text;
-  if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.webContents.send('loading:progress', text);
+  try {
+    if (loadingWindow && !loadingWindow.isDestroyed() && !loadingWindow.webContents.isDestroyed()) {
+      loadingWindow.webContents.send('loading:progress', text);
+    }
+  } catch (err) {
+    log(`[shell] loading progress delivery skipped: ${err.message}`);
+  }
 }
 
 /**
@@ -3416,6 +3463,10 @@ if (!gotLock) {
     // keeps keyboard accelerators alive (Ctrl+R / Ctrl+Shift+I / Ctrl+, …).
     buildAppMenu();
     openLog();
+    // Keep zstd decompression and session JSON parsing off Electron's main
+    // thread. The worker is long-lived so token and compaction polling share
+    // one isolated CPU lane and cannot stall window IPC.
+    sessionWorkerClient = createSessionWorkerClient();
     if (!fs.existsSync(iconPath())) log('[shell] warning: resources/icon.png missing');
     registerIpc();
     // Phone remote-control gateway: constructed here because safeStorage needs
@@ -3511,7 +3562,6 @@ if (!gotLock) {
         }
       }, 300);
     });
-    channelsMgr.startEnabled();
     broadcastTheme(); // push the resolved theme once settings are ready
     // Registry write on Windows; not needed before the first window.
     setTimeout(() => syncLoginItemSetting(settings.get().autoStart), 3_000);
@@ -3532,26 +3582,12 @@ if (!gotLock) {
     // never continue a torn-down app (write-after-end crashes).
     if (quitting) return;
     if (runtimeReady) {
-      // Reads the web profile's package.json (and may write settings) —
-      // housekeeping, keep it off the first-window path.
-      setTimeout(seedInstalledPlugins, 2_000);
       // The guided flow may have just closed its loading window; with no main
       // window open yet, window-all-closed would otherwise quit the app while
       // the runtime is still booting (M15). Hold quit until the window opens.
       mainWindowPending = true;
       spawnRuntime();
     }
-    registerQuickAskHotkey();
-    startScheduler();
-    // official balance polling (C1): startup-delayed + every-5-min fallback;
-    // turn ends hook in via onTurnEnd()
-    initBalanceMonitor();
-    // compaction tracking (C3): same 5s cadence as the token widget, stat-gated
-    initCompactTracking();
-    // require('electron-updater') pulls a large dependency tree out of the
-    // asar (hundreds of files, each an AV scan on Windows) — defer it well
-    // past the first window; checkShellUpdate() lazy-inits if user is faster.
-    setTimeout(initAutoUpdater, 5_000);
     if (process.env.DSH_DESKTOP_OPEN_SETTINGS === '1') createSettingsWindow();
 
     // token widget: one collect per tick shared by the widget and the cost
@@ -3574,17 +3610,24 @@ if (!gotLock) {
         if (!quitting) setTimeout(pollTokens, TOKEN_POLL_MS);
       }
     };
-    // Context is a core Cockpit rail signal, so polling stays active.
-    setTimeout(pollTokens, 2_000);
-    setTimeout(async () => {
-      const stats = await collectStats();
-      costSnapshot(stats);
-      primeTurnBaseline(stats); // seed the per-turn cost baseline (C1)
-      const diag = diagnosticsInfo();
-      if (diag.crashCount > 0) {
-        notify(t(lang(), 'notify.crashReminder'), t(lang(), 'notify.crashReminderBody', { n: diag.crashCount }));
-      }
-    }, 8_000);
+    // Context is a core Cockpit rail signal, so polling stays active, but the
+    // first scan waits until the real window is interactive. This prevents a
+    // large history tree from competing with runtime boot on first launch.
+    const startTokenPolling = () => {
+      if (quitting) return;
+      if (!deferredServicesStarted) { setTimeout(startTokenPolling, 1_000); return; }
+      setTimeout(pollTokens, 0);
+      setTimeout(async () => {
+        const stats = await collectStats();
+        costSnapshot(stats);
+        primeTurnBaseline(stats); // seed the per-turn cost baseline (C1)
+        const diag = diagnosticsInfo();
+        if (diag.crashCount > 0) {
+          notify(t(lang(), 'notify.crashReminder'), t(lang(), 'notify.crashReminderBody', { n: diag.crashCount }));
+        }
+      }, 6_000);
+    };
+    setTimeout(startTokenPolling, 2_000);
 
     // background update check (does not block boot)
     if (settings.get().checkUpdatesOnStartup) {
@@ -3637,6 +3680,7 @@ if (!gotLock) {
     if (remote) remote.stop();
     if (publicRemote) publicRemote.stopTunnel(); // C7: cloudflared child never outlives the app (taskkill /T /F inside)
     if (channelsMgr) channelsMgr.stopAll();
+    if (sessionWorkerClient) { sessionWorkerClient.close().catch(() => {}); sessionWorkerClient = null; }
     if (logStream) logStream.end();
   });
 }

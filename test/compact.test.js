@@ -230,6 +230,25 @@ test('tracker follows the active session file: running→idle, history entry wit
   assert.strictEqual(tracker.history().length, 1);
 });
 
+test('tracker delegates log scanning and does not overlap worker requests', async () => {
+  const home = tmpdir();
+  const sesDir = path.join(home, 'sessions', 'proj', 'ses-worker');
+  await fsp.mkdir(sesDir, { recursive: true });
+  await fsp.writeFile(path.join(sesDir, 'session.jsonl'), '{}\n');
+  let calls = 0;
+  const tracker = compact.createTracker({
+    historyFile: path.join(home, 'compact-history.json'),
+    dshHomeOf: () => home,
+    scan: async () => {
+      calls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return { records: [], open: null };
+    },
+  });
+  await Promise.all([tracker.tick(), tracker.tick()]);
+  assert.equal(calls, 1);
+});
+
 // ------------------------------------------------- pressure basis (main.js fix)
 
 test('pressureOf: context pressure is the LAST request prompt side, not the history sum', () => {

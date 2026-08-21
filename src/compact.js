@@ -224,6 +224,10 @@ function createTracker(opts) {
   const log = opts.log || (() => {});
   const onStatus = opts.onStatus || null;
   const onRecord = opts.onRecord || null;
+  const scan = opts.scan || (async (file) => {
+    const text = await tokenStats.decodeSessionLogAsync(file);
+    return text === null ? { records: [], open: null, unavailable: true } : scanCompactions(text);
+  });
   let history = loadHistory(historyFile);
   const known = new Set(history.map((r) => r.id));
   let lastFile = null;
@@ -231,6 +235,7 @@ function createTracker(opts) {
   let lastMtimeMs = -1;
   let compacting = false;
   let openId = null;
+  let tickInFlight = false;
 
   async function activeFile() {
     const root = path.join(dshHomeOf(), 'sessions');
@@ -245,45 +250,51 @@ function createTracker(opts) {
   }
 
   async function tick() {
-    let active;
-    try { active = await activeFile(); } catch { return; }
-    if (!active) return;
-    if (active.file === lastFile && active.size === lastSize && active.mtimeMs === lastMtimeMs) return;
-    lastFile = active.file;
-    lastSize = active.size;
-    lastMtimeMs = active.mtimeMs;
-    const text = await tokenStats.decodeSessionLogAsync(active.file);
-    if (text === null) return; // zstd frame mid-write; retry next tick
-    const scan = scanCompactions(text);
-    if (scan.open && scan.open.id !== openId) {
-      openId = scan.open.id;
-      compacting = true;
-      if (onStatus) onStatus('running', scan.open);
-    } else if (!scan.open && openId !== null) {
-      openId = null;
-      compacting = false;
-      if (onStatus) onStatus('idle');
-    }
-    for (const rec of scan.records) {
-      if (!rec.complete || known.has(rec.id)) continue;
-      known.add(rec.id);
-      const sessionId = path.basename(path.dirname(active.file));
-      const s = estimateSavings(
-        rec.beforeTokens, rec.afterTokens, rec.beforeUsage,
-        rec.summaryAt || rec.endedAt || rec.startedAt, windowsOf(), rec.model
-      );
-      const entry = {
-        id: rec.id,
-        sessionId,
-        at: rec.endedAt || rec.summaryAt || rec.startedAt || Date.now(),
-        beforeTokens: rec.beforeTokens,
-        afterTokens: rec.afterTokens,
-        savedYuan: Math.round(s.savedYuan * 1e4) / 1e4,
-        model: rec.model || cost.DEFAULT_MODEL,
-      };
-      history = appendHistory(historyFile, entry);
-      log(`[compact] session ${sessionId} compacted: ${rec.beforeTokens} -> ${rec.afterTokens} tokens (≈¥${s.savedYuan.toFixed(4)}/turn saved)`);
-      if (onRecord) onRecord(entry);
+    if (tickInFlight) return;
+    tickInFlight = true;
+    try {
+      let active;
+      try { active = await activeFile(); } catch { return; }
+      if (!active) return;
+      if (active.file === lastFile && active.size === lastSize && active.mtimeMs === lastMtimeMs) return;
+      let result;
+      try { result = await scan(active.file); } catch { return; }
+      if (result.unavailable) return; // zstd frame mid-write; retry next tick
+      lastFile = active.file;
+      lastSize = active.size;
+      lastMtimeMs = active.mtimeMs;
+      if (result.open && result.open.id !== openId) {
+        openId = result.open.id;
+        compacting = true;
+        if (onStatus) onStatus('running', result.open);
+      } else if (!result.open && openId !== null) {
+        openId = null;
+        compacting = false;
+        if (onStatus) onStatus('idle');
+      }
+      for (const rec of result.records) {
+        if (!rec.complete || known.has(rec.id)) continue;
+        known.add(rec.id);
+        const sessionId = path.basename(path.dirname(active.file));
+        const s = estimateSavings(
+          rec.beforeTokens, rec.afterTokens, rec.beforeUsage,
+          rec.summaryAt || rec.endedAt || rec.startedAt, windowsOf(), rec.model
+        );
+        const entry = {
+          id: rec.id,
+          sessionId,
+          at: rec.endedAt || rec.summaryAt || rec.startedAt || Date.now(),
+          beforeTokens: rec.beforeTokens,
+          afterTokens: rec.afterTokens,
+          savedYuan: Math.round(s.savedYuan * 1e4) / 1e4,
+          model: rec.model || cost.DEFAULT_MODEL,
+        };
+        history = appendHistory(historyFile, entry);
+        log(`[compact] session ${sessionId} compacted: ${rec.beforeTokens} -> ${rec.afterTokens} tokens (≈¥${s.savedYuan.toFixed(4)}/turn saved)`);
+        if (onRecord) onRecord(entry);
+      }
+    } finally {
+      tickInFlight = false;
     }
   }
 
