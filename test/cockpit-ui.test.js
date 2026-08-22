@@ -41,6 +41,7 @@ test('onboarding keeps the real Rail visible, highlights its actual targets, and
   assert.match(html, /classList\.add\('onboarding-highlight'\)/);
   assert.match(html, /src="assets\/cockpit-logo\.jpg"/);
   assert.match(html, /aria-label="DshCockpit logo"/);
+  assert.doesNotMatch(html, /\.onboard\s*\{[^}]*position:\s*absolute/); // card must flow inside the shell, or overflow:hidden clips it and the rail is trapped disabled
   const asset = path.join(SRC, 'assets', 'cockpit-logo.jpg');
   assert.ok(fs.existsSync(asset), 'Cockpit logo asset must be copied into src/assets');
   assert.ok(fs.statSync(asset).size > 0, 'Cockpit logo asset must not be empty');
