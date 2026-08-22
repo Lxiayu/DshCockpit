@@ -987,7 +987,7 @@ function cockpitNavigate(mode, page, intent) {
   hideCockpit();
 }
 
-function buildCockpitSnapshot() {
+async function buildCockpitSnapshot() {
   const now = Date.now();
   if (cockpitSnapshotCache.snapshot && now - cockpitSnapshotCache.at < COCKPIT_SNAPSHOT_TTL_MS) {
     return cockpitSnapshotCache.snapshot;
@@ -997,7 +997,7 @@ function buildCockpitSnapshot() {
   let usage = null;
   let costData = null;
   try { usage = costCache.data; } catch { /* no-op */ }
-  try { costData = usage ? costSnapshot(usage) : null; } catch { /* no-op */ }
+  try { costData = usage ? await costSnapshot(usage) : null; } catch { /* no-op */ }
   const tasks = cfg.scheduledTasks || [];
   const history = cfg.scheduledHistory || [];
   const snapshot = buildSnapshot({
@@ -1020,9 +1020,9 @@ function invalidateCockpitSnapshot() {
   cockpitSnapshotCache.at = 0;
 }
 
-function broadcastCockpitSnapshot() {
+async function broadcastCockpitSnapshot() {
   if (!cockpitWindow || cockpitWindow.isDestroyed()) return;
-  try { cockpitWindow.webContents.send('cockpit:snapshot', buildCockpitSnapshot()); } catch { /* ignore */ }
+  try { cockpitWindow.webContents.send('cockpit:snapshot', await buildCockpitSnapshot()); } catch { /* ignore */ }
 }
 
 /** Keep restored bounds at least partially visible on some display. */
@@ -1635,7 +1635,7 @@ function registerIpc() {
   });
   ipcMain.handle('shell:cost-info', async () => {
     const stats = await collectStats();
-    return costSnapshot(stats);
+    return await costSnapshot(stats);
   });
   // official account balance (C1): snapshot for display + forced refresh
   ipcMain.handle('shell:balance-info', () => ({
@@ -2676,7 +2676,7 @@ function todayMonthKey() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function costSnapshot(stats) {
+async function costSnapshot(stats) {
   if (!stats) return; // async collect now drives all callers; no sync fallback
   const cfg = settings.get();
   const snapshotKey = JSON.stringify({
@@ -2728,14 +2728,14 @@ function costSnapshot(stats) {
   const now = Date.now();
   if (now - lastCostUpdateAt > 10 * 60 * 1000) {
     lastCostUpdateAt = now;
-    cost.updateHistory(costHistoryFile(), {
+    await cost.updateHistory(costHistoryFile(), {
       input: stats.totals.input, output: stats.totals.output,
       cacheRead: stats.totals.cacheRead, cacheWrite: stats.totals.cacheWrite,
       sessions: stats.sessionCount, cost: totalCost,
       peakCost: peakCostTotal,
     });
   }
-  const history = cost.loadHistory(costHistoryFile());
+  const history = await cost.loadHistory(costHistoryFile());
   const month = cost.summarize(history, 30);
   checkBudget(month.cost);
   const windows = peakWindowsOf(cfg);
@@ -3642,7 +3642,7 @@ if (!gotLock) {
       try {
         const stats = await collectStats();
         pushTokens(stats);
-        costSnapshot(stats);
+        await costSnapshot(stats);
       } catch (e) {
         log(`[shell] token poll failed: ${e.message}`);
       } finally {
@@ -3659,7 +3659,7 @@ if (!gotLock) {
       setTimeout(pollTokens, 0);
       setTimeout(async () => {
         const stats = await collectStats();
-        costSnapshot(stats);
+        await costSnapshot(stats);
         primeTurnBaseline(stats); // seed the per-turn cost baseline (C1)
         const diag = diagnosticsInfo();
         if (diag.crashCount > 0) {

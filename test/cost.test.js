@@ -16,11 +16,11 @@ test('costOf converts tokens to money', () => {
   assert.strictEqual(Math.round(c * 100) / 100, 2 + 4 + 0.1); // 6.1
 });
 
-test('updateHistory upserts today and prunes old', () => {
+test('updateHistory upserts today and prunes old', async () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-cost-')), 'h.json');
-  cost.updateHistory(file, { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, sessions: 1, cost: 0.1 });
-  cost.updateHistory(file, { input: 30, output: 40, cacheRead: 0, cacheWrite: 0, sessions: 2, cost: 0.3 });
-  const h = cost.loadHistory(file);
+  await cost.updateHistory(file, { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, sessions: 1, cost: 0.1 });
+  await cost.updateHistory(file, { input: 30, output: 40, cacheRead: 0, cacheWrite: 0, sessions: 2, cost: 0.3 });
+  const h = await cost.loadHistory(file);
   assert.strictEqual(h.length, 1);
   assert.strictEqual(h[0].input, 30);
   fs.rmSync(path.dirname(file), { recursive: true, force: true });
@@ -116,11 +116,11 @@ test('costOfSplit splits buckets, degrades without buckets or peak rates', () =>
   assert.strictEqual(noPeakRates.total, 2);
 });
 
-test('updateHistory stores peakCost and summarize accumulates it', () => {
+test('updateHistory stores peakCost and summarize accumulates it', async () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-cost-')), 'h.json');
-  cost.updateHistory(file, { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, sessions: 1, cost: 0.1, peakCost: 0.04 });
-  cost.updateHistory(file, { input: 30, output: 40, cacheRead: 0, cacheWrite: 0, sessions: 2, cost: 0.3, peakCost: 0.12 });
-  const h = cost.loadHistory(file);
+  await cost.updateHistory(file, { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, sessions: 1, cost: 0.1, peakCost: 0.04 });
+  await cost.updateHistory(file, { input: 30, output: 40, cacheRead: 0, cacheWrite: 0, sessions: 2, cost: 0.3, peakCost: 0.12 });
+  const h = await cost.loadHistory(file);
   assert.strictEqual(h.length, 1);
   assert.strictEqual(h[0].peakCost, 0.12);
   assert.strictEqual(cost.summarize(h, 1).peakCost, 0.12);

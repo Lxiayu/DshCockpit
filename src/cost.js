@@ -4,7 +4,7 @@
 // numbers shown are labeled as estimates, never as official billing.
 'use strict';
 
-const fs = require('node:fs');
+const fsp = require('node:fs/promises');
 const path = require('node:path');
 
 const HISTORY_MAX_DAYS = 90;
@@ -160,10 +160,12 @@ function costOfSplit(totals, rates, peakRates) {
   return { peak, offPeak, total: peak + offPeak };
 }
 
-/** Load or create the daily history file (array of {date, input, output, cacheRead, cacheWrite, sessions, cost}). */
-function loadHistory(file) {
+/** Load or create the daily history file (array of {date, input, output, cacheRead, cacheWrite, sessions, cost}).
+ * Async so the disk read never blocks the main process's event loop (Windows AV
+ * can stall sync reads for tens of ms; perf report P2/P3). */
+async function loadHistory(file) {
   let st;
-  try { st = fs.statSync(file); } catch {
+  try { st = await fsp.stat(file); } catch {
     // file missing — drop any stale cache entry
     historyCache.delete(file);
     return [];
@@ -172,7 +174,7 @@ function loadHistory(file) {
   if (hit && hit.mtimeMs === st.mtimeMs) return hit.history;
   let history = [];
   try {
-    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const raw = JSON.parse(await fsp.readFile(file, 'utf8'));
     if (Array.isArray(raw)) history = raw;
   } catch { /* first run / corrupt */ }
   // keep a defensive copy so callers can't mutate the cached array
@@ -182,8 +184,8 @@ function loadHistory(file) {
 }
 
 /** Upsert today's entry; prune entries older than HISTORY_MAX_DAYS. */
-function updateHistory(file, entry) {
-  let history = loadHistory(file);
+async function updateHistory(file, entry) {
+  let history = await loadHistory(file);
   const key = todayKey();
   const idx = history.findIndex((h) => h.date === key);
   if (idx === -1) history.push({ date: key, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, sessions: 0, cost: 0 });
@@ -195,14 +197,14 @@ function updateHistory(file, entry) {
   const cutoff = new Date(Date.now() - HISTORY_MAX_DAYS * 86_400_000);
   history = history.filter((h) => !h.date || new Date(h.date + 'T00:00:00') >= cutoff);
   try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
+    await fsp.mkdir(path.dirname(file), { recursive: true });
     const tmp = `${file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(history, null, 2));
-    fs.renameSync(tmp, file);
+    await fsp.writeFile(tmp, JSON.stringify(history, null, 2));
+    await fsp.rename(tmp, file);
   } catch { /* ignore */ }
   // refresh cache so the next loadHistory reuses the just-written data
   try {
-    const st = fs.statSync(file);
+    const st = await fsp.stat(file);
     historyCache.set(file, { mtimeMs: st.mtimeMs, history: history.map((h) => ({ ...h })) });
   } catch { historyCache.delete(file); }
   return history;
