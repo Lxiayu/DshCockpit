@@ -1024,6 +1024,12 @@
           <h2 data-i18n="nav.update">更新</h2>
           <p data-i18n="page.update.d">运行时更新通道与版本</p>
         </div>
+        <div class="card" id="compat-card">
+          <h3 data-i18n="card.compat">上游兼容状态</h3>
+          <div class="kv"><span data-i18n="compat.current">当前运行时版本</span><b id="compat-current">--</b></div>
+          <div class="kv"><span data-i18n="compat.state">上游验证</span><b id="compat-state">--</b></div>
+          <div class="status" id="compat-note"></div>
+        </div>
         <div class="card">
           <h3 data-i18n="card.updateChannel">通道与来源</h3>
           <div class="setting">
@@ -1092,6 +1098,17 @@
             <button class="secondary" id="open-logs" data-i18n="btn.openLogs">打开日志目录</button>
             <button class="secondary" id="open-diagnostics" data-i18n="btn.openDiagnostics">打开诊断目录</button>
           </div>
+        </div>
+        <div class="card" id="boot-check-card">
+          <h3 data-i18n="card.bootCheck">启动自检</h3>
+          <div class="kv"><span data-i18n="boot.lastRun">上次自检</span><b id="boot-last-run">--</b></div>
+          <div class="kv"><span data-i18n="boot.overall">总体状态</span><b id="boot-overall">--</b></div>
+          <div id="boot-results"></div>
+          <div class="btnrow">
+            <button class="secondary" id="btn-boot-rerun" data-i18n="btn.bootRerun">立即重检</button>
+            <button class="secondary" id="btn-boot-repair" data-i18n="btn.bootRepair" style="display:none">一键修复</button>
+          </div>
+          <div class="status" id="boot-status"></div>
         </div>
       </div>
 
@@ -1538,6 +1555,25 @@
       skills_w1: '目录名与技能名不一致，已自动对齐为 {name}（跨平台兼容）',
       skills_w2: '该技能附带可执行脚本或命令类指令，安装后 agent 可能请求运行它们（每次经 dsh 审批）',
       skills_pluginForm: '该仓库是插件型技能包（package.json + dsh bundle），请通过插件市场安装',
+      card_bootCheck: '启动自检',
+      boot_lastRun: '上次自检', boot_overall: '总体状态',
+      boot_overallOk: '全部通过', boot_overallFailed: '{n} 项未通过', boot_overallDegraded: '{n} 项存在兼容性提示', boot_none: '尚未运行自检。',
+      btn_bootRerun: '立即重检', btn_bootRepair: '一键修复',
+      boot_running: '⏳ 自检中…', boot_repairing: '⏳ 修复中…',
+      boot_done: '✅ 自检完成：{p}/{t} 项通过。',
+      boot_repaired: '✅ 已修复 {items}；重新自检 {p}/{t} 项通过。',
+      boot_repairSkipped: '未修复（需手动处理）：{items}',
+      boot_checkRuntimeBin: '运行时可执行', boot_checkRuntimePointer: '版本指针',
+      boot_checkDshHomeWritable: 'DSH_HOME 可写', boot_checkProfileLinks: 'Profile 链接健康',
+      boot_checkPortAvailable: '端口可用性', boot_checkCredentialsExists: '凭据存在',
+      boot_checkCredentialsLayout: '凭据格式兼容',
+      card_compat: '上游兼容状态',
+      compat_current: '当前运行时版本', compat_state: '上游验证',
+      compat_stateVerified: '✅ 已验证兼容', compat_stateUnverified: '⚠️ 尚未验证（最新已验证：{v}）',
+      compat_stateUnknown: '未知', compat_stateDisabled: '已关闭',
+      compat_noteSource: '数据来自仓库兼容快报（{date} · {source}）',
+      compat_sourceLive: '实时', compat_sourceCache: '缓存',
+      compat_noteUnavailable: '无法读取兼容快报：{reason}',
     },
     en: {
       title: 'DshCockpit Settings',
@@ -1896,6 +1932,25 @@
       skills_w1: 'Directory name differs from the skill name; aligned automatically to {name} (cross-platform compatibility)',
       skills_w2: 'This skill bundles executable scripts or command-style instructions; the agent may ask to run them after install (each run goes through dsh approval)',
       skills_pluginForm: 'This repo is a bundle-plugin skill pack (package.json + dsh bundle); install it from the plugin market',
+      card_bootCheck: 'Boot self-check',
+      boot_lastRun: 'Last check', boot_overall: 'Overall',
+      boot_overallOk: 'All checks passed', boot_overallFailed: '{n} check(s) failed', boot_overallDegraded: '{n} compatibility notice(s)', boot_none: 'No self-check has run yet.',
+      btn_bootRerun: 'Re-run now', btn_bootRepair: 'One-click repair',
+      boot_running: '⏳ Checking…', boot_repairing: '⏳ Repairing…',
+      boot_done: '✅ Check finished: {p}/{t} passed.',
+      boot_repaired: '✅ Repaired {items}; re-check passed {p}/{t}.',
+      boot_repairSkipped: 'Not repaired (manual action needed): {items}',
+      boot_checkRuntimeBin: 'Runtime executable', boot_checkRuntimePointer: 'Version pointer',
+      boot_checkDshHomeWritable: 'DSH_HOME writable', boot_checkProfileLinks: 'Profile links healthy',
+      boot_checkPortAvailable: 'Port availability', boot_checkCredentialsExists: 'Credentials present',
+      boot_checkCredentialsLayout: 'Credential layout compatible',
+      card_compat: 'Upstream compatibility',
+      compat_current: 'Current runtime version', compat_state: 'Upstream verification',
+      compat_stateVerified: '✅ Verified compatible', compat_stateUnverified: '⚠️ Not yet verified (latest verified: {v})',
+      compat_stateUnknown: 'Unknown', compat_stateDisabled: 'Disabled',
+      compat_noteSource: 'Data from the repo compat report ({date} · {source})',
+      compat_sourceLive: 'live', compat_sourceCache: 'cached',
+      compat_noteUnavailable: 'Compat report unavailable: {reason}',
     },
   };
 
@@ -2003,7 +2058,8 @@
     // long-session center: refresh the compaction state/history + memory file
     if (p === 'longsession') { refreshCompact(); loadMemory(); }
     if (p === 'data') { refreshStorageInfo(); renderSnapshots(); refreshBackupInfo(); }
-    if (p === 'about') refreshDiagnostics();
+    if (p === 'about') { refreshDiagnostics(); refreshBootCheck(); }
+    if (p === 'update') refreshCompat();
   }
   function consumeCenterIntent(intent) {
     if (CENTER_INTENTS.has(intent) && centerMode === 'control') {
@@ -3430,6 +3486,87 @@
   }
 
   $('open-diagnostics').addEventListener('click', () => window.dshShell.openDiagnostics());
+
+  // ------------------------------------------------- boot self-check (R1)
+  const BOOT_CHECK_TITLES = {
+    'runtime.bin': 'boot.checkRuntimeBin',
+    'runtime.pointer': 'boot.checkRuntimePointer',
+    'dshhome.writable': 'boot.checkDshHomeWritable',
+    'profile.links': 'boot.checkProfileLinks',
+    'port.available': 'boot.checkPortAvailable',
+    'credentials.exists': 'boot.checkCredentialsExists',
+    'credentials.layout': 'boot.checkCredentialsLayout',
+  };
+  function renderBootCheck(report) {
+    const fixable = (report && report.results || []).filter((r) => !r.ok && r.fixable);
+    $('btn-boot-repair').style.display = fixable.length ? '' : 'none';
+    if (!report) {
+      $('boot-last-run').textContent = '--';
+      $('boot-overall').textContent = tr('boot.none');
+      $('boot-overall').removeAttribute('style');
+      $('boot-results').innerHTML = '';
+      return;
+    }
+    try { $('boot-last-run').textContent = new Date(report.at).toLocaleString(); }
+    catch { $('boot-last-run').textContent = String(report.at || '--'); }
+    const overall = report.overall || ((report.summary && report.summary.failed) ? 'failed' : 'ok');
+    const overallText = overall === 'ok' ? tr('boot.overallOk')
+      : overall === 'degraded' ? tr('boot.overallDegraded', { n: (report.summary && report.summary.degraded) || 0 })
+        : tr('boot.overallFailed', { n: (report.summary && report.summary.failed) || 0 });
+    $('boot-overall').textContent = overallText;
+    $('boot-overall').style.color = overall === 'ok' ? 'var(--ok)' : (overall === 'degraded' ? 'var(--warn)' : 'var(--bad)');
+    $('boot-results').innerHTML = (report.results || []).map((r) => {
+      const title = BOOT_CHECK_TITLES[r.id] ? tr(BOOT_CHECK_TITLES[r.id]) : r.id;
+      const mark = r.ok ? '✅' : (r.severity === 'warning' ? '⚠️' : '❌');
+      const color = r.ok ? '' : (r.severity === 'warning' ? ' style="color:var(--warn)"' : ' style="color:var(--bad)"');
+      return `<div class="kv"><span>${escapeHtml(title)}</span><b${color} style="font-weight:400;font-size:12px;text-align:right">${mark} ${escapeHtml(r.detail || '')}</b></div>`;
+    }).join('');
+  }
+  async function refreshBootCheck() {
+    try { renderBootCheck((await window.dshShell.bootReport()).report); }
+    catch (e) { dbg(`refreshBootCheck: failed ${e.message}`); }
+  }
+  $('btn-boot-rerun').addEventListener('click', async () => {
+    const btn = $('btn-boot-rerun');
+    btn.disabled = true;
+    setStatus($('boot-status'), tr('boot.running'));
+    try {
+      const r = await window.dshShell.bootRerun();
+      renderBootCheck(r.report);
+      setStatus($('boot-status'), r.report ? tr('boot.done', { p: r.report.summary.passed, t: r.report.summary.total }) : tr('boot.none'));
+    } catch (e) {
+      setStatus($('boot-status'), tr('control.operationFailed', { reason: e.message }), 'warn');
+    } finally { btn.disabled = false; }
+  });
+  $('btn-boot-repair').addEventListener('click', async () => {
+    const btn = $('btn-boot-repair');
+    btn.disabled = true;
+    setStatus($('boot-status'), tr('boot.repairing'));
+    try {
+      const r = await window.dshShell.bootRepair();
+      renderBootCheck(r.report);
+      const items = (r.repaired || []).map((id) => BOOT_CHECK_TITLES[id] ? tr(BOOT_CHECK_TITLES[id]) : id).join(', ');
+      if ((r.repaired || []).length) setStatus($('boot-status'), tr('boot.repaired', { items, p: r.report.summary.passed, t: r.report.summary.total }));
+      else setStatus($('boot-status'), tr('boot.repairSkipped', { items: (r.skipped || []).join(', ') }), 'warn');
+    } catch (e) {
+      setStatus($('boot-status'), tr('control.operationFailed', { reason: e.message }), 'warn');
+    } finally { btn.disabled = false; }
+  });
+
+  // ------------------------------------------- upstream compat status (R2)
+  async function refreshCompat() {
+    try {
+      const s = await window.dshShell.compatStatus();
+      $('compat-current').textContent = s.current || '--';
+      if (!s.enabled) { $('compat-state').textContent = tr('compat.stateDisabled'); $('compat-note').textContent = ''; return; }
+      if (!s.ok) { $('compat-state').textContent = tr('compat.stateUnknown'); setStatus($('compat-note'), tr('compat.noteUnavailable', { reason: s.reason || '' }), 'warn'); return; }
+      $('compat-state').textContent = s.compatible
+        ? tr('compat.stateVerified', { v: s.latestVerified })
+        : tr('compat.stateUnverified', { v: s.latestVerified, c: s.current });
+      $('compat-note').textContent = tr('compat.noteSource', { date: s.updatedAt || '--', source: s.source === 'cache' ? tr('compat.sourceCache') : tr('compat.sourceLive') });
+      dbg(`refreshCompat: ok source=${s.source} compatible=${s.compatible}`);
+    } catch (e) { dbg(`refreshCompat: failed ${e.message}`); }
+  }
 
   // ---------------------------------------------------------- plugin center
   function escapeHtml(s) {

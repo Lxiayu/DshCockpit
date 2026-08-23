@@ -208,10 +208,15 @@ test('main window can never stay hidden: ready-to-show fallback timer + limited 
 
 test('runtime log tailing reads only appended bytes, never the whole file', () => {
   const main = read('main.js');
-  assert.match(main, /st\.size === lastLogOffset\) return/); // no-growth short-circuit
-  assert.match(main, /fs\.openSync\(runtimeLogPath, 'r'\)/);
-  assert.match(main, /fs\.readSync\(fd, buf, 0, len, lastLogOffset\)/);
-  assert.match(main, /st\.size < lastLogOffset\) lastLogOffset = 0/); // truncation reset
+  // the poller delegates to the incident-hardened tailer module (v0.2.8 NaN
+  // offset fix); raw fs.readSync bookkeeping must stay OUT of main.js
+  assert.match(main, /createRuntimeLogTailer\(runtimeLogPath\)/);
+  assert.doesNotMatch(main, /readSync\(fd, buf, 0, len, lastLogOffset\)/);
+  const tailerSrc = read('runtime-log-tail.js');
+  assert.match(tailerSrc, /st\.size === offset\) return ''/); // no-growth short-circuit
+  assert.match(tailerSrc, /st\.size < offset\) offset = 0/); // truncation reset
+  assert.match(tailerSrc, /typeof ret === 'number'/, // readSync return-shape normalization
+    'fs.readSync return must be normalized (the destructuring incident)');
 });
 
 test('Settings does not launch a recursive storage scan on every open', () => {

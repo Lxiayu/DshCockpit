@@ -1,0 +1,113 @@
+# R2 upstream compatibility pipeline: verify a @deepseek-ai/dsh release
+# installs and boots on win + mac, then aggregate the verdicts into the repo's
+# public compat artifacts (docs/compat/) via a PR — "who declared compat
+# first" is a user decision moment, so this runs on demand and daily.
+#
+# Outputs (created by scripts/upstream-compat-report.js):
+#   docs/compat/compat-status.json   ledger read by the app + badge generator
+#   docs/compat/badge.json           shields.io endpoint payload for the README badge
+#   docs/compat/<date>-<version>.md  human-readable report with failure summaries
+#   docs/compat/discussion-body.md   GitHub Discussion announcement template
+name: upstream-compat
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_version:
+        description: 'Specific @deepseek-ai/dsh version (empty = resolve dist-tag below)'
+        required: false
+        default: ''
+      resolve_tag:
+        description: 'Dist-tag to resolve when no explicit version is given'
+        required: false
+        default: 'rc'
+  schedule:
+    - cron: '0 3 * * *' # daily drill: catch upstream rc releases within hours
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  smoke:
+    name: smoke ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false # one platform failing must not hide the other's verdict
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # arborist reify of the dsh runtime can exceed Node's default heap on CI
+      - name: Run compat smoke
+        id: smoke
+        continue-on-error: true
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: >-
+          node scripts/upstream-compat-smoke.js
+          ${{ github.event.inputs.upstream_version && format('--version {0}', github.event.inputs.upstream_version) || '' }}
+          --resolve-tag ${{ github.event.inputs.resolve_tag || 'rc' }}
+          --out compat-result-${{ matrix.os }}.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compat-result-${{ matrix.os }}
+          if-no-files-found: error
+          path: compat-result-${{ matrix.os }}.json
+
+  report:
+    name: aggregate & open PR
+    needs: smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: .compat-artifacts
+
+      # flatten artifact dirs so loadResults() sees plain *.json files
+      - name: Flatten artifacts
+        run: |
+          mkdir -p .compat-flat
+          find .compat-artifacts -name 'compat-result-*.json' -exec cp {} .compat-flat/ \;
+
+      - name: Build compat artifacts
+        run: node scripts/upstream-compat-report.js --in .compat-flat --out docs/compat
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: compat/auto-report
+          delete-branch: true
+          title: 'chore(compat): upstream verification report'
+          body-path: docs/compat/discussion-body.md
+          commit-message: 'chore(compat): record upstream compatibility run'
+
+      # Optional announcement: set the repo variable COMPAT_DISCUSSION_CATEGORY_ID
+      # to enable; the body template is generated next to the report.
+      - name: Publish Discussion
+        if: ${{ vars.COMPAT_DISCUSSION_CATEGORY_ID != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPAT_DISCUSSION_CATEGORY_ID: ${{ vars.COMPAT_DISCUSSION_CATEGORY_ID }}
+        run: |
+          gh api graphql -f query='mutation($repo:String!,$cat:ID!,$title:String!,$body:String!){
+            createDiscussion(input:{repositoryId:$repo,categoryId:$cat,title:$title,body:$body}){
+              discussion{ url }
+            }
+          }' -f repo="${{ github.repository_id }}" -f cat="$COMPAT_DISCUSSION_CATEGORY_ID" \
+             -f title="$(head -1 docs/compat/discussion-body.md | tr -d '*')" \
+             -f body="$(cat docs/compat/discussion-body.md)" || \
+          echo "::warning::discussion publish failed (check category id)"

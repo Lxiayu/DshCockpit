@@ -38,7 +38,7 @@ const { runHeadless } = require('./headless');
 const { Scheduler } = require('./scheduler');
 const { searchSessions } = require('./session-search');
 const { RemoteControl, PAIR_PATH } = require('./remote-control');
-const { ensurePnpmShim, prependPath } = require('./pnpm-shim');
+const { ensurePnpmShim, prependPath, resolvePnpmForProfile } = require('./pnpm-shim');
 const { createPublicRemote, buildPairUrl } = require('./public-remote');
 const { createModelsManager, PRESETS: MODELS_PRESETS, OLLAMA_PRESET: MODELS_OLLAMA_PRESET } = require('./models-manager');
 const compact = require('./compact');
@@ -56,6 +56,11 @@ const { WecomChannel } = require('./channels/receivers/wecom');
 const { testWecomConnection } = require('./channels/senders/wecom');
 const { DingtalkChannel } = require('./channels/receivers/dingtalk');
 const { testDingtalkConnection } = require('./channels/senders/dingtalk');
+const { createBootCheck, runOnStartup } = require('./boot-check'); // R1
+const { createCompatStatus } = require('./compat-status'); // R2
+const { pickRuntimeCandidate } = require('./runtime-pick'); // H5 runtime priority
+const { detectCredentialFormatMismatch, readLogTail } = require('./crash-reason'); // H5 crash root cause
+const { createRuntimeLogTailer } = require('./runtime-log-tail'); // boot URL poller (incident-hardened)
 
 if (process.env.DSH_DESKTOP_USER_DATA) {
   // must happen before app is ready; keeps logs/state inside the workspace
@@ -219,6 +224,26 @@ const skillsMgr = createSkillsManager({
   stagingRoot: () => path.join(app.getPath('userData'), 'skills-staging'),
   log: (line) => log(line),
   progress: sendSkillsProgress,
+});
+
+// R1: boot self-check + one-click repair (report → diagnostics/boot-report.json)
+const bootCheck = createBootCheck({
+  userDataDir: app.getPath('userData'),
+  effectiveSettings: () => settings.effective(),
+  patchSettings: (p) => settings.patch(p),
+  runtimeInfo: () => manager.getInfo(),
+  revalidateRuntime: () => manager.revalidate(),
+  resolveNodeBin: () => bestNodeBin(),
+  shellVersion: APP_VERSION,
+  log,
+});
+// R2: upstream compat status for the Updates page (read-only)
+const bundledRuntimeVersion = (() => { try { return require('../package.json').runtimeVersion || ''; } catch { return ''; } })();
+const compatStatus = createCompatStatus({
+  getSettings: () => settings.get(),
+  getRuntimeVersion: () => manager.getInfo().activeVersion || bundledRuntimeVersion,
+  userDataDir: app.getPath('userData'),
+  log,
 });
 
 // ---------------------------------------------------------------------------
@@ -408,11 +433,15 @@ function dshBinMeta(binJs) {
 }
 
 /**
- * Make sure a runtime version is registered. Order: existing entry -> bundled
- * seed (installer, instant) -> discovered install (npx/global). Then kicks off
- * background materialization so the app never depends on ephemeral paths.
+ * Make sure a runtime version is registered. Order (H5): existing entry ->
+ * discovered system install when it is at least as new as the bundled seed
+ * (the system dsh most likely wrote ~/.dsh and understands its credential
+ * layout) -> bundled seed (installer, instant). Every non-active candidate
+ * passes the --dump-config smoke guard first; failures fall through. Then
+ * kicks off background materialization so the app never depends on ephemeral
+ * paths.
  */
-function ensureRuntimeRegistered() {
+async function ensureRuntimeRegistered() {
   manager.revalidate(); // drop entries pointing at moved/deleted installs
   const info = manager.getInfo();
   if (info.activeVersion && manager.entry(info.activeVersion)) {
@@ -423,22 +452,42 @@ function ensureRuntimeRegistered() {
     setTimeout(() => { registerBundledRuntime(); materializeIfNeeded(); }, 1_000);
     return true;
   }
-  // nothing active: bundled seed first (instant), then discovered install
+  const binJs = discoverDshBin();
+  const meta = dshBinMeta(binJs);
+  const bundle = findBundledRuntime();
+  const pick = await pickRuntimeCandidate({
+    active: null,
+    system: meta ? { version: meta.version || 'unknown', path: path.dirname(meta.installRoot) } : null,
+    bundled: bundle ? { version: bundle.version, path: bundle.path } : null,
+    smoke: async (cand) => (await manager.smokeTest(cand)).ok,
+  });
+  if (!pick) {
+    log('[shell] no dsh runtime found to bootstrap');
+    return false;
+  }
+  if (pick.choice === 'system') {
+    // dshBinMeta's installRoot is the node_modules dir; entry.path semantics
+    // expect its parent (the dir CONTAINING node_modules).
+    const homeDir = path.dirname(meta.installRoot);
+    log(`[shell] bootstrap runtime ${meta.version} from system install ${homeDir} (newer than or equal to the bundled seed)`);
+    manager.bootstrapFrom(homeDir, meta.version || 'unknown');
+    materializeIfNeeded();
+    return true;
+  }
   if (registerBundledRuntime()) {
     materializeIfNeeded();
     return true;
   }
-  const binJs = discoverDshBin();
-  const meta = dshBinMeta(binJs);
-  if (!meta) {
-    log('[shell] no dsh runtime found to bootstrap');
-    return false;
+  if (meta) {
+    // picked bundled but registration failed (dev mode / broken seed)
+    const homeDir = path.dirname(meta.installRoot);
+    log(`[shell] bundled seed unusable; falling back to system dsh ${meta.version}`);
+    manager.bootstrapFrom(homeDir, meta.version || 'unknown');
+    materializeIfNeeded();
+    return true;
   }
-  const version = meta.version || 'unknown';
-  log(`[shell] bootstrap runtime ${version} from ${meta.installRoot}`);
-  manager.bootstrapFrom(meta.installRoot, version);
-  materializeIfNeeded();
-  return true;
+  log('[shell] no dsh runtime found to bootstrap');
+  return false;
 }
 
 /** Make the active runtime owned (managed dir or bundled seed) in the background. */
@@ -558,39 +607,23 @@ function spawnRuntime() {
   log(`[shell] runtime log: ${runtimeLogPath}`);
 
   // Tail the runtime log for the URL line (started once; survives retries).
-  // Skip the readFileSync when the file has not grown since the last poll
-  // (perf #8): on slow disks / long runtimes this avoids re-reading a
-  // multi-MB file every 500ms during the boot window.
+  // Byte-offset bookkeeping lives in runtime-log-tail.js (unit tested): it
+  // reads only appended bytes (perf #8 — a full re-read of a multi-MB log on
+  // Windows+AV stalls the shell), self-heals on truncation, and is immune to
+  // the v0.2.8 NaN-offset incident that stalled the boot window forever.
   if (urlPollTimer) clearInterval(urlPollTimer);
+  const urlTail = createRuntimeLogTailer(runtimeLogPath);
   let lastLogText = '';
-  let lastLogOffset = 0; // consumed byte offset — only new bytes are ever read
   urlPollTimer = setInterval(() => {
     if (runtimeUrl) { clearInterval(urlPollTimer); urlPollTimer = null; return; }
-    let st;
-    try { st = fs.statSync(runtimeLogPath); } catch { return; }
-    if (st.size === lastLogOffset) return; // no new bytes since last poll
-    try {
-      // Read only the bytes appended since the last poll instead of re-reading
-      // the whole (potentially multi-MB) runtime log on every tick — on
-      // Windows + AV a full sync read in the boot window stalls the shell.
-      if (st.size < lastLogOffset) lastLogOffset = 0; // truncated / rewritten
-      if (st.size > lastLogOffset) {
-        const fd = fs.openSync(runtimeLogPath, 'r');
-        try {
-          const len = st.size - lastLogOffset;
-          const buf = Buffer.alloc(len);
-          const { bytesRead } = fs.readSync(fd, buf, 0, len, lastLogOffset);
-          lastLogText += buf.toString('utf8', 0, bytesRead);
-          lastLogOffset += bytesRead;
-        } finally {
-          fs.closeSync(fd);
-        }
-      }
-    } catch { return; }
+    // never throws; '' when the log has not grown / is not readable yet
+    const appended = urlTail.poll();
+    if (appended) lastLogText += appended;
     const m = lastLogText.match(URL_LINE_RE);
     if (m) {
       if (!runtimeStateController.isCurrent(generation)) return;
       runtimeUrl = m[1];
+      clearTimeout(urlWatchdogTimer);
       crashCount = 0; // a healthy boot resets the auto-restart counter
       log(`[shell] runtime URL: ${runtimeUrl}`);
       if (remote) remote.setRuntimeUrl(runtimeUrl); // phone gateway follows the runtime port
@@ -609,10 +642,40 @@ function spawnRuntime() {
     }
   }, 500);
 
+  // H5: when the log tail matches the credential-format signature, replace
+  // the bare code/signal error with a root-cause dialog that offers the
+  // standard update pipeline (check → install → smoke → activate → restart).
+  const showCredentialUpgradeDialog = (message) => {
+    log('[shell] credential format mismatch detected in runtime log');
+    dialog.showMessageBox({
+      type: 'error',
+      title: APP_NAME,
+      message: t(lang(), 'crash.credFormat.title'),
+      detail: `${t(lang(), 'crash.credFormat.body')}\n\n${message}`,
+      buttons: [t(lang(), 'crash.credFormat.upgradeNow'), t(lang(), 'crash.credFormat.later')],
+      defaultId: 0,
+      cancelId: 1,
+    }).then(({ response }) => {
+      if (response !== 0) { if (!mainWindow) app.quit(); return; }
+      runUpdateCheck(true)
+        .then((report) => {
+          if (!report || !report.ok) return; // failure already surfaced by the pipeline
+          return applyPendingUpdate().catch((err) => notify(t(lang(), 'notify.applyFailed'), err.message));
+        })
+        .catch(() => { /* pipeline already notified */ });
+    }).catch(() => { /* dialog failed — fall back to nothing */ });
+  };
+
   const fail = (message) => {
     runtimeStateController.transition('offline', generation);
     if (urlPollTimer) { clearInterval(urlPollTimer); urlPollTimer = null; }
+    clearTimeout(urlWatchdogTimer);
     if (outFd !== -1) { try { fs.closeSync(outFd); } catch { /* ignore */ } outFd = -1; }
+    // pure display-layer enhancement: no signature → behave exactly as before
+    if (detectCredentialFormatMismatch(readLogTail(runtimeLogPath))) {
+      showCredentialUpgradeDialog(message);
+      return;
+    }
     if (!mainWindow) {
       // boot-time failure: nothing to fall back to
       dialog.showErrorBox(APP_NAME, message);
@@ -623,6 +686,20 @@ function spawnRuntime() {
       notify(t(lang(), 'notify.runtimeExited'), message);
     }
   };
+
+  // Boot watchdog: if the URL line never appears (slow machine, unexpected
+  // runtime output format, …) the boot window must not spin silently forever
+  // — surface a one-shot pointer to the log so the user can act. Cleared as
+  // soon as the URL is found or this spawn generation ends.
+  const BOOT_URL_WATCHDOG_MS = 8 * 60_000;
+  let urlWatchdogTimer = setTimeout(() => {
+    if (runtimeUrl || quitting || !runtimeStateController.isCurrent(generation)) return;
+    log('[shell] boot watchdog: no URL line after ' + Math.round(BOOT_URL_WATCHDOG_MS / 1000) + 's');
+    notify(
+      t(lang(), 'notify.bootUrlTimeout'),
+      t(lang(), 'notify.bootUrlTimeoutBody', { min: Math.round(BOOT_URL_WATCHDOG_MS / 60_000), log: runtimeLogPath })
+    );
+  }, BOOT_URL_WATCHDOG_MS);
 
   let attempt = 0;
   let retrying = false;
@@ -1169,6 +1246,11 @@ function updateTray() {
     { type: 'separator' },
     { label: t(L, 'tray.restartRuntime'), click: restartRuntime },
     {
+      // R1: full app restart (window state is persisted by window-state.js)
+      label: t(L, 'tray.restartApp'),
+      click: () => { quitting = true; log('[shell] app relaunch requested'); app.relaunch(); app.exit(0); },
+    },
+    {
       label: t(L, 'tray.checkShellUpdate'),
       click: () => checkShellUpdate(true),
     },
@@ -1633,10 +1715,20 @@ function registerIpc() {
   // manual fallback for "plugin installed but webUI did not refresh": same
   // restart the tray uses; refuse (instead of quitting) when no runtime exists
   ipcMain.handle('shell:restart-runtime', () => {
-    if (!activeDshBin()) return { ok: false, reason: 'no runtime found' };
+    log('[shell] restart requested');
     restartRuntime();
     return { ok: true };
   });
+  // R1 boot self-check (new channels only; report contract in boot-check.js)
+  ipcMain.handle('boot:report', () => ({ ok: true, report: bootCheck.readReport(), file: bootCheck.reportFile() }));
+  ipcMain.handle('boot:rerun', async () => ({ ok: true, report: await bootCheck.runChecks() }));
+  ipcMain.handle('boot:repair', async (_e, ids) => {
+    const out = await bootCheck.repair(Array.isArray(ids) ? ids : undefined);
+    if (out.repaired.length) notify(t(lang(), 'notify.bootRepairDone'), t(lang(), 'notify.bootRepairDoneBody', { items: out.repaired.join(', '), passed: out.report.summary.passed, total: out.report.summary.total }));
+    return { ok: true, ...out };
+  });
+  // R2 upstream compatibility status (read-only)
+  ipcMain.handle('compat:status', () => compatStatus.getStatus());
   ipcMain.handle('shell:cost-info', async () => {
     const stats = await collectStats();
     return await costSnapshot(stats);
@@ -2186,11 +2278,34 @@ function dshCliEnv(extra) {
 
 /** Run `dsh plugin --profile web <args>`; output to a log file (fd, sandbox-safe).
  * Resolves { ok, code: 'exit'|'timeout'|'spawn', output }. `onTail({stage,tail})`
- * streams incremental child output so the market UI can show live progress. */
-function runDshPlugin(args, timeoutMs = 120_000, onTail = null) {
+ * streams incremental child output so the market UI can show live progress.
+ * H6: before spawning, resolve a pnpm matching the profile's creating major
+ * (.modules.yaml) — bundled pnpm 10 stays the fallback; only plugin ops pay
+ * for this resolution (startup never touches it). */
+async function runDshPlugin(args, timeoutMs = 120_000, onTail = null) {
   const node = bestNodeBin();
   const binJs = activeDshBin();
   const dshHome = dshHomeOf();
+  // H6: follow the user's environment — the profile decides which pnpm runs
+  let pnpmRes = { shimDir: null };
+  try {
+    pnpmRes = await resolvePnpmForProfile({
+      profileDir: profileDirOf(),
+      userDataDir: app.getPath('userData'),
+      nodeBin: node.bin,
+      fromDir: __dirname,
+    });
+  } catch (err) {
+    pnpmRes = { error: 'install-failed', reason: err.message };
+  }
+  if (pnpmRes.error) {
+    log(`[shell] pnpm resolve failed (major=${pnpmRes.major}): ${pnpmRes.reason || pnpmRes.error}`);
+    return {
+      ok: false,
+      code: 'spawn',
+      output: t(lang(), 'plugin.pnpmMismatch', { major: pnpmRes.major || '?' }),
+    };
+  }
   const outFile = path.join(ensureLogDir(), `plugin-${Date.now()}.out`);
   let fd = -1;
   try { fd = fs.openSync(outFile, 'a'); } catch { /* ignore */ }
@@ -2201,7 +2316,10 @@ function runDshPlugin(args, timeoutMs = 120_000, onTail = null) {
     try { fs.closeSync(fd); } catch { /* ignore */ }
   };
   return new Promise((resolve) => {
+    // H6: the profile-matched shim dir wins; fall back to the legacy bundled
+    // shim dir (dshCliEnv) when resolution produced nothing usable
     const env = dshCliEnv({ DSH_HOME: dshHome });
+    if (pnpmRes.shimDir) env.PATH = prependPath(pnpmRes.shimDir, env.PATH);
     if (node.runAsNode) env.ELECTRON_RUN_AS_NODE = '1';
     let child;
     try {
@@ -3138,7 +3256,7 @@ function registerBundledRuntime() {
 }
 
 async function ensureRuntimeWithGuide() {
-  if (ensureRuntimeRegistered()) return true;
+  if (await ensureRuntimeRegistered()) return true;
   // brand-new machine with NO dsh and NO usable bundle: registry install (rare)
   log('[shell] guided first-run: no usable runtime found, installing from the registry');
   try {
@@ -3699,6 +3817,12 @@ if (!gotLock) {
     // background update check (does not block boot)
     if (settings.get().checkUpdatesOnStartup) {
       setTimeout(() => { runUpdateCheck(false, { install: false }); }, 15_000);
+    }
+
+    // R1: automatic boot self-check shortly after launch (C-6 switch; manual
+    // reruns from Settings → About ignore the switch)
+    if (runOnStartup(settings.get())) {
+      setTimeout(() => { if (!quitting) bootCheck.runChecks().catch((e) => log(`[boot-check] failed: ${e.message}`)); }, 4_000);
     }
   });
 

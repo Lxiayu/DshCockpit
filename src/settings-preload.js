@@ -40,6 +40,12 @@ contextBridge.exposeInMainWorld('dshShell', {
   skillsImport: (dir, pick) => ipcRenderer.invoke('shell:skills-import', dir, pick),
   onSkillsProgress: (cb) => ipcRenderer.on('skills:progress', (_e, d) => cb(d)),
   restartRuntime: () => ipcRenderer.invoke('shell:restart-runtime'),
+  // R1 boot self-check (Settings → About): last report / rerun / one-click repair
+  bootReport: () => ipcRenderer.invoke('boot:report'),
+  bootRerun: () => ipcRenderer.invoke('boot:rerun'),
+  bootRepair: (ids) => ipcRenderer.invoke('boot:repair', ids),
+  // R2 upstream compatibility status (Settings → Updates, read-only)
+  compatStatus: () => ipcRenderer.invoke('compat:status'),
   costInfo: () => ipcRenderer.invoke('shell:cost-info'),
   balanceInfo: () => ipcRenderer.invoke('shell:balance-info'),
   balanceRefresh: () => ipcRenderer.invoke('shell:balance-refresh'),

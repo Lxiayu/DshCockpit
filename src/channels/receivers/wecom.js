@@ -90,8 +90,11 @@ class WecomChannel {
     this.client = client;
 
     const up = await new Promise((resolve, reject) => {
+      // NOTE: this timeout must stay ref'd. unref() (removed, v0.2.8 field
+      // report) tells the event loop the process may exit without it — with
+      // nothing else holding a handle during connect the guard can never
+      // fire and an authentication stall hangs start() forever.
       const timer = setTimeout(() => reject(new Error('wecom: authenticate timeout')), this.authTimeoutMs);
-      if (typeof timer.unref === 'function') timer.unref();
       client.once('authenticated', () => { clearTimeout(timer); resolve(); });
       client.once('disconnected', (reason) => {
         clearTimeout(timer);
