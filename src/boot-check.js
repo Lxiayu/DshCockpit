@@ -19,6 +19,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const net = require('node:net');
+const os = require('node:os');
 const semver = require('semver');
 
 const DSH_PACKAGE_PARTS = ['@deepseek-ai', 'dsh'];
@@ -237,11 +238,12 @@ function createBootCheck(deps) {
 
   function checkCredentialsExist(cfg) {
     const file = path.join(cfg.dshHome, CREDENTIALS_FILE);
-    // existence only — the file is NEVER read here (C-4 / privacy)
+    // existence only — the file is NEVER read here (C-4 / privacy). A missing
+    // file is a normal fresh-install state → warning, not a hard failure.
     const exists = fs.existsSync(file);
     return exists
-      ? { id: 'credentials.exists', ok: true, fixable: false, detail: 'credentials file present' }
-      : { id: 'credentials.exists', ok: false, fixable: false, detail: `no ${CREDENTIALS_FILE} in DSH_HOME — configure the API key` };
+      ? { id: 'credentials.exists', ok: true, fixable: false, severity: 'warning', detail: 'credentials file present' }
+      : { id: 'credentials.exists', ok: false, fixable: false, severity: 'warning', detail: `no ${CREDENTIALS_FILE} in DSH_HOME — configure the API key` };
   }
 
   /**
@@ -333,7 +335,10 @@ function createBootCheck(deps) {
   let lastRichResults = []; // rich check results (repair needs farm/path fields)
 
   async function runChecks() {
-    const cfg = effectiveSettings();
+    const raw = effectiveSettings();
+    // mirror spawnRuntime's default: an empty dshHome means ~/.dsh — checking
+    // the raw '' would test the CWD instead of the home the runtime uses
+    const cfg = { ...raw, dshHome: raw.dshHome || path.join(os.homedir(), '.dsh') };
     const info = runtimeInfo();
     const results = [];
     results.push(await checkRuntimeBin(cfg, info));

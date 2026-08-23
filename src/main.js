@@ -455,22 +455,31 @@ async function ensureRuntimeRegistered() {
   const binJs = discoverDshBin();
   const meta = dshBinMeta(binJs);
   const bundle = findBundledRuntime();
+  log(`[shell] runtime discovery: envBin=${binJs ? 'set' : 'null'} meta=${meta ? meta.version : 'null'} bundled=${bundle ? bundle.version : 'null'}`);
+  const sysCandidate = meta ? { version: meta.version || 'unknown', path: meta.installRoot } : null;
+  log(`[shell] runtime candidates: system=${JSON.stringify(sysCandidate)} bundled=${bundle ? bundle.version : 'null'}`);
   const pick = await pickRuntimeCandidate({
     active: null,
-    system: meta ? { version: meta.version || 'unknown', path: path.dirname(meta.installRoot) } : null,
+    system: sysCandidate,
     bundled: bundle ? { version: bundle.version, path: bundle.path } : null,
-    smoke: async (cand) => (await manager.smokeTest(cand)).ok,
+    smoke: async (cand) => {
+      try {
+        const r = await manager.smokeTest(cand);
+        log(`[shell] candidate ${cand.version}@${cand.path} smoke ok=${r.ok} reason=${r.reason || r.exitCode || ''}`);
+        return r.ok;
+      } catch (err) {
+        log(`[shell] candidate ${cand.version}@${cand.path} smoke THREW: ${err.message}`);
+        return false;
+      }
+    },
   });
   if (!pick) {
     log('[shell] no dsh runtime found to bootstrap');
     return false;
   }
   if (pick.choice === 'system') {
-    // dshBinMeta's installRoot is the node_modules dir; entry.path semantics
-    // expect its parent (the dir CONTAINING node_modules).
-    const homeDir = path.dirname(meta.installRoot);
-    log(`[shell] bootstrap runtime ${meta.version} from system install ${homeDir} (newer than or equal to the bundled seed)`);
-    manager.bootstrapFrom(homeDir, meta.version || 'unknown');
+    log(`[shell] bootstrap runtime ${meta.version} from system install ${meta.installRoot} (newer than or equal to the bundled seed)`);
+    manager.bootstrapFrom(meta.installRoot, meta.version || 'unknown');
     materializeIfNeeded();
     return true;
   }
@@ -480,9 +489,8 @@ async function ensureRuntimeRegistered() {
   }
   if (meta) {
     // picked bundled but registration failed (dev mode / broken seed)
-    const homeDir = path.dirname(meta.installRoot);
     log(`[shell] bundled seed unusable; falling back to system dsh ${meta.version}`);
-    manager.bootstrapFrom(homeDir, meta.version || 'unknown');
+    manager.bootstrapFrom(meta.installRoot, meta.version || 'unknown');
     materializeIfNeeded();
     return true;
   }
