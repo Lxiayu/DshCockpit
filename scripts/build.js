@@ -57,9 +57,9 @@ if (archivedSeeds.length) {
   console.log(`[build] archiving non-pinned runtime seeds for this build: ${archivedSeeds.join(', ')} (restored afterwards)`);
 }
 
+const args = process.argv.slice(2); // module scope: the --win verification below needs it
 let result;
 try {
-  const args = process.argv.slice(2);
   const cli = require.resolve('electron-builder/cli');
   result = spawnSync(process.execPath, [cli, ...args], { stdio: 'inherit', cwd: ROOT });
 } finally {
