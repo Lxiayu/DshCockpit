@@ -2,44 +2,52 @@
 
 | 平台 | 文件 |
 |---|---|
-| Windows x64 | `DshCockpit-0.2.8-win-x64.zip` |
-| Apple Silicon（M1/M2/M3/M4） | `DshCockpit-0.2.8-mac-arm64.dmg` |
-| Intel Mac | `DshCockpit-0.2.8-mac-x64.dmg` |
+| Windows x64 | `DshCockpit-0.2.9-win-x64.zip` |
+| Apple Silicon（M1/M2/M3/M4） | `DshCockpit-0.2.9-mac-arm64.dmg` |
+| Intel Mac | `DshCockpit-0.2.9-mac-x64.dmg` |
 
-v0.2.8 是一个修复版本：成本中心跟随 DeepSeek 新计费规则（周末全天谷价），并修复打包版安装插件时报 `pnpm not found on PATH` 的问题。
+v0.2.9 是可靠性版本：启动自检 + 一键修复 + 托盘重启、上游兼容快报、内置运行时升级到 0.1.1-rc.2（解决终端新版 dsh 写入的数据在桌面端无法读取的格式代差）、插件操作跟随用户环境的 pnpm 版本，以及一个可能导致「准备中」窗口无限转圈的轮询器 bug 修复。发行包体积较 0.2.8 显著缩小。
 
 > **Harness owns the workspace. DshCockpit owns the operating layer.**
 > **Invisible when working. Obvious when needed.**
 
-## 修复：成本中心周末计费错误（周六日被按 2 倍价格计算）
+## 新增：启动自检 + 一键修复（设置 → 关于）
 
-- DeepSeek 自 2026 年 8 月 23 日（北京时间）起调整峰谷计费规则：**周六、周日全天按谷价计费**
-- 此前成本中心仅按小时判断峰谷，周日 09:00 起会错误进入峰值口径，导致成本显示为实际账单的 2 倍
-- 本次修复：周末（北京时间周六/周日）全天按谷价计费，且以规则生效时刻为闸门——**规则生效前的历史账本不会被追溯改价**；托盘状态行在周末显示「谷时（周末全天谷价）」，不再出现误导的「X 分钟后转峰」倒计时
+- 启动后自动体检七项：运行时可执行、版本指针完整性、DSH_HOME 可写、Profile 符号链接健康、端口可用性、凭据存在性与**凭据格式兼容性**（只判断布局，绝不读取凭据内容）
+- 报告落盘 `userData/diagnostics/boot-report.json`；「立即重检」与「一键修复」随时可用
+- 可修复项白名单化：重建 Profile 链接农场（dsh 下次启动自动自愈）、清理损坏的受管运行时目录、端口占用自动改为系统分配
+- 托盘新增「重启应用」（保留窗口状态）
 
-## 修复：打包版安装插件失败（pnpm not found on PATH）
+## 新增：上游兼容快报
 
-- 从 Release 安装包（非源码运行）安装/卸载插件时报错：`dsh: pnpm not found on PATH`
-- 原因：`dsh plugin` 命令依赖系统 PATH 中的 `pnpm`；macOS 从 Finder 启动的应用 PATH 极简（不含 Homebrew 目录），Windows 便携版更是完全没有
-- 本次修复：**DshCockpit 现在自带 pnpm**，自动生成可执行桥接并注入子进程 PATH——无论源码运行还是打包安装，插件市场/技能安装均无需用户安装任何额外工具
-- 安全升级：node-forge 升至 1.4.0（修复 CVE-2025-12816、CVE-2025-66031 两个高危漏洞）
+- CI 每日/手动对指定上游版本执行 win+mac 双平台安装 → `--dump-config` 冒烟 → HTTP 健康检查，结论自动生成 Markdown 快报并经 PR 入库 `docs/compat/`
+- README 徽章实时显示「upstream ✅ rc.X verified」；设置 → 更新 面板展示当前运行时是否已验证兼容
+- v0.2.9 发布时已验证 **0.1.1-rc.2** 兼容
 
-## Windows 安装
+## 重要：内置运行时升级到 0.1.1-rc.2（数据格式代差修复）
 
-用 **7-Zip / WinRAR** 解压 `DshCockpit-0.2.8-win-x64.zip` → 双击根目录的 `DshCockpit.exe`。
-- 内置 dsh 运行时，无需安装 Node/dsh、无需联网下载。
-- 首次启动若 `DSH_HOME` 尚未初始化，会多花约 20–30 秒建立 profile。
-- 若内置运行时被解压工具截断（极少见），应用会自动从 npm registry 兜底安装。
+- 上游 0.1.1 将 `~/.dsh/.credentials.yaml` 从平铺格式升级为 `version + refs` 嵌套格式，双向不兼容——先用终端新版 dsh 再装桌面端的用户会启动即崩（v0.2.8 用户实测）
+- 本版内置运行时已升级：新格式直接可读；旧平铺格式由运行时自动迁移（值原样保留）
+- 壳现在优先使用你系统里安装的 dsh（它最可能是数据的写入者）：系统版本 ≥ 内置版本时自动选用，且每个候选先通过冒烟验证；系统无 dsh 时回落内置 seed
+- 运行时异常退出时，若日志命中凭据格式特征，崩溃弹窗会直接给出根因说明与「立即升级」按钮，复用现有更新管道一键完成 检查→安装→冒烟→激活→重启
 
-## macOS 安装
+## 新增：插件操作跟随你的 pnpm 版本
 
-双击 `.dmg` → 把 **DshCockpit** 拖进「应用程序」→ 双击启动。内置 dsh 运行时，无需另装 Node/dsh。
+- pnpm 的 store 按 major 版本隔离；用不同 major 的 pnpm 操作既有 profile 会报 `ERR_PNPM_UNEXPECTED_STORE`
+- 现在壳会读取 profile 的 `.modules.yaml` 元数据（只读），优先调用与你创建 profile 时相同 major 的 pnpm（系统 PATH 校验 → 自动按需安装缓存），内置 pnpm 10 仍是无 profile 场景的默认兜底
+- 仅影响 设置→插件 的安装/卸载/市场操作；不匹配且无法提供时会给出可读指引而非裸报错
 
-> ⚠️ **首次打开会被 Gatekeeper 拦截**（提示「已损坏」或「无法验证开发者」）：当前包尚未签名公证，应用没坏。终端执行一次即可永久放行：
-> ```
-> xattr -dr com.apple.quarantine /Applications/DshCockpit.app
-> ```
+## 修复：「准备中」窗口无限转圈
 
----
+- 修复启动 URL 轮询器的偏移量记账缺陷（特定时序下偏移量变为 NaN 后不再读取日志新内容，主窗口永不出现）；该路径已抽出为独立模块并附带截断自愈与返回值形态容错
+- 新增启动看门狗：就绪耗时过长时给出日志位置提示，不再无限静默等待
 
-macOS 的 `.zip` 包供 electron-updater 自动更新使用，普通用户下载 `.dmg` 即可。
+## 发行包瘦身
+
+- 安装包内容改为白名单制：不再携带 README/设计文档/docs/scripts 等仓库文件，仅保留运行必需代码与依赖；本地构建同时只打包 pinned 版本的运行时种子
+- 实测应用体积减少约一半，Windows 解压/删除速度与磁盘占用同步改善
+
+## 升级提示
+
+- 从 0.2.8 直接覆盖升级即可；首次启动若检测到数据格式代差会引导升级运行时
+- macOS 未签名版本首次打开仍需右键 → 打开 绕过 Gatekeeper（见 README）

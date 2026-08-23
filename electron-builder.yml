@@ -8,12 +8,19 @@ productName: DshCockpit
 directories:
   output: dist
   buildResources: resources
+# Whitelist packaging (v0.2.9): the previous blacklist let the whole repo
+# (READMEs, DESIGN/ROADMAP, docs/, scripts/, .github/, …) into app.asar,
+# inflating install/delete time and disk usage. The shell only ever reads:
+#   src/**            main process + renderer pages + preload bridges
+#   package.json      version + runtimeVersion fallbacks
+#   node_modules      production dependency tree (always packed by builder;
+#                       pnpm.cjs is additionally unpacked, see asarUnpack)
+# The app icon reaches resources/icon.png via extraResources below, and
+# docs/compat data is fetched from GitHub at runtime — neither belongs in
+# the archive.
 files:
+  - "src/**/*"
   - "!**/*.map"
-  - "!test/**/*"
-  - "!.trial/**"
-  - "!dist/**/*"
-  - "!vendor/**/*"
 asar: true
 # pnpm is spawned as a plain node child by the dsh CLI ("spawnSync('pnpm')"),
 # which cannot execute inside app.asar — keep its cjs entry unpacked.
