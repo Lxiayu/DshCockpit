@@ -14,6 +14,12 @@ const HISTORY_MAX_DAYS = 90;
 // hours (9-12 and 14-18 Beijing time); user-configurable as a string.
 const DEFAULT_WINDOWS = [[9, 12], [14, 18]];
 
+// DeepSeek bills all-day off-peak on Beijing Saturdays & Sundays starting
+// 2026-08-23 00:00 Beijing (= 2026-08-22T16:00Z) — official pricing page,
+// verified 2026-08-23. Instants before this keep pre-rule behaviour so
+// stored history is never re-priced retroactively.
+const WEEKEND_OFFPEAK_SINCE = Date.UTC(2026, 7, 22, 16, 0, 0);
+
 // Official DeepSeek price matrix (¥ per 1M tokens): model x time-of-day.
 // Peak pricing took effect 2026-08-17 00:00 Beijing time (peak hours above);
 // peak = off-peak x 2 across every dimension. Cache writes are NOT billed by
@@ -113,9 +119,22 @@ function parseWindows(str) {
   return out.length ? out : null;
 }
 
-/** True when the epoch-ms timestamp falls inside a peak window (Beijing time). */
+/** True when the instant falls on a Beijing Saturday/Sunday at or after the
+ * official weekend-off-peak effective date. Pure arithmetic on the same
+ * Beijing-shifted clock as isPeakTime's hour so hour and weekday always agree
+ * on one calendar (a Date-based getUTCDay would disagree over 16:00–24:00 UTC
+ * for user windows that reach past 16:00 UTC). */
+function isWeekendOffPeak(ms) {
+  if (!(ms >= WEEKEND_OFFPEAK_SINCE)) return false;
+  const dow = (Math.floor((ms + 8 * 3_600_000) / 86_400_000) + 4) % 7; // 1970-01-01 = Thursday; 0=Sun…6=Sat
+  return dow === 0 || dow === 6;
+}
+
+/** True when the epoch-ms timestamp falls inside a peak window (Beijing time).
+ * Weekend instants (Beijing Sat/Sun since 2026-08-23) are always off-peak. */
 function isPeakTime(ms, windows) {
   if (!windows || !windows.length) return false;
+  if (isWeekendOffPeak(ms)) return false;
   const h = Math.floor(((ms / 3_600_000) % 24 + 8 + 24) % 24);
   return windows.some(([s, e]) => h >= s && h < e);
 }
@@ -125,6 +144,11 @@ function isPeakTime(ms, windows) {
 function peakStatus(nowMs, windows) {
   const minuteOfDay = Math.floor(((nowMs / 60_000) % 1440 + 480 + 1440) % 1440);
   const hour = Math.floor(minuteOfDay / 60);
+  if (isWeekendOffPeak(nowMs)) {
+    // All-day off-peak: there is no switch later today, so a countdown to the
+    // next window start would wrongly imply prices flip before Monday.
+    return { peak: false, hour, nextChangeInMin: 0, allDayOffPeak: true };
+  }
   const peak = isPeakTime(nowMs, windows);
   let nextChangeInMin = 0;
   if (peak) {
@@ -141,7 +165,7 @@ function peakStatus(nowMs, windows) {
     }
     nextChangeInMin = best === Infinity ? 0 : Math.floor(best);
   }
-  return { peak, hour, nextChangeInMin };
+  return { peak, hour, nextChangeInMin, allDayOffPeak: false };
 }
 
 /** costOf split into peak/off-peak. When `totals` carries peak/offPeak
@@ -236,4 +260,4 @@ function budgetStatus(monthCost, budget) {
   return null;
 }
 
-module.exports = { todayKey, costOf, loadHistory, updateHistory, summarize, budgetStatus, HISTORY_MAX_DAYS, DEFAULT_WINDOWS, parseWindows, isPeakTime, peakStatus, costOfSplit, PRICE_MATRIX, DEFAULT_MODEL, normalizeModel, modelRates, turnCost };
+module.exports = { todayKey, costOf, loadHistory, updateHistory, summarize, budgetStatus, HISTORY_MAX_DAYS, DEFAULT_WINDOWS, WEEKEND_OFFPEAK_SINCE, parseWindows, isPeakTime, isWeekendOffPeak, peakStatus, costOfSplit, PRICE_MATRIX, DEFAULT_MODEL, normalizeModel, modelRates, turnCost };

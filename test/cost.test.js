@@ -199,3 +199,37 @@ test('JSONL usage → turn cost caliber (inputTokens=miss, cacheReadTokens=hit, 
   assert.ok(Math.abs(tc.saved - 1.16) < 1e-9);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// ---- weekend all-day off-peak (official rule effective 2026-08-23 Beijing) --
+
+test('isPeakTime: Beijing weekends are all-day off-peak since 2026-08-23', () => {
+  // Issue #3 acceptance instants (official pricing page, verified 2026-08-23)
+  assert.strictEqual(cost.isPeakTime(Date.UTC(2026, 7, 23, 1, 30), WINDOWS), false);  // Sun 09:30 -> off-peak
+  assert.strictEqual(cost.isPeakTime(Date.UTC(2026, 7, 23, 7, 0), WINDOWS), false);   // Sun 15:00 -> off-peak
+  assert.strictEqual(cost.isPeakTime(Date.UTC(2026, 7, 24, 1, 30), WINDOWS), true);   // Mon 09:30 -> peak
+  assert.strictEqual(cost.isPeakTime(Date.UTC(2026, 7, 22, 1, 30), WINDOWS), true);   // Sat 09:30 BEFORE the rule -> peak
+  assert.strictEqual(cost.isPeakTime(Date.UTC(2026, 7, 28, 16, 30), WINDOWS), false); // Beijing Sat 00:30 (still Fri in UTC)
+});
+
+test('isPeakTime: weekday axis agrees with the Beijing calendar for late-UTC windows', () => {
+  const LATE = [[21, 24]]; // Beijing 21-24h; hour and weekday must come from one calendar
+  assert.strictEqual(cost.isPeakTime(Date.UTC(2026, 7, 28, 13, 0), LATE), true);   // Fri 21:00 Beijing -> peak
+  assert.strictEqual(cost.isPeakTime(Date.UTC(2026, 7, 29, 13, 0), LATE), false);  // Sat 21:00 Beijing -> weekend off-peak
+});
+
+test('isWeekendOffPeak gates exactly on the official effective instant', () => {
+  assert.strictEqual(cost.isWeekendOffPeak(Date.UTC(2026, 7, 22, 15, 59, 59, 999)), false); // Beijing Fri 23:59:59.999
+  assert.strictEqual(cost.isWeekendOffPeak(Date.UTC(2026, 7, 22, 16, 0, 0)), true);         // Beijing Sat 00:00:00
+  assert.strictEqual(cost.isWeekendOffPeak(Date.UTC(2026, 7, 30, 8, 0)), true);             // Beijing Sun 16:00
+  assert.strictEqual(cost.isWeekendOffPeak(Date.UTC(2026, 7, 31, 8, 0)), false);            // Beijing Mon 16:00
+});
+
+test('peakStatus marks weekend all-day off-peak without a misleading countdown', () => {
+  const sunMorning = cost.peakStatus(Date.UTC(2026, 7, 23, 1, 30), WINDOWS); // Sun 09:30, inside default window hours
+  assert.strictEqual(sunMorning.peak, false);
+  assert.strictEqual(sunMorning.allDayOffPeak, true);
+  assert.strictEqual(sunMorning.nextChangeInMin, 0);
+  const satBeforeRule = cost.peakStatus(Date.UTC(2026, 7, 22, 1, 30), WINDOWS); // pre-rule Saturday keeps legacy shape
+  assert.strictEqual(satBeforeRule.allDayOffPeak, false);
+  assert.strictEqual(satBeforeRule.peak, true);
+});

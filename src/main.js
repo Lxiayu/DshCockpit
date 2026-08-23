@@ -38,6 +38,7 @@ const { runHeadless } = require('./headless');
 const { Scheduler } = require('./scheduler');
 const { searchSessions } = require('./session-search');
 const { RemoteControl, PAIR_PATH } = require('./remote-control');
+const { ensurePnpmShim, prependPath } = require('./pnpm-shim');
 const { createPublicRemote, buildPairUrl } = require('./public-remote');
 const { createModelsManager, PRESETS: MODELS_PRESETS, OLLAMA_PRESET: MODELS_OLLAMA_PRESET } = require('./models-manager');
 const compact = require('./compact');
@@ -304,6 +305,7 @@ function firstLineOf(cmd, args) {
 let _nodeBinCache = null;
 let _nodeCandidatesCache = null;
 let _nodeLookupKey = undefined;
+let _pnpmShimDirCached; // undefined = not probed yet; null = no shim available
 
 function _resolveNodeFromPath() {
   // Disk cache short-circuits the `where.exe` spawn entirely: one existsSync
@@ -1132,9 +1134,11 @@ function updateTray() {
     const hasPeakRate = !!(cfg.costPeakInputPerM || cfg.costPeakOutputPerM || cfg.costPeakCacheReadPerM || cfg.costPeakCacheWritePerM);
     const rate = ps.peak ? (hasPeakRate ? peakOut : flatOut) : flatOut;
     peakItems.push({
-      label: ps.peak
-        ? t(L, 'tray.peakOn', { r: rate, m: ps.nextChangeInMin })
-        : t(L, 'tray.peakOff', { r: rate, m: ps.nextChangeInMin }),
+      label: ps.allDayOffPeak
+        ? t(L, 'tray.peakWeekend', { r: rate })
+        : ps.peak
+          ? t(L, 'tray.peakOn', { r: rate, m: ps.nextChangeInMin })
+          : t(L, 'tray.peakOff', { r: rate, m: ps.nextChangeInMin }),
       enabled: false,
     });
   }
@@ -2157,6 +2161,29 @@ async function marketPayload(force) {
   return { ok: true, source, fetchedAt, ...buildMarketPayload(entries, starMap, installed) };
 }
 
+/** Best-effort directory that provides a runnable `pnpm` (bundled shim first,
+ * then common Homebrew/usr-local locations on macOS). Null when nothing is
+ * available, in which case callers keep the ambient PATH. */
+function pnpmShimDir() {
+  if (_pnpmShimDirCached === undefined) {
+    const node = bestNodeBin();
+    _pnpmShimDirCached = ensurePnpmShim({
+      userDataDir: app.getPath('userData'),
+      nodeBin: node.bin,
+      fromDir: __dirname,
+    });
+  }
+  return _pnpmShimDirCached;
+}
+
+/** env for dsh CLI child processes with the pnpm shim prepended to PATH. */
+function dshCliEnv(extra) {
+  const env = { ...process.env, ...extra };
+  const shim = pnpmShimDir();
+  if (shim) env.PATH = prependPath(shim, env.PATH);
+  return env;
+}
+
 /** Run `dsh plugin --profile web <args>`; output to a log file (fd, sandbox-safe).
  * Resolves { ok, code: 'exit'|'timeout'|'spawn', output }. `onTail({stage,tail})`
  * streams incremental child output so the market UI can show live progress. */
@@ -2174,7 +2201,7 @@ function runDshPlugin(args, timeoutMs = 120_000, onTail = null) {
     try { fs.closeSync(fd); } catch { /* ignore */ }
   };
   return new Promise((resolve) => {
-    const env = { ...process.env, DSH_HOME: dshHome };
+    const env = dshCliEnv({ DSH_HOME: dshHome });
     if (node.runAsNode) env.ELECTRON_RUN_AS_NODE = '1';
     let child;
     try {

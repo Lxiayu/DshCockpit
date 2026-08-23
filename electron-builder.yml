@@ -15,6 +15,10 @@ files:
   - "!dist/**/*"
   - "!vendor/**/*"
 asar: true
+# pnpm is spawned as a plain node child by the dsh CLI ("spawnSync('pnpm')"),
+# which cannot execute inside app.asar — keep its cjs entry unpacked.
+asarUnpack:
+  - node_modules/pnpm/bin/pnpm.cjs
 compression: normal
 # Bundled runtime seed -> resources/runtime/<version> (install-and-use, no first-run download)
 extraResources:
