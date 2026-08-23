@@ -4,135 +4,155 @@
 
 # 🛩️ DshCockpit
 
-**Turn DeepSeek Harness into a resident background Agent cockpit**
+**Not another window around `dsh` — a desktop control plane.**
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)](#)
-[![Powered by](https://img.shields.io/badge/powered%20by-DeepSeek%20Harness-4D6BFE)](https://github.com/deepseek-ai/deepseek-harness)
+[![Tests](https://img.shields.io/badge/tests-311%20passing-brightgreen)](#)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
 
-> **Harness owns the workspace. DshCockpit owns the operating layer.**
-
-DshCockpit is an open-source desktop control plane (Electron) for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`): double-click to launch, tray-resident, self-updating, cost-aware. Harness keeps its 100% native workspace; all monitoring, automation, and runtime management live in the independent Cockpit layer. Bundled runtime — no Node.js install needed. Windows portable zip + macOS dmg (arm64/x64).
+DshCockpit turns [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
+(`dsh`) from a terminal command into a resident desktop service: it keeps the
+Harness workspace 100% native, and adds the layer around it — safe runtime
+updates, cost tracking, background tasks, remote access — over stable
+interfaces only. Bundled runtime, no Node.js required.
 
 </div>
 
 ---
 
-## 🚀 Features
+## Why does this exist?
 
-### 🎛️ Monitoring
-- **Token / Context**: always-on Edge Rail shows usage and context pressure; click for detail (input/output/cache), warnings at 60%/85%, built-in one-click compaction
-- **Cost center**: per day/week/month/workspace stats, monthly budget 80%/100% alarms, peak/off-peak pricing
-- **Official balance**: live DeepSeek account balance (total/granted/topped-up) and exact per-turn spend
+If you run agents through `dsh` daily, three problems never go away:
 
-### 📡 Remote & automation
-- **Phone remote control**: full dsh UI in a phone browser (sessions, messages, approvals, questions); one-tap LAN pairing, plus Tailscale / Cloudflare tunnels for anywhere access
-- **IM channel remote control**: Feishu / WeCom / DingTalk official long connections — task completion, approvals, and questions land in your chat, handled right from the conversation
-- **Quick Ask**: `Ctrl+Alt+Space` global hotkey — ask anything, runs in the background, notified when done
-- **Scheduled tasks**: daily/weekly/interval reports, run history included
+| Problem | What actually happens |
+|---|---|
+| **Updates are a leap of faith** | Upstream ships rc releases every few days; upgrading by hand can break your profile, and downgrading means reinstalling. |
+| **You can't see what it costs** | No usage API, no spend dashboard — you find out what a debugging spree cost when the bill arrives. |
+| **The agent lives in one window** | Close the window (or the laptop) and long tasks die. Approvals wait for you to come back. |
 
-### 🛠️ Runtime & data
-- **Runtime management**: auto-update + smoke-test guard + one-click rollback, live install progress
-- **Session search**: `Ctrl+K` full-text search across all sessions; auto-backup on exit
-- **Long sessions**: one-click `/compact` with before/after token comparison and estimated savings; AGENTS.md memory files editable online
+Typical desktop shells solve none of these — they wrap the same window in a
+tray icon. DshCockpit treats the agent as a **service to operate**, and the
+window is just where it happens to be visible.
 
-### 🧩 Ecosystem & experience
-- **Model manager**: 6 third-party templates + custom + local Ollama, connection test before use
-- **Plugin + Skills marketplaces**: 14-category community plugins and Claude Skill skills, preview before install
-- Bilingual UI, dark/light themes, fully local data (no collection, no upload, backups exclude credentials)
+## What you get
 
----
+### 1 · A runtime that can't brick itself
 
-## 🚀 Quick Start
+New runtime versions install side-by-side, must pass a `--dump-config` smoke
+test before activation, then switch atomically. A broken release never
+activates. One-click rollback restores the previous version **and** a snapshot
+of your data directory. Updates follow the official npm channel automatically
+— no vendoring, no forks, no lag behind upstream.
 
-### Option 1: Windows portable
-Download `DshCockpit-<version>-win-x64.zip` from [Releases](https://github.com/Lxiayu/DshCockpit/releases) → **extract with 7-Zip/WinRAR** → double-click `DshCockpit.exe` in the root folder.
-> **~9s to first window** (first launch may take 20–30s extra if DSH_HOME isn't initialized yet). Bundled runtime — no Node.js/dsh install, no network download. Future versions self-update.
-> If the bundled runtime got truncated by your extraction tool (rare), the app falls back to installing from the npm registry and prompts you to re-extract with 7-Zip.
+### 2 · Cost & usage observability
 
-### Option 2: macOS (.dmg)
-Download the matching `.dmg` from [Releases](https://github.com/Lxiayu/DshCockpit/releases):
-- **Apple Silicon (M1/M2/M3/M4)**: `DshCockpit-<version>-mac-arm64.dmg`
-- **Intel Mac**: `DshCockpit-<version>-mac-x64.dmg`
+- **Context pressure inline**: a quiet capsule tracks input/output/cache tokens
+  of the current session, warns at 60%/85%, compacts in one click
+- **Cost center**: per day/week/month, attributed per workspace, peak/off-peak
+  pricing aware, monthly budget with 80%/100% alarms
+- **Live balance**: total/granted/topped-up from the official API, exact
+  per-turn spend including cache savings
 
-Double-click to mount → drag **DshCockpit** into **Applications** → launch.
+All computed locally from session logs (pure-JS zstd decompression). No
+telemetry, ever.
 
-> ⚠️ **First launch shows "damaged" or "unidentified developer"**: the macOS build is **not yet signed/notarized** (no Apple Developer certificate yet). This is a normal Gatekeeper block — the app is fine. Run this once in Terminal to clear it permanently:
+### 3 · An agent that works when you're not watching
+
+- **Quick Ask** — `Ctrl+Alt+Space`, ask anything, runs headless, notified on completion
+- **Scheduled tasks** — daily reports, interval jobs, run history
+- **IM channels** — Feishu / WeCom / DingTalk: completions, approvals, and agent questions land in your group chat, handled with buttons
+- **Phone remote** — full UI in your phone browser via an authenticated LAN gateway; Tailscale/Cloudflare for outside home
+- **Session search** — `Ctrl+K` full-text across all history; auto-backup on exit
+
+Plus: model manager (6 provider templates + Ollama), plugin & skills
+marketplaces with previews, bilingual UI, dark/light themes.
+
+### How it compares
+
+| | plain `dsh web` | typical shell wrappers | **DshCockpit** |
+|---|---|---|---|
+| Double-click launch, bundled runtime | ❌ | ✅ | ✅ |
+| Update gating + rollback + data snapshot | ❌ | ❌ | ✅ |
+| Token/context pressure + budget alarms | ❌ | ❌ | ✅ |
+| Per-workspace cost analytics | ❌ | ❌ | ✅ |
+| Global-hotkey background asks | ❌ | ❌ | ✅ |
+| Scheduled prompts | ❌ | ❌ | ✅ |
+| Full-text session search | ❌ | ❌ | ✅ |
+| Authenticated phone remote | ❌ | rare | ✅ |
+| Runs the **unpatched official runtime** | — | often vendored/forked | ✅ always |
+
+## Zero-intrusion by design
+
+The shell never patches upstream source and never touches its internals. Every
+integration rides a stable boundary: HTTP/WebSocket, the filesystem (session
+logs), CLI flags (`--dump-config`, port discovery), and explicit IPC. That's
+why "Harness can change; the cockpit stays useful" is an engineering property
+here, not a slogan. Details in [`DESIGN.md`](DESIGN.md).
+
+## Quick Start
+
+**Windows**: grab `DshCockpit-<version>-win-x64.zip` from
+[Releases](https://github.com/Lxiayu/DshCockpit/releases), extract (7-Zip/WinRAR),
+double-click `DshCockpit.exe`. ~9 s to first window; future updates are automatic.
+
+**macOS**: download the `.dmg` for your arch (Apple Silicon / Intel), drag to
+Applications, launch.
+
+> ⚠️ Not signed yet — Gatekeeper will complain once. Clear it permanently:
 > ```bash
 > xattr -dr com.apple.quarantine /Applications/DshCockpit.app
 > ```
 
-### Option 3: from source (developers)
+**From source** (Node ≥ 22):
 ```bash
-# Requires Node.js ≥ 22; having @deepseek-ai/dsh installed is recommended (auto-downloaded on first launch otherwise)
-git clone https://github.com/Lxiayu/DshCockpit.git
-cd DshCockpit
-npm install
-npm start
+git clone https://github.com/Lxiayu/DshCockpit.git && cd DshCockpit
+npm install && npm start
 ```
 
-After first launch:
-1. Configure your DeepSeek API key in the native Harness settings (gear icon, red-dot hint);
-2. Choose a workspace from the Edge Rail Settings or workspace action;
-3. Start chatting — the Edge Rail keeps Context status visible, while Cockpit opens the operating layer when needed.
+First run: set your DeepSeek API key (red-dot hint on the gear), pick a
+workspace, talk to your agent. Everything else is optional.
 
----
-
-## 📸 Screenshots
+## Screenshots
 
 <div align="center">
-
-<img src="photo/preview-1.png?v=0.2.5" width="720" alt="DshCockpit main window — native DeepSeek Harness workspace with Edge Rail and Context status" />
-
+<img src="photo/preview-1.png?v=0.2.7" width="720" alt="Native DeepSeek Harness workspace with DshCockpit Edge Rail showing context status" />
 <table><tr>
-<td><img src="photo/preview-2.png?v=0.2.5" width="280" alt="Cost center — token cost tracking & budget alerts" /></td>
-<td><img src="photo/preview-3.png?v=0.2.5" width="280" alt="Settings & plugin marketplace" /></td>
+<td><img src="photo/preview-2.png?v=0.2.7" width="280" alt="Cost center: per-workspace spend, budgets, alerts" /></td>
+<td><img src="photo/preview-3.png?v=0.2.7" width="280" alt="Control center and plugin marketplace" /></td>
 </tr></table>
-
 </div>
 
----
+## Honest limitations
 
-## 🤝 Contributing
+- macOS builds are unsigned/notarized-yet (needs the `xattr` line above);
+  Windows may trigger SmartScreen for the same reason
+- Solo-maintained project; battle-tested mainly on the author's machines
+- Windows is the primary development target; macOS arm64/x64 builds are CI-built and smoke-tested but see less real-world mileage
 
-PRs welcome! Please run `npm test` first. See [`DESIGN.md`](DESIGN.md) for architecture, [`PHILOSOPHY.md`](PHILOSOPHY.md) for the product philosophy, and [`FEATURES.md`](FEATURES.md) for the feature list.
+## Contributing
 
-## 📄 License
-
-[MIT](LICENSE)
-
-## 🙏 Acknowledgements
-
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — the agent runtime & Web UI this project drives
-- IM channel design references MIT projects such as dsh-im-bridge; balance display paradigm references dms-deepseekbalance (MIT); skills ecosystem is [Claude Skill](https://agentskills.io) compatible (Anthropic)
-- Everyone building community shells and plugins for the ecosystem
-
----
-
-## 💡 Product Philosophy
+PRs welcome — run `npm test` (311 tests) first. Architecture:
+[`DESIGN.md`](DESIGN.md) · Philosophy: [`PHILOSOPHY.md`](PHILOSOPHY.md) ·
+Features: [`FEATURES.md`](FEATURES.md)
 
 <details>
-<summary><b>Not another Harness UI — Harness owns the workspace. DshCockpit owns the operating layer.</b></summary>
+<summary><b>The operating-layer principle</b></summary>
 
-DshCockpit is not designed to replace, redesign, or modify the Harness WebUI. Harness owns the workspace (talk to agents, inspect files, write code, complete tasks); DshCockpit owns the **operating layer** around it: monitoring, Quick Ask, background tasks, cost, runtime management, session search, remote control, integrations, and desktop-level automation.
+Harness owns the workspace. DshCockpit owns the operating layer.
 
-Core interaction principle:
+The workspace — conversation, files, code, approvals — belongs to Harness,
+unmodified. Everything around it — monitoring, cost, automation, updates,
+remote access — belongs to the cockpit. High-frequency actions stay visible;
+Settings holds only persistent configuration; small questions never open big
+dashboards (`Default → Peek → Cockpit → Full config`). An agent is not a
+window: it is a desktop service that keeps running, accumulating usage, and
+accepting instructions regardless of what's in front.
 
-> **Invisible when working. Obvious when needed.**
-
-Three product disciplines:
-
-- **The Cockpit, not the Settings page**: high-frequency capabilities stay visible (Token / Cockpit / Quick Ask / Tasks); status and actions live in the Control Center; Settings is reserved for persistent configuration — *Settings is not a feature hub, it is a configuration center*
-- **Progressive disclosure**: `Default → Peek → Cockpit → Full configuration` — never open a big dashboard to answer a small question
-- **Agent ≠ the current window**: the Agent is a continuously manageable desktop service — background runs, scheduled tasks, remote commands, usage accumulation, runtime updates — independent of whether the workspace is in front
-
-Engineering stays **zero-invasive**: only stable boundaries (HTTP / WebSocket / IPC / filesystem / explicit runtime interfaces), never Harness DOM, CSS, or component internals. Compatibility is a product feature — **Harness can change. DshCockpit should remain useful.**
-
-In one sentence:
-
-> **DshCockpit is a desktop control plane for DeepSeek Harness.**
-> Harness owns the workspace. DshCockpit owns the operating layer.
-
-Full philosophy → [`PHILOSOPHY.md`](PHILOSOPHY.md).
+Full text: [`PHILOSOPHY.md`](PHILOSOPHY.md)
 </details>
+
+## License & Acknowledgements
+
+[MIT](LICENSE) · Built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
+Community project — not affiliated with or endorsed by DeepSeek.
