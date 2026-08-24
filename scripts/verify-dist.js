@@ -120,18 +120,23 @@ function verifyDir(dir, opts) {
 }
 
 /** Main entry: verify dist artifacts; exit 1 on failure (build aborts). */
-function verify() {
+function verify(opts = {}) {
   if (!fs.existsSync(DIST)) {
     console.log('[verify] no dist/ directory — nothing to verify');
-    return;
+    return true;
   }
   const zips = fs.readdirSync(DIST).filter((f) => /^DshCockpit-.*\.zip$/.test(f));
   let ok = true;
   if (zips.length) {
-    for (const z of zips.sort()) ok = verifyZip(path.join(DIST, z)) && ok;
+    for (const z of zips.sort()) {
+      // per-artifact slim detection: the -slim- name segment means no bundled
+      // runtime by design, so the runtime-presence assertions must not run
+      const isSlim = /-slim-/.test(z);
+      ok = verifyZip(path.join(DIST, z), { ...opts, slim: isSlim || !!opts.slim }) && ok;
+    }
   } else {
     const unpacked = path.join(DIST, 'win-unpacked');
-    if (fs.existsSync(unpacked)) ok = verifyDir(unpacked) && ok;
+    if (fs.existsSync(unpacked)) ok = verifyDir(unpacked, opts) && ok;
     else console.log('[verify] neither zip nor win-unpacked found — skipping');
   }
   return ok;
