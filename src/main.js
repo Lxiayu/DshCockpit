@@ -63,6 +63,7 @@ const { detectCredentialFormatMismatch, readLogTail } = require('./crash-reason'
 const { createRuntimeLogTailer } = require('./runtime-log-tail'); // boot URL poller (incident-hardened)
 const { createNotificationCenter } = require('./notification-center'); // R6
 const { buildCacheEconomics, pricingFromSettings } = require('./cache-economics'); // R4
+const { createWeeklyReport } = require('./weekly-report'); // R5
 
 if (process.env.DSH_DESKTOP_USER_DATA) {
   // must happen before app is ready; keeps logs/state inside the workspace
@@ -108,6 +109,7 @@ let balanceMonitor = null; // official balance poller (constructed after app rea
 let balanceTimer = null; // 5-minute fallback poll for the balance monitor
 let modelsMgr = null; // model provider panel state (constructed after app ready)
 let compactTracker = null; // compaction watcher (C3, constructed after app ready)
+let weekly = null; // R5 weekly report (constructed after app ready)
 let compactTimer = null; // 5-second compaction scan cadence
 let sessionWorkerClient = null;
 let deferredServicesStarted = false;
@@ -1760,6 +1762,34 @@ function registerIpc() {
   // R6 notification hub history (searchable in Settings → Notifications)
   ipcMain.handle('notifications:list', (_e, query, kind, limit) => ({ ok: true, items: nc.list({ query, kind, limit }) }));
   ipcMain.handle('notifications:clear', () => nc.clear());
+  // R5 weekly report (Wrapped card)
+  ipcMain.handle('weekly:generate', async () => {
+    try {
+      const out = await (weekly ? weekly.generate() : Promise.reject(new Error('not ready')));
+      return { ok: true, file: out.file, data: out.data };
+    } catch (err) { return { ok: false, reason: err.message }; }
+  });
+  ipcMain.handle('weekly:list', async () => {
+    try {
+      const data = await (weekly ? weekly.buildData() : Promise.reject(new Error('not ready')));
+      return { ok: true, files: weekly ? weekly.listFiles() : [], preview: data };
+    } catch (err) { return { ok: false, reason: err.message }; }
+  });
+  ipcMain.handle('weekly:open-dir', async () => { shell.openPath(path.join(app.getPath('userData'), 'weekly')); return { ok: true }; });
+  ipcMain.handle('weekly:push', async () => {
+    try {
+      if (!weekly) return { ok: false, reason: 'not ready' };
+      const out = await weekly.generate();
+      const zh = lang() !== 'en';
+      const text = zh
+        ? `📊 DSH 周报 ${out.data.weekLabel}\n花费 ¥${(out.data.costYuan || 0).toFixed(2)} · 定时任务 ${out.data.tasksDone} 次 · Quick Ask ${out.data.quickAsks} 次\n缓存节省 ¥${(out.data.cacheSavedYuan || 0).toFixed(2)}\n最活跃工作区：${out.data.topWorkspace || '—'}`
+        : `📊 DSH Weekly ${out.data.weekLabel}\nSpend ¥${(out.data.costYuan || 0).toFixed(2)} · Scheduled runs ${out.data.tasksDone} · Quick Asks ${out.data.quickAsks}\nCache saved ¥${(out.data.cacheSavedYuan || 0).toFixed(2)}\nTop workspace: ${out.data.topWorkspace || '—'}\n(card: ${out.file})`;
+      if (!channelsMgr) return { ok: false, reason: 'channels unavailable' };
+      await channelsMgr.broadcastText(text);
+      log('[weekly] pushed to IM channels');
+      return { ok: true };
+    } catch (err) { return { ok: false, reason: err.message }; }
+  });
   // R4 cache economics (read-only aggregation over the shared collect() cache)
   ipcMain.handle('cache-economics:summary', async () => {
     try {
@@ -3367,6 +3397,7 @@ async function handleQuickAskSubmit(prompt) {
       prompt: prompt.trim(),
     });
     notifyAs('completion', t(lang(), 'notify.quickAskDone'), t(lang(), 'notify.quickAskDoneBody', { ok: result.ok ? '✓' : '✗' }));
+    if (weekly && result.ok) weekly.record('quickask', true); // R5 activity stream
     return result;
   } finally {
     quickAskRunning = false;
@@ -3418,6 +3449,7 @@ async function runScheduledTask(task) {
     t(lang(), 'notify.taskDone'),
     t(lang(), 'notify.scheduledDoneBody', { name: task.name || task.id, ok: result.ok ? '✓' : '✗' })
   );
+  if (weekly) weekly.record('task', !!result.ok); // R5 activity stream
   broadcastScheduled();
   return result;
 }
@@ -3775,6 +3807,17 @@ if (!gotLock) {
     channelsMgr.register('feishu', FeishuChannel, (c) => testFeishuConnection({ appId: c.appId, appSecret: c.appSecret }));
     channelsMgr.register('wecom', WecomChannel, (c) => testWecomConnection({ botId: c.botId, secret: c.secret }));
     channelsMgr.register('dingtalk', DingtalkChannel, (c) => testDingtalkConnection({ clientId: c.clientId, clientSecret: c.clientSecret }));
+    // R5 weekly report (Wrapped card): needs channels for the IM push leg
+    weekly = createWeeklyReport({
+      userDataDir: () => app.getPath('userData'),
+      collectStatsShared: () => collectStats(false),
+      getSettings: () => settings.get(),
+      broadcastText: channelsMgr ? (text) => channelsMgr.broadcastText(text) : null,
+      BrowserWindow,
+      isDark: () => resolvedTheme() !== 'light',
+      lang,
+      log,
+    });
     // push channel state changes (online/offline/backoff) to every open window.
     // Coalesce bursty updates (reconnect storms fire emitState repeatedly) into
     // a single push — without this the renderer rebuilds the whole channel
@@ -3866,6 +3909,28 @@ if (!gotLock) {
     if (runOnStartup(settings.get())) {
       setTimeout(() => { if (!quitting) bootCheck.runChecks().catch((e) => log(`[boot-check] failed: ${e.message}`)); }, 4_000);
     }
+
+    // R5: weekly auto-generation — check every 30 min; fires on Monday
+    // morning Beijing time when enabled and this week's card is missing.
+    let weeklyLastWeekStart = null;
+    const weeklyAutoCheck = async () => {
+      try {
+        if (!weekly || quitting) return;
+        if (!settings.get().weeklyReportEnabled) return;
+        const { weekWindowCst } = require('./weekly-report');
+        const { start } = weekWindowCst(Date.now());
+        if (weeklyLastWeekStart === start) return; // already generated this week
+        const bjDay = (Math.floor((Date.now() + 8 * 3_600_000) / 86_400_000) + 4) % 7; // 1 = Monday
+        const bjHour = Math.floor(((Date.now() / 3_600_000) % 24 + 8 + 24) % 24);
+        if (bjDay !== 1 || bjHour < 6 || bjHour >= 12) return; // Monday 06:00–12:00 CST window
+        weeklyLastWeekStart = start;
+        log('[weekly] auto-generating this week\'s card');
+        const out = await weekly.generate();
+        if (settings.get().weeklyReportPushIm && channelsMgr) await channelsMgr.broadcastText(`📊 ${out.data.weekLabel} · ¥${(out.data.costYuan || 0).toFixed(2)} · ${out.file}`);
+      } catch (err) { log(`[weekly] auto-generate failed: ${err.message}`); }
+    };
+    setInterval(weeklyAutoCheck, 30 * 60_000);
+    setTimeout(weeklyAutoCheck, 60_000);
   });
 
   app.on('window-all-closed', () => {

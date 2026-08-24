@@ -51,6 +51,11 @@ contextBridge.exposeInMainWorld('dshShell', {
   notificationsClear: () => ipcRenderer.invoke('notifications:clear'),
   // R4 cache economics (Settings → Cost)
   cacheEconomics: () => ipcRenderer.invoke('cache-economics:summary'),
+  // R5 weekly report (Settings → Tasks & automation)
+  weeklyGenerate: () => ipcRenderer.invoke('weekly:generate'),
+  weeklyList: () => ipcRenderer.invoke('weekly:list'),
+  weeklyOpenDir: () => ipcRenderer.invoke('weekly:open-dir'),
+  weeklyPush: () => ipcRenderer.invoke('weekly:push'),
   costInfo: () => ipcRenderer.invoke('shell:cost-info'),
   balanceInfo: () => ipcRenderer.invoke('shell:balance-info'),
   balanceRefresh: () => ipcRenderer.invoke('shell:balance-refresh'),

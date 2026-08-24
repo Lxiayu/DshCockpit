@@ -56,10 +56,12 @@ const DEFAULTS = {
   notifDndWindow: '23:00-07:00', // R6: DND window, HH:MM-HH:MM, may cross midnight
   notifFoldEnabled: false, // R6: fold identical toasts inside a 60s window (default off)
   notifKindsDisabled: [], // R6: subset of approval/completion/question/budget/system
+  weeklyReportEnabled: false, // R5: auto-generate the Wrapped card every Monday morning
+  weeklyReportPushIm: false, // R5: also push the generated card summary to configured IM channels
 };
 
 const NUMERIC_KEYS = ['keepVersions', 'port', 'contextWindow', 'costInputPerM', 'costOutputPerM', 'costCacheReadPerM', 'costCacheWritePerM', 'costPeakInputPerM', 'costPeakOutputPerM', 'costPeakCacheReadPerM', 'costPeakCacheWritePerM', 'monthlyBudget', 'backupKeep', 'remotePort'];
-const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'cockpitOnboarded', 'shellAutoUpdate', 'costPeakEnabled', 'remoteControl', 'remoteCompat', 'remotePublic', 'bootCheckOnStartup', 'compatStatusEnabled', 'notificationCenterEnabled', 'notifDndEnabled', 'notifFoldEnabled'];
+const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'cockpitOnboarded', 'shellAutoUpdate', 'costPeakEnabled', 'remoteControl', 'remoteCompat', 'remotePublic', 'bootCheckOnStartup', 'compatStatusEnabled', 'notificationCenterEnabled', 'notifDndEnabled', 'notifFoldEnabled', 'weeklyReportEnabled', 'weeklyReportPushIm'];
 const STRING_KEYS = ['channel', 'pinnedVersion', 'registry', 'workspace', 'dshHome', 'nodeBin', 'dshBin', 'language', 'themeMode', 'quickAskHotkey', 'costPeakWindows', 'remotePublicMode', 'notifDndWindow'];
 const ARRAY_KEYS = ['recentWorkspaces', 'installedPlugins', 'scheduledTasks', 'scheduledHistory', 'modelProviders', 'imChannels', 'notifKindsDisabled'];
 

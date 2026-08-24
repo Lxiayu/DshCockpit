@@ -353,6 +353,17 @@ function createChannelManager(deps) {
     }
   }
 
+  /** R5: fan a plain-text message out to every ONLINE channel (no queueing —
+   * generated reports are pushed once; offline channels simply miss it). */
+  function broadcastText(text) {
+    const jobs = [];
+    for (const [id, rec] of instances) {
+      if (!rec.sender) continue;
+      jobs.push(rec.sender.sendText(String(text)).catch((e) => handleSendError(id, e)));
+    }
+    return Promise.all(jobs);
+  }
+
   // -------------------------------------------------------------- status
 
   function statusAll() {
@@ -471,6 +482,7 @@ function createChannelManager(deps) {
     startEnabled,
     stopAll,
     broadcast,
+    broadcastText,
     toggle,
     setAllowFrom,
     statusAll,

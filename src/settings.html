@@ -890,6 +890,24 @@
         <div class="note" data-i18n="auto.note">到点后会在后台用无头会话运行该任务的提示词（需已配置 API Key），完成后系统通知并记录到执行历史。</div>
       </div>
 
+      <div class="card" id="weekly-card">
+        <h3 data-i18n="weekly.title">Agent 周报卡片</h3>
+        <div class="setting">
+          <div class="setting-info"><label data-i18n="weekly.enabled">每周一上午自动生成</label><span class="desc" data-i18n="weekly.enabledHint">生成 Wrapped 风格的本周卡片（PNG，保存到报告目录）</span></div>
+          <div class="setting-ctrl"><input type="checkbox" class="toggle" id="weeklyReportEnabled" /></div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><label data-i18n="weekly.pushIm">生成后推送 IM 渠道</label><span class="desc" data-i18n="weekly.pushImHint">向已接入并在线的渠道发送周报摘要（需在渠道页配置）</span></div>
+          <div class="setting-ctrl"><input type="checkbox" class="toggle" id="weeklyReportPushIm" /></div>
+        </div>
+        <div class="btnrow">
+          <button class="secondary" id="btn-weekly-generate" data-i18n="weekly.generate">立即生成本周卡片</button>
+          <button class="secondary" id="btn-weekly-push" data-i18n="weekly.push">推送到 IM</button>
+          <button class="secondary" id="btn-weekly-open" data-i18n="weekly.openDir">打开报告目录</button>
+        </div>
+        <div class="status" id="weekly-status"></div>
+      </div>
+
       <!-- ------------------------- page: notifications (R6 通知中心) -->
       <div class="page" id="page-notifications">
         <div class="page-head">
@@ -1667,6 +1685,10 @@
       notif_historyTitle: '通知历史（最近 500 条）', notif_searchPh: '搜索标题 / 正文…', notif_clear: '清空历史',
       notif_empty: '暂无通知记录。', notif_clearConfirm: '清空全部通知历史？', notif_cleared: '✅ 已清空',
       notif_rulesOn: '通知中心已启用；规则修改即时生效。', notif_rulesOff: '⚠️ 通知中心已关闭：所有通知直接弹窗，不记录历史。',
+      weekly_title: 'Agent 周报卡片', weekly_enabled: '每周一上午自动生成', weekly_enabledHint: '生成 Wrapped 风格的本周卡片（PNG，保存到报告目录）',
+      weekly_pushIm: '生成后推送 IM 渠道', weekly_pushImHint: '向已接入并在线的渠道发送周报摘要（需在渠道页配置）',
+      weekly_generate: '立即生成本周卡片', weekly_push: '推送到 IM', weekly_openDir: '打开报告目录',
+      weekly_generating: '⏳ 正在渲染卡片…', weekly_generated: '✅ 已生成：{file}', weekly_pushing: '⏳ 正在推送…', weekly_pushed: '✅ 已推送到在线渠道。',
     },
     en: {
       title: 'DshCockpit Settings',
@@ -2058,6 +2080,10 @@
       notif_historyTitle: 'History (last 500)', notif_searchPh: 'Search title / body…', notif_clear: 'Clear history',
       notif_empty: 'No notifications recorded yet.', notif_clearConfirm: 'Clear the entire notification history?', notif_cleared: '✅ Cleared',
       notif_rulesOn: 'Notification center is on; rule changes apply immediately.', notif_rulesOff: '⚠️ Notification center is off: everything toasts directly and nothing is recorded.',
+      weekly_title: 'Agent weekly card', weekly_enabled: 'Auto-generate every Monday morning', weekly_enabledHint: 'Renders a Wrapped-style PNG card for the week into the report folder',
+      weekly_pushIm: 'Push to IM channels after generating', weekly_pushImHint: 'Sends the summary to connected online channels (configure them on the Channels page)',
+      weekly_generate: 'Generate this week now', weekly_push: 'Push to IM', weekly_openDir: 'Open report folder',
+      weekly_generating: '⏳ Rendering card…', weekly_generated: '✅ Generated: {file}', weekly_pushing: '⏳ Pushing…', weekly_pushed: '✅ Pushed to online channels.',
     },
   };
 
@@ -2253,6 +2279,8 @@
     ['notifDndEnabled', 'notifDndEnabled', (el) => el.checked],
     ['notifDndWindow', 'notifDndWindow', (el) => el.value.trim()],
     ['notifFoldEnabled', 'notifFoldEnabled', (el) => el.checked],
+    ['weeklyReportEnabled', 'weeklyReportEnabled', (el) => el.checked],
+    ['weeklyReportPushIm', 'weeklyReportPushIm', (el) => el.checked],
   ];
   for (const [id, key, pick] of AUTO_FIELDS) {
     $(id).addEventListener('change', async () => {
@@ -2343,6 +2371,9 @@
     $('notifFoldEnabled').checked = !!s.notifFoldEnabled;
     const disabledKinds = new Set(s.notifKindsDisabled || []);
     document.querySelectorAll('#notif-kinds input').forEach((cb) => { cb.checked = disabledKinds.has(cb.value); });
+    // R5 weekly report
+    $('weeklyReportEnabled').checked = !!s.weeklyReportEnabled;
+    $('weeklyReportPushIm').checked = !!s.weeklyReportPushIm;
     $('workspace').value = s.workspace || '';
     $('dshHome').value = s.dshHome || '';
     $('port').value = s.port;
@@ -3716,6 +3747,31 @@
       dbg(`refreshCacheEcon: ok saved=${r.month.savedYuan.toFixed(2)} days=${days.length}`);
     } catch (e) { dbg(`refreshCacheEcon: failed ${e.message}`); }
   }
+
+  // --------------------------------------------- weekly report card (R5)
+  $('btn-weekly-generate').addEventListener('click', async () => {
+    const btn = $('btn-weekly-generate');
+    btn.disabled = true;
+    setStatus($('weekly-status'), tr('weekly.generating'));
+    try {
+      const r = await window.dshShell.weeklyGenerate();
+      if (r.ok) setStatus($('weekly-status'), tr('weekly.generated', { file: r.file }));
+      else setStatus($('weekly-status'), tr('control.operationFailed', { reason: r.reason || '' }), 'warn');
+    } catch (e) { setStatus($('weekly-status'), tr('control.operationFailed', { reason: e.message }), 'warn'); }
+    finally { btn.disabled = false; }
+  });
+  $('btn-weekly-push').addEventListener('click', async () => {
+    const btn = $('btn-weekly-push');
+    btn.disabled = true;
+    setStatus($('weekly-status'), tr('weekly.pushing'));
+    try {
+      const r = await window.dshShell.weeklyPush();
+      if (r.ok) setStatus($('weekly-status'), tr('weekly.pushed'));
+      else setStatus($('weekly-status'), tr('control.operationFailed', { reason: r.reason || '' }), 'warn');
+    } catch (e) { setStatus($('weekly-status'), tr('control.operationFailed', { reason: e.message }), 'warn'); }
+    finally { btn.disabled = false; }
+  });
+  $('btn-weekly-open').addEventListener('click', () => window.dshShell.weeklyOpenDir());
 
   // --------------------------------------------- notification center (R6)
   const NOTIF_KIND_BADGE = { approval: '🔔', completion: '✅', question: '❓', budget: '💰', system: '⚙️' };
