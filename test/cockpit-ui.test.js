@@ -206,6 +206,21 @@ test('main window can never stay hidden: ready-to-show fallback timer + limited 
   assert.match(main, /code === -3/); // ERR_ABORTED superseded loads ignored
 });
 
+test('no free references to state moved into extracted modules (A1 guard)', () => {
+  const main = read('main.js');
+  // strip strings & comments so dictionary keys like 'tray.settings' do not
+  // count as identifier uses
+  const code = main
+    .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
+    .replace(/`(?:[^`\\]|\\.)*`/g, '``')
+    .replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+  for (const name of ['tray', 'runtimeChild', 'runtimeUrl', 'runtimeLogPath', 'urlPollTimer', 'crashGuard', 'lastCrashAt']) {
+    const uses = [...code.matchAll(new RegExp(`(?<![\\w$.])${name}(?![\\w$])`, 'g'))];
+    assert.deepStrictEqual(uses.map(() => name), [],
+      `main.js still references "${name}" as a free variable — that state moved to an extracted module (tray-menu / runtime-supervisor / runtime-log-tail); use the injected accessor instead`);
+  }
+});
+
 test('runtime log tailing reads only appended bytes, never the whole file', () => {
   const main = read('main.js');
   // A1: the poller lives in runtime-supervisor.js; raw fs.readSync

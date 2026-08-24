@@ -135,7 +135,10 @@ function createTrayMenu(deps) {
     updateTray();
   }
 
-  return { createTray, updateTray };
+  function hasTray() { return !!tray && !tray.isDestroyed(); }
+  function setTooltip(text) { if (hasTray()) tray.setToolTip(text); }
+
+  return { createTray, updateTray, hasTray, setTooltip };
 }
 
 module.exports = { createTrayMenu };

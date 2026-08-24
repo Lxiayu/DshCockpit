@@ -366,7 +366,7 @@ const supervisor = createRuntimeSupervisor({
   upgradeNow: () => runUpdateCheck(true),
   applyPendingUpdate,
 });
-const { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeLogPath } = supervisor;
+const { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeLogPath, getRuntimeChild } = supervisor;
 
 // ---------------------------------------------------------------------------
 // binary resolution
@@ -712,7 +712,7 @@ function createWindow(url) {
     }
   });
   mainWindow.on('close', (e) => {
-    if (!quitting && !noTray && settings.get().trayOnClose && tray) {
+    if (!quitting && !noTray && settings.get().trayOnClose && trayMenu.hasTray()) {
       e.preventDefault();
       mainWindow.hide();
     }
@@ -736,7 +736,7 @@ function createWindow(url) {
   });
   mainWindow.on('close', saveBounds);
 
-  if (tray) tray.setToolTip(`${APP_NAME} — ${getRuntimeUrl() || 'starting…'}`);
+  trayMenu.setTooltip(`${APP_NAME} — ${getRuntimeUrl() || 'starting…'}`);
   setTimeout(() => { createCockpitWindow(); showCockpitInactive(); }, 0);
 }
 
@@ -2862,11 +2862,12 @@ function recordCrash(code, signal) {
     const dir = diagnosticsDir();
     fs.mkdirSync(dir, { recursive: true });
     let tail = '';
-    try { tail = fs.readFileSync(runtimeLogPath, 'utf8').split('\n').slice(-20).join('\n'); } catch { /* ignore */ }
+    const logPath = getRuntimeLogPath();
+    try { tail = logPath ? fs.readFileSync(logPath, 'utf8').split('\n').slice(-20).join('\n') : ''; } catch { /* ignore */ }
     const rec = {
       ts: new Date().toISOString(), code, signal,
       activeVersion: manager.getInfo().activeVersion,
-      logPath: runtimeLogPath,
+      logPath,
       logTail: tail,
     };
     fs.writeFileSync(path.join(dir, `crash-${Date.now()}.json`), JSON.stringify(rec, null, 2));
@@ -3551,7 +3552,7 @@ if (!gotLock) {
     // refresh the tray's peak/off-peak countdown line once a minute (the
     // menu is only rebuilt when split pricing is actually enabled)
     trayPeakTimer = setInterval(() => {
-      if (quitting || !tray || tray.isDestroyed()) return;
+      if (quitting || !trayMenu.hasTray()) return;
       if (settings.get().costPeakEnabled) updateTray();
     }, 60_000);
     // Splash on EVERY boot, not just guided first-run: without it Windows
