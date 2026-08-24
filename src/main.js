@@ -64,6 +64,7 @@ const { createRuntimeLogTailer } = require('./runtime-log-tail'); // boot URL po
 const { createNotificationCenter } = require('./notification-center'); // R6
 const { buildCacheEconomics, pricingFromSettings } = require('./cache-economics'); // R4
 const { createWeeklyReport } = require('./weekly-report'); // R5
+const { createCrashLoopGuard, armWatchdog } = require('./runtime-supervisor'); // A1 supervision primitives
 
 if (process.env.DSH_DESKTOP_USER_DATA) {
   // must happen before app is ready; keeps logs/state inside the workspace
@@ -87,8 +88,7 @@ let logStream = null;
 let runtimeLogPath = null;
 let urlPollTimer = null;
 let updateInFlight = false;
-let crashCount = 0;
-let lastCrashAt = 0;
+const crashGuard = createCrashLoopGuard(); // A1: crash-loop state machine
 let eventsFeed = [];
 let eventsRetryTimer = null;
 let lastTaskNotifyAt = 0;
@@ -656,7 +656,7 @@ function spawnRuntime() {
       if (!runtimeStateController.isCurrent(generation)) return;
       runtimeUrl = m[1];
       clearTimeout(urlWatchdogTimer);
-      crashCount = 0; // a healthy boot resets the auto-restart counter
+      crashGuard.reset(); // a healthy boot resets the auto-restart counter
       log(`[shell] runtime URL: ${runtimeUrl}`);
       if (remote) remote.setRuntimeUrl(runtimeUrl); // phone gateway follows the runtime port
       const bootUrl = runtimeUrl;
@@ -787,12 +787,12 @@ function spawnRuntime() {
       // crash guard: auto-restart with loop protection (max 3 in 60s);
       // a clean exit (code 0) or a manual restart is not a crash (M9)
       if (code !== 0) recordCrash(code, signal);
-      const now = Date.now();
-      if (now - lastCrashAt > 60_000) crashCount = 0;
-      lastCrashAt = now;
-      crashCount += 1;
-      if (crashCount <= 3) {
-        notify(t(lang(), 'notify.runtimeExited'), t(lang(), 'notify.autoRestart', { code, signal, attempt: crashCount }));
+      // A1: every unexpected exit advances the rolling guard (legacy M9
+      // semantics — a clean exit is not written to crash diagnostics but it
+      // still consumes an auto-restart slot), keeping behaviour identical.
+      const verdict = crashGuard.record();
+      if (verdict.restart) {
+        notify(t(lang(), 'notify.runtimeExited'), t(lang(), 'notify.autoRestart', { code, signal, attempt: verdict.attempt }));
         setTimeout(restartRuntime, 1_500);
       } else {
         // crash loop: the runtime cannot boot — most likely a broken plugin.
@@ -823,21 +823,12 @@ function spawnRuntime() {
 
 /** Spawn a detached watchdog that reaps the runtime if this shell dies hard. */
 function spawnWatchdog(runtimePid) {
-  try {
-    const node = bestNodeBin();
-    const env = { ...process.env };
-    if (node.runAsNode) env.ELECTRON_RUN_AS_NODE = '1';
-    const wd = spawn(node.bin, [path.join(__dirname, 'watchdog.js'), String(process.pid), String(runtimePid)], {
-      detached: true,
-      stdio: 'ignore',
-      env,
-      windowsHide: true,
-    });
-    wd.unref();
-    log(`[shell] watchdog armed (shell=${process.pid}, runtime=${runtimePid})`);
-  } catch (e) {
-    log(`[shell] watchdog spawn failed: ${e.message}`);
-  }
+  armWatchdog({
+    node: bestNodeBin(),
+    shellPid: process.pid,
+    runtimePid,
+    log,
+  });
 }
 
 // ---------------------------------------------------------------------------
