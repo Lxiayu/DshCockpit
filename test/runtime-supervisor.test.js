@@ -37,7 +37,8 @@ test('a clean exit still consumes an auto-restart slot (M9 legacy semantics)', (
 test('crashes older than the 60s window fall out of the count', () => {
   const f = fixture();
   for (let i = 0; i < 3; i++) { f.guard.record(); f.tick(10_000); }
-  f.tick(35_000); // first crash is now >60s old → window restarts
+  // last recorded crash was 10s ago; jump past the 60s window from it
+  f.tick(61_000);
   const fresh = f.guard.record();
   assert.strictEqual(fresh.restart, true, 'window elapsed → fresh start');
   assert.strictEqual(fresh.attempt, 1);

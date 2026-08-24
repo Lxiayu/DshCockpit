@@ -52,14 +52,15 @@ const config = {
     ],
     icon: 'resources/icon.png',
     artifactName: `DshCockpit-\${version}${suffix}-win-\${arch}.\${ext}`,
-    // NSIS posture (R10 boundary table): per-user, no UAC, one-click like
-    // Slack/Discord; uninstaller never touches %APPDATA%\dsh-cockpit.
-    nsis: {
-      oneClick: true,
-      perMachine: false,
-      allowToChangeInstallationDirectory: false,
-      deleteAppDataOnUninstall: false,
-    },
+  },
+  // NOTE: nsis is a TOP-LEVEL key (win.nsis is invalid per schema).
+  // Posture (R10 boundary table): per-user, no UAC, one-click like
+  // Slack/Discord; uninstaller never touches %APPDATA%\dsh-cockpit.
+  nsis: {
+    oneClick: true,
+    perMachine: false,
+    allowToChangeInstallationDirectory: false,
+    deleteAppDataOnUninstall: false,
   },
   mac: {
     target: [
