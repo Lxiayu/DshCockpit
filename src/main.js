@@ -345,6 +345,7 @@ const windowManager = createWindowManager({
   log, t, lang,
   settingsGet: () => settings.get(),
   noTray,
+  isQuitting: () => quitting,
   getRuntimeUrl: () => getRuntimeUrl(),
   getRuntimeChild: () => getRuntimeChild(),
   traySetTooltip: (text) => trayMenu.setTooltip(text),

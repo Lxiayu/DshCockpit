@@ -138,17 +138,38 @@ async function main() {
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  killTree(child);
-
-  if (!urlLineSeen) console.error('[e2e] FAIL: URL line never appeared');
-  else if (!healthOk) console.error(`[e2e] FAIL: ${lastUrl} never returned 200`);
-  else {
-    console.log(`[e2e] PASS: booted, served ${lastUrl}, health 200 (${((Date.now() - startedAt) / 1000).toFixed(1)}s total)`);
-    try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch { /* best effort */ }
-    return;
+  if (!urlLineSeen) {
+    console.error('[e2e] FAIL: URL line never appeared');
+    killTree(child);
+    console.error(tailAllLogs());
+    process.exit(1);
   }
-  console.error(tailAllLogs());
-  process.exit(1);
+  if (!healthOk) {
+    console.error(`[e2e] FAIL: ${lastUrl} never returned 200`);
+    killTree(child);
+    console.error(tailAllLogs());
+    process.exit(1);
+  }
+
+  // Graceful-shutdown gate: SIGTERM must produce a clean quit (before-quit ->
+  // window close -> backup -> exit) within 15s. A crash dialog or hung
+  // close-handler here is exactly the class of bug users see on exit.
+  console.log('[e2e] sending SIGTERM for graceful shutdown');
+  try { child.kill('SIGTERM'); } catch { /* ignore */ }
+  const exitDeadline = Date.now() + 15_000;
+  while (!exited && Date.now() < exitDeadline) await new Promise((r) => setTimeout(r, 200));
+  if (!exited) {
+    console.error('[e2e] FAIL: app did not exit within 15s of SIGTERM');
+    killTree(child);
+    console.error(tailAllLogs());
+    process.exit(1);
+  }
+  if (exited.code !== 0 && exited.signal !== 'SIGTERM') {
+    console.error(`[e2e] FAIL: app exited code=${exited.code} signal=${exited.signal} during shutdown`);
+    process.exit(1);
+  }
+  console.log(`[e2e] PASS: booted, served ${lastUrl}, health 200, clean shutdown (${((Date.now() - startedAt) / 1000).toFixed(1)}s total)`);
+  try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch { /* best effort */ }
 }
 
 main().catch((err) => { console.error('[e2e] FAILED:', err.message); process.exit(1); });

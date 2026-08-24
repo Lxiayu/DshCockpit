@@ -15,6 +15,7 @@ function createWindowManager(deps) {
     log, t, lang,
     settingsGet,
     noTray = false,
+    isQuitting = () => false,
     getRuntimeUrl, getRuntimeChild,
     traySetTooltip = () => {},
     closeLoading,
