@@ -65,6 +65,7 @@ const { createNotificationCenter } = require('./notification-center'); // R6
 const { buildCacheEconomics, pricingFromSettings } = require('./cache-economics'); // R4
 const { createWeeklyReport } = require('./weekly-report'); // R5
 const { createCrashLoopGuard, armWatchdog } = require('./runtime-supervisor'); // A1 supervision primitives
+const { createTrayMenu } = require('./tray-menu'); // A1 tray extraction
 
 if (process.env.DSH_DESKTOP_USER_DATA) {
   // must happen before app is ready; keeps logs/state inside the workspace
@@ -80,7 +81,6 @@ const KILL_GRACE_MS = 4_000;
 let mainWindow = null;
 let settingsWindow = null;
 let cockpitWindow = null;
-let tray = null;
 let runtimeChild = null;
 let runtimeUrl = null;
 let quitting = false;
@@ -1217,104 +1217,46 @@ nativeTheme.on('theme-changed', () => broadcastTheme());
 // ---------------------------------------------------------------------------
 // tray
 // ---------------------------------------------------------------------------
+// A1: tray construction/menu lives in src/tray-menu.js (moved verbatim);
+// these wrappers keep every existing updateTray()/createTray() call site.
+const trayMenu = createTrayMenu({
+  Tray, Menu, nativeImage: require('electron').nativeImage, app,
+  iconPath,
+  noTray,
+  appName: APP_NAME,
+  lang,
+  t,
+  runtimeInfo: () => manager.getInfo(),
+  settingsGet: () => settings.get(),
+  peakWindowsOf,
+  costPeakStatus: cost.peakStatus,
+  quickAskAccelerator: () => quickAskShortcut.current(),
+  isMainWindowAlive: () => !!(mainWindow && !mainWindow.isDestroyed()),
+  toggleDevTools: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.toggleDevTools(); },
+  quittingFlag: () => quitting,
+  setQuitting: (v) => { quitting = v; },
+  notify,
+  log,
+  actions: {
+    showMain,
+    openSettingsWindow: createSettingsWindow,
+    openQuickAsk,
+    runUpdateCheck,
+    applyPendingUpdate,
+    doRollback,
+    restartRuntime,
+    restartApp: () => { quitting = true; log('[shell] app relaunch requested'); app.relaunch(); app.exit(0); },
+    checkShellUpdate,
+    setWorkspace,
+  },
+});
+
 function updateTray() {
-  if (!tray) return;
-  const L = lang();
-  const info = manager.getInfo();
-  const pending = info.pendingVersion;
-  const canRollback = info.installed && info.installed.length > 1;
-  // peak/off-peak status line (only when split pricing is enabled)
-  const cfg = settings.get();
-  const windows = peakWindowsOf(cfg);
-  const peakItems = [];
-  if (windows) {
-    const ps = cost.peakStatus(Date.now(), windows);
-    const flatOut = cfg.costOutputPerM || 0;
-    const peakOut = cfg.costPeakOutputPerM || 0;
-    const hasPeakRate = !!(cfg.costPeakInputPerM || cfg.costPeakOutputPerM || cfg.costPeakCacheReadPerM || cfg.costPeakCacheWritePerM);
-    const rate = ps.peak ? (hasPeakRate ? peakOut : flatOut) : flatOut;
-    peakItems.push({
-      label: ps.allDayOffPeak
-        ? t(L, 'tray.peakWeekend', { r: rate })
-        : ps.peak
-          ? t(L, 'tray.peakOn', { r: rate, m: ps.nextChangeInMin })
-          : t(L, 'tray.peakOff', { r: rate, m: ps.nextChangeInMin }),
-      enabled: false,
-    });
-  }
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: t(L, 'tray.open'), click: () => showMain() },
-    ...peakItems,
-    { label: t(L, 'tray.settings'), click: () => createSettingsWindow() },
-    { label: t(L, 'tray.quickAsk'), accelerator: quickAskShortcut.current(), click: () => openQuickAsk() },
-    { type: 'separator' },
-    {
-      label: t(L, 'tray.checkUpdates'),
-      click: async () => { await runUpdateCheck(true); },
-    },
-    {
-      label: pending ? `${t(L, 'tray.applyUpdate')}（${info.activeVersion} → ${pending}）` : t(L, 'tray.applyUpdate'),
-      enabled: !!pending,
-      click: async () => {
-        try { await applyPendingUpdate(); } catch (err) { notify(t(L, 'notify.applyFailed'), err.message); }
-      },
-    },
-    {
-      label: t(L, 'tray.rollback'),
-      enabled: canRollback,
-      click: async () => {
-        try { await doRollback(); } catch (err) { notify(t(L, 'notify.rollbackFailed'), err.message); }
-      },
-    },
-    { type: 'separator' },
-    { label: t(L, 'tray.restartRuntime'), click: restartRuntime },
-    {
-      // R1: full app restart (window state is persisted by window-state.js)
-      label: t(L, 'tray.restartApp'),
-      click: () => { quitting = true; log('[shell] app relaunch requested'); app.relaunch(); app.exit(0); },
-    },
-    {
-      label: t(L, 'tray.checkShellUpdate'),
-      click: () => checkShellUpdate(true),
-    },
-    {
-      label: t(L, 'tray.workspaces'),
-      submenu: (settings.get().recentWorkspaces || []).filter(Boolean).length
-        ? settings.get().recentWorkspaces.filter(Boolean).map((ws) => ({
-            label: ws,
-            type: 'checkbox',
-            checked: settings.get().workspace === ws,
-            click: () => setWorkspace(ws),
-          }))
-        : [{ label: t(L, 'tray.noWorkspaces'), enabled: false }],
-    },
-    { label: t(L, 'tray.devtools'), click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.toggleDevTools(); } },
-    { type: 'separator' },
-    { label: t(L, 'tray.runtime', { v: info.activeVersion || '—' }), enabled: false },
-    { label: t(L, 'tray.quit'), click: () => { quitting = true; app.quit(); } },
-  ]));
+  trayMenu.updateTray();
 }
 
 function createTray() {
-  if (noTray) return;
-  const nativeImage = require('electron').nativeImage;
-  const baseIcon = nativeImage.createFromPath(iconPath());
-  if (process.platform === 'darwin') {
-    // macOS menu bar icon. The bundled icon.png is a 512x512 RGBA app icon
-    // with an opaque background — using it as a template image (Electron's
-    // default for small icons) renders it as a solid block because the whole
-    // alpha channel is fully opaque. Show it as a colored icon instead:
-    // resize to 22x22 (the standard menubar size) and explicitly opt out of
-    // template mode so macOS shows the original artwork.
-    const resized = baseIcon.resize({ width: 22, height: 22 });
-    resized.setTemplateImage(false);
-    tray = new Tray(resized);
-  } else {
-    tray = new Tray(baseIcon.resize({ width: 16, height: 16 }));
-  }
-  tray.setToolTip(APP_NAME);
-  tray.on('click', () => showMain());
-  updateTray();
+  trayMenu.createTray();
 }
 
 function showMain() {
