@@ -70,7 +70,7 @@ jobs:
       # A2 artifact-level gate: cold-boot the packaged app, wait for the boot
       # URL line, probe HTTP 200 — a red step blocks the artifact upload.
       - name: E2E smoke (packaged artifact)
-        run: node scripts/e2e-smoke.js --app dist/mac-arm64/DshCockpit.app/Contents/MacOS/DshCockpit --timeout 180000
+        run: node scripts/e2e-smoke.js --expect-feed --app dist/mac-arm64/DshCockpit.app/Contents/MacOS/DshCockpit --timeout 180000
 
       # D2 slim track: same shell, no bundled runtime seed (~100MB-class zip).
       # No E2E here — identical shell code already gated by the full artifact.
@@ -135,7 +135,7 @@ jobs:
       - run: node scripts/build.js --mac --x64 --publish never
 
       - name: E2E smoke (packaged artifact)
-        run: node scripts/e2e-smoke.js --app dist/mac-x64/DshCockpit.app/Contents/MacOS/DshCockpit --timeout 180000
+        run: node scripts/e2e-smoke.js --expect-feed --app dist/mac-x64/DshCockpit.app/Contents/MacOS/DshCockpit --timeout 180000
 
       - name: Build slim variant
         run: node scripts/build.js --mac --x64 --slim dir

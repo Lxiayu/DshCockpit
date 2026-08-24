@@ -24,6 +24,9 @@ function argValue(flag) {
 
 const appPath = argValue('--app');
 const TIMEOUT_MS = Number(argValue('--timeout')) || 180_000;
+// dir-target local builds do not carry app-update.yml (updater only applies
+// to zip/nsis artifacts) — CI release pipelines pass --expect-feed to enforce it
+const EXPECT_FEED = process.argv.includes('--expect-feed');
 if (!appPath || !fs.existsSync(appPath)) {
   console.error(`[e2e] --app path missing or not found: ${appPath}`);
   process.exit(1);
@@ -166,10 +169,16 @@ async function main() {
       process.exit(1);
     }
     console.log(`[e2e] updater feed ok: ${feed.split('\n').filter((l) => /owner|repo/.test(l)).join(' ').trim()}`);
-  } catch {
-    console.error(`[e2e] FAIL: app-update.yml missing at ${feedPath} (in-app auto-update would be dead)`);
-    killTree(child);
-    process.exit(1);
+  } catch (err) {
+    const msg = EXPECT_FEED
+      ? `app-update.yml missing at ${feedPath} (in-app auto-update would be dead)`
+      : `app-update.yml absent (dir-target build) — feed gate skipped`;
+    if (EXPECT_FEED) {
+      console.error(`[e2e] FAIL: ${msg}`);
+      killTree(child);
+      process.exit(1);
+    }
+    console.log(`[e2] ${msg}`.replace('[e2]', '[e2e]'));
   }
 
   // Graceful-shutdown gate: SIGTERM must produce a clean quit (before-quit ->
