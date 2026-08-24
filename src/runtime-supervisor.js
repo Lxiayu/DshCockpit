@@ -89,7 +89,7 @@ function armWatchdog({ watchdogScript = path.join(__dirname, 'watchdog.js'), nod
   }
 }
 
-module.exports = { createCrashLoopGuard, killTree, armWatchdog, CRASH_WINDOW_MS, MAX_CRASHES };
+
 
 // ---------------------------------------------------------------------------
 // A1 step 3: the full spawn/restart/kill lifecycle (moved verbatim from
@@ -138,6 +138,7 @@ function createRuntimeSupervisor(deps) {
   let runtimeUrl = null;
   let runtimeLogPath = null;
   let urlPollTimer = null;
+  const crashGuard = createCrashLoopGuard(); // healthy boot resets; 4th crash in 60s trips safe-mode
 
   function getRuntimeUrl() { return runtimeUrl; }
   function getRuntimeLogPath() { return runtimeLogPath; }
@@ -423,3 +424,12 @@ function createRuntimeSupervisor(deps) {
 
   return { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeLogPath, getRuntimeChild, waitForHealth, crashGuard };
 }
+
+module.exports = {
+  createCrashLoopGuard,
+  killTree,
+  armWatchdog,
+  createRuntimeSupervisor,
+  CRASH_WINDOW_MS,
+  MAX_CRASHES,
+};

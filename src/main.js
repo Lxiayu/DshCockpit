@@ -64,7 +64,7 @@ const { createRuntimeLogTailer } = require('./runtime-log-tail'); // boot URL po
 const { createNotificationCenter } = require('./notification-center'); // R6
 const { buildCacheEconomics, pricingFromSettings } = require('./cache-economics'); // R4
 const { createWeeklyReport } = require('./weekly-report'); // R5
-const { createCrashLoopGuard, armWatchdog } = require('./runtime-supervisor'); // A1 supervision primitives
+const { createCrashLoopGuard, armWatchdog, createRuntimeSupervisor } = require('./runtime-supervisor'); // A1 supervision primitives
 const { createTrayMenu } = require('./tray-menu'); // A1 tray extraction
 
 if (process.env.DSH_DESKTOP_USER_DATA) {
@@ -128,48 +128,7 @@ const skillsGuard = createPluginOpGuard(); // one skill install/upgrade at a tim
 const scheduledRunning = new Set();
 const budgetNotified = new Set();
 
-// A1 step 3: full runtime lifecycle supervision extracted from main.js.
-// The deps object is the explicit coupling surface between the shell and the
-// supervisor domain (was ~40 scattered free-variable references).
-const supervisor = createRuntimeSupervisor({
-  app,
-  dialog,
-  log,
-  t,
-  lang,
-  appName: APP_NAME,
-  stateController: runtimeStateController,
-  resolveDshBin: activeDshBin,
-  describeDshBin: dshBinMeta,
-  nodeCandidates,
-  effectiveSettings: () => settings.effective(),
-  selfHealProfile,
-  ensureLogDir,
-  resolveNodeBin: bestNodeBin,
-  onRemoteUrl: (url) => { if (remote) remote.setRuntimeUrl(url); },
-  startEventsFeed,
-  stopEventsFeed,
-  resetEventsFeedLiveFlag: () => { eventsFeedLiveLogged = false; },
-  onHealthy: (bootUrl) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.loadURL(bootUrl);
-      createCockpitWindow();
-      showCockpitInactive();
-    } else {
-      createWindow(bootUrl);
-    }
-  },
-  hasMainWindow: () => !!mainWindow,
-  isQuitting: () => quitting,
-  recordCrash,
-  enterSafeMode,
-  upgradeDialog: (message) => showCredentialUpgradeDialog(message),
-  isCredentialFormatIssue: (logPath) => detectCredentialFormatMismatch(readLogTail(logPath)),
-  notify,
-  upgradeNow: () => runUpdateCheck(true),
-  applyPendingUpdate,
-});
-const { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeLogPath } = supervisor;
+
 const materializing = new Set();
 
 const settings = new SettingsStore(app.getPath('userData'));
@@ -365,6 +324,49 @@ const nc = createNotificationCenter({
   },
   log,
 });
+
+// A1 step 3: full runtime lifecycle supervision extracted from main.js.
+// The deps object is the explicit coupling surface between the shell and the
+// supervisor domain (was ~40 scattered free-variable references).
+const supervisor = createRuntimeSupervisor({
+  app,
+  dialog,
+  log,
+  t,
+  lang,
+  appName: APP_NAME,
+  stateController: runtimeStateController,
+  resolveDshBin: activeDshBin,
+  describeDshBin: dshBinMeta,
+  nodeCandidates,
+  effectiveSettings: () => settings.effective(),
+  selfHealProfile,
+  ensureLogDir,
+  resolveNodeBin: bestNodeBin,
+  onRemoteUrl: (url) => { if (remote) remote.setRuntimeUrl(url); },
+  startEventsFeed,
+  stopEventsFeed,
+  resetEventsFeedLiveFlag: () => { eventsFeedLiveLogged = false; },
+  onHealthy: (bootUrl) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.loadURL(bootUrl);
+      createCockpitWindow();
+      showCockpitInactive();
+    } else {
+      createWindow(bootUrl);
+    }
+  },
+  hasMainWindow: () => !!mainWindow,
+  isQuitting: () => quitting,
+  recordCrash,
+  enterSafeMode,
+  upgradeDialog: (message) => showCredentialUpgradeDialog(message),
+  isCredentialFormatIssue: (logPath) => detectCredentialFormatMismatch(readLogTail(logPath)),
+  notify,
+  upgradeNow: () => runUpdateCheck(true),
+  applyPendingUpdate,
+});
+const { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeLogPath } = supervisor;
 
 // ---------------------------------------------------------------------------
 // binary resolution
@@ -2828,6 +2830,28 @@ function initCompactTracking() {
     },
   });
   compactTimer = setInterval(() => { if (!quitting) compactTracker.tick(); }, TOKEN_POLL_MS);
+}
+
+function showCredentialUpgradeDialog(message) {
+  log('[shell] credential format mismatch detected in runtime log');
+  dialog.showMessageBox({
+    type: 'error',
+    title: APP_NAME,
+    message: t(lang(), 'crash.credFormat.title'),
+    detail: `${t(lang(), 'crash.credFormat.body')}\n\n${message}`,
+    buttons: [t(lang(), 'crash.credFormat.upgradeNow'), t(lang(), 'crash.credFormat.later')],
+    defaultId: 0,
+    cancelId: 1,
+  }).then(({ response }) => {
+    if (response !== 0) return;
+    // reuse the standard update pipeline: check -> install -> smoke -> activate -> restart
+    Promise.resolve(runUpdateCheck(true))
+      .then((report) => {
+        if (!report || !report.ok) return; // failure already surfaced by the pipeline
+        return applyPendingUpdate().catch((err) => notify(t(lang(), 'notify.applyFailed'), err.message));
+      })
+      .catch(() => { /* pipeline already notified */ });
+  }).catch(() => { /* dialog failed */ });
 }
 
 // ---------------------------------------------------------------------------
