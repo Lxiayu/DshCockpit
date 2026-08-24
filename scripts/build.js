@@ -57,6 +57,22 @@ if (archivedSeeds.length) {
   console.log(`[build] archiving non-pinned runtime seeds for this build: ${archivedSeeds.join(', ')} (restored afterwards)`);
 }
 
+// D1: prune the pinned seed (docs/maps/types/foreign prebuilds) BEFORE
+// packaging — halves the file count the installer must write and users must
+// delete; idempotent, and the E2E smoke below validates the pruned tree.
+try {
+  const pinned = pinnedRuntimeVersion();
+  if (pinned) {
+    const { pruneRuntime } = require('./prune-runtime');
+    const stats = pruneRuntime(path.join(ROOT, 'vendor', 'runtime', pinned));
+    if (stats.filesRemoved || stats.dirsRemoved) {
+      console.log(`[build] pruned runtime ${pinned}: -${stats.filesRemoved} files / -${stats.dirsRemoved} dirs / -${(stats.bytesSaved / 1e6).toFixed(1)} MB`);
+    }
+  }
+} catch (err) {
+  console.error(`[build] runtime prune failed (packaging UNPRUNED tree): ${err.message}`);
+}
+
 const args = process.argv.slice(2); // module scope: the --win verification below needs it
 let result;
 try {
