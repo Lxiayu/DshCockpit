@@ -62,6 +62,7 @@ const { pickRuntimeCandidate } = require('./runtime-pick'); // H5 runtime priori
 const { detectCredentialFormatMismatch, readLogTail } = require('./crash-reason'); // H5 crash root cause
 const { createRuntimeLogTailer } = require('./runtime-log-tail'); // boot URL poller (incident-hardened)
 const { createNotificationCenter } = require('./notification-center'); // R6
+const { buildCacheEconomics, pricingFromSettings } = require('./cache-economics'); // R4
 
 if (process.env.DSH_DESKTOP_USER_DATA) {
   // must happen before app is ready; keeps logs/state inside the workspace
@@ -1759,6 +1760,15 @@ function registerIpc() {
   // R6 notification hub history (searchable in Settings → Notifications)
   ipcMain.handle('notifications:list', (_e, query, kind, limit) => ({ ok: true, items: nc.list({ query, kind, limit }) }));
   ipcMain.handle('notifications:clear', () => nc.clear());
+  // R4 cache economics (read-only aggregation over the shared collect() cache)
+  ipcMain.handle('cache-economics:summary', async () => {
+    try {
+      const data = await collectStats(false);
+      return { ok: true, ...buildCacheEconomics(data, pricingFromSettings(settings.get())) };
+    } catch (err) {
+      return { ok: false, reason: err.message };
+    }
+  });
   // R2 upstream compatibility status (read-only)
   ipcMain.handle('compat:status', () => compatStatus.getStatus());
   ipcMain.handle('shell:cost-info', async () => {

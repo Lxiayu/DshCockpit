@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld('dshShell', {
   // R6 notification center history
   notificationsList: (query, kind, limit) => ipcRenderer.invoke('notifications:list', query, kind, limit),
   notificationsClear: () => ipcRenderer.invoke('notifications:clear'),
+  // R4 cache economics (Settings → Cost)
+  cacheEconomics: () => ipcRenderer.invoke('cache-economics:summary'),
   costInfo: () => ipcRenderer.invoke('shell:cost-info'),
   balanceInfo: () => ipcRenderer.invoke('shell:balance-info'),
   balanceRefresh: () => ipcRenderer.invoke('shell:balance-refresh'),

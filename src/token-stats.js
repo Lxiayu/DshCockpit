@@ -54,11 +54,15 @@ function parseHeader(text) {
  * With `windows` (peak hour ranges, Beijing time), each usage event is also
  * bucketed into peak/offPeak by its `time` field (events without a time go
  * to offPeak); without windows both buckets stay zero and totals are
- * identical to the legacy behavior. */
+ * identical to the legacy behavior.
+ * R4: every usage event is ALSO bucketed per Beijing-calendar-day
+ * (`days['YYYY-MM-DD']`, aligned with DeepSeek's billing day) — a pure
+ * superset: legacy fields keep their meaning and shape. */
 function sumUsage(text, windows) {
   let input = 0, output = 0, cacheRead = 0, cacheWrite = 0;
   const peak = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   const offPeak = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  const days = {};
   const bucketed = !!(windows && windows.length);
   let lines = 0;
   // prompt side of the MOST RECENT usage event (context pressure basis, C3)
@@ -90,9 +94,25 @@ function sumUsage(text, windows) {
       const dst = (typeof ev.time === 'number' && isPeakTime(ev.time, windows)) ? peak : offPeak;
       dst.input += ui; dst.output += uo; dst.cacheRead += ucr; dst.cacheWrite += ucw;
     }
+    const dayKey = (typeof ev.time === 'number' && ev.time > 0)
+      ? new Date(ev.time + 8 * 3_600_000).toISOString().slice(0, 10) // UTC+8 billing day
+      : 'unknown';
+    const d = days[dayKey] || (days[dayKey] = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+    d.input += ui; d.output += uo; d.cacheRead += ucr; d.cacheWrite += ucw;
     if (nl === -1) break;
   }
-  return { input, output, cacheRead, cacheWrite, lines, peak, offPeak, lastUsage };
+  return { input, output, cacheRead, cacheWrite, lines, peak, offPeak, days, lastUsage };
+}
+
+/** Merge two per-day buckets (R4 incremental parse: base + appended bytes). */
+function mergeDays(baseDays, incDays) {
+  const out = {};
+  for (const [k, v] of Object.entries(baseDays || {})) out[k] = { input: v.input, output: v.output, cacheRead: v.cacheRead, cacheWrite: v.cacheWrite };
+  for (const [k, v] of Object.entries(incDays || {})) {
+    const dst = out[k] || (out[k] = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+    dst.input += v.input; dst.output += v.output; dst.cacheRead += v.cacheRead; dst.cacheWrite += v.cacheWrite;
+  }
+  return out;
 }
 
 /** Decode a session log file to text; null on failure. Used by session-search. */
@@ -193,6 +213,7 @@ async function parseSessionLogAsync(file, windows) {
           cacheRead: (base.offPeak ? base.offPeak.cacheRead : 0) + inc.offPeak.cacheRead,
           cacheWrite: (base.offPeak ? base.offPeak.cacheWrite : 0) + inc.offPeak.cacheWrite,
         },
+        days: mergeDays(base.days, inc.days),
       };
       // A concurrent parse may have already consumed these bytes and replaced
       // the cache entry while we were reading — abandon our increment and let
@@ -300,6 +321,7 @@ async function collect(dshHome, opts) {
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
     peak: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     offPeak: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    days: {},
   };
   const sessions = [];
   let sessionCount = 0;
@@ -313,6 +335,10 @@ async function collect(dshHome, opts) {
     sessionCount += 1;
     totals.input += usage.input; totals.output += usage.output;
     totals.cacheRead += usage.cacheRead; totals.cacheWrite += usage.cacheWrite;
+    if (usage.days) {
+      // R4: per-day rollup across sessions (mergeDays mutates nothing)
+      totals.days = mergeDays(totals.days, usage.days);
+    }
     if (usage.peak) {
       totals.peak.input += usage.peak.input || 0; totals.peak.output += usage.peak.output || 0;
       totals.peak.cacheRead += usage.peak.cacheRead || 0; totals.peak.cacheWrite += usage.peak.cacheWrite || 0;
@@ -353,4 +379,5 @@ function pressureOf(usage) {
 module.exports = {
   collect, fmt, isEmptyTotals, decodeSessionLog, decodeSessionLogAsync,
   parseSessionLogAsync, walkSessionFiles, walkSessionFilesAsync, pressureOf,
+  mergeDays,
 };

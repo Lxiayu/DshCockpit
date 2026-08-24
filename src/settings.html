@@ -345,6 +345,13 @@
   #install-stage { font-weight: 600; }
   #install-stage::before { content: '▸ '; color: var(--acc); }
   [hidden] { display: none !important; }
+  /* R4 cache economics */
+  .cache-econ-hero { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 10px; }
+  .cache-econ-hero .big { font-size: 34px; font-weight: 700; color: var(--ok); letter-spacing: -0.5px; }
+  .cache-trend { display: flex; align-items: flex-end; gap: 4px; height: 96px; padding: 8px 0; }
+  .cache-trend .bar { flex: 1 1 auto; min-width: 6px; max-width: 42px; background: linear-gradient(180deg, var(--ok), color-mix(in srgb, var(--ok) 45%, transparent)); border-radius: 3px 3px 0 0; position: relative; }
+  .cache-trend .bar:hover::after { content: attr(data-tip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line); padding: 3px 7px; font-size: 11px; white-space: nowrap; border-radius: 4px; z-index: 2; }
+  .cache-trend-empty { opacity: .55; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -451,6 +458,16 @@
           <p data-i18n="page.cost.d">API 费率、峰谷分时与预算</p>
         </div>
         <div id="cost-overview" data-center-scope="control">
+          <div class="card" id="cache-econ-card">
+            <h3 data-i18n="card.cacheEcon">缓存经济学</h3>
+            <div class="cache-econ-hero">
+              <div class="big" id="cache-econ-saved">--</div>
+              <div class="desc" data-i18n="cacheEcon.hero">本月缓存帮你省了（按当前单价估算）</div>
+            </div>
+            <div class="kv"><span data-i18n="cacheEcon.hitRate">缓存命中率</span><b id="cache-econ-hitrate">--</b></div>
+            <div class="kv"><span data-i18n="cacheEcon.peakSplit">峰时节省 / 谷时节省</span><b id="cache-econ-split">--</b></div>
+            <div class="status" id="cache-econ-status"></div>
+          </div>
           <div class="card">
             <h3 data-i18n="card.balance">账户余额（官方）</h3>
             <div class="status" id="balance-status"></div>
@@ -465,6 +482,13 @@
             <h3 data-i18n="card.costUsage">用量统计</h3>
             <div class="status" id="cost-status"></div>
             <div class="note" data-i18n="cost.ratesHint">费用按你配置的价格估算，仅供参考，不构成实际计费。</div>
+          </div>
+          <div class="card" id="cache-econ-detail">
+            <h3 data-i18n="card.cacheEconDetail">缓存节省明细</h3>
+            <div class="note" data-i18n="cacheEcon.trendHint">按天节省（按平价差估算）；月度总额为峰谷精确口径。悬停查看数值。</div>
+            <div class="cache-trend" id="cache-econ-days"></div>
+            <h3 data-i18n="cacheEcon.topTitle" style="margin-top:14px">会话节省 Top 10</h3>
+            <div id="cache-econ-top"></div>
           </div>
         </div>
         <div id="cost-config" data-center-scope="settings">
@@ -1488,6 +1512,11 @@
       page_update_d: '运行时更新通道与版本', page_about_d: '版本、诊断与帮助',
       card_costRates: '谷时费率（默认）', card_costPeak: '峰谷分时计价', card_costUsage: '用量统计',
       card_balance: '账户余额（官方）',
+      card_cacheEcon: '缓存经济学', card_cacheEconDetail: '缓存节省明细',
+      cacheEcon_hero: '本月缓存帮你省了（按当前单价估算）', cacheEcon_hitRate: '缓存命中率',
+      cacheEcon_peakSplit: '峰时节省 / 谷时节省', cacheEcon_peakOff: '未启用峰谷分时（统一平价口径）',
+      cacheEcon_trendHint: '按天节省（按平价差估算）；月度总额为峰谷精确口径。悬停查看数值。',
+      cacheEcon_topTitle: '会话节省 Top 10', cacheEcon_noDays: '暂无带时间戳的用量数据（旧会话日志不含事件时间）。', cacheEcon_noSessions: '暂无会话数据。',
       balance_hint: '官方数据，与本地估算口径可能有差异（赠款 / 失败请求）。',
       balance_total: '总额', balance_granted: '赠送余额', balance_toppedUp: '充值余额',
       balance_updatedJust: '刚刚刷新', balance_updatedAgo: '{n} 分钟前刷新',
@@ -1874,6 +1903,11 @@
       page_update_d: 'Runtime update channel & versions', page_about_d: 'Versions, diagnostics & help',
       card_costRates: 'Off-peak rates (default)', card_costPeak: 'Peak & off-peak pricing', card_costUsage: 'Usage',
       card_balance: 'Account balance (official)',
+      card_cacheEcon: 'Cache economics', card_cacheEconDetail: 'Cache savings detail',
+      cacheEcon_hero: 'Saved this month by prompt caching (at current prices)', cacheEcon_hitRate: 'Cache hit rate',
+      cacheEcon_peakSplit: 'Peak saved / off-peak saved', cacheEcon_peakOff: 'Peak split disabled (flat pricing)',
+      cacheEcon_trendHint: 'Per-day savings (flat-gap estimate); the month headline uses exact peak/off-peak pricing. Hover for values.',
+      cacheEcon_topTitle: 'Top 10 sessions by savings', cacheEcon_noDays: 'No timestamped usage yet (older session logs lack event times).', cacheEcon_noSessions: 'No session data.',
       balance_hint: 'Official data; may differ from local estimates (grants / failed requests).',
       balance_total: 'Total', balance_granted: 'Granted', balance_toppedUp: 'Topped up',
       balance_updatedJust: 'updated just now', balance_updatedAgo: 'updated {n} min ago',
@@ -2125,7 +2159,7 @@
     if (p === 'channels') refreshChannels();
     if (p === 'runtime' && centerMode === 'control') refreshRuntimeOperations();
     // cost center: refresh the official balance card + per-turn cost on visit
-    if (p === 'cost') { refreshCost(); refreshBalance(); }
+    if (p === 'cost') { refreshCost(); refreshBalance(); refreshCacheEcon(); }
     // model panel: local profile list is cheap; the Ollama probe is async
     if (p === 'models') refreshModels();
     // long-session center: refresh the compaction state/history + memory file
@@ -3652,6 +3686,35 @@
       $('compat-note').textContent = tr('compat.noteSource', { date: s.updatedAt || '--', source: s.source === 'cache' ? tr('compat.sourceCache') : tr('compat.sourceLive') });
       dbg(`refreshCompat: ok source=${s.source} compatible=${s.compatible}`);
     } catch (e) { dbg(`refreshCompat: failed ${e.message}`); }
+  }
+
+  // --------------------------------------------- cache economics (R4)
+  function fmtYuan(v) { return '¥' + (Number(v) || 0).toFixed(2); }
+  async function refreshCacheEcon() {
+    try {
+      const r = await window.dshShell.cacheEconomics();
+      if (!r || !r.ok) { setStatus($('cache-econ-status'), tr('control.operationFailed', { reason: (r && r.reason) || '' }), 'warn'); return; }
+      $('cache-econ-saved').textContent = fmtYuan(r.month.savedYuan);
+      $('cache-econ-hitrate').textContent = Math.round((r.overall.hitRate || 0) * 100) + '%';
+      $('cache-econ-split').textContent = r.pricing.peakEnabled
+        ? `${fmtYuan(r.overall.peakSavedYuan)} / ${fmtYuan(r.overall.offPeakSavedYuan)}`
+        : tr('cacheEcon.peakOff');
+      // per-day bars (flat-gap estimate; heights normalised to the max day)
+      const days = r.byDay || [];
+      const max = days.reduce((m, d) => Math.max(m, d.savedYuan), 0);
+      $('cache-econ-days').innerHTML = days.length
+        ? days.map((d) => {
+            const h = max > 0 ? Math.max(4, Math.round((d.savedYuan / max) * 88)) : 4;
+            return `<div class="bar" style="height:${h}px" data-tip="${d.day} · ${fmtYuan(d.savedYuan)} · ${Math.round((d.hitRate || 0) * 100)}%"></div>`;
+          }).join('')
+        : `<div class="cache-trend-empty">${tr('cacheEcon.noDays')}</div>`;
+      // top sessions
+      const top = r.topSessions || [];
+      $('cache-econ-top').innerHTML = top.length
+        ? top.map((s, i) => `<div class="kv"><span>${i + 1}. ${escapeHtml(s.alias)}</span><b style="font-weight:400;font-size:12px">${fmtYuan(s.savedYuan)} · ${Math.round((s.hitRate || 0) * 100)}%</b></div>`).join('')
+        : `<div class="status">${tr('cacheEcon.noSessions')}</div>`;
+      dbg(`refreshCacheEcon: ok saved=${r.month.savedYuan.toFixed(2)} days=${days.length}`);
+    } catch (e) { dbg(`refreshCacheEcon: failed ${e.message}`); }
   }
 
   // --------------------------------------------- notification center (R6)
