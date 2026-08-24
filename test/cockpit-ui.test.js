@@ -208,10 +208,12 @@ test('main window can never stay hidden: ready-to-show fallback timer + limited 
 
 test('runtime log tailing reads only appended bytes, never the whole file', () => {
   const main = read('main.js');
-  // the poller delegates to the incident-hardened tailer module (v0.2.8 NaN
-  // offset fix); raw fs.readSync bookkeeping must stay OUT of main.js
-  assert.match(main, /createRuntimeLogTailer\(runtimeLogPath\)/);
-  assert.doesNotMatch(main, /readSync\(fd, buf, 0, len, lastLogOffset\)/);
+  // A1: the poller lives in runtime-supervisor.js; raw fs.readSync
+  // bookkeeping must stay OUT of main.js AND out of the supervisor.
+  assert.match(main, /createRuntimeSupervisor\(/);
+  const sup = read('runtime-supervisor.js');
+  assert.match(sup, /createRuntimeLogTailer\(runtimeLogPath\)/);
+  assert.doesNotMatch(sup, /readSync\(fd, buf, 0, len, lastLogOffset\)/);
   const tailerSrc = read('runtime-log-tail.js');
   assert.match(tailerSrc, /st\.size === offset\) return ''/); // no-growth short-circuit
   assert.match(tailerSrc, /st\.size < offset\) offset = 0/); // truncation reset
@@ -262,17 +264,20 @@ test('Cockpit snapshot construction has a short-lived cache for repeated IPC rea
 
 test('runtime lifecycle is generation-guarded and routed through the state controller', () => {
   const main = read('main.js');
+  const sup = read('runtime-supervisor.js');
+  // the controller is created in main and INJECTED into the supervisor
   assert.match(main, /createRuntimeStateController\(/);
-  assert.match(main, /const generation = runtimeStateController\.begin\('starting'\)/);
-  assert.match(main, /runtimeStateController\.transition\('healthy', generation\)/);
-  assert.match(main, /runtimeStateController\.transition\('offline', generation\)/);
-  assert.match(main, /runtimeStateController\.isCurrent\(generation\)/);
+  assert.match(main, /stateController: runtimeStateController/);
+  assert.match(sup, /stateController\.begin\('starting'\)/);
+  assert.match(sup, /stateController\.transition\('healthy', generation\)/);
+  assert.match(sup, /stateController\.transition\('offline', generation\)/);
+  assert.match(sup, /stateController\.isCurrent\(generation\)/);
   assert.doesNotMatch(main, /^\s*cockpitRuntimeState\s*=\s*'(?:healthy|offline|restarting|starting)'/m);
 });
 
 test('desktop runtime disables Harness default-browser handoff', () => {
-  const main = read('main.js');
-  assert.match(main, /const args = \[dshBin, '--profile', 'web', '--port', String\(port\), '--no-open'\]/);
+  const sup = read('runtime-supervisor.js');
+  assert.match(sup, /const args = \[dshBin, '--profile', 'web', '--port', String\(port\), '--no-open'\]/);
 });
 
 test('runtime consumers receive the controller state instead of inferring health from a version', () => {

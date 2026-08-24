@@ -10,6 +10,7 @@
 'use strict';
 
 const path = require('node:path');
+const http = require('node:http');
 
 const CRASH_WINDOW_MS = 60_000;
 const MAX_CRASHES = 3;
@@ -89,3 +90,336 @@ function armWatchdog({ watchdogScript = path.join(__dirname, 'watchdog.js'), nod
 }
 
 module.exports = { createCrashLoopGuard, killTree, armWatchdog, CRASH_WINDOW_MS, MAX_CRASHES };
+
+// ---------------------------------------------------------------------------
+// A1 step 3: the full spawn/restart/kill lifecycle (moved verbatim from
+// main.js; every external symbol is an injected dependency). Behaviour is
+// statement-for-statement identical to the pre-extraction implementation.
+// ---------------------------------------------------------------------------
+
+const HEALTH_TIMEOUT_MS = 90_000;
+const KILL_GRACE_MS = 4_000;
+const URL_LINE_RE = /dsh web: (https?:\/\/127\.0\.0\.1:\d+)/;
+
+/**
+ * @param {object} deps — see main.js construction site for the annotated list.
+ * Behaviour contract: pass-through of the pre-extraction logic with these
+ * substitutions only: runtimeStateController→stateController,
+ * activeDshBin()→resolveDshBin(), settings.effective()→effectiveSettings(),
+ * remote.setRuntimeUrl→onRemoteUrl, mainWindow cluster→hasMainWindow/
+ * onHealthy, events-feed trio→startEventsFeed/stopEventsFeed/
+ * resetEventsFeedLiveFlag, credential-format probe→isCredentialFormatIssue +
+ * upgradeDialog, runUpdateCheck/applyPendingUpdate pair→upgradeNow.
+ */
+function createRuntimeSupervisor(deps) {
+  const {
+    app, dialog,
+    log = () => {},
+    t, lang, appName,
+    stateController,
+    resolveDshBin, describeDshBin, nodeCandidates, effectiveSettings,
+    selfHealProfile, ensureLogDir, resolveNodeBin,
+    onRemoteUrl = () => {},
+    startEventsFeed = () => {}, stopEventsFeed = () => {}, resetEventsFeedLiveFlag = () => {},
+    onHealthy = () => {}, hasMainWindow = () => false,
+    isQuitting = () => false,
+    recordCrash = () => {}, enterSafeMode = () => {},
+    upgradeDialog = () => {}, isCredentialFormatIssue = () => false,
+    notify,
+  } = deps;
+
+  const { spawn } = require('node:child_process');
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { createRuntimeLogTailer } = require('./runtime-log-tail');
+
+  let runtimeChild = null;
+  let runtimeUrl = null;
+  let runtimeLogPath = null;
+  let urlPollTimer = null;
+
+  function getRuntimeUrl() { return runtimeUrl; }
+  function getRuntimeLogPath() { return runtimeLogPath; }
+
+  function waitForHealth(url, timeoutMs = HEALTH_TIMEOUT_MS) {
+    const deadline = Date.now() + timeoutMs;
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (ok) => { if (!settled) { settled = true; resolve(ok); } };
+      const tick = () => {
+        if (Date.now() > deadline) return finish(false);
+        const req = http.get(url, (res) => {
+          res.resume();
+          if (res.statusCode === 200) return finish(true);
+          retry();
+        });
+        // H4: a server that accepts but never responds must not hang forever
+        req.setTimeout(3000, () => { try { req.destroy(); } catch { /* ignore */ } retry(); });
+        req.on('error', retry);
+        function retry() {
+          if (Date.now() > deadline) return finish(false);
+          setTimeout(tick, 500);
+        }
+      };
+      tick();
+    });
+  }
+
+  function spawnRuntime() {
+    const generation = stateController.begin('starting');
+    const dshBin = resolveDshBin();
+    if (!dshBin) {
+      dialog.showErrorBox(appName, t(lang(), 'dialog.noRuntime'));
+      app.quit();
+      return null;
+    }
+    const meta = describeDshBin(dshBin);
+    const eff = effectiveSettings();
+    const port = eff.port || 0;
+    const dshHome = eff.dshHome || path.join(os.homedir(), '.dsh');
+    const cwd = eff.workspace || os.homedir();
+
+    selfHealProfile();
+
+    try { fs.mkdirSync(cwd, { recursive: true }); } catch { /* best effort */ }
+
+    // The Harness web profile opens the system browser by default. DshCockpit
+    // owns the desktop surface, so keep that handoff disabled and load the same
+    // runtime URL in the Electron BrowserWindow below.
+    const args = [dshBin, '--profile', 'web', '--port', String(port), '--no-open'];
+    const candidates = nodeCandidates();
+
+    // Runtime stdout/stderr go straight into a file via an fd (no pipes; the URL
+    // line is discovered by tailing this file). Pipe capture is more fragile and
+    // is blocked by the harness sandbox; see DESIGN.md §7.
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    runtimeLogPath = path.join(ensureLogDir(), `runtime-${stamp}.out`);
+    let outFd = -1;
+    try { outFd = fs.openSync(runtimeLogPath, 'a'); } catch (err) { log(`[shell] cannot open runtime log: ${err.message}`); }
+
+    log(`[shell] dsh bin:  ${dshBin}${meta && meta.version ? ` (v${meta.version})` : ''}`);
+    log(`[shell] args:     ${args.slice(1).join(' ')}`);
+    log(`[shell] DSH_HOME: ${dshHome}`);
+    log(`[shell] cwd:      ${cwd}`);
+    log(`[shell] runtime log: ${runtimeLogPath}`);
+
+    // Tail the runtime log for the URL line (started once; survives retries).
+    // Byte-offset bookkeeping lives in runtime-log-tail.js (unit tested).
+    if (urlPollTimer) clearInterval(urlPollTimer);
+    const urlTail = createRuntimeLogTailer(runtimeLogPath);
+    let lastLogText = '';
+    urlPollTimer = setInterval(() => {
+      if (runtimeUrl) { clearInterval(urlPollTimer); urlPollTimer = null; return; }
+      // never throws; '' when the log has not grown / is not readable yet
+      const appended = urlTail.poll();
+      if (appended) lastLogText += appended;
+      const m = lastLogText.match(URL_LINE_RE);
+      if (m) {
+        if (!stateController.isCurrent(generation)) return;
+        runtimeUrl = m[1];
+        clearTimeout(urlWatchdogTimer);
+        crashGuard.reset(); // a healthy boot resets the auto-restart counter
+        log(`[shell] runtime URL: ${runtimeUrl}`);
+        onRemoteUrl(runtimeUrl); // phone gateway follows the runtime port
+        const bootUrl = runtimeUrl;
+        waitForHealth(bootUrl).then((ok) => {
+          if (!stateController.isCurrent(generation) || runtimeUrl !== bootUrl) return;
+          if (!ok) {
+            stateController.transition('offline', generation);
+            return;
+          }
+          stateController.transition('healthy', generation);
+          startEventsFeed();
+          onHealthy(bootUrl);
+        });
+      }
+    }, 500);
+
+    // H5: when the log tail matches the credential-format signature, replace
+    // the bare code/signal error with a root-cause dialog that offers the
+    // standard update pipeline (check → install → smoke → activate → restart).
+    const showCredentialUpgradeDialog = (message) => {
+      log('[shell] credential format mismatch detected in runtime log');
+      dialog.showMessageBox({
+        type: 'error',
+        title: appName,
+        message: t(lang(), 'crash.credFormat.title'),
+        detail: `${t(lang(), 'crash.credFormat.body')}\n\n${message}`,
+        buttons: [t(lang(), 'crash.credFormat.upgradeNow'), t(lang(), 'crash.credFormat.later')],
+        defaultId: 0,
+        cancelId: 1,
+      }).then(({ response }) => {
+        if (response !== 0) { if (!hasMainWindow()) app.quit(); return; }
+        deps.upgradeNow()
+          .then((report) => {
+            if (!report || !report.ok) return; // failure already surfaced by the pipeline
+            return deps.applyPendingUpdate().catch((err) => notify(t(lang(), 'notify.applyFailed'), err.message));
+          })
+          .catch(() => { /* pipeline already notified */ });
+      }).catch(() => { /* dialog failed — fall back to nothing */ });
+    };
+
+    const fail = (message) => {
+      stateController.transition('offline', generation);
+      if (urlPollTimer) { clearInterval(urlPollTimer); urlPollTimer = null; }
+      clearTimeout(urlWatchdogTimer);
+      if (outFd !== -1) { try { fs.closeSync(outFd); } catch { /* ignore */ } outFd = -1; }
+      // pure display-layer enhancement: no signature → behave exactly as before
+      if (isCredentialFormatIssue(runtimeLogPath)) {
+        showCredentialUpgradeDialog(message);
+        return;
+      }
+      if (!hasMainWindow()) {
+        // boot-time failure: nothing to fall back to
+        dialog.showErrorBox(appName, message);
+        app.quit();
+      } else {
+        // runtime failure while the app is up: keep the shell alive (M8)
+        dialog.showErrorBox(appName, message);
+        notify(t(lang(), 'notify.runtimeExited'), message);
+      }
+    };
+
+    // Boot watchdog: if the URL line never appears (slow machine, unexpected
+    // runtime output format, …) the boot window must not spin silently forever
+    // — surface a one-shot pointer to the log so the user can act. Cleared as
+    // soon as the URL is found or this spawn generation ends.
+    const BOOT_URL_WATCHDOG_MS = 8 * 60_000;
+    let urlWatchdogTimer = setTimeout(() => {
+      if (runtimeUrl || isQuitting() || !stateController.isCurrent(generation)) return;
+      log('[shell] boot watchdog: no URL line after ' + Math.round(BOOT_URL_WATCHDOG_MS / 1000) + 's');
+      notify(
+        t(lang(), 'notify.bootUrlTimeout'),
+        t(lang(), 'notify.bootUrlTimeoutBody', { min: Math.round(BOOT_URL_WATCHDOG_MS / 60_000), log: runtimeLogPath })
+      );
+    }, BOOT_URL_WATCHDOG_MS);
+
+    let attempt = 0;
+    let retrying = false;
+    const launch = () => {
+      const cand = candidates[Math.min(attempt, candidates.length - 1)];
+      attempt += 1;
+      retrying = false;
+      log(`[shell] node attempt ${attempt}/${candidates.length}: ${cand.bin}${cand.runAsNode ? ' (electron-as-node)' : ''}`);
+      const env = { ...process.env, DSH_HOME: dshHome };
+      if (cand.runAsNode) env.ELECTRON_RUN_AS_NODE = '1';
+
+      let child;
+      try {
+        child = spawn(cand.bin, args, {
+          env,
+          cwd,
+          windowsHide: true,
+          stdio: outFd === -1 ? 'ignore' : ['ignore', outFd, outFd],
+        });
+      } catch (err) {
+        fail(t(lang(), 'dialog.spawnFailed', { msg: err.message }));
+        return;
+      }
+
+      child.on('error', (err) => {
+        log(`[runtime] spawn error: ${err.message}`);
+        if (err && err.code === 'ENOENT' && attempt < candidates.length) {
+          retrying = true;
+          log('[shell] retrying with next node candidate');
+          launch();
+          return;
+        }
+        stateController.transition('offline', generation);
+        fail(t(lang(), 'dialog.spawnFailed', { msg: err.message }));
+      });
+      child.on('close', (code, signal) => {
+        const wasCurrent = runtimeChild === child;
+        if (wasCurrent) runtimeChild = null;
+        // close the runtime log fd regardless (H2: fd leak)
+        if (outFd !== -1) { try { fs.closeSync(outFd); } catch { /* ignore */ } outFd = -1; }
+        log(`[runtime] exited code=${code} signal=${signal}${wasCurrent ? '' : ' (superseded by restart)'}`);
+        // A superseded child (killed by restart/update/rollback/workspace switch)
+        // must NOT touch the NEW child's poller or state (H1).
+        if (!wasCurrent || isQuitting() || retrying) return;
+        runtimeUrl = null;
+        onRemoteUrl(null);
+        stateController.transition('offline', generation);
+        if (urlPollTimer) { clearInterval(urlPollTimer); urlPollTimer = null; }
+        if (!hasMainWindow()) {
+          fail(t(lang(), 'dialog.runtimeDied', { code, signal, path: runtimeLogPath }));
+          return;
+        }
+        // crash guard: auto-restart with loop protection (max 3 in 60s);
+        // a clean exit (code 0) or a manual restart is not a crash (M9)
+        if (code !== 0) recordCrash(code, signal);
+        // A1: every unexpected exit advances the rolling guard (legacy M9
+        // semantics — a clean exit is not written to crash diagnostics but it
+        // still consumes an auto-restart slot), keeping behaviour identical.
+        const verdict = crashGuard.record();
+        if (verdict.restart) {
+          notify(t(lang(), 'notify.runtimeExited'), t(lang(), 'notify.autoRestart', { code, signal, attempt: verdict.attempt }));
+          setTimeout(restartRuntime, 1_500);
+        } else {
+          // crash loop: the runtime cannot boot — most likely a broken plugin.
+          // Offer safe mode (official bundles only) right here instead of a bare
+          // "gave up" notification the user cannot act on.
+          notify(t(lang(), 'notify.runtimeExited'), t(lang(), 'notify.autoRestartStopped', { code, signal }));
+          dialog.showMessageBox({
+            type: 'error',
+            title: appName,
+            message: t(lang(), 'crashloop.title'),
+            detail: t(lang(), 'crashloop.body', { log: runtimeLogPath }),
+            buttons: [t(lang(), 'crashloop.safeMode'), t(lang(), 'crashloop.later')],
+            defaultId: 0,
+            cancelId: 1,
+          }).then(({ response }) => {
+            if (response === 0) enterSafeMode();
+          }).catch(() => { /* dialog failed — notifications already sent */ });
+        }
+      });
+
+      runtimeChild = child;
+      try {
+        armWatchdog({ node: resolveNodeBin(), shellPid: process.pid, runtimePid: child.pid, log });
+      } catch { /* ignore */ }
+    };
+
+    launch();
+    return runtimeChild;
+  }
+
+  function restartRuntime() {
+    log('[shell] restart requested');
+    stateController.begin('restarting');
+    stopEventsFeed();
+    resetEventsFeedLiveFlag();
+    if (runtimeChild) { runtimeChild.kill(); runtimeChild = null; }
+    runtimeUrl = null;
+    onRemoteUrl(null); // gateway answers 503 until the new URL arrives
+    spawnRuntime();
+  }
+
+  function killRuntime() {
+    onRemoteUrl(null);
+    if (!runtimeChild || runtimeChild.killed) return;
+    stopEventsFeed();
+    const child = runtimeChild;
+    try { child.kill(); } catch { /* ignore */ }
+    const start = Date.now();
+    const wait = setInterval(() => {
+      if (child.exitCode !== null || Date.now() - start > KILL_GRACE_MS) {
+        clearInterval(wait);
+        if (child.exitCode === null) {
+          log('[shell] runtime did not exit in time, forcing kill');
+          if (process.platform === 'win32') {
+            const { execFileSync } = require('node:child_process');
+            try { execFileSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }); } catch { /* ignore */ }
+          } else {
+            try { child.kill('SIGKILL'); } catch { /* ignore */ }
+          }
+        }
+      }
+    }, 200);
+  }
+
+  function getRuntimeChild() { return runtimeChild; }
+
+  return { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeLogPath, getRuntimeChild, waitForHealth, crashGuard };
+}

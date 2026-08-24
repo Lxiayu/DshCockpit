@@ -74,21 +74,13 @@ if (process.env.DSH_DESKTOP_USER_DATA) {
 
 const APP_NAME = 'DshCockpit';
 const APP_VERSION = require('../package.json').version;
-const URL_LINE_RE = /dsh web: (https?:\/\/127\.0\.0\.1:\d+)/;
-const HEALTH_TIMEOUT_MS = 90_000;
-const KILL_GRACE_MS = 4_000;
 
 let mainWindow = null;
 let settingsWindow = null;
 let cockpitWindow = null;
-let runtimeChild = null;
-let runtimeUrl = null;
 let quitting = false;
 let logStream = null;
-let runtimeLogPath = null;
-let urlPollTimer = null;
 let updateInFlight = false;
-const crashGuard = createCrashLoopGuard(); // A1: crash-loop state machine
 let eventsFeed = [];
 let eventsRetryTimer = null;
 let lastTaskNotifyAt = 0;
@@ -135,6 +127,49 @@ const pluginGuard = createPluginOpGuard(); // one dsh plugin op at a time (profi
 const skillsGuard = createPluginOpGuard(); // one skill install/upgrade at a time (atomic writes)
 const scheduledRunning = new Set();
 const budgetNotified = new Set();
+
+// A1 step 3: full runtime lifecycle supervision extracted from main.js.
+// The deps object is the explicit coupling surface between the shell and the
+// supervisor domain (was ~40 scattered free-variable references).
+const supervisor = createRuntimeSupervisor({
+  app,
+  dialog,
+  log,
+  t,
+  lang,
+  appName: APP_NAME,
+  stateController: runtimeStateController,
+  resolveDshBin: activeDshBin,
+  describeDshBin: dshBinMeta,
+  nodeCandidates,
+  effectiveSettings: () => settings.effective(),
+  selfHealProfile,
+  ensureLogDir,
+  resolveNodeBin: bestNodeBin,
+  onRemoteUrl: (url) => { if (remote) remote.setRuntimeUrl(url); },
+  startEventsFeed,
+  stopEventsFeed,
+  resetEventsFeedLiveFlag: () => { eventsFeedLiveLogged = false; },
+  onHealthy: (bootUrl) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.loadURL(bootUrl);
+      createCockpitWindow();
+      showCockpitInactive();
+    } else {
+      createWindow(bootUrl);
+    }
+  },
+  hasMainWindow: () => !!mainWindow,
+  isQuitting: () => quitting,
+  recordCrash,
+  enterSafeMode,
+  upgradeDialog: (message) => showCredentialUpgradeDialog(message),
+  isCredentialFormatIssue: (logPath) => detectCredentialFormatMismatch(readLogTail(logPath)),
+  notify,
+  upgradeNow: () => runUpdateCheck(true),
+  applyPendingUpdate,
+});
+const { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeLogPath } = supervisor;
 const materializing = new Set();
 
 const settings = new SettingsStore(app.getPath('userData'));
@@ -600,263 +635,12 @@ function selfHealProfile() {
   }
 }
 
-function spawnRuntime() {
-  const generation = runtimeStateController.begin('starting');
-  const dshBin = activeDshBin();
-  if (!dshBin) {
-    dialog.showErrorBox(APP_NAME, t(lang(), 'dialog.noRuntime'));
-    app.quit();
-    return null;
-  }
-  const meta = dshBinMeta(dshBin);
-  const eff = settings.effective();
-  const port = eff.port || 0;
-  const dshHome = eff.dshHome || path.join(os.homedir(), '.dsh');
-  const cwd = eff.workspace || os.homedir();
-
-  selfHealProfile();
-
-  try { fs.mkdirSync(cwd, { recursive: true }); } catch { /* best effort */ }
-
-  // The Harness web profile opens the system browser by default. DshCockpit
-  // owns the desktop surface, so keep that handoff disabled and load the same
-  // runtime URL in the Electron BrowserWindow below.
-  const args = [dshBin, '--profile', 'web', '--port', String(port), '--no-open'];
-  const candidates = nodeCandidates();
-
-  // Runtime stdout/stderr go straight into a file via an fd (no pipes; the URL
-  // line is discovered by tailing this file). Pipe capture is more fragile and
-  // is blocked by the harness sandbox; see DESIGN.md §7.
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  runtimeLogPath = path.join(ensureLogDir(), `runtime-${stamp}.out`);
-  let outFd = -1;
-  try { outFd = fs.openSync(runtimeLogPath, 'a'); } catch (err) { log(`[shell] cannot open runtime log: ${err.message}`); }
-
-  log(`[shell] dsh bin:  ${dshBin}${meta && meta.version ? ` (v${meta.version})` : ''}`);
-  log(`[shell] args:     ${args.slice(1).join(' ')}`);
-  log(`[shell] DSH_HOME: ${dshHome}`);
-  log(`[shell] cwd:      ${cwd}`);
-  log(`[shell] runtime log: ${runtimeLogPath}`);
-
-  // Tail the runtime log for the URL line (started once; survives retries).
-  // Byte-offset bookkeeping lives in runtime-log-tail.js (unit tested): it
-  // reads only appended bytes (perf #8 — a full re-read of a multi-MB log on
-  // Windows+AV stalls the shell), self-heals on truncation, and is immune to
-  // the v0.2.8 NaN-offset incident that stalled the boot window forever.
-  if (urlPollTimer) clearInterval(urlPollTimer);
-  const urlTail = createRuntimeLogTailer(runtimeLogPath);
-  let lastLogText = '';
-  urlPollTimer = setInterval(() => {
-    if (runtimeUrl) { clearInterval(urlPollTimer); urlPollTimer = null; return; }
-    // never throws; '' when the log has not grown / is not readable yet
-    const appended = urlTail.poll();
-    if (appended) lastLogText += appended;
-    const m = lastLogText.match(URL_LINE_RE);
-    if (m) {
-      if (!runtimeStateController.isCurrent(generation)) return;
-      runtimeUrl = m[1];
-      clearTimeout(urlWatchdogTimer);
-      crashGuard.reset(); // a healthy boot resets the auto-restart counter
-      log(`[shell] runtime URL: ${runtimeUrl}`);
-      if (remote) remote.setRuntimeUrl(runtimeUrl); // phone gateway follows the runtime port
-      const bootUrl = runtimeUrl;
-      waitForHealth(bootUrl).then((ok) => {
-        if (!runtimeStateController.isCurrent(generation) || runtimeUrl !== bootUrl) return;
-        if (!ok) {
-          runtimeStateController.transition('offline', generation);
-          return;
-        }
-        runtimeStateController.transition('healthy', generation);
-        startEventsFeed();
-        if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.loadURL(bootUrl); createCockpitWindow(); showCockpitInactive(); }
-        else createWindow(bootUrl);
-      });
-    }
-  }, 500);
-
-  // H5: when the log tail matches the credential-format signature, replace
-  // the bare code/signal error with a root-cause dialog that offers the
-  // standard update pipeline (check → install → smoke → activate → restart).
-  const showCredentialUpgradeDialog = (message) => {
-    log('[shell] credential format mismatch detected in runtime log');
-    dialog.showMessageBox({
-      type: 'error',
-      title: APP_NAME,
-      message: t(lang(), 'crash.credFormat.title'),
-      detail: `${t(lang(), 'crash.credFormat.body')}\n\n${message}`,
-      buttons: [t(lang(), 'crash.credFormat.upgradeNow'), t(lang(), 'crash.credFormat.later')],
-      defaultId: 0,
-      cancelId: 1,
-    }).then(({ response }) => {
-      if (response !== 0) { if (!mainWindow) app.quit(); return; }
-      runUpdateCheck(true)
-        .then((report) => {
-          if (!report || !report.ok) return; // failure already surfaced by the pipeline
-          return applyPendingUpdate().catch((err) => notify(t(lang(), 'notify.applyFailed'), err.message));
-        })
-        .catch(() => { /* pipeline already notified */ });
-    }).catch(() => { /* dialog failed — fall back to nothing */ });
-  };
-
-  const fail = (message) => {
-    runtimeStateController.transition('offline', generation);
-    if (urlPollTimer) { clearInterval(urlPollTimer); urlPollTimer = null; }
-    clearTimeout(urlWatchdogTimer);
-    if (outFd !== -1) { try { fs.closeSync(outFd); } catch { /* ignore */ } outFd = -1; }
-    // pure display-layer enhancement: no signature → behave exactly as before
-    if (detectCredentialFormatMismatch(readLogTail(runtimeLogPath))) {
-      showCredentialUpgradeDialog(message);
-      return;
-    }
-    if (!mainWindow) {
-      // boot-time failure: nothing to fall back to
-      dialog.showErrorBox(APP_NAME, message);
-      app.quit();
-    } else {
-      // runtime failure while the app is up: keep the shell alive (M8)
-      dialog.showErrorBox(APP_NAME, message);
-      notify(t(lang(), 'notify.runtimeExited'), message);
-    }
-  };
-
-  // Boot watchdog: if the URL line never appears (slow machine, unexpected
-  // runtime output format, …) the boot window must not spin silently forever
-  // — surface a one-shot pointer to the log so the user can act. Cleared as
-  // soon as the URL is found or this spawn generation ends.
-  const BOOT_URL_WATCHDOG_MS = 8 * 60_000;
-  let urlWatchdogTimer = setTimeout(() => {
-    if (runtimeUrl || quitting || !runtimeStateController.isCurrent(generation)) return;
-    log('[shell] boot watchdog: no URL line after ' + Math.round(BOOT_URL_WATCHDOG_MS / 1000) + 's');
-    notify(
-      t(lang(), 'notify.bootUrlTimeout'),
-      t(lang(), 'notify.bootUrlTimeoutBody', { min: Math.round(BOOT_URL_WATCHDOG_MS / 60_000), log: runtimeLogPath })
-    );
-  }, BOOT_URL_WATCHDOG_MS);
-
-  let attempt = 0;
-  let retrying = false;
-  const launch = () => {
-    const cand = candidates[Math.min(attempt, candidates.length - 1)];
-    attempt += 1;
-    retrying = false;
-    log(`[shell] node attempt ${attempt}/${candidates.length}: ${cand.bin}${cand.runAsNode ? ' (electron-as-node)' : ''}`);
-    const env = { ...process.env, DSH_HOME: dshHome };
-    if (cand.runAsNode) env.ELECTRON_RUN_AS_NODE = '1';
-
-    let child;
-    try {
-      child = spawn(cand.bin, args, {
-        env,
-        cwd,
-        windowsHide: true,
-        stdio: outFd === -1 ? 'ignore' : ['ignore', outFd, outFd],
-      });
-    } catch (err) {
-      fail(t(lang(), 'dialog.spawnFailed', { msg: err.message }));
-      return;
-    }
-
-    child.on('error', (err) => {
-      log(`[runtime] spawn error: ${err.message}`);
-      if (err && err.code === 'ENOENT' && attempt < candidates.length) {
-        retrying = true;
-        log('[shell] retrying with next node candidate');
-        launch();
-        return;
-      }
-      runtimeStateController.transition('offline', generation);
-      fail(t(lang(), 'dialog.spawnFailed', { msg: err.message }));
-    });
-    child.on('close', (code, signal) => {
-      const wasCurrent = runtimeChild === child;
-      if (wasCurrent) runtimeChild = null;
-      // close the runtime log fd regardless (H2: fd leak)
-      if (outFd !== -1) { try { fs.closeSync(outFd); } catch { /* ignore */ } outFd = -1; }
-      log(`[runtime] exited code=${code} signal=${signal}${wasCurrent ? '' : ' (superseded by restart)'}`);
-      // A superseded child (killed by restart/update/rollback/workspace switch)
-      // must NOT touch the NEW child's poller or state (H1).
-      if (!wasCurrent || quitting || retrying) return;
-      runtimeUrl = null;
-      if (remote) remote.setRuntimeUrl(null);
-      runtimeStateController.transition('offline', generation);
-      if (urlPollTimer) { clearInterval(urlPollTimer); urlPollTimer = null; }
-      if (!mainWindow) {
-        fail(t(lang(), 'dialog.runtimeDied', { code, signal, path: runtimeLogPath }));
-        return;
-      }
-      // crash guard: auto-restart with loop protection (max 3 in 60s);
-      // a clean exit (code 0) or a manual restart is not a crash (M9)
-      if (code !== 0) recordCrash(code, signal);
-      // A1: every unexpected exit advances the rolling guard (legacy M9
-      // semantics — a clean exit is not written to crash diagnostics but it
-      // still consumes an auto-restart slot), keeping behaviour identical.
-      const verdict = crashGuard.record();
-      if (verdict.restart) {
-        notify(t(lang(), 'notify.runtimeExited'), t(lang(), 'notify.autoRestart', { code, signal, attempt: verdict.attempt }));
-        setTimeout(restartRuntime, 1_500);
-      } else {
-        // crash loop: the runtime cannot boot — most likely a broken plugin.
-        // Offer safe mode (official bundles only) right here instead of a bare
-        // "gave up" notification the user cannot act on.
-        notify(t(lang(), 'notify.runtimeExited'), t(lang(), 'notify.autoRestartStopped', { code, signal }));
-        dialog.showMessageBox({
-          type: 'error',
-          title: APP_NAME,
-          message: t(lang(), 'crashloop.title'),
-          detail: t(lang(), 'crashloop.body', { log: runtimeLogPath }),
-          buttons: [t(lang(), 'crashloop.safeMode'), t(lang(), 'crashloop.later')],
-          defaultId: 0,
-          cancelId: 1,
-        }).then(({ response }) => {
-          if (response === 0) enterSafeMode();
-        }).catch(() => { /* dialog failed — notifications already sent */ });
-      }
-    });
-
-    runtimeChild = child;
-    try { spawnWatchdog(child.pid); } catch { /* ignore */ }
-  };
-
-  launch();
-  return runtimeChild;
-}
 
 /** Spawn a detached watchdog that reaps the runtime if this shell dies hard. */
-function spawnWatchdog(runtimePid) {
-  armWatchdog({
-    node: bestNodeBin(),
-    shellPid: process.pid,
-    runtimePid,
-    log,
-  });
-}
 
 // ---------------------------------------------------------------------------
 // health check
 // ---------------------------------------------------------------------------
-function waitForHealth(url, timeoutMs = HEALTH_TIMEOUT_MS) {
-  const deadline = Date.now() + timeoutMs;
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (ok) => { if (!settled) { settled = true; resolve(ok); } };
-    const tick = () => {
-      if (Date.now() > deadline) return finish(false);
-      const req = http.get(url, (res) => {
-        res.resume();
-        if (res.statusCode === 200) return finish(true);
-        retry();
-      });
-      // H4: a server that accepts but never responds must not hang forever
-      req.setTimeout(3000, () => { try { req.destroy(); } catch { /* ignore */ } retry(); });
-      req.on('error', retry);
-      function retry() {
-        if (Date.now() > deadline) return finish(false);
-        setTimeout(tick, 500);
-      }
-    };
-    tick();
-  });
-}
 
 // ---------------------------------------------------------------------------
 // windows
@@ -950,7 +734,7 @@ function createWindow(url) {
   });
   mainWindow.on('close', saveBounds);
 
-  if (tray) tray.setToolTip(`${APP_NAME} — ${runtimeUrl || 'starting…'}`);
+  if (tray) tray.setToolTip(`${APP_NAME} — ${getRuntimeUrl() || 'starting…'}`);
   setTimeout(() => { createCockpitWindow(); showCockpitInactive(); }, 0);
 }
 
@@ -1103,7 +887,7 @@ async function buildCockpitSnapshot() {
   const tasks = cfg.scheduledTasks || [];
   const history = cfg.scheduledHistory || [];
   const snapshot = buildSnapshot({
-    runtime: { state: cockpitRuntimeState, child: !!runtimeChild, url: runtimeUrl, restarting: cockpitRuntimeState === 'restarting', version: runtime.activeVersion, activeVersion: runtime.activeVersion },
+    runtime: { state: cockpitRuntimeState, child: !!getRuntimeChild(), url: getRuntimeUrl(), restarting: cockpitRuntimeState === 'restarting', version: runtime.activeVersion, activeVersion: runtime.activeVersion },
     usage,
     contextWindow: cfg.contextWindow,
     cost: costData,
@@ -1266,16 +1050,6 @@ function showMain() {
   mainWindow.focus();
 }
 
-function restartRuntime() {
-  log('[shell] restart requested');
-  runtimeStateController.begin('restarting');
-  stopEventsFeed();
-  eventsFeedLiveLogged = false;
-  if (runtimeChild) { runtimeChild.kill(); runtimeChild = null; }
-  runtimeUrl = null;
-  if (remote) remote.setRuntimeUrl(null); // gateway answers 503 until the new URL arrives
-  spawnRuntime();
-}
 
 /**
  * Minimal application menu: keeps keyboard shortcuts alive (Ctrl+R reload,
@@ -1312,7 +1086,7 @@ function buildAppMenu() {
       submenu: [
         { label: t(L, 'menu.reload'), accelerator: 'CmdOrCtrl+R', click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload(); } },
         { label: t(L, 'menu.devtools'), accelerator: 'CmdOrCtrl+Shift+I', click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.toggleDevTools(); } },
-        { label: t(L, 'menu.openBrowser'), accelerator: 'CmdOrCtrl+Shift+O', click: () => { if (runtimeUrl) shell.openExternal(runtimeUrl); } },
+        { label: t(L, 'menu.openBrowser'), accelerator: 'CmdOrCtrl+Shift+O', click: () => { const ru = getRuntimeUrl(); if (ru) shell.openExternal(ru); } },
       ],
     },
   ];
@@ -1452,7 +1226,7 @@ function applyRemoteSettings(saved) {
   remote.setPublicMode(!!saved.remotePublic); // C7 posture follows the switch, no restart needed
   remote.stop();
   if (saved.remoteControl) {
-    remote.setRuntimeUrl(runtimeUrl);
+    remote.setRuntimeUrl(getRuntimeUrl());
     remote.start({ port: saved.remotePort, compat: !!saved.remoteCompat })
       .then((s) => { if (!s.running) notify(t(lang(), 'notify.remoteFailed'), t(lang(), 'notify.remoteFailedBody')); })
       .catch((e) => log(`[remote] start failed: ${e.message}`));
@@ -2795,9 +2569,9 @@ async function compactNow() {
   if (sessionRunning || (compactTracker && compactTracker.isCompacting())) {
     return { ok: false, code: 'busy', reason: t(lang(), 'compact.busy') };
   }
-  if (!runtimeUrl) return { ok: false, code: 'runtime-offline', reason: t(lang(), 'compact.noWindow') };
+  if (!getRuntimeUrl()) return { ok: false, code: 'runtime-offline', reason: t(lang(), 'compact.noWindow') };
   const info = manager.getInfo();
-  const client = createHarnessRpcClient({ baseUrl: runtimeUrl, version: info.activeVersion || '' });
+  const client = createHarnessRpcClient({ baseUrl: getRuntimeUrl(), version: info.activeVersion || '' });
   const r = await client.compactLatestSession();
   if (!r.ok) {
     const reason = t(lang(), 'compact.failedBody', { code: r.code });
@@ -3410,8 +3184,9 @@ function startScheduler() {
 // ---------------------------------------------------------------------------
 function startEventsFeed() {
   stopEventsFeed();
-  if (!runtimeUrl || quitting) return;
-  const base = runtimeUrl.endsWith('/') ? runtimeUrl : `${runtimeUrl}/`;
+  const ru = getRuntimeUrl();
+  if (!ru || quitting) return;
+  const base = ru.endsWith('/') ? ru : `${ru}/`;
   const onFeedError = (err) => {
     log(`[shell] events feed error: ${err.message}`);
     if (quitting) return;
@@ -3514,13 +3289,14 @@ function onQuestionRequested(frame, rpcId) {
  * {ok, reason} the channel dispatcher replies with over IM.
  */
 async function respondToRuntime({ rpcId, value, what }) {
-  if (!runtimeUrl) return { ok: false, reason: 'runtime offline' };
+  const ru = getRuntimeUrl();
+  if (!ru) return { ok: false, reason: 'runtime offline' };
   if (!rpcId || !value) {
     log(`[channels] ${what || 'respond'} dropped: missing runtime routing id`);
     return { ok: false, reason: 'no rpc id' };
   }
   try {
-    const base = runtimeUrl.endsWith('/') ? runtimeUrl : `${runtimeUrl}/`;
+    const base = ru.endsWith('/') ? ru : `${ru}/`;
     const res = await fetch(`${base}api/respond`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -3618,27 +3394,6 @@ function checkShellUpdate(notifyUser) {
 // ---------------------------------------------------------------------------
 // teardown
 // ---------------------------------------------------------------------------
-function killRuntime() {
-  if (remote) remote.setRuntimeUrl(null);
-  if (!runtimeChild || runtimeChild.killed) return;
-  stopEventsFeed();
-  const child = runtimeChild;
-  try { child.kill(); } catch { /* ignore */ }
-  const start = Date.now();
-  const wait = setInterval(() => {
-    if (child.exitCode !== null || Date.now() - start > KILL_GRACE_MS) {
-      clearInterval(wait);
-      if (child.exitCode === null) {
-        log('[shell] runtime did not exit in time, forcing kill');
-        if (process.platform === 'win32') {
-          try { execFileSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }); } catch { /* ignore */ }
-        } else {
-          try { child.kill('SIGKILL'); } catch { /* ignore */ }
-        }
-      }
-    }
-  }, 200);
-}
 
 // ---------------------------------------------------------------------------
 // app lifecycle
@@ -3681,7 +3436,7 @@ if (!gotLock) {
       log,
     });
     if (settings.get().remoteControl) {
-      remote.setRuntimeUrl(runtimeUrl);
+      remote.setRuntimeUrl(getRuntimeUrl());
       remote.start({ port: settings.get().remotePort, compat: !!settings.get().remoteCompat })
         .then((s) => { if (!s.running) notify(t(lang(), 'notify.remoteFailed'), t(lang(), 'notify.remoteFailedBody')); })
         .catch((e) => log(`[remote] start failed: ${e.message}`));
@@ -3882,8 +3637,8 @@ if (!gotLock) {
       if (!mainWindow.isVisible()) mainWindow.show();
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
-    } else if (runtimeUrl) {
-      createWindow(runtimeUrl);
+    } else if (getRuntimeUrl()) {
+      createWindow(getRuntimeUrl());
     }
   });
 
