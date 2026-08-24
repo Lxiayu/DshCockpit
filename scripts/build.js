@@ -57,6 +57,28 @@ if (archivedSeeds.length) {
   console.log(`[build] archiving non-pinned runtime seeds for this build: ${archivedSeeds.join(', ')} (restored afterwards)`);
 }
 
+// D2 slim track: --slim hides the ENTIRE runtime seed for this build (the
+// slim config has no extraResources entry for it). First launch of a slim
+// install runs the guided registry install or picks up a system dsh.
+const args = process.argv.slice(2); // module scope: the --win verification below needs it
+const SLIM = args.includes('--slim');
+let slimRuntimeHidden = false;
+function hideRuntimeForSlim() {
+  if (!SLIM || !fs.existsSync(RUNTIME_VENDOR)) return;
+  try {
+    fs.renameSync(RUNTIME_VENDOR, path.join(ROOT, 'vendor', '.runtime-hidden'));
+    slimRuntimeHidden = true;
+    console.log('[build] slim track: vendor/runtime hidden from extraResources');
+  } catch (err) {
+    console.error(`[build] could not hide vendor/runtime (${err.message}); continuing FULL`);
+  }
+}
+function unhideRuntimeForSlim() {
+  if (!slimRuntimeHidden) return;
+  try { fs.renameSync(path.join(ROOT, 'vendor', '.runtime-hidden'), RUNTIME_VENDOR); } catch { /* best effort */ }
+}
+hideRuntimeForSlim();
+
 // D1: prune the pinned seed (docs/maps/types/foreign prebuilds) BEFORE
 // packaging — halves the file count the installer must write and users must
 // delete; idempotent, and the E2E smoke below validates the pruned tree.
@@ -73,12 +95,16 @@ try {
   console.error(`[build] runtime prune failed (packaging UNPRUNED tree): ${err.message}`);
 }
 
-const args = process.argv.slice(2); // module scope: the --win verification below needs it
 let result;
 try {
   const cli = require.resolve('electron-builder/cli');
-  result = spawnSync(process.execPath, [cli, ...args], { stdio: 'inherit', cwd: ROOT });
+  // --slim selects the slim variant via env (see electron-builder.js)
+  if (SLIM) process.env.DSH_BUILD_SLIM = '1';
+  result = spawnSync(process.execPath, [cli, ...args.filter((a) => a !== '--slim')], { stdio: 'inherit', cwd: ROOT });
 } finally {
+  // order matters: un-hiding vendor/runtime first gives the archived seeds
+  // their destination directory back
+  unhideRuntimeForSlim();
   restoreArchivedRuntimeSeeds(archivedSeeds);
 }
 if (result.status !== 0) process.exit(result.status === null ? 1 : result.status);
@@ -91,7 +117,7 @@ if (args.includes('--win')) {
   const pi = args.indexOf('--publish');
   const publishing = pi !== -1 && args[pi + 1] !== 'never';
   try {
-    if (!verify({ requireUpdaterFeed: publishing })) process.exit(1);
+    if (!verify({ requireUpdaterFeed: publishing, slim: SLIM })) process.exit(1);
   } catch (e) {
     console.error('[build] artifact verification failed:', e.message);
     process.exit(1);

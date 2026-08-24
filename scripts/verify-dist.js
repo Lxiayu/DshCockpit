@@ -75,10 +75,14 @@ function verifyTree(getEntries, describe, opts) {
   } else {
     console.log('  [info] resources/app-update.yml skipped (--publish never build)');
   }
-  const runtimeBins = entries.filter((e) => RUNTIME_RE.test(e.name));
-  ok = check(runtimeBins.length > 0, 'bundled runtime lib/bin.js present (' + runtimeBins.length + ')') && ok;
-  const emptyBins = runtimeBins.filter((e) => (e.uncompSize === undefined ? 0 : e.uncompSize) === 0);
-  ok = check(emptyBins.length === 0, 'bundled runtime lib/bin.js non-empty') && ok;
+  if (opts.slim) {
+    console.log('  [info] slim artifact: bundled-runtime checks skipped by design');
+  } else {
+    const runtimeBins = entries.filter((e) => RUNTIME_RE.test(e.name));
+    ok = check(runtimeBins.length > 0, 'bundled runtime lib/bin.js present (' + runtimeBins.length + ')') && ok;
+    const emptyBins = runtimeBins.filter((e) => (e.uncompSize === undefined ? 0 : e.uncompSize) === 0);
+    ok = check(emptyBins.length === 0, 'bundled runtime lib/bin.js non-empty') && ok;
+  }
   // deepest path guard (Windows MAX_PATH risk; zips tolerate long paths but
   // extraction tools differ — README recommends 7-Zip)
   const deepest = entries.reduce((a, e) => (e.name.length > a.length ? e.name : a), '');
