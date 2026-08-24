@@ -95,12 +95,18 @@ try {
   console.error(`[build] runtime prune failed (packaging UNPRUNED tree): ${err.message}`);
 }
 
+// H7: normalize the legacy positional 'dir' into the --dir flag —
+// 'electron-builder --mac --arm64 dir' fails with "Unknown argument: dir"
+// while '--mac dir' and '--dir' both work. Normalizing keeps every
+// invocation form working across all workflows.
+const normalizedArgs = args.filter((a) => a !== '--slim').map((a) => (a === 'dir' ? '--dir' : a));
+
 let result;
 try {
   const cli = require.resolve('electron-builder/cli');
   // --slim selects the slim variant via env (see electron-builder.js)
   if (SLIM) process.env.DSH_BUILD_SLIM = '1';
-  result = spawnSync(process.execPath, [cli, ...args.filter((a) => a !== '--slim')], { stdio: 'inherit', cwd: ROOT });
+  result = spawnSync(process.execPath, [cli, ...normalizedArgs], { stdio: 'inherit', cwd: ROOT });
 } finally {
   // order matters: un-hiding vendor/runtime first gives the archived seeds
   // their destination directory back

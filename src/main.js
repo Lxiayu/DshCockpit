@@ -1212,6 +1212,11 @@ function registerIpc() {
     restartRuntime();
     return { ok: true };
   });
+  // H10: manual shell-update check from Settings → Updates
+  ipcMain.handle('shell:check-shell-update', async () => {
+    try { await checkShellUpdate(true); return { ok: true }; }
+    catch (err) { return { ok: false, reason: err.message }; }
+  });
   // A1: v0.3.0 feature-domain IPC (boot/notifications/weekly/cache-econ/compat)
   // registered in src/ipc-features.js
   registerFeatureIpc(ipcMain, {
@@ -1764,7 +1769,33 @@ function dshCliEnv(extra) {
   const env = { ...process.env, ...extra };
   const shim = pnpmShimDir();
   if (shim) env.PATH = prependPath(shim, env.PATH);
+  // H8: git is required for GitHub-sourced plugins (pnpm -> git ls-remote).
+  // GUI-launched apps inherit a minimal PATH, so probe the usual install
+  // locations and inject what we find.
+  const gitDir = locateGitDir();
+  if (gitDir) env.PATH = prependPath(gitDir, env.PATH);
   return env;
+}
+
+let _gitDirCache; // undefined = not probed; null = not found
+/** Locate a usable git: common install locations first (Windows GUI apps
+ * get a stripped PATH), then the ambient PATH. Returns its directory. */
+function locateGitDir() {
+  if (_gitDirCache !== undefined) return _gitDirCache;
+  const exe = process.platform === 'win32' ? 'git.exe' : 'git';
+  const candidates = process.platform === 'win32'
+    ? [
+        'C:\\Program Files\\Git\\cmd',
+        'C:\\Program Files (x86)\\Git\\cmd',
+        path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Git', 'cmd'),
+      ]
+    : ['/usr/local/bin', '/opt/homebrew/bin', '/usr/bin'];
+  for (const dir of candidates) {
+    try { if (fs.existsSync(path.join(dir, exe))) { _gitDirCache = dir; return dir; } } catch { /* ignore */ }
+  }
+  const line = firstLineOf(process.platform === 'win32' ? 'where.exe' : 'which', ['git']);
+  _gitDirCache = line ? path.dirname(line) : null;
+  return _gitDirCache;
 }
 
 /** Run `dsh plugin --profile web <args>`; output to a log file (fd, sandbox-safe).
@@ -1860,6 +1891,15 @@ async function runDshPlugin(args, timeoutMs = 120_000, onTail = null) {
       let out = '';
       try { out = fs.readFileSync(outFile, 'utf8'); } catch { /* ignore */ }
       log(`[shell] dsh plugin ${args.join(' ')} -> exit ${code}`);
+      // H8: a git-source plugin failing on git ls-remote means git is not
+      // reachable from this app — wrap the raw pnpm error in guidance.
+      let outText = '';
+      try { outText = fs.readFileSync(outFile, 'utf8'); } catch { /* ignore */ }
+      if (code !== 0 && /git (ls-remote|clone)|unable to find git|git is not recognized/i.test(outText)) {
+        log('[shell] git unreachable for plugin install');
+        resolve({ ok: false, code: 'exit', output: t(lang(), 'plugin.gitMissing', { msg: String(out).slice(-300) }) });
+        return;
+      }
       resolve({ ok: code === 0, code: 'exit', output: out.slice(-2000) });
     });
   });

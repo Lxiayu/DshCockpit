@@ -54,13 +54,20 @@ const config = {
     artifactName: `DshCockpit-\${version}${suffix}-win-\${arch}.\${ext}`,
   },
   // NOTE: nsis is a TOP-LEVEL key (win.nsis is invalid per schema).
-  // Posture (R10 boundary table): per-user, no UAC, one-click like
-  // Slack/Discord; uninstaller never touches %APPDATA%\dsh-cockpit.
+  // H11: assisted wizard (welcome -> directory -> shortcuts -> progress with
+  // detail log -> finish) instead of the bare one-click progress bar — users
+  // asked for drive/shortcut choice and visible installation steps.
+  // Posture (R10 boundary table): per-user, no UAC; uninstaller never touches
+  // %APPDATA%\dsh-cockpit.
   nsis: {
-    oneClick: true,
+    oneClick: false,
     perMachine: false,
-    allowToChangeInstallationDirectory: false,
+    allowToChangeInstallationDirectory: true,
+    createDesktopShortcut: true,
+    createStartMenuShortcut: true,
+    runAfterFinish: true,
     deleteAppDataOnUninstall: false,
+    include: 'resources/installer.nsh',
   },
   mac: {
     target: [

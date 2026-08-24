@@ -51,6 +51,8 @@ contextBridge.exposeInMainWorld('dshShell', {
   notificationsClear: () => ipcRenderer.invoke('notifications:clear'),
   // R4 cache economics (Settings → Cost)
   cacheEconomics: () => ipcRenderer.invoke('cache-economics:summary'),
+  // H10 shell update check (Settings → Updates)
+  shellCheckUpdate: () => ipcRenderer.invoke('shell:check-shell-update'),
   // R5 weekly report (Settings → Tasks & automation)
   weeklyGenerate: () => ipcRenderer.invoke('weekly:generate'),
   weeklyList: () => ipcRenderer.invoke('weekly:list'),

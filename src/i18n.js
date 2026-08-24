@@ -162,7 +162,9 @@ const STRINGS = {
     'plugin.removed': '插件已卸载',
     'plugin.removedBody': '{name} 已卸载；运行时已自动重启。',
     'plugin.failed': '插件操作失败',
+    'plugin.gitMissing': '安装 GitHub 来源的插件需要 Git。检测到当前环境无法访问 git 命令：请安装 Git for Windows（https://git-scm.com）后重启应用重试。原始错误：{msg}',
     'plugin.failedBody': '{name}：{reason}',
+    'plugin.gitMissing': 'Installing GitHub-sourced plugins requires Git, which is not reachable here. Install Git (https://git-scm.com) and restart the app. Original error: {msg}',
     'plugin.collectionRepo': '该仓库是皮肤/插件合集，根目录没有可安装的包（多个子包时请手动指定）',
     // skills center (C4) — error/warning codes map to skills.<code>
     'skills.e1': '未找到 SKILL.md：这不是一个技能包（可能是普通文档仓库或 dsh 插件）',
@@ -405,6 +407,7 @@ const STRINGS = {
     'plugin.removedBody': '{name} removed; the runtime restarted automatically.',
     'plugin.failed': 'Plugin operation failed',
     'plugin.failedBody': '{name}: {reason}',
+    'plugin.gitMissing': 'Installing GitHub-sourced plugins requires Git, which is not reachable here. Install Git (https://git-scm.com) and restart the app. Original error: {msg}',
     'plugin.collectionRepo': 'This repo is a skin/plugin collection with no installable root package (with multiple subpackages, pick one manually)',
     // skills center (C4) — error/warning codes map to skills.<code>
     'skills.e1': 'No SKILL.md found: this is not a skill package (maybe a plain docs repo or a dsh plugin)',

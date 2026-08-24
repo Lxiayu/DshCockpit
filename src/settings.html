@@ -375,7 +375,8 @@
       <button class="nav-item" data-page="skills"><span class="ico">✨</span><span class="txt" data-i18n="nav.skills">技能</span></button>
       <button class="nav-item" data-page="tasks"><span class="ico">⏰</span><span class="txt" data-i18n="nav.tasks">任务与自动化</span></button>
      <button class="nav-item" data-page="notifications"><span class="ico">🔔</span><span class="txt" data-i18n="nav.notifications">通知中心</span></button>
-      <button class="nav-item" data-page="remote"><span class="ico">📱</span><span class="txt" data-i18n="nav.remote">手机远程</span></button>
+      <button class="nav-item" data-page="weekly"><span class="ico">📊</span><span class="txt" data-i18n="nav.weekly">Agent 周报</span></button>
+     <button class="nav-item" data-page="remote"><span class="ico">📱</span><span class="txt" data-i18n="nav.remote">手机远程</span></button>
       <button class="nav-item" data-page="channels"><span class="ico">💬</span><span class="txt" data-i18n="nav.channels">渠道</span></button>
       <div class="group-label" data-i18n="group.system">系统</div>
       <button class="nav-item" data-page="data"><span class="ico">💾</span><span class="txt" data-i18n="nav.data">数据与备份</span></button>
@@ -427,10 +428,6 @@
                 <option value="en" data-i18n="language.en">English</option>
               </select>
             </div>
-          </div>
-          <div class="setting">
-            <div class="setting-info"><label data-i18n="shellAutoUpdate">自动检查壳更新</label></div>
-            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="shellAutoUpdate" /></div>
           </div>
         </div>
         <div class="card">
@@ -890,23 +887,7 @@
         <div class="note" data-i18n="auto.note">到点后会在后台用无头会话运行该任务的提示词（需已配置 API Key），完成后系统通知并记录到执行历史。</div>
       </div>
 
-      <div class="card" id="weekly-card">
-        <h3 data-i18n="weekly.title">Agent 周报卡片</h3>
-        <div class="setting">
-          <div class="setting-info"><label data-i18n="weekly.enabled">每周一上午自动生成</label><span class="desc" data-i18n="weekly.enabledHint">生成 Wrapped 风格的本周卡片（PNG，保存到报告目录）</span></div>
-          <div class="setting-ctrl"><input type="checkbox" class="toggle" id="weeklyReportEnabled" /></div>
-        </div>
-        <div class="setting">
-          <div class="setting-info"><label data-i18n="weekly.pushIm">生成后推送 IM 渠道</label><span class="desc" data-i18n="weekly.pushImHint">向已接入并在线的渠道发送周报摘要（需在渠道页配置）</span></div>
-          <div class="setting-ctrl"><input type="checkbox" class="toggle" id="weeklyReportPushIm" /></div>
-        </div>
-        <div class="btnrow">
-          <button class="secondary" id="btn-weekly-generate" data-i18n="weekly.generate">立即生成本周卡片</button>
-          <button class="secondary" id="btn-weekly-push" data-i18n="weekly.push">推送到 IM</button>
-          <button class="secondary" id="btn-weekly-open" data-i18n="weekly.openDir">打开报告目录</button>
-        </div>
-        <div class="status" id="weekly-status"></div>
-      </div>
+
 
       <!-- ------------------------- page: notifications (R6 通知中心) -->
       <div class="page" id="page-notifications">
@@ -960,6 +941,31 @@
           <div id="notif-list" aria-live="polite"></div>
           <div class="status" id="notif-list-status"></div>
         </div>
+      </div>
+
+      <!-- ------------------------- page: weekly (R5 Agent 周报) -->
+      <div class="page" id="page-weekly">
+        <div class="page-head">
+          <h2 data-i18n="nav.weekly">Agent 周报</h2>
+          <p data-i18n="page.weekly.d">Wrapped 风格的每周使用卡片：生成、分享、推送到 IM</p>
+        </div>
+<div class="card" id="weekly-card">
+        <h3 data-i18n="weekly.title">Agent 周报卡片</h3>
+        <div class="setting">
+          <div class="setting-info"><label data-i18n="weekly.enabled">每周一上午自动生成</label><span class="desc" data-i18n="weekly.enabledHint">生成 Wrapped 风格的本周卡片（PNG，保存到报告目录）</span></div>
+          <div class="setting-ctrl"><input type="checkbox" class="toggle" id="weeklyReportEnabled" /></div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><label data-i18n="weekly.pushIm">生成后推送 IM 渠道</label><span class="desc" data-i18n="weekly.pushImHint">向已接入并在线的渠道发送周报摘要（需在渠道页配置）</span></div>
+          <div class="setting-ctrl"><input type="checkbox" class="toggle" id="weeklyReportPushIm" /></div>
+        </div>
+        <div class="btnrow">
+          <button class="secondary" id="btn-weekly-generate" data-i18n="weekly.generate">立即生成本周卡片</button>
+          <button class="secondary" id="btn-weekly-push" data-i18n="weekly.push">推送到 IM</button>
+          <button class="secondary" id="btn-weekly-open" data-i18n="weekly.openDir">打开报告目录</button>
+        </div>
+        <div class="status" id="weekly-status"></div>
+      </div>
       </div>
 
       <!-- ------------------------- page: remote (手机远程控制) -->
@@ -1119,7 +1125,23 @@
       <div class="page" id="page-update">
         <div class="page-head">
           <h2 data-i18n="nav.update">更新</h2>
-          <p data-i18n="page.update.d">运行时更新通道与版本</p>
+          <p data-i18n="page.update.d">桌面壳与 Harness 运行时的更新管理</p>
+        </div>
+        <div class="card" id="shell-update-card">
+          <h3 data-i18n="card.shellUpdate">桌面壳更新</h3>
+          <div class="kv"><span data-i18n="shellUpdate.version">当前壳版本</span><b id="update-shell-version">--</b></div>
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="shellAutoUpdate">自动检查壳更新</label>
+              <span class="desc" data-i18n="shellAutoUpdate.hint">启动与每 4 小时自动检查；发现新版本自动下载，退出时安装</span>
+            </div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="shellAutoUpdate" /></div>
+          </div>
+          <div class="btnrow">
+            <button class="secondary" id="btn-shell-check" data-i18n="shellUpdate.check">立即检查壳更新</button>
+          </div>
+          <div class="status" id="shell-update-status"></div>
+          <div class="note" data-i18n="shellUpdate.note">Windows 安装版（NSIS）支持应用内差分更新；便携版与 macOS 请前往 GitHub Releases 手动下载。</div>
         </div>
         <div class="card" id="compat-card">
           <h3 data-i18n="card.compat">上游兼容状态</h3>
@@ -1128,7 +1150,8 @@
           <div class="status" id="compat-note"></div>
         </div>
         <div class="card">
-          <h3 data-i18n="card.updateChannel">通道与来源</h3>
+          <h3 data-i18n="card.runtimeUpdate">Harness 运行时更新</h3>
+          <div class="note" data-i18n="runtimeUpdate.note">以下设置只影响 Harness 运行时（与上方的桌面壳更新相互独立）。</div>
           <div class="setting">
             <div class="setting-info"><label data-i18n="channel">更新通道</label></div>
             <div class="setting-ctrl">
@@ -1527,7 +1550,7 @@
       page_general_d: '壳的界面与启动偏好', page_cost_d: 'API 费率、峰谷分时与预算',
       page_runtime_d: '工作区、端口与可执行文件路径', page_plugins_d: '发现与管理 dsh 插件',
       page_tasks_d: '配置和管理自动化任务，让 AI 按计划执行工作流。', page_data_d: '备份、存储与隐私',
-      page_update_d: '运行时更新通道与版本', page_about_d: '版本、诊断与帮助',
+      page_update_d: '桌面壳与 Harness 运行时的更新管理', page_about_d: '版本、诊断与帮助',
       card_costRates: '谷时费率（默认）', card_costPeak: '峰谷分时计价', card_costUsage: '用量统计',
       card_balance: '账户余额（官方）',
       card_cacheEcon: '缓存经济学', card_cacheEconDetail: '缓存节省明细',
@@ -1685,6 +1708,12 @@
       notif_historyTitle: '通知历史（最近 500 条）', notif_searchPh: '搜索标题 / 正文…', notif_clear: '清空历史',
       notif_empty: '暂无通知记录。', notif_clearConfirm: '清空全部通知历史？', notif_cleared: '✅ 已清空',
       notif_rulesOn: '通知中心已启用；规则修改即时生效。', notif_rulesOff: '⚠️ 通知中心已关闭：所有通知直接弹窗，不记录历史。',
+      nav_weekly: 'Agent 周报', page_weekly_d: 'Wrapped 风格的每周使用卡片：生成、分享、推送到 IM',
+      card_shellUpdate: '桌面壳更新', card_runtimeUpdate: 'Harness 运行时更新',
+      shellUpdate_version: '当前壳版本', shellAutoUpdate_hint: '启动与每 4 小时自动检查；发现新版本自动下载，退出时安装',
+      shellUpdate_check: '立即检查壳更新', shellUpdate_checking: '⏳ 正在检查…', shellUpdate_checkDone: '✅ 已触发检查，结果将通过系统通知告知。',
+      shellUpdate_note: 'Windows 安装版（NSIS）支持应用内差分更新；便携版与 macOS 请前往 GitHub Releases 手动下载。',
+      runtimeUpdate_note: '以下设置只影响 Harness 运行时（与上方的桌面壳更新相互独立）。',
       weekly_title: 'Agent 周报卡片', weekly_enabled: '每周一上午自动生成', weekly_enabledHint: '生成 Wrapped 风格的本周卡片（PNG，保存到报告目录）',
       weekly_pushIm: '生成后推送 IM 渠道', weekly_pushImHint: '向已接入并在线的渠道发送周报摘要（需在渠道页配置）',
       weekly_generate: '立即生成本周卡片', weekly_push: '推送到 IM', weekly_openDir: '打开报告目录',
@@ -1922,7 +1951,7 @@
       page_general_d: 'Shell interface & startup preferences', page_cost_d: 'API rates, peak pricing & budget',
       page_runtime_d: 'Workspace, port & executable paths', page_plugins_d: 'Discover & manage dsh plugins',
       page_tasks_d: 'Configure and manage automation tasks — AI workflows on a schedule.', page_data_d: 'Backups, storage & privacy',
-      page_update_d: 'Runtime update channel & versions', page_about_d: 'Versions, diagnostics & help',
+      page_update_d: 'Desktop shell & Harness runtime update management', page_about_d: 'Versions, diagnostics & help',
       card_costRates: 'Off-peak rates (default)', card_costPeak: 'Peak & off-peak pricing', card_costUsage: 'Usage',
       card_balance: 'Account balance (official)',
       card_cacheEcon: 'Cache economics', card_cacheEconDetail: 'Cache savings detail',
@@ -2080,6 +2109,12 @@
       notif_historyTitle: 'History (last 500)', notif_searchPh: 'Search title / body…', notif_clear: 'Clear history',
       notif_empty: 'No notifications recorded yet.', notif_clearConfirm: 'Clear the entire notification history?', notif_cleared: '✅ Cleared',
       notif_rulesOn: 'Notification center is on; rule changes apply immediately.', notif_rulesOff: '⚠️ Notification center is off: everything toasts directly and nothing is recorded.',
+      nav_weekly: 'Agent Weekly', page_weekly_d: 'A Wrapped-style weekly card: generate, share, push to IM',
+      card_shellUpdate: 'Desktop shell updates', card_runtimeUpdate: 'Harness runtime updates',
+      shellUpdate_version: 'Current shell version', shellAutoUpdate_hint: 'Checks on launch and every 4 hours; new versions download automatically and install on quit',
+      shellUpdate_check: 'Check for shell updates now', shellUpdate_checking: '⏳ Checking…', shellUpdate_checkDone: '✅ Check triggered; you will be notified of the result.',
+      shellUpdate_note: 'Windows installer (NSIS) supports in-app differential updates; portable and macOS builds: download manually from GitHub Releases.',
+      runtimeUpdate_note: 'These settings only affect the Harness runtime (independent of the desktop shell updates above).',
       weekly_title: 'Agent weekly card', weekly_enabled: 'Auto-generate every Monday morning', weekly_enabledHint: 'Renders a Wrapped-style PNG card for the week into the report folder',
       weekly_pushIm: 'Push to IM channels after generating', weekly_pushImHint: 'Sends the summary to connected online channels (configure them on the Channels page)',
       weekly_generate: 'Generate this week now', weekly_push: 'Push to IM', weekly_openDir: 'Open report folder',
@@ -2120,9 +2155,9 @@
   }
 
   // ------------------------------------------------------------- routing
-  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'skills', 'tasks', 'notifications', 'remote', 'channels', 'models', 'longsession', 'data', 'update', 'about'];
+  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'skills', 'tasks', 'notifications', 'weekly', 'remote', 'channels', 'models', 'longsession', 'data', 'update', 'about'];
   const CONTROL_PAGES = new Set(['cost', 'tasks', 'runtime', 'remote', 'plugins', 'skills', 'channels', 'longsession']);
-  const SETTINGS_PAGES = new Set(['general', 'cost', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about', 'notifications']);
+  const SETTINGS_PAGES = new Set(['general', 'cost', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about', 'notifications', 'weekly']);
   const CENTER_INTENTS = new Set(['new-task']);
   const routeParams = new URLSearchParams(location.search);
   let centerMode = routeParams.get('mode') === 'control' ? 'control' : 'settings';
@@ -2373,6 +2408,8 @@
     document.querySelectorAll('#notif-kinds input').forEach((cb) => { cb.checked = disabledKinds.has(cb.value); });
     // R5 weekly report
     $('weeklyReportEnabled').checked = !!s.weeklyReportEnabled;
+    // H10 shell update card
+    $('update-shell-version').textContent = s.shellVersion || '--';
     $('weeklyReportPushIm').checked = !!s.weeklyReportPushIm;
     $('workspace').value = s.workspace || '';
     $('dshHome').value = s.dshHome || '';
@@ -3747,6 +3784,18 @@
       dbg(`refreshCacheEcon: ok saved=${r.month.savedYuan.toFixed(2)} days=${days.length}`);
     } catch (e) { dbg(`refreshCacheEcon: failed ${e.message}`); }
   }
+
+  // ------------------------------------------- shell update card (H10)
+  $('btn-shell-check').addEventListener('click', async () => {
+    const btn = $('btn-shell-check');
+    btn.disabled = true;
+    setStatus($('shell-update-status'), tr('shellUpdate.checking'));
+    try {
+      const r = await window.dshShell.shellCheckUpdate();
+      setStatus($('shell-update-status'), r && r.ok ? tr('shellUpdate.checkDone') : tr('control.operationFailed', { reason: (r && r.reason) || '' }), r && r.ok ? '' : 'warn');
+    } catch (e) { setStatus($('shell-update-status'), tr('control.operationFailed', { reason: e.message }), 'warn'); }
+    finally { btn.disabled = false; }
+  });
 
   // --------------------------------------------- weekly report card (R5)
   $('btn-weekly-generate').addEventListener('click', async () => {
