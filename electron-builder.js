@@ -77,11 +77,16 @@ const config = {
     icon: 'resources/icon.png',
     category: 'public.app-category.developer-tools',
     darkModeSupport: true,
-    // Unsigned distribution (no Apple Developer ID yet). identity:null skips
-    // code signing; hardenedRuntime MUST be false when unsigned. See README
-    // "macOS 安装" for the Gatekeeper override; flip to signing+notarization
-    // later via CSC_LINK/APPLE_* env vars.
-    identity: null,
+    // H-mac-sign: identity '-' = AD-HOC signing. Skipping signing entirely
+    // (identity:null) leaves the .app with a linker-signed stub whose
+    // designated requirement is the cdhash itself — every rebuild changes it,
+    // so Squirrel.Mac update validation AND codesign --verify both fail.
+    // An ad-hoc signature gives a stable DR (identifier com.dshcockpit.app),
+    // which is what Squirrel.Mac compares across versions -> in-app
+    // auto-update becomes viable WITHOUT a Developer ID.
+    // Developer ID signing + notarization remains the D-1 upgrade path
+    // (swap identity for CSC_LINK then).
+    identity: '-',
     hardenedRuntime: false,
     artifactName: `DshCockpit-\${version}${suffix}-mac-\${arch}.\${ext}`,
   },
