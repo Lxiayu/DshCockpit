@@ -73,25 +73,36 @@ test('module exports are fully destructured in main.js (no missing accessors)', 
     return mainSrc.slice(start + 'const {'.length, end);
   }
 
-  // An export is satisfied when it is EITHER destructured in main.js OR used
-  // through the qualified moduleName.key form (both resolve at runtime).
-  function satisfied(mainSrc, moduleName, key) {
-    return new RegExp(`\\b${key}\\b`).test(destructureBlock(mainSrc, moduleName))
-      || new RegExp(`\\b${moduleName}\\.${key}\\b`).test(mainSrc);
+  // Three-state check per exported key:
+  //   destructured in main.js            -> OK
+  //   used via moduleName.key            -> OK (const object stays in scope)
+  //   bare reference with neither        -> FAIL (runtime ReferenceError)
+  //   completely unused                  -> OK (informational)
+  function usageState(mainSrc, moduleName, key) {
+    const destr = new RegExp(`\\b${key}\\b`).test(destructureBlock(mainSrc, moduleName));
+    const qualified = new RegExp(`\\b${moduleName}\\.${key}\\b`).test(mainSrc);
+    // the (?!\s*:) exclusion skips object-LITERAL KEYS (hasQuickAsk: ...)
+    // which are not variable references
+    const bare = new RegExp(`(?<![\\w$.])${key}(?![\\w$])(?!\\s*:)`).test(
+      mainSrc.replace(new RegExp(`\\b${moduleName}\\.[A-Za-z_$][\\w$]*`, 'g'), ''));
+    if (destr) return 'ok';
+    if (qualified && !bare) return 'ok';
+    if (bare) return 'BARE';
+    return 'unused';
   }
 
   const wmKeys = returnKeys('window-manager.js', 'createWindowManager');
-  const wmMissing = wmKeys.filter((k) => !satisfied(mainSrc, 'windowManager', k));
+  const wmMissing = wmKeys.filter((k) => usageState(mainSrc, 'windowManager', k) === 'BARE');
   assert.deepStrictEqual(wmMissing, [],
     `window-manager exports missing from the main.js destructure (calls would throw at runtime): ${wmMissing.join(', ')}`);
 
   const auxKeys = returnKeys('aux-windows.js', 'createAuxWindows');
-  const auxMissing = auxKeys.filter((k) => !satisfied(mainSrc, 'auxWindows', k));
+  const auxMissing = auxKeys.filter((k) => usageState(mainSrc, 'auxWindows', k) === 'BARE');
   assert.deepStrictEqual(auxMissing, [],
     `aux-windows exports missing from the main.js destructure: ${auxMissing.join(', ')}`);
 
   const supKeys = returnKeys('runtime-supervisor.js', 'createRuntimeSupervisor');
-  const supMissing = supKeys.filter((k) => !satisfied(mainSrc, 'supervisor', k));
+  const supMissing = supKeys.filter((k) => usageState(mainSrc, 'supervisor', k) === 'BARE');
   assert.deepStrictEqual(supMissing, [],
     `runtime-supervisor exports missing from the main.js destructure: ${supMissing.join(', ')}`);
 });
