@@ -151,6 +151,27 @@ async function main() {
     process.exit(1);
   }
 
+  // Updater-feed gate (D5): the packaged app must carry an app-update.yml
+  // pointing at the real repo — 'owner: local' means the CI env was missing
+  // and the in-app updater would 404 forever.
+  const resourcesDir = path.join(path.dirname(appPath), '..', 'Resources');
+  const feedPath = process.platform === 'win32'
+    ? path.join(path.dirname(appPath), 'resources', 'app-update.yml')
+    : path.join(resourcesDir, 'app-update.yml');
+  try {
+    const feed = fs.readFileSync(feedPath, 'utf8');
+    if (/owner:\s*local\b/.test(feed)) {
+      console.error('[e2e] FAIL: app-update.yml points at the placeholder "local" repo (CI env DSH_REPO_OWNER/DSH_REPO_NAME missing)');
+      killTree(child);
+      process.exit(1);
+    }
+    console.log(`[e2e] updater feed ok: ${feed.split('\n').filter((l) => /owner|repo/.test(l)).join(' ').trim()}`);
+  } catch {
+    console.error(`[e2e] FAIL: app-update.yml missing at ${feedPath} (in-app auto-update would be dead)`);
+    killTree(child);
+    process.exit(1);
+  }
+
   // Graceful-shutdown gate: SIGTERM must produce a clean quit (before-quit ->
   // window close -> backup -> exit) within 15s. A crash dialog or hung
   // close-handler here is exactly the class of bug users see on exit.

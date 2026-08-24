@@ -34,6 +34,15 @@ jobs:
       # Single source of truth for the bundled runtime: package.json
       # "runtimeVersion". Never "latest from registry" — a DeepSeek rc.9/rc.10
       # must NOT change what this release bundles.
+      # D5: the packaged app-update.yml must point at the REAL GitHub repo
+      # (build.js otherwise falls back to owner "local", which would make the
+      # in-app updater 404 forever).
+      - name: Set updater feed coordinates
+        shell: bash
+        run: |
+          echo "DSH_REPO_OWNER=${{ github.repository_owner }}" >> "$GITHUB_ENV"
+          echo "DSH_REPO_NAME=${{ github.event.repository.name }}" >> "$GITHUB_ENV"
+
       - name: Resolve runtime version
         id: rtv
         shell: bash
