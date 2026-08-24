@@ -76,9 +76,6 @@ if (process.env.DSH_DESKTOP_USER_DATA) {
 const APP_NAME = 'DshCockpit';
 const APP_VERSION = require('../package.json').version;
 
-let mainWindow = null;
-let settingsWindow = null;
-let cockpitWindow = null;
 let quitting = false;
 let logStream = null;
 let updateInFlight = false;
@@ -86,7 +83,6 @@ let eventsFeed = [];
 let eventsRetryTimer = null;
 let lastTaskNotifyAt = 0;
 let eventsFeedLiveLogged = false;
-let windowStateSaveTimer = null;
 let lastCostUpdateAt = 0;
 let latestCostSnapshot = { stats: null, key: '', data: null };
 let quickAskRunning = false;
@@ -105,7 +101,6 @@ let sessionWorkerClient = null;
 let deferredServicesStarted = false;
 let sessionRunning = false; // live host/session-status frames (C3 busy check)
 let guidedInstallInProgress = false;
-let mainWindowPending = false; // guided first-run: runtime booting, main window not open yet
 let cockpitRuntimeState = 'starting';
 const runtimeStateController = createRuntimeStateController({
   initial: cockpitRuntimeState,
@@ -113,13 +108,6 @@ const runtimeStateController = createRuntimeStateController({
   onInvalidate: () => invalidateCockpitSnapshot(),
   onBroadcast: () => broadcastCockpitSnapshot(),
 });
-let cockpitSyncTimer = null;
-let cockpitMode = 'rail';
-let cockpitOffset = { x: 0, y: 0 };
-let returnToCockpitPending = false;
-let cockpitHiddenForAuxWindow = false;
-let cockpitSnapshotCache = { at: 0, snapshot: null };
-const COCKPIT_SNAPSHOT_TTL_MS = 250;
 let lastLoginItemSetting = null;
 const pluginGuard = createPluginOpGuard(); // one dsh plugin op at a time (profile safety)
 const skillsGuard = createPluginOpGuard(); // one skill install/upgrade at a time (atomic writes)
@@ -328,8 +316,9 @@ const nc = createNotificationCenter({
 const auxWindows = createAuxWindows({
   BrowserWindow,
   themeBackground,
-  prepareCockpitForAuxWindow,
-  restoreCockpitRail,
+  // late-bound: these become const destructures further down (A1 step 5)
+  prepareCockpitForAuxWindow: () => prepareCockpitForAuxWindow(),
+  restoreCockpitRail: () => restoreCockpitRail(),
   appVersion: () => app.getVersion(),
   onLoadingError: (code, description) => {
     setLoading(t(lang(), 'loading.failed', { msg: description || code }));
@@ -341,6 +330,50 @@ const {
   openSearchWindow,
   createLoadingWindow, setLoading, closeLoading, showLoadingOnError,
 } = auxWindows;
+
+// A1 step 5: window management (main window + Cockpit rail + Settings
+// center) extracted to src/window-manager.js. The deps object is the explicit
+// coupling surface (was ~35 free-variable references).
+const COCKPIT_SNAPSHOT_TTL_MS = 250; // cockpit snapshot cache TTL (consumed by window-manager)
+const windowManager = createWindowManager({
+  BrowserWindow, screen,
+  appName: APP_NAME,
+  iconPath,
+  themeBackground, resolvedTheme,
+  windowState, windowStateFile: () => windowStateFile(),
+  log, t, lang,
+  settingsGet: () => settings.get(),
+  noTray,
+  getRuntimeUrl, getRuntimeChild,
+  traySetTooltip: (text) => trayMenu.setTooltip(text),
+  closeLoading,
+  startDeferredServices,
+  computeCockpitBounds,
+  getCockpitRuntimeState: () => cockpitRuntimeState,
+  getUsageCache: () => costCache.data,
+  costSnapshot,
+  getScheduledRunning: () => [...scheduledRunning],
+  getRemoteStatus: () => (remote ? { ...remote.status(), enabled: !!settings.get().remoteControl, publicMode: settings.get().remotePublicMode } : null),
+  appVersion: APP_VERSION,
+  dshHomeOf,
+  hasQuickAsk: () => auxWindows.hasQuickAsk(),
+  hasSearch: () => auxWindows.hasSearch(),
+  hasTray: () => trayMenu.hasTray(),
+  setLoading: (text) => setLoading(text),
+  showLoadingOnError: () => showLoadingOnError(),
+  COCKPIT_SNAPSHOT_TTL_MS,
+  buildSnapshot,
+  runtimeInfo: () => manager.getInfo(),
+});
+const {
+  createWindow, showMain, createCockpitWindow, showCockpitInactive, hideCockpit,
+  prepareCockpitForAuxWindow, restoreCockpitRail, scheduleCockpitSync,
+  cockpitNavigate, createSettingsWindow,
+  buildCockpitSnapshot, invalidateCockpitSnapshot, broadcastCockpitSnapshot,
+  closeSettingsWindow, returnToCockpit, setCockpitMode, moveCockpitOffset,
+  reloadMainWindow, toggleMainDevTools, pickDialogParent, isMainWindowPending,
+  onRuntimeHealthy,
+} = windowManager;
 
 // A1 step 3: full runtime lifecycle supervision extracted from main.js.
 // The deps object is the explicit coupling surface between the shell and the
@@ -364,16 +397,8 @@ const supervisor = createRuntimeSupervisor({
   startEventsFeed,
   stopEventsFeed,
   resetEventsFeedLiveFlag: () => { eventsFeedLiveLogged = false; },
-  onHealthy: (bootUrl) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.loadURL(bootUrl);
-      createCockpitWindow();
-      showCockpitInactive();
-    } else {
-      createWindow(bootUrl);
-    }
-  },
-  hasMainWindow: () => !!mainWindow,
+  onHealthy: (bootUrl) => onRuntimeHealthy(bootUrl),
+  hasMainWindow: () => !!pickDialogParent(),
   isQuitting: () => quitting,
   recordCrash,
   enterSafeMode,
@@ -664,98 +689,6 @@ function selfHealProfile() {
 // ---------------------------------------------------------------------------
 // windows
 // ---------------------------------------------------------------------------
-function createWindow(url) {
-  mainWindowPending = false; // the main window is (about to be) open
-  const saved = windowState.load(windowStateFile());
-  const bounds = safeBounds(saved) || { width: 1280, height: 840 };
-  mainWindow = new BrowserWindow({
-    ...bounds,
-    backgroundColor: themeBackground(), // match the splash: no white flash before the web UI paints
-    title: APP_NAME,
-    show: false,
-    autoHideMenuBar: true,
-    icon: iconPath(),
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, 'preload.js'),
-    },
-  });
-
-  mainWindow.on('show', () => { createCockpitWindow(); syncCockpitBounds(); showCockpitInactive(); });
-  mainWindow.on('restore', () => { createCockpitWindow(); syncCockpitBounds(); showCockpitInactive(); });
-  mainWindow.on('hide', () => hideCockpit());
-  mainWindow.on('minimize', () => hideCockpit());
-  mainWindow.on('maximize', () => syncCockpitBounds());
-  mainWindow.on('unmaximize', () => syncCockpitBounds());
-  mainWindow.on('enter-full-screen', () => { hideCockpit(); setTimeout(() => { syncCockpitBounds(); showCockpitInactive(); }, 80); });
-  mainWindow.on('leave-full-screen', () => { setTimeout(() => { syncCockpitBounds(); showCockpitInactive(); }, 80); });
-
-  mainWindow.loadURL(url);
-  // Show + start deferred services when the page is truly paintable (no white
-  // flash). A timeout fallback covers Windows GPU / older-Electron combos that
-  // never emit ready-to-show even after a successful load, and a did-fail-load
-  // retry recovers transient load failures. Without the fallback a stuck main
-  // window would leave deferred services (token poll, scheduler, balance,
-  // compaction, …) disabled forever.
-  let mainShown = false;
-  let mainShowFallbackTimer = null;
-  const showMainWhenReady = () => {
-    if (mainShown || !mainWindow || mainWindow.isDestroyed()) return;
-    mainShown = true;
-    clearTimeout(mainShowFallbackTimer);
-    mainWindow.show();
-    closeLoading();
-    startDeferredServices();
-  };
-  mainWindow.once('ready-to-show', showMainWhenReady);
-  mainShowFallbackTimer = setTimeout(() => {
-    if (!mainShown) {
-      log('[shell] main window ready-to-show timed out; forcing show');
-      showMainWhenReady();
-    }
-  }, 15_000);
-  let mainLoadRetries = 0;
-  mainWindow.webContents.on('did-fail-load', (_event, code, description) => {
-    if (code === -3) return; // ERR_ABORTED: superseded navigation, not a real failure
-    log(`[shell] main window failed to load (${code}): ${description}`);
-    if (mainLoadRetries < 2 && mainWindow && !mainWindow.isDestroyed()) {
-      mainLoadRetries += 1;
-      setTimeout(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(url); }, 1_000);
-    } else {
-      setLoading(t(lang(), 'loading.failed', { msg: description || code }));
-      showLoadingOnError();
-    }
-  });
-  mainWindow.on('close', (e) => {
-    if (!quitting && !noTray && settings.get().trayOnClose && trayMenu.hasTray()) {
-      e.preventDefault();
-      mainWindow.hide();
-    }
-  });
-  mainWindow.on('closed', () => { mainWindow = null; });
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-
-  // persist window bounds (debounced)
-  const saveBounds = () => {
-    if (mainWindow && !mainWindow.isDestroyed()) windowState.save(windowStateFile(), mainWindow.getBounds());
-  };
-  mainWindow.on('resize', () => {
-    scheduleCockpitSync();
-    clearTimeout(windowStateSaveTimer);
-    windowStateSaveTimer = setTimeout(saveBounds, 500);
-  });
-  mainWindow.on('move', () => {
-    scheduleCockpitSync();
-    clearTimeout(windowStateSaveTimer);
-    windowStateSaveTimer = setTimeout(saveBounds, 500);
-  });
-  mainWindow.on('close', saveBounds);
-
-  trayMenu.setTooltip(`${APP_NAME} — ${getRuntimeUrl() || 'starting…'}`);
-  setTimeout(() => { createCockpitWindow(); showCockpitInactive(); }, 0);
-}
 
 /** Start optional integrations only after the first real renderer is visible. */
 function startDeferredServices() {
@@ -771,219 +704,20 @@ function startDeferredServices() {
   log('[perf] deferred services started after main window ready');
 }
 
-function cockpitDisplay() {
-  if (!mainWindow || mainWindow.isDestroyed()) return null;
-  try { return screen.getDisplayMatching(mainWindow.getBounds()); } catch { return screen.getPrimaryDisplay(); }
-}
 
-function syncCockpitBounds() {
-  if (!cockpitWindow || cockpitWindow.isDestroyed() || !mainWindow || mainWindow.isDestroyed()) return;
-  const display = cockpitDisplay();
-  if (!display) return;
-  const bounds = computeCockpitBounds(mainWindow.getBounds(), display.workArea, cockpitMode, undefined, cockpitOffset);
-  cockpitWindow.setBounds(bounds, false);
-}
 
-function scheduleCockpitSync() {
-  clearTimeout(cockpitSyncTimer);
-  cockpitSyncTimer = setTimeout(() => { cockpitSyncTimer = null; syncCockpitBounds(); }, 40);
-}
 
-function showCockpitInactive() {
-  if (!cockpitWindow || cockpitWindow.isDestroyed() || !mainWindow || mainWindow.isDestroyed()) return;
-  if (!mainWindow.isVisible() || mainWindow.isMinimized()) return;
-  // Never place the rail over an active auxiliary or configuration window.
-  if (settingsWindow && !settingsWindow.isDestroyed()) return;
-  if (auxWindows.hasQuickAsk()) return;
-  if (auxWindows.hasSearch()) return;
-  syncCockpitBounds();
-  try { cockpitWindow.showInactive(); } catch { cockpitWindow.show(); }
-}
 
-function hideCockpit() {
-  if (cockpitWindow && !cockpitWindow.isDestroyed()) cockpitWindow.hide();
-}
 
-function prepareCockpitForAuxWindow() {
-  // Auxiliary windows temporarily own the foreground. Remember only cases
-  // where the visible main window can safely receive the rail back later.
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized()
-      && !(settingsWindow && !settingsWindow.isDestroyed())) {
-    cockpitHiddenForAuxWindow = true;
-  }
-  cockpitMode = 'rail';
-  hideCockpit();
-}
 
-function restoreCockpitRail() {
-  if (!cockpitHiddenForAuxWindow) return;
-  // Do not reveal the rail underneath another auxiliary or settings window.
-  if (settingsWindow && !settingsWindow.isDestroyed()) return;
-  if (auxWindows.hasQuickAsk()) return;
-  if (auxWindows.hasSearch()) return;
-  cockpitHiddenForAuxWindow = false;
-  cockpitMode = 'rail';
-  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMinimized()) return;
-  createCockpitWindow();
-  showCockpitInactive();
-}
 
-function createCockpitWindow() {
-  if (cockpitWindow && !cockpitWindow.isDestroyed()) return cockpitWindow;
-  if (!mainWindow || mainWindow.isDestroyed()) return null;
-  cockpitWindow = new BrowserWindow({
-    parent: mainWindow,
-    modal: false,
-    frame: false,
-    transparent: true,
-    show: false,
-    skipTaskbar: true,
-    resizable: false,
-    fullscreenable: false,
-    focusable: true,
-    backgroundColor: '#00000000',
-    hasShadow: false,
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, 'cockpit-preload.js'),
-    },
-  });
-  cockpitWindow.loadFile(path.join(__dirname, 'cockpit.html'));
-  cockpitWindow.webContents.on('will-navigate', (e) => e.preventDefault());
-  cockpitWindow.on('will-move', (_event, nextBounds) => {
-    const display = cockpitDisplay();
-    if (!display || !nextBounds) return;
-    const base = computeCockpitBounds(mainWindow.getBounds(), display.workArea, cockpitMode);
-    cockpitOffset = { x: nextBounds.x - base.x, y: nextBounds.y - base.y };
-  });
-  cockpitWindow.on('moved', () => {
-    const display = cockpitDisplay();
-    if (!display || !mainWindow || mainWindow.isDestroyed()) return;
-    const base = computeCockpitBounds(mainWindow.getBounds(), display.workArea, cockpitMode);
-    const current = cockpitWindow.getBounds();
-    cockpitOffset = { x: current.x - base.x, y: current.y - base.y };
-  });
-  cockpitWindow.on('blur', () => {
-    if (cockpitMode !== 'rail' && cockpitMode !== 'onboarding') {
-      cockpitMode = 'rail';
-      cockpitWindow.webContents.send('cockpit:mode', 'rail');
-      syncCockpitBounds();
-    }
-  });
-  cockpitWindow.on('closed', () => { cockpitWindow = null; cockpitMode = 'rail'; });
-  syncCockpitBounds();
-  return cockpitWindow;
-}
 
-function cockpitNavigate(mode, page, intent) {
-  const allowed = {
-    control: ['cost', 'tasks', 'runtime', 'remote', 'plugins', 'skills', 'channels', 'longsession'],
-    settings: ['general', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about'],
-  };
-  const m = mode === 'control' || mode === 'settings' ? mode : 'settings';
-  const p = allowed[m].includes(page) ? page : (m === 'control' ? 'tasks' : 'general');
-  const safeIntent = m === 'control' && p === 'tasks' && intent === 'new-task' ? 'new-task' : '';
-  const route = safeIntent === 'new-task'
-    ? { mode: m, page: p, intent: 'new-task' }
-    : { mode: m, page: p, intent: '' };
-  createSettingsWindow(route);
-  hideCockpit();
-}
 
-async function buildCockpitSnapshot() {
-  const now = Date.now();
-  if (cockpitSnapshotCache.snapshot && now - cockpitSnapshotCache.at < COCKPIT_SNAPSHOT_TTL_MS) {
-    return cockpitSnapshotCache.snapshot;
-  }
-  const cfg = settings.get();
-  const runtime = manager.getInfo();
-  let usage = null;
-  let costData = null;
-  try { usage = costCache.data; } catch { /* no-op */ }
-  try { costData = usage ? await costSnapshot(usage) : null; } catch { /* no-op */ }
-  const tasks = cfg.scheduledTasks || [];
-  const history = cfg.scheduledHistory || [];
-  const snapshot = buildSnapshot({
-    runtime: { state: cockpitRuntimeState, child: !!getRuntimeChild(), url: getRuntimeUrl(), restarting: cockpitRuntimeState === 'restarting', version: runtime.activeVersion, activeVersion: runtime.activeVersion },
-    usage,
-    contextWindow: cfg.contextWindow,
-    cost: costData,
-    monthlyBudget: cfg.monthlyBudget,
-    tasks,
-    history,
-    running: [...scheduledRunning],
-    remote: remote ? { ...remote.status(), enabled: !!cfg.remoteControl, publicMode: cfg.remotePublicMode } : null,
-    shell: { version: APP_VERSION, language: lang(), theme: resolvedTheme(), needsSetup: !fs.existsSync(path.join(dshHomeOf(), '.credentials.yaml')), onboardingComplete: !!cfg.cockpitOnboarded },
-  });
-  cockpitSnapshotCache = { at: now, snapshot };
-  return snapshot;
-}
 
-function invalidateCockpitSnapshot() {
-  cockpitSnapshotCache.at = 0;
-}
 
-async function broadcastCockpitSnapshot() {
-  if (!cockpitWindow || cockpitWindow.isDestroyed()) return;
-  try { cockpitWindow.webContents.send('cockpit:snapshot', await buildCockpitSnapshot()); } catch { /* ignore */ }
-}
 
 /** Keep restored bounds at least partially visible on some display. */
-function safeBounds(saved) {
-  if (!saved) return null;
-  const ok = screen.getAllDisplays().some((d) => {
-    const a = d.workArea;
-    return saved.x < a.x + a.width - 40 && saved.y < a.y + a.height - 40
-      && saved.x + saved.width > a.x + 40 && saved.y + saved.height > a.y + 40;
-  });
-  return ok ? saved : null;
-}
 
-function createSettingsWindow(route) {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    if (route && route.mode) settingsWindow.webContents.send('center:navigate', { mode: route.mode, page: route.page || '', intent: route.intent === 'new-task' ? 'new-task' : '' });
-    settingsWindow.focus();
-    return settingsWindow;
-  }
-  settingsWindow = new BrowserWindow({
-    // 16:10-ish landscape: room for the planned sidebar (208px) + content
-    // column (~680px) per UI-REDESIGN-RESEARCH.md §4.3, instead of the old
-    // narrow tall strip.
-    width: 960,
-    height: 720,
-    minWidth: 760,
-    minHeight: 560,
-    backgroundColor: themeBackground(),
-    title: t(lang(), 'settings.title', { name: APP_NAME }),
-    icon: iconPath(),
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, 'settings-preload.js'),
-    },
-  });
-  const query = route && route.mode ? `?mode=${encodeURIComponent(route.mode)}&page=${encodeURIComponent(route.page || '')}${route.intent === 'new-task' ? '&intent=new-task' : ''}` : '';
-  settingsWindow.loadFile(path.join(__dirname, 'settings.html'), { search: query });
-  settingsWindow.webContents.on('will-navigate', (e) => e.preventDefault());
-  settingsWindow.on('closed', () => {
-    settingsWindow = null;
-    const returnPanel = returnToCockpitPending;
-    returnToCockpitPending = false;
-    cockpitMode = returnPanel ? 'panel' : 'rail';
-    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized()) {
-      createCockpitWindow();
-      showCockpitInactive();
-    }
-  });
-  settingsWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
-    if (level >= 2) log(`[settings:console] ${message} (${sourceId}:${line})`);
-  });
-  log('[shell] settings window opened');
-  return settingsWindow;
-}
 
 function iconPath() {
   if (app.isPackaged) return path.join(process.resourcesPath, 'icon.png');
@@ -1034,8 +768,8 @@ const trayMenu = createTrayMenu({
   peakWindowsOf,
   costPeakStatus: cost.peakStatus,
   quickAskAccelerator: () => quickAskShortcut.current(),
-  isMainWindowAlive: () => !!(mainWindow && !mainWindow.isDestroyed()),
-  toggleDevTools: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.toggleDevTools(); },
+  isMainWindowAlive: () => !!pickDialogParent(),
+  toggleDevTools: toggleMainDevTools,
   quittingFlag: () => quitting,
   setQuitting: (v) => { quitting = v; },
   notify,
@@ -1062,12 +796,6 @@ function createTray() {
   trayMenu.createTray();
 }
 
-function showMain() {
-  if (!mainWindow) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
-}
 
 
 /**
@@ -1103,8 +831,8 @@ function buildAppMenu() {
     {
       label: t(L, 'menu.view'),
       submenu: [
-        { label: t(L, 'menu.reload'), accelerator: 'CmdOrCtrl+R', click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload(); } },
-        { label: t(L, 'menu.devtools'), accelerator: 'CmdOrCtrl+Shift+I', click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.toggleDevTools(); } },
+        { label: t(L, 'menu.reload'), accelerator: 'CmdOrCtrl+R', click: () => reloadMainWindow() },
+        { label: t(L, 'menu.devtools'), accelerator: 'CmdOrCtrl+Shift+I', click: () => toggleMainDevTools() },
         { label: t(L, 'menu.openBrowser'), accelerator: 'CmdOrCtrl+Shift+O', click: () => { const ru = getRuntimeUrl(); if (ru) shell.openExternal(ru); } },
       ],
     },
@@ -1378,7 +1106,7 @@ function registerIpc() {
   });
   ipcMain.handle('shell:get-theme', () => resolvedTheme());
   ipcMain.handle('shell:pick-folder', async (_e, kind) => {
-    const res = await dialog.showOpenDialog(settingsWindow || mainWindow, {
+    const res = await dialog.showOpenDialog(pickDialogParent(), {
       properties: ['openDirectory', 'createDirectory'],
       title: kind === 'workspace'
         ? t(lang(), 'dialog.pickWorkspace')
@@ -1724,9 +1452,9 @@ function registerIpc() {
 
   ipcMain.handle('cockpit:get-snapshot', () => buildCockpitSnapshot());
   ipcMain.handle('cockpit:set-mode', (_e, mode) => {
-    cockpitMode = ['rail', 'peek', 'taskpeek', 'panel', 'onboarding'].includes(mode) ? mode : 'rail';
+    const r = setCockpitMode(mode);
     syncCockpitBounds();
-    return { ok: true, mode: cockpitMode };
+    return r;
   });
   ipcMain.handle('cockpit:set-language', (_e, language) => {
     const value = language === 'en' ? 'en' : 'zh';
@@ -1739,9 +1467,9 @@ function registerIpc() {
   ipcMain.handle('cockpit:move-offset', (_e, dx, dy) => {
     const x = Number(dx); const y = Number(dy);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return { ok: false };
-    cockpitOffset = { x: Math.max(-2000, Math.min(2000, cockpitOffset.x + x)), y: Math.max(-1200, Math.min(1200, cockpitOffset.y + y)) };
+    const r = moveCockpitOffset(x, y);
     syncCockpitBounds();
-    return { ok: true, offset: cockpitOffset };
+    return r;
   });
   ipcMain.handle('cockpit:complete-onboarding', () => {
     settings.patch({ cockpitOnboarded: true });
@@ -1759,19 +1487,8 @@ function registerIpc() {
     return setWorkspace(ws);
   });
   ipcMain.on('cockpit:close', () => hideCockpit());
-  ipcMain.on('center:close', () => { if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close(); });
-  ipcMain.on('center:return-cockpit', () => {
-    if (settingsWindow && !settingsWindow.isDestroyed()) {
-      returnToCockpitPending = true;
-      settingsWindow.close();
-    } else {
-      returnToCockpitPending = false;
-    }
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
-    cockpitMode = 'panel';
-    if (cockpitWindow && !cockpitWindow.isDestroyed()) cockpitWindow.webContents.send('cockpit:mode', 'panel');
-    showCockpitInactive();
-  });
+  ipcMain.on('center:close', () => closeSettingsWindow());
+  ipcMain.on('center:return-cockpit', () => returnToCockpit('panel'));
 
   // long-session center (C3): compaction + AGENTS.md memory files
   ipcMain.handle('shell:compact-now', async () => compactNow());
@@ -2174,15 +1891,17 @@ async function runDshPlugin(args, timeoutMs = 120_000, onTail = null) {
 
 /** Forward plugin-install progress to the settings window (plugin center). */
 function sendMarketProgress(info) {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    try { settingsWindow.webContents.send('plugins:progress', info); } catch { /* ignore */ }
+  const swc = getSettingsWindowWebContents();
+  if (swc) {
+    try { swc.send('plugins:progress', info); } catch { /* ignore */ }
   }
 }
 
 /** Forward skill install/upgrade progress (resolve → download → verify → write). */
 function sendSkillsProgress(info) {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    try { settingsWindow.webContents.send('skills:progress', info); } catch { /* ignore */ }
+  const swc = getSettingsWindowWebContents();
+  if (swc) {
+    try { swc.send('skills:progress', info); } catch { /* ignore */ }
   }
 }
 
@@ -2569,7 +2288,8 @@ async function pluginAction(action, fullName) {
   }
 }
 function pushTokens(stats) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const mw = getMainWindowWebContents();
+  if (!mw) return;
   if (!stats) return; // async collect now drives all callers; no sync fallback
   // The Harness renderer is intentionally untouched. Cockpit consumes the
   // normalized snapshot from its own window instead of receiving injected UI data.
@@ -2603,8 +2323,9 @@ async function compactNow() {
 }
 
 function broadcastCompactStatus() {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    settingsWindow.webContents.send('compact:status', {
+  const swc = getSettingsWindowWebContents();
+  if (swc) {
+    swc.send('compact:status', {
       compacting: compactTracker ? compactTracker.isCompacting() : false,
       sessionRunning,
     });
@@ -3157,7 +2878,7 @@ function stopEventsFeed() {
 }
 
 function windowHidden() {
-  return !mainWindow || !mainWindow.isVisible() || mainWindow.isMinimized();
+  return !hasVisibleMainWindow();
 }
 
 function onTaskDone() {
@@ -3286,7 +3007,7 @@ async function promptInstallShellUpdate(info) {
   if (!autoUpdater) return;
   const L = lang();
   const detail = [t(L, 'updateDialogDetail'), releaseNotesText(info)].filter(Boolean).join('\n\n');
-  const { response } = await dialog.showMessageBox(mainWindow || undefined, {
+  const { response } = await dialog.showMessageBox(pickDialogParent() || undefined, {
     type: 'info',
     buttons: [t(L, 'updateDialogRestart'), t(L, 'updateDialogLater')],
     defaultId: 0,
@@ -3466,7 +3187,7 @@ if (!gotLock) {
       // The guided flow may have just closed its loading window; with no main
       // window open yet, window-all-closed would otherwise quit the app while
       // the runtime is still booting (M15). Hold quit until the window opens.
-      mainWindowPending = true;
+      setMainWindowPending(true);
       spawnRuntime();
     }
     if (process.env.DSH_DESKTOP_OPEN_SETTINGS === '1') createSettingsWindow();
@@ -3545,7 +3266,7 @@ if (!gotLock) {
   });
 
   app.on('window-all-closed', () => {
-    if (mainWindowPending) return; // runtime still booting; the main window opens soon
+    if (isMainWindowPending()) return; // runtime still booting; the main window opens soon
     if (noTray || quitting || !settings.get().trayOnClose) app.quit();
   });
 
@@ -3556,10 +3277,8 @@ if (!gotLock) {
   // if it was actually destroyed.
   app.on('activate', () => {
     if (quitting) return;
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (!mainWindow.isVisible()) mainWindow.show();
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
+    if (hasVisibleMainWindow()) {
+      showMain();
     } else if (getRuntimeUrl()) {
       createWindow(getRuntimeUrl());
     }
