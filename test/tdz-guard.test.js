@@ -56,7 +56,16 @@ test('module exports are fully destructured in main.js (no missing accessors)', 
     const src = read(file);
     const start = src.indexOf(`function ${factoryName}`);
     assert.notStrictEqual(start, -1, `${factoryName} not found in ${file}`);
-    const ret = src.indexOf('return {', start);
+    // brace-balance to the END of the factory, then take the LAST
+    // `return {` inside it — inner helper functions may have their own small
+    // returns (e.g. setCockpitMode's `{ ok, mode }`) which must not win.
+    let depth = 0; let fnEnd = -1;
+    for (let i = start; i < src.length; i++) {
+      if (src[i] === '{') depth++;
+      else if (src[i] === '}') { depth--; if (depth === 0) { fnEnd = i; break; } }
+    }
+    assert.notStrictEqual(fnEnd, -1, `${factoryName} braces unbalanced`);
+    const ret = src.lastIndexOf('return {', fnEnd);
     assert.notStrictEqual(ret, -1, `${factoryName} has no return block`);
     const end = src.indexOf('};', ret);
     const body = src.slice(ret + 'return {'.length, end);

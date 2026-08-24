@@ -435,7 +435,7 @@ function createWindowManager(deps) {
     buildCockpitSnapshot, invalidateCockpitSnapshot, broadcastCockpitSnapshot,
     createSettingsWindow, closeSettingsWindow, returnToCockpit,
     setCockpitMode, moveCockpitOffset,
-    onRuntimeHealthy, hasTray, setLoadingText, showLoadingOnError,
+    onRuntimeHealthy, hasTray,
   };
 }
 

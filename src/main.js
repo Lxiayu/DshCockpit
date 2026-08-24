@@ -369,7 +369,8 @@ const windowManager = createWindowManager({
 });
 const {
   createWindow, showMain, createCockpitWindow, showCockpitInactive, hideCockpit,
-  prepareCockpitForAuxWindow, restoreCockpitRail, scheduleCockpitSync,
+  prepareCockpitForAuxWindow, restoreCockpitRail, syncCockpitBounds, scheduleCockpitSync,
+  getSettingsWindowWebContents,
   cockpitNavigate, createSettingsWindow,
   buildCockpitSnapshot, invalidateCockpitSnapshot, broadcastCockpitSnapshot,
   closeSettingsWindow, returnToCockpit, setCockpitMode, moveCockpitOffset,
