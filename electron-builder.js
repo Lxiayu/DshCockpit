@@ -43,9 +43,23 @@ const config = {
     { from: 'resources/icon.png', to: 'icon.png' },
   ],
   win: {
-    target: [{ target: 'zip', arch: ['x64'] }],
+    // D5: zip = portable/escape hatch; nsis = primary track with in-app
+    // auto-update (electron-updater consumes latest.yml + .exe.blockmap for
+    // MB-level differential upgrades).
+    target: [
+      { target: 'nsis', arch: ['x64'] },
+      { target: 'zip', arch: ['x64'] },
+    ],
     icon: 'resources/icon.png',
     artifactName: `DshCockpit-\${version}${suffix}-win-\${arch}.\${ext}`,
+    // NSIS posture (R10 boundary table): per-user, no UAC, one-click like
+    // Slack/Discord; uninstaller never touches %APPDATA%\dsh-cockpit.
+    nsis: {
+      oneClick: true,
+      perMachine: false,
+      allowToChangeInstallationDirectory: false,
+      deleteAppDataOnUninstall: false,
+    },
   },
   mac: {
     target: [

@@ -64,6 +64,18 @@ jobs:
       - name: E2E smoke (packaged artifact)
         run: node scripts/e2e-smoke.js --app dist/mac-arm64/DshCockpit.app/Contents/MacOS/DshCockpit --timeout 180000
 
+      # D2 slim track: same shell, no bundled runtime seed (~100MB-class zip).
+      # No E2E here — identical shell code already gated by the full artifact.
+      - name: Build slim variant
+        run: node scripts/build.js --mac --arm64 --slim dir
+
+      - name: Generate SHA256SUMS
+        run: |
+          cd dist
+          shasum -a 256 DshCockpit-*-mac-arm64*.zip DshCockpit-*-mac-arm64.dmg latest-mac.yml > SHA256SUMS-mac-arm64.txt 2>/dev/null || \
+          shasum -a 256 DshCockpit-*-mac-arm64*.zip > SHA256SUMS-mac-arm64.txt
+          cat SHA256SUMS-mac-arm64.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: mac-arm64
@@ -71,6 +83,9 @@ jobs:
           path: |
             dist/DshCockpit-*-mac-arm64.dmg
             dist/DshCockpit-*-mac-arm64.zip
+            dist/DshCockpit-*-slim-mac-arm64.zip
+            dist/latest-mac.yml
+            dist/SHA256SUMS-mac-arm64.txt
 
   build-x64:
     name: build x64 mac
@@ -106,6 +121,15 @@ jobs:
       - name: E2E smoke (packaged artifact)
         run: node scripts/e2e-smoke.js --app dist/mac-x64/DshCockpit.app/Contents/MacOS/DshCockpit --timeout 180000
 
+      - name: Build slim variant
+        run: node scripts/build.js --mac --x64 --slim dir
+
+      - name: Generate SHA256SUMS
+        run: |
+          cd dist
+          shasum -a 256 DshCockpit-*-mac-x64*.zip DshCockpit-*-mac-x64.dmg > SHA256SUMS-mac-x64.txt
+          cat SHA256SUMS-mac-x64.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: mac-x64
@@ -113,6 +137,8 @@ jobs:
           path: |
             dist/DshCockpit-*-mac-x64.dmg
             dist/DshCockpit-*-mac-x64.zip
+            dist/DshCockpit-*-slim-mac-x64.zip
+            dist/SHA256SUMS-mac-x64.txt
 
   release:
     name: publish to GitHub Releases
@@ -135,6 +161,9 @@ jobs:
           files: |
             artifacts/DshCockpit-*-mac-arm64.dmg
             artifacts/DshCockpit-*-mac-arm64.zip
+            artifacts/DshCockpit-*-slim-mac-arm64.zip
+            artifacts/latest-mac.yml
+            artifacts/SHA256SUMS-mac-arm64.txt
 
   upload-x64:
     name: attach x64 build to release
@@ -154,3 +183,5 @@ jobs:
           files: |
             artifacts/DshCockpit-*-mac-x64.dmg
             artifacts/DshCockpit-*-mac-x64.zip
+            artifacts/DshCockpit-*-slim-mac-x64.zip
+            artifacts/SHA256SUMS-mac-x64.txt
