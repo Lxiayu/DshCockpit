@@ -61,6 +61,7 @@ const { createCompatStatus } = require('./compat-status'); // R2
 const { pickRuntimeCandidate } = require('./runtime-pick'); // H5 runtime priority
 const { detectCredentialFormatMismatch, readLogTail } = require('./crash-reason'); // H5 crash root cause
 const { createRuntimeLogTailer } = require('./runtime-log-tail'); // boot URL poller (incident-hardened)
+const { createNotificationCenter } = require('./notification-center'); // R6
 
 if (process.env.DSH_DESKTOP_USER_DATA) {
   // must happen before app is ready; keeps logs/state inside the workspace
@@ -301,11 +302,31 @@ function log(line) {
 }
 
 function notify(title, body) {
-  if (Notification.isSupported()) {
-    try { new Notification({ title, body }).show(); } catch { /* ignore */ }
-  }
-  log(`[shell] notify: ${title} — ${body}`);
+  // R6: single egress through the notification hub (kind defaults to system).
+  // The hub decides pass-through/fold/DND and records history; the OS toast
+  // itself fires via the showSystem sink below — same behaviour as before
+  // when every rule is off.
+  nc.enqueue({ kind: 'system', title, body });
 }
+
+/** Kind-annotated egress for the four event families (R6). Event-source
+ * logic is untouched — only the exit function changes. */
+function notifyAs(kind, title, body) {
+  nc.enqueue({ kind, title, body });
+}
+
+// R6 notification hub: OS toast sink + searchable JSONL history under userData
+const nc = createNotificationCenter({
+  getSettings: () => settings.get(),
+  historyFile: () => path.join(app.getPath('userData'), 'notification-history.jsonl'),
+  showSystem: ({ title, body }) => {
+    if (Notification.isSupported()) {
+      try { new Notification({ title, body }).show(); } catch { /* ignore */ }
+    }
+    log(`[shell] notify: ${title} — ${body}`);
+  },
+  log,
+});
 
 // ---------------------------------------------------------------------------
 // binary resolution
@@ -1735,6 +1756,9 @@ function registerIpc() {
     if (out.repaired.length) notify(t(lang(), 'notify.bootRepairDone'), t(lang(), 'notify.bootRepairDoneBody', { items: out.repaired.join(', '), passed: out.report.summary.passed, total: out.report.summary.total }));
     return { ok: true, ...out };
   });
+  // R6 notification hub history (searchable in Settings → Notifications)
+  ipcMain.handle('notifications:list', (_e, query, kind, limit) => ({ ok: true, items: nc.list({ query, kind, limit }) }));
+  ipcMain.handle('notifications:clear', () => nc.clear());
   // R2 upstream compatibility status (read-only)
   ipcMain.handle('compat:status', () => compatStatus.getStatus());
   ipcMain.handle('shell:cost-info', async () => {
@@ -2921,9 +2945,9 @@ function checkBudget(monthCost) {
   budgetNotified.add(key);
   const pct = Math.round((monthCost / budget) * 100);
   if (status === 'exceed') {
-    notify(t(lang(), 'notify.budgetExceed'), t(lang(), 'notify.budgetExceedBody', { pct }));
+    notifyAs('budget', t(lang(), 'notify.budgetExceed'), t(lang(), 'notify.budgetExceedBody', { pct }));
   } else {
-    notify(t(lang(), 'notify.budgetWarn'), t(lang(), 'notify.budgetWarnBody', { pct }));
+    notifyAs('budget', t(lang(), 'notify.budgetWarn'), t(lang(), 'notify.budgetWarnBody', { pct }));
   }
 }
 
@@ -3332,7 +3356,7 @@ async function handleQuickAskSubmit(prompt) {
       logDir: ensureLogDir(),
       prompt: prompt.trim(),
     });
-    notify(t(lang(), 'notify.quickAskDone'), t(lang(), 'notify.quickAskDoneBody', { ok: result.ok ? '✓' : '✗' }));
+    notifyAs('completion', t(lang(), 'notify.quickAskDone'), t(lang(), 'notify.quickAskDoneBody', { ok: result.ok ? '✓' : '✗' }));
     return result;
   } finally {
     quickAskRunning = false;
@@ -3380,7 +3404,7 @@ async function runScheduledTask(task) {
     log(`[scheduler] history write failed: ${e.message}`);
   }
   log(`[scheduler] ${task.name || task.id} finished ok=${result.ok} (${Math.round(result.durationMs / 1000)}s)`);
-  notify(
+  notifyAs('completion',
     t(lang(), 'notify.taskDone'),
     t(lang(), 'notify.scheduledDoneBody', { name: task.name || task.id, ok: result.ok ? '✓' : '✗' })
   );
@@ -3471,7 +3495,7 @@ function onTaskDone() {
   // inside the channel manager; no-ops while no channel is enabled.
   if (channelsMgr) channelsMgr.broadcast({ kind: 'taskDone' });
   if (!windowHidden()) return; // user is watching
-  notify(t(lang(), 'notify.taskDone'), t(lang(), 'notify.taskDoneBody'));
+  notifyAs('completion', t(lang(), 'notify.taskDone'), t(lang(), 'notify.taskDoneBody'));
 }
 
 function onApprovalRequested(frame, rpcId) {
@@ -3489,7 +3513,7 @@ function onApprovalRequested(frame, rpcId) {
     });
   }
   if (!windowHidden()) return;
-  notify(t(lang(), 'notify.approval'), t(lang(), 'notify.approvalBody', { tool }));
+  notifyAs('approval', t(lang(), 'notify.approval'), t(lang(), 'notify.approvalBody', { tool }));
 }
 
 function onQuestionRequested(frame, rpcId) {
@@ -3505,7 +3529,7 @@ function onQuestionRequested(frame, rpcId) {
     });
   }
   if (!windowHidden()) return;
-  notify(t(lang(), 'notify.question'), t(lang(), 'notify.questionBody'));
+  notifyAs('question', t(lang(), 'notify.question'), t(lang(), 'notify.questionBody'));
 }
 
 /**

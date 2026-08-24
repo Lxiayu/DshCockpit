@@ -367,6 +367,7 @@
       <button class="nav-item" data-page="plugins"><span class="ico">🧩</span><span class="txt" data-i18n="nav.plugins">插件</span></button>
       <button class="nav-item" data-page="skills"><span class="ico">✨</span><span class="txt" data-i18n="nav.skills">技能</span></button>
       <button class="nav-item" data-page="tasks"><span class="ico">⏰</span><span class="txt" data-i18n="nav.tasks">任务与自动化</span></button>
+     <button class="nav-item" data-page="notifications"><span class="ico">🔔</span><span class="txt" data-i18n="nav.notifications">通知中心</span></button>
       <button class="nav-item" data-page="remote"><span class="ico">📱</span><span class="txt" data-i18n="nav.remote">手机远程</span></button>
       <button class="nav-item" data-page="channels"><span class="ico">💬</span><span class="txt" data-i18n="nav.channels">渠道</span></button>
       <div class="group-label" data-i18n="group.system">系统</div>
@@ -863,6 +864,60 @@
           <div class="auto-grid" id="auto-tpl"></div>
         </div>
         <div class="note" data-i18n="auto.note">到点后会在后台用无头会话运行该任务的提示词（需已配置 API Key），完成后系统通知并记录到执行历史。</div>
+      </div>
+
+      <!-- ------------------------- page: notifications (R6 通知中心) -->
+      <div class="page" id="page-notifications">
+        <div class="page-head">
+          <h2 data-i18n="nav.notifications">通知中心</h2>
+          <p data-i18n="page.notifications.d">系统通知统一收口：规则、免打扰与可检索历史</p>
+        </div>
+        <div class="card">
+          <h3 data-i18n="notif.rulesTitle">通知规则</h3>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="notif.master">启用通知中心</label><span class="desc" data-i18n="notif.masterHint">关闭后回到旧版直发行为，不再记录历史</span></div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="notificationCenterEnabled" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="notif.dnd">免打扰时段</label><span class="desc" data-i18n="notif.dndHint">时段内只记录不弹窗，支持跨零点（如 23:00-07:00）</span></div>
+            <div class="setting-ctrl">
+              <input type="checkbox" class="toggle" id="notifDndEnabled" style="margin-right:8px" />
+              <input type="text" class="mono" id="notifDndWindow" placeholder="23:00-07:00" style="width:130px" />
+            </div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="notif.fold">同类折叠</label><span class="desc" data-i18n="notif.foldHint">60 秒窗口内相同标题的通知只弹一次（仍会记录）</span></div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="notifFoldEnabled" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="notif.kinds">按类型禁用</label><span class="desc" data-i18n="notif.kindsHint">勾选的类型只记录不弹窗</span></div>
+            <div class="setting-ctrl notif-kinds" id="notif-kinds">
+              <label><input type="checkbox" value="approval" /> <span data-i18n="notif.kindApproval">审批</span></label>
+              <label><input type="checkbox" value="completion" /> <span data-i18n="notif.kindCompletion">完成</span></label>
+              <label><input type="checkbox" value="question" /> <span data-i18n="notif.kindQuestion">提问</span></label>
+              <label><input type="checkbox" value="budget" /> <span data-i18n="notif.kindBudget">预算</span></label>
+              <label><input type="checkbox" value="system" /> <span data-i18n="notif.kindSystem">系统</span></label>
+            </div>
+          </div>
+          <div class="status" id="notif-rules-status"></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="notif.historyTitle">通知历史（最近 500 条）</h3>
+          <div class="btnrow" style="gap:8px">
+            <input type="text" class="mono" id="notif-search" data-i18n-placeholder="notif.searchPh" placeholder="搜索标题 / 正文…" style="flex:1" />
+            <select id="notif-kind-filter" style="width:auto">
+              <option value="" data-i18n="notif.kindAll">全部类型</option>
+              <option value="approval" data-i18n="notif.kindApproval">审批</option>
+              <option value="completion" data-i18n="notif.kindCompletion">完成</option>
+              <option value="question" data-i18n="notif.kindQuestion">提问</option>
+              <option value="budget" data-i18n="notif.kindBudget">预算</option>
+              <option value="system" data-i18n="notif.kindSystem">系统</option>
+            </select>
+            <button class="secondary" id="btn-notif-clear" data-i18n="notif.clear">清空历史</button>
+          </div>
+          <div id="notif-list" aria-live="polite"></div>
+          <div class="status" id="notif-list-status"></div>
+        </div>
       </div>
 
       <!-- ------------------------- page: remote (手机远程控制) -->
@@ -1574,6 +1629,15 @@
       compat_noteSource: '数据来自仓库兼容快报（{date} · {source}）',
       compat_sourceLive: '实时', compat_sourceCache: '缓存',
       compat_noteUnavailable: '无法读取兼容快报：{reason}',
+      nav_notifications: '通知中心', page_notifications_d: '系统通知统一收口：规则、免打扰与可检索历史',
+      notif_rulesTitle: '通知规则', notif_master: '启用通知中心', notif_masterHint: '关闭后回到旧版直发行为，不再记录历史',
+      notif_dnd: '免打扰时段', notif_dndHint: '时段内只记录不弹窗，支持跨零点（如 23:00-07:00）',
+      notif_fold: '同类折叠', notif_foldHint: '60 秒窗口内相同标题的通知只弹一次（仍会记录）',
+      notif_kinds: '按类型禁用', notif_kindsHint: '勾选的类型只记录不弹窗',
+      notif_kindApproval: '审批', notif_kindCompletion: '完成', notif_kindQuestion: '提问', notif_kindBudget: '预算', notif_kindSystem: '系统', notif_kindAll: '全部类型',
+      notif_historyTitle: '通知历史（最近 500 条）', notif_searchPh: '搜索标题 / 正文…', notif_clear: '清空历史',
+      notif_empty: '暂无通知记录。', notif_clearConfirm: '清空全部通知历史？', notif_cleared: '✅ 已清空',
+      notif_rulesOn: '通知中心已启用；规则修改即时生效。', notif_rulesOff: '⚠️ 通知中心已关闭：所有通知直接弹窗，不记录历史。',
     },
     en: {
       title: 'DshCockpit Settings',
@@ -1951,6 +2015,15 @@
       compat_noteSource: 'Data from the repo compat report ({date} · {source})',
       compat_sourceLive: 'live', compat_sourceCache: 'cached',
       compat_noteUnavailable: 'Compat report unavailable: {reason}',
+      nav_notifications: 'Notifications', page_notifications_d: 'Unified system notifications: rules, DND and searchable history',
+      notif_rulesTitle: 'Notification rules', notif_master: 'Enable notification center', notif_masterHint: 'When off, legacy direct-toast behaviour; no history is kept',
+      notif_dnd: 'Do-not-disturb window', notif_dndHint: 'Recorded but silent inside the window; may cross midnight (e.g. 23:00-07:00)',
+      notif_fold: 'Fold identical toasts', notif_foldHint: 'Same-title notifications within 60s toast once (still recorded)',
+      notif_kinds: 'Muted kinds', notif_kindsHint: 'Checked kinds are recorded but never toast',
+      notif_kindApproval: 'Approval', notif_kindCompletion: 'Completion', notif_kindQuestion: 'Question', notif_kindBudget: 'Budget', notif_kindSystem: 'System', notif_kindAll: 'All kinds',
+      notif_historyTitle: 'History (last 500)', notif_searchPh: 'Search title / body…', notif_clear: 'Clear history',
+      notif_empty: 'No notifications recorded yet.', notif_clearConfirm: 'Clear the entire notification history?', notif_cleared: '✅ Cleared',
+      notif_rulesOn: 'Notification center is on; rule changes apply immediately.', notif_rulesOff: '⚠️ Notification center is off: everything toasts directly and nothing is recorded.',
     },
   };
 
@@ -1987,9 +2060,9 @@
   }
 
   // ------------------------------------------------------------- routing
-  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'skills', 'tasks', 'remote', 'channels', 'models', 'longsession', 'data', 'update', 'about'];
+  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'skills', 'tasks', 'notifications', 'remote', 'channels', 'models', 'longsession', 'data', 'update', 'about'];
   const CONTROL_PAGES = new Set(['cost', 'tasks', 'runtime', 'remote', 'plugins', 'skills', 'channels', 'longsession']);
-  const SETTINGS_PAGES = new Set(['general', 'cost', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about']);
+  const SETTINGS_PAGES = new Set(['general', 'cost', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about', 'notifications']);
   const CENTER_INTENTS = new Set(['new-task']);
   const routeParams = new URLSearchParams(location.search);
   let centerMode = routeParams.get('mode') === 'control' ? 'control' : 'settings';
@@ -2060,6 +2133,7 @@
     if (p === 'data') { refreshStorageInfo(); renderSnapshots(); refreshBackupInfo(); }
     if (p === 'about') { refreshDiagnostics(); refreshBootCheck(); }
     if (p === 'update') refreshCompat();
+    if (p === 'notifications') { refreshNotifRulesStatus(); renderNotifHistory(); }
   }
   function consumeCenterIntent(intent) {
     if (CENTER_INTENTS.has(intent) && centerMode === 'control') {
@@ -2140,6 +2214,11 @@
     ['remotePort', 'remotePort', (el) => Math.min(65535, Math.max(1024, Number(el.value) || 31780))],
     ['remoteCompat', 'remoteCompat', (el) => el.checked],
     ['remotePublicMode', 'remotePublicMode', (el) => el.value],
+    // R6 notification center rules
+    ['notificationCenterEnabled', 'notificationCenterEnabled', (el) => el.checked],
+    ['notifDndEnabled', 'notifDndEnabled', (el) => el.checked],
+    ['notifDndWindow', 'notifDndWindow', (el) => el.value.trim()],
+    ['notifFoldEnabled', 'notifFoldEnabled', (el) => el.checked],
   ];
   for (const [id, key, pick] of AUTO_FIELDS) {
     $(id).addEventListener('change', async () => {
@@ -2223,6 +2302,13 @@
     $('registry').value = s.registry;
     $('keepVersions').value = s.keepVersions;
     $('checkUpdatesOnStartup').checked = !!s.checkUpdatesOnStartup;
+    // R6 notification rules
+    $('notificationCenterEnabled').checked = s.notificationCenterEnabled !== false;
+    $('notifDndEnabled').checked = !!s.notifDndEnabled;
+    $('notifDndWindow').value = s.notifDndWindow || '23:00-07:00';
+    $('notifFoldEnabled').checked = !!s.notifFoldEnabled;
+    const disabledKinds = new Set(s.notifKindsDisabled || []);
+    document.querySelectorAll('#notif-kinds input').forEach((cb) => { cb.checked = disabledKinds.has(cb.value); });
     $('workspace').value = s.workspace || '';
     $('dshHome').value = s.dshHome || '';
     $('port').value = s.port;
@@ -3567,6 +3653,58 @@
       dbg(`refreshCompat: ok source=${s.source} compatible=${s.compatible}`);
     } catch (e) { dbg(`refreshCompat: failed ${e.message}`); }
   }
+
+  // --------------------------------------------- notification center (R6)
+  const NOTIF_KIND_BADGE = { approval: '🔔', completion: '✅', question: '❓', budget: '💰', system: '⚙️' };
+  const NOTIF_KIND_LABEL = {
+    approval: 'notif.kindApproval',
+    completion: 'notif.kindCompletion',
+    question: 'notif.kindQuestion',
+    budget: 'notif.kindBudget',
+    system: 'notif.kindSystem',
+  };
+  let notifSearchTimer = null;
+  async function renderNotifHistory() {
+    try {
+      const q = ($('notif-search').value || '').trim();
+      const kind = $('notif-kind-filter').value || '';
+      const r = await window.dshShell.notificationsList(q, kind, 100);
+      const items = (r && r.items) || [];
+      $('notif-list').innerHTML = items.length
+        ? items.map((n) => `<div class="kv" style="align-items:flex-start"><span style="white-space:nowrap">${NOTIF_KIND_BADGE[n.kind] || '•'} ${escapeHtml(tr(NOTIF_KIND_LABEL[n.kind] || 'notif.kindSystem'))}<br><span style="opacity:.6;font-size:11px">${escapeHtml(new Date(n.ts).toLocaleString())}</span></span><b style="font-weight:400;font-size:12px;text-align:right;word-break:break-word">${n.shown ? '' : '🔕 '}${escapeHtml(n.title)}${n.body ? '<br>' + escapeHtml(n.body) : ''}</b></div>`).join('')
+        : `<div class="status">${tr('notif.empty')}</div>`;
+    } catch (e) { dbg(`renderNotifHistory: failed ${e.message}`); }
+  }
+  function refreshNotifRulesStatus() {
+    const on = $('notificationCenterEnabled').checked;
+    setStatus($('notif-rules-status'), on ? tr('notif.rulesOn') : tr('notif.rulesOff'), on ? '' : 'warn');
+  }
+  // per-kind disable checkboxes save the array as a whole
+  document.querySelectorAll('#notif-kinds input').forEach((cb) => {
+    cb.addEventListener('change', async () => {
+      const disabled = [...document.querySelectorAll('#notif-kinds input:checked')].map((x) => x.value);
+      try {
+        const saved = await window.dshShell.saveSettings({ notifKindsDisabled: disabled });
+        if (current) current.notifKindsDisabled = saved.notifKindsDisabled;
+      } catch (e) { flash(tr('saved_fail') + e.message); }
+    });
+  });
+  ['notificationCenterEnabled', 'notifDndEnabled', 'notifFoldEnabled', 'notifDndWindow'].forEach((id) => {
+    $(id).addEventListener('change', refreshNotifRulesStatus);
+  });
+  $('notif-search').addEventListener('input', () => {
+    clearTimeout(notifSearchTimer);
+    notifSearchTimer = setTimeout(renderNotifHistory, 250);
+  });
+  $('notif-kind-filter').addEventListener('change', renderNotifHistory);
+  $('btn-notif-clear').addEventListener('click', async () => {
+    if (!confirm(tr('notif.clearConfirm'))) return;
+    try {
+      await window.dshShell.notificationsClear();
+      await renderNotifHistory();
+      setStatus($('notif-list-status'), tr('notif.cleared'));
+    } catch (e) { setStatus($('notif-list-status'), tr('control.operationFailed', { reason: e.message }), 'warn'); }
+  });
 
   // ---------------------------------------------------------- plugin center
   function escapeHtml(s) {

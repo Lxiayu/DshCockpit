@@ -46,6 +46,9 @@ contextBridge.exposeInMainWorld('dshShell', {
   bootRepair: (ids) => ipcRenderer.invoke('boot:repair', ids),
   // R2 upstream compatibility status (Settings → Updates, read-only)
   compatStatus: () => ipcRenderer.invoke('compat:status'),
+  // R6 notification center history
+  notificationsList: (query, kind, limit) => ipcRenderer.invoke('notifications:list', query, kind, limit),
+  notificationsClear: () => ipcRenderer.invoke('notifications:clear'),
   costInfo: () => ipcRenderer.invoke('shell:cost-info'),
   balanceInfo: () => ipcRenderer.invoke('shell:balance-info'),
   balanceRefresh: () => ipcRenderer.invoke('shell:balance-refresh'),
