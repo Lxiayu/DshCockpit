@@ -409,6 +409,7 @@ const supervisor = createRuntimeSupervisor({
   enterSafeMode,
   upgradeDialog: (message) => showCredentialUpgradeDialog(message),
   isCredentialFormatIssue: (logPath) => detectCredentialFormatMismatch(readLogTail(logPath)),
+  bootTimingFile: () => path.join(app.getPath('userData'), 'diagnostics', 'boot-timing.json'),
   notify,
   upgradeNow: () => runUpdateCheck(true),
   applyPendingUpdate,
@@ -3251,7 +3252,14 @@ if (!gotLock) {
     // R1: automatic boot self-check shortly after launch (C-6 switch; manual
     // reruns from Settings → About ignore the switch)
     if (runOnStartup(settings.get())) {
-      setTimeout(() => { if (!quitting) bootCheck.runChecks().catch((e) => log(`[boot-check] failed: ${e.message}`)); }, 4_000);
+      setTimeout(() => {
+        if (quitting) return;
+        bootCheck.runChecks().then((report) => {
+          // D6: surface the self-check result on the splash instead of dead air
+          if (!isMainWindowPending()) return;
+          setLoading(t(lang(), 'loading.selfcheck', { p: report.summary.passed, t: report.summary.total }));
+        }).catch((e) => log(`[boot-check] failed: ${e.message}`));
+      }, 4_000);
     }
 
     // R5: weekly auto-generation — check every 30 min; fires on Monday

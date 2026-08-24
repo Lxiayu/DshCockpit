@@ -81,12 +81,14 @@ function createWindowManager(deps) {
     // compaction, …) disabled forever.
     let mainShown = false;
     let mainShowFallbackTimer = null;
+    const createT0 = Date.now();
     const showMainWhenReady = () => {
       if (mainShown || !mainWindow || mainWindow.isDestroyed()) return;
       mainShown = true;
       clearTimeout(mainShowFallbackTimer);
       mainWindow.show();
       closeLoading();
+      log(`[perf] main window paintable in ${Date.now() - createT0}ms`);
       startDeferredServices();
     };
     mainWindow.once('ready-to-show', showMainWhenReady);

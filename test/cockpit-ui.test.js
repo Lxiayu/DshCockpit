@@ -218,7 +218,9 @@ test('no free references to state moved into extracted modules (A1 guard)', () =
     .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
     .replace(/`(?:[^`\\]|\\.)*`/g, '``')
     .replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
-  for (const name of ['tray', 'runtimeChild', 'runtimeUrl', 'runtimeLogPath', 'urlPollTimer', 'crashGuard', 'lastCrashAt']) {
+  for (const name of ['tray', 'runtimeChild', 'runtimeUrl', 'runtimeLogPath', 'urlPollTimer', 'crashGuard', 'lastCrashAt',
+    'mainWindowPending', 'settingsWindow', 'cockpitWindow', 'cockpitMode', 'cockpitOffset',
+    'cockpitHiddenForAuxWindow', 'returnToCockpitPending', 'cockpitSnapshotCache', 'cockpitSyncTimer', 'windowStateSaveTimer']) {
     const uses = [...code.matchAll(new RegExp(`(?<![\\w$.])${name}(?![\\w$])`, 'g'))];
     assert.deepStrictEqual(uses.map(() => name), [],
       `main.js still references "${name}" as a free variable — that state moved to an extracted module (tray-menu / runtime-supervisor / runtime-log-tail); use the injected accessor instead`);

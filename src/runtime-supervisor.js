@@ -125,6 +125,7 @@ function createRuntimeSupervisor(deps) {
     isQuitting = () => false,
     recordCrash = () => {}, enterSafeMode = () => {},
     upgradeDialog = () => {}, isCredentialFormatIssue = () => false,
+    bootTimingFile = null, // () => path — A3 boot baselines land here
     notify,
   } = deps;
 
@@ -169,6 +170,10 @@ function createRuntimeSupervisor(deps) {
 
   function spawnRuntime() {
     const generation = stateController.begin('starting');
+    // A3: boot timing baselines (spawn -> URL -> healthy) persisted to
+    // userData/diagnostics/boot-timing.json so regressions have numbers.
+    const bootTiming = { spawnAt: new Date().toISOString(), urlMs: null, healthyMs: null, url: null };
+    const spawnT0 = Date.now();
     const dshBin = resolveDshBin();
     if (!dshBin) {
       dialog.showErrorBox(appName, t(lang(), 'dialog.noRuntime'));
@@ -221,6 +226,8 @@ function createRuntimeSupervisor(deps) {
         runtimeUrl = m[1];
         clearTimeout(urlWatchdogTimer);
         crashGuard.reset(); // a healthy boot resets the auto-restart counter
+        bootTiming.urlMs = Date.now() - spawnT0;
+        bootTiming.url = runtimeUrl;
         log(`[shell] runtime URL: ${runtimeUrl}`);
         onRemoteUrl(runtimeUrl); // phone gateway follows the runtime port
         const bootUrl = runtimeUrl;
@@ -231,6 +238,14 @@ function createRuntimeSupervisor(deps) {
             return;
           }
           stateController.transition('healthy', generation);
+          bootTiming.healthyMs = Date.now() - spawnT0;
+          if (bootTimingFile) {
+            try {
+              fs.mkdirSync(path.dirname(bootTimingFile()), { recursive: true });
+              fs.writeFileSync(bootTimingFile(), JSON.stringify(bootTiming, null, 2));
+            } catch (err) { log(`[shell] boot timing write failed: ${err.message}`); }
+          }
+          log(`[perf] boot: URL in ${bootTiming.urlMs}ms, healthy in ${bootTiming.healthyMs}ms`);
           startEventsFeed();
           onHealthy(bootUrl);
         });
