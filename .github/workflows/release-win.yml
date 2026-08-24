@@ -55,6 +55,18 @@ jobs:
 
       - run: node scripts/build.js --win --x64 --publish never
 
+      # A2 artifact-level gate: cold-boot the packaged exe from the extracted
+      # zip layout, wait for the boot URL line, probe HTTP 200 — a red step
+      # blocks the artifact upload.
+      - name: E2E smoke (packaged artifact)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/e2e-app | Out-Null
+          $zip = (Get-ChildItem dist -Filter 'DshCockpit-*-win-x64.zip' | Select-Object -First 1).FullName
+          tar -xf $zip -C dist/e2e-app
+          $exe = (Get-ChildItem dist/e2e-app -Recurse -Filter DshCockpit.exe | Select-Object -First 1).FullName
+          node scripts/e2e-smoke.js --app $exe --timeout 240000
+
       - uses: actions/upload-artifact@v4
         with:
           name: win-x64

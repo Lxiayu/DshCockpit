@@ -59,6 +59,11 @@ jobs:
 
       - run: node scripts/build.js --mac --arm64 --publish never
 
+      # A2 artifact-level gate: cold-boot the packaged app, wait for the boot
+      # URL line, probe HTTP 200 — a red step blocks the artifact upload.
+      - name: E2E smoke (packaged artifact)
+        run: node scripts/e2e-smoke.js --app dist/mac-arm64/DshCockpit.app/Contents/MacOS/DshCockpit --timeout 180000
+
       - uses: actions/upload-artifact@v4
         with:
           name: mac-arm64
@@ -97,6 +102,9 @@ jobs:
         run: node scripts/prepare-runtime.js --version ${{ steps.rtv.outputs.runtime_version }}
 
       - run: node scripts/build.js --mac --x64 --publish never
+
+      - name: E2E smoke (packaged artifact)
+        run: node scripts/e2e-smoke.js --app dist/mac-x64/DshCockpit.app/Contents/MacOS/DshCockpit --timeout 180000
 
       - uses: actions/upload-artifact@v4
         with:
