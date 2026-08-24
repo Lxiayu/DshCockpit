@@ -67,6 +67,7 @@ const { createWeeklyReport } = require('./weekly-report'); // R5
 const { createCrashLoopGuard, armWatchdog, createRuntimeSupervisor } = require('./runtime-supervisor'); // A1 supervision primitives
 const { createTrayMenu } = require('./tray-menu'); // A1 tray extraction
 const { createAuxWindows } = require('./aux-windows'); // A1 aux window extraction
+const { createWindowManager } = require('./window-manager'); // A1 step 5
 
 if (process.env.DSH_DESKTOP_USER_DATA) {
   // must happen before app is ready; keeps logs/state inside the workspace
@@ -344,7 +345,8 @@ const windowManager = createWindowManager({
   log, t, lang,
   settingsGet: () => settings.get(),
   noTray,
-  getRuntimeUrl, getRuntimeChild,
+  getRuntimeUrl: () => getRuntimeUrl(),
+  getRuntimeChild: () => getRuntimeChild(),
   traySetTooltip: (text) => trayMenu.setTooltip(text),
   closeLoading,
   startDeferredServices,
@@ -372,6 +374,7 @@ const {
   buildCockpitSnapshot, invalidateCockpitSnapshot, broadcastCockpitSnapshot,
   closeSettingsWindow, returnToCockpit, setCockpitMode, moveCockpitOffset,
   reloadMainWindow, toggleMainDevTools, pickDialogParent, isMainWindowPending,
+  setMainWindowPending, getMainWindowWebContents, hasVisibleMainWindow,
   onRuntimeHealthy,
 } = windowManager;
 
@@ -3042,6 +3045,13 @@ function checkShellUpdate(notifyUser) {
 // ---------------------------------------------------------------------------
 // app lifecycle
 // ---------------------------------------------------------------------------
+// Unhandled rejections must be VISIBLE: a rejected whenReady chain used to
+// fail silently (no window, no logs) during the A1 extraction.
+process.on('unhandledRejection', (reason) => {
+  const msg = reason && reason.message ? reason.message : String(reason);
+  try { log('[shell] unhandled rejection: ' + msg); }
+  catch { console.error('[shell] unhandled rejection:', msg); }
+});
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();

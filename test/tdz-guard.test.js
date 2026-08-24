@@ -47,3 +47,51 @@ test('top-level factory blocks have no TDZ / missing-symbol references', () => {
   assert.deepStrictEqual(issues, [],
     'load-time reference errors found in top-level factory blocks:\n' + issues.join('\n'));
 });
+
+test('module exports are fully destructured in main.js (no missing accessors)', () => {
+  const read = (f) => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8');
+  const mainSrc = read('main.js');
+
+  function returnKeys(file, factoryName) {
+    const src = read(file);
+    const start = src.indexOf(`function ${factoryName}`);
+    assert.notStrictEqual(start, -1, `${factoryName} not found in ${file}`);
+    const ret = src.indexOf('return {', start);
+    assert.notStrictEqual(ret, -1, `${factoryName} has no return block`);
+    const end = src.indexOf('};', ret);
+    const body = src.slice(ret + 'return {'.length, end);
+    return body.split('\n').flatMap((l) => l.split(','))
+      .map((x) => x.trim())
+      .filter((x) => /^[A-Za-z_$][\w$]*$/.test(x));
+  }
+
+  function destructureBlock(mainSrc, moduleName) {
+    const marker = `} = ${moduleName};`;
+    const end = mainSrc.indexOf(marker);
+    assert.notStrictEqual(end, -1, `main.js never destructures ${moduleName}`);
+    const start = mainSrc.lastIndexOf('const {', end);
+    return mainSrc.slice(start + 'const {'.length, end);
+  }
+
+  // An export is satisfied when it is EITHER destructured in main.js OR used
+  // through the qualified moduleName.key form (both resolve at runtime).
+  function satisfied(mainSrc, moduleName, key) {
+    return new RegExp(`\\b${key}\\b`).test(destructureBlock(mainSrc, moduleName))
+      || new RegExp(`\\b${moduleName}\\.${key}\\b`).test(mainSrc);
+  }
+
+  const wmKeys = returnKeys('window-manager.js', 'createWindowManager');
+  const wmMissing = wmKeys.filter((k) => !satisfied(mainSrc, 'windowManager', k));
+  assert.deepStrictEqual(wmMissing, [],
+    `window-manager exports missing from the main.js destructure (calls would throw at runtime): ${wmMissing.join(', ')}`);
+
+  const auxKeys = returnKeys('aux-windows.js', 'createAuxWindows');
+  const auxMissing = auxKeys.filter((k) => !satisfied(mainSrc, 'auxWindows', k));
+  assert.deepStrictEqual(auxMissing, [],
+    `aux-windows exports missing from the main.js destructure: ${auxMissing.join(', ')}`);
+
+  const supKeys = returnKeys('runtime-supervisor.js', 'createRuntimeSupervisor');
+  const supMissing = supKeys.filter((k) => !satisfied(mainSrc, 'supervisor', k));
+  assert.deepStrictEqual(supMissing, [],
+    `runtime-supervisor exports missing from the main.js destructure: ${supMissing.join(', ')}`);
+});

@@ -422,7 +422,7 @@ function createRuntimeSupervisor(deps) {
 
   function getRuntimeChild() { return runtimeChild; }
 
-  return { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeLogPath, getRuntimeChild, waitForHealth, crashGuard };
+  return { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeLogPath, getRuntimeChild };
 }
 
 module.exports = {
