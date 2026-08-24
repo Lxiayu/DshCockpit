@@ -180,11 +180,13 @@ test('Cockpit rail exposes a bordered, wide drag hit area with pointer-capture c
 
 test('startup keeps the loading surface until the real page is ready and uses packaged assets', () => {
   const main = read('main.js');
+  const aux = read('aux-windows.js'); // A1: splash construction moved here
   const loading = read('loading.html');
-  assert.match(main, /loadingWindow = new BrowserWindow\(\{[\s\S]*show:\s*false/);
-  assert.match(main, /loadingWindow\.once\('ready-to-show',/);
+  assert.match(aux, /loadingWindow = new BrowserWindow\(\{[\s\S]*show:\s*false/);
+  assert.match(aux, /loadingWindow\.once\('ready-to-show',/);
   assert.match(main, /mainWindow\.once\('ready-to-show',/);
-  assert.match(main, /did-fail-load/);
+  assert.match(main, /closeLoading\(\)/); // splash closes when the main window paints
+  assert.match(aux, /did-fail-load/);
   assert.match(loading, /src="assets\/cockpit-logo\.jpg"/);
 });
 
@@ -327,8 +329,10 @@ test('cost snapshots reuse the last calculation for the same stats object', () =
 
 test('auxiliary Cockpit windows restore the rail after they close', () => {
   const main = read('main.js');
-  assert.match(main, /quickAskWindow\.on\('closed',[\s\S]*?restoreCockpitRail\(\)/);
-  assert.match(main, /searchWindow\.on\('closed',[\s\S]*?restoreCockpitRail\(\)/);
+  const aux = read('aux-windows.js'); // A1: quickask/search construction moved here
+  assert.match(aux, /quickAskWindow\.on\('closed',[\s\S]*?restoreCockpitRail\(\)/);
+  assert.match(aux, /searchWindow\.on\('closed',[\s\S]*?restoreCockpitRail\(\)/);
+  assert.match(main, /restoreCockpitRail,/); // injected into the aux factory
   assert.match(main, /function restoreCockpitRail\(\)/);
 });
 
@@ -347,7 +351,11 @@ test('Quick Ask shutdown releases only its tracked accelerator', () => {
 
 test('Cockpit rail visibility is guarded across main-window restore and auxiliary focus', () => {
   const main = read('main.js');
+  const aux = read('aux-windows.js');
   assert.match(main, /mainWindow\.on\('show',[\s\S]*?showCockpitInactive\(\)/);
-  assert.match(main, /function showCockpitInactive\(\)[\s\S]*?quickAskWindow && !quickAskWindow\.isDestroyed\(\)/);
-  assert.match(main, /function showCockpitInactive\(\)[\s\S]*?searchWindow && !searchWindow\.isDestroyed\(\)/);
+  // A1: the guards now query the aux module (hasQuickAsk/hasSearch)
+  assert.match(aux, /function hasQuickAsk\(\)/);
+  assert.match(aux, /function hasSearch\(\)/);
+  assert.match(main, /auxWindows\.hasQuickAsk\(\)/);
+  assert.match(main, /auxWindows\.hasSearch\(\)/);
 });

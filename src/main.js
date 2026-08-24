@@ -66,6 +66,7 @@ const { buildCacheEconomics, pricingFromSettings } = require('./cache-economics'
 const { createWeeklyReport } = require('./weekly-report'); // R5
 const { createCrashLoopGuard, armWatchdog, createRuntimeSupervisor } = require('./runtime-supervisor'); // A1 supervision primitives
 const { createTrayMenu } = require('./tray-menu'); // A1 tray extraction
+const { createAuxWindows } = require('./aux-windows'); // A1 aux window extraction
 
 if (process.env.DSH_DESKTOP_USER_DATA) {
   // must happen before app is ready; keeps logs/state inside the workspace
@@ -88,14 +89,11 @@ let eventsFeedLiveLogged = false;
 let windowStateSaveTimer = null;
 let lastCostUpdateAt = 0;
 let latestCostSnapshot = { stats: null, key: '', data: null };
-let quickAskWindow = null;
 let quickAskRunning = false;
-let searchWindow = null;
 let scheduler = null;
 let remote = null; // phone remote-control gateway (constructed after app ready)
 let publicRemote = null; // C7: Tailscale detection + cloudflared quick tunnel helper
 let channelsMgr = null; // IM channels hub (C5 skeleton; constructed after app ready)
-let loadingWindow = null;
 let trayPeakTimer = null; // 1-minute tray refresh for the peak/off-peak countdown
 let balanceMonitor = null; // official balance poller (constructed after app ready)
 let balanceTimer = null; // 5-minute fallback poll for the balance monitor
@@ -324,6 +322,25 @@ const nc = createNotificationCenter({
   },
   log,
 });
+
+// A1: auxiliary windows extracted to src/aux-windows.js (loading splash,
+// Quick Ask, session search). Cockpit coordination stays injected here.
+const auxWindows = createAuxWindows({
+  BrowserWindow,
+  themeBackground,
+  prepareCockpitForAuxWindow,
+  restoreCockpitRail,
+  appVersion: () => app.getVersion(),
+  onLoadingError: (code, description) => {
+    setLoading(t(lang(), 'loading.failed', { msg: description || code }));
+  },
+  log,
+});
+const {
+  createQuickAsk, openQuickAsk,
+  openSearchWindow,
+  createLoadingWindow, setLoading, closeLoading, showLoadingOnError,
+} = auxWindows;
 
 // A1 step 3: full runtime lifecycle supervision extracted from main.js.
 // The deps object is the explicit coupling surface between the shell and the
@@ -689,7 +706,7 @@ function createWindow(url) {
     mainShown = true;
     clearTimeout(mainShowFallbackTimer);
     mainWindow.show();
-    if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.close();
+    closeLoading();
     startDeferredServices();
   };
   mainWindow.once('ready-to-show', showMainWhenReady);
@@ -708,7 +725,7 @@ function createWindow(url) {
       setTimeout(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(url); }, 1_000);
     } else {
       setLoading(t(lang(), 'loading.failed', { msg: description || code }));
-      if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.show();
+      showLoadingOnError();
     }
   });
   mainWindow.on('close', (e) => {
@@ -777,8 +794,8 @@ function showCockpitInactive() {
   if (!mainWindow.isVisible() || mainWindow.isMinimized()) return;
   // Never place the rail over an active auxiliary or configuration window.
   if (settingsWindow && !settingsWindow.isDestroyed()) return;
-  if (quickAskWindow && !quickAskWindow.isDestroyed()) return;
-  if (searchWindow && !searchWindow.isDestroyed()) return;
+  if (auxWindows.hasQuickAsk()) return;
+  if (auxWindows.hasSearch()) return;
   syncCockpitBounds();
   try { cockpitWindow.showInactive(); } catch { cockpitWindow.show(); }
 }
@@ -802,8 +819,8 @@ function restoreCockpitRail() {
   if (!cockpitHiddenForAuxWindow) return;
   // Do not reveal the rail underneath another auxiliary or settings window.
   if (settingsWindow && !settingsWindow.isDestroyed()) return;
-  if (quickAskWindow && !quickAskWindow.isDestroyed()) return;
-  if (searchWindow && !searchWindow.isDestroyed()) return;
+  if (auxWindows.hasQuickAsk()) return;
+  if (auxWindows.hasSearch()) return;
   cockpitHiddenForAuxWindow = false;
   cockpitMode = 'rail';
   if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMinimized()) return;
@@ -1531,7 +1548,7 @@ function registerIpc() {
   ipcMain.handle('shell:diagnostics-info', () => diagnosticsInfo());
   ipcMain.handle('shell:open-diagnostics', () => shell.openPath(diagnosticsDir()));
   ipcMain.handle('quickask:submit', (_e, prompt) => handleQuickAskSubmit(prompt));
-  ipcMain.on('quickask:close', () => { if (quickAskWindow) quickAskWindow.close(); });
+  ipcMain.on('quickask:close', () => auxWindows.closeQuickAsk());
   ipcMain.handle('shell:scheduled-list', () => ({
     tasks: settings.get().scheduledTasks || [],
     running: [...scheduledRunning],
@@ -1703,7 +1720,7 @@ function registerIpc() {
     if (typeof text === 'string' && text.length > 0 && text.length <= 4096) clipboard.writeText(text);
     return null;
   });
-  ipcMain.on('search:close', () => { if (searchWindow) searchWindow.close(); });
+  ipcMain.on('search:close', () => auxWindows.closeSearchWindow());
 
   ipcMain.handle('cockpit:get-snapshot', () => buildCockpitSnapshot());
   ipcMain.handle('cockpit:set-mode', (_e, mode) => {
@@ -2885,136 +2902,17 @@ function diagnosticsInfo() {
 // ---------------------------------------------------------------------------
 // Quick Ask (global hotkey -> background headless run)
 // ---------------------------------------------------------------------------
-function createQuickAsk() {
-  if (quickAskWindow && !quickAskWindow.isDestroyed()) {
-    quickAskWindow.show();
-    quickAskWindow.focus();
-    return quickAskWindow;
-  }
-  quickAskWindow = new BrowserWindow({
-    width: 460,
-    height: 190,
-    frame: false,
-    alwaysOnTop: true,
-    resizable: false,
-    skipTaskbar: true,
-    show: false,
-    backgroundColor: themeBackground(),
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, 'quickask-preload.js'),
-    },
-  });
-  quickAskWindow.loadFile(path.join(__dirname, 'quickask.html'));
-  quickAskWindow.webContents.on('will-navigate', (e) => e.preventDefault());
-  quickAskWindow.once('ready-to-show', () => quickAskWindow.show());
-  quickAskWindow.on('closed', () => {
-    quickAskWindow = null;
-    restoreCockpitRail();
-  });
-  return quickAskWindow;
-}
 
-function openQuickAsk() {
-  prepareCockpitForAuxWindow();
-  return createQuickAsk();
-}
 
-function createSearchWindow() {
-  if (searchWindow && !searchWindow.isDestroyed()) {
-    searchWindow.show();
-    searchWindow.focus();
-    return searchWindow;
-  }
-  searchWindow = new BrowserWindow({
-    width: 520,
-    height: 420,
-    frame: false,
-    alwaysOnTop: true,
-    resizable: false,
-    skipTaskbar: true,
-    show: false,
-    backgroundColor: themeBackground(),
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, 'search-preload.js'),
-    },
-  });
-  searchWindow.loadFile(path.join(__dirname, 'search.html'));
-  searchWindow.webContents.on('will-navigate', (e) => e.preventDefault());
-  searchWindow.once('ready-to-show', () => searchWindow.show());
-  searchWindow.on('closed', () => {
-    searchWindow = null;
-    restoreCockpitRail();
-  });
-  return searchWindow;
-}
 
-function openSearchWindow() {
-  prepareCockpitForAuxWindow();
-  return createSearchWindow();
-}
+
+
 
 // ---------------------------------------------------------------------------
 // guided first run (no runtime anywhere: install from the registry)
 // ---------------------------------------------------------------------------
-let pendingLoadingText = null;
 
-function createLoadingWindow() {
-  if (loadingWindow && !loadingWindow.isDestroyed()) { loadingWindow.focus(); return loadingWindow; }
-  loadingWindow = new BrowserWindow({
-    width: 480,
-    height: 260,
-    frame: false,
-    resizable: false,
-    show: false,
-    backgroundColor: themeBackground(), // cover the first paint; the page bg matches
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, 'loading-preload.js'),
-    },
-  });
-  loadingWindow.loadFile(path.join(__dirname, 'loading.html'));
-  loadingWindow.webContents.on('will-navigate', (e) => e.preventDefault());
-  loadingWindow.once('ready-to-show', () => {
-    if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.show();
-  });
-  loadingWindow.webContents.on('did-fail-load', (_event, code, description) => {
-    log(`[shell] loading window failed to load (${code}): ${description}`);
-    setLoading(t(lang(), 'loading.failed', { msg: description || code }));
-  });
-  // re-send the latest text once the page is ready (setLoading may have been
-  // called before the renderer registered its IPC listener)
-  loadingWindow.webContents.once('did-finish-load', () => {
-    if (loadingWindow && !loadingWindow.isDestroyed()) {
-      if (pendingLoadingText) loadingWindow.webContents.send('loading:progress', pendingLoadingText);
-      loadingWindow.webContents.send('loading:meta', { version: app.getVersion() });
-      // `ready-to-show` is the normal path; this fallback covers older
-      // Electron/Windows GPU combinations that never emit it for a frameless
-      // window even though the document is fully loaded.
-      if (!loadingWindow.isVisible()) loadingWindow.show();
-    }
-  });
-  loadingWindow.on('closed', () => { loadingWindow = null; pendingLoadingText = null; });
-  return loadingWindow;
-}
 
-function setLoading(text) {
-  pendingLoadingText = text;
-  try {
-    if (loadingWindow && !loadingWindow.isDestroyed() && !loadingWindow.webContents.isDestroyed()) {
-      loadingWindow.webContents.send('loading:progress', text);
-    }
-  } catch (err) {
-    log(`[shell] loading progress delivery skipped: ${err.message}`);
-  }
-}
 
 /**
  * Find the runtime bundled into the installer (resources/runtime/<version>).
@@ -3089,7 +2987,7 @@ async function ensureRuntimeWithGuide() {
     await manager.activate(target);
     log(`[shell] guided first-run: installed runtime ${target} from the registry`);
     setLoading(t(lang(), 'loading.done'));
-    setTimeout(() => { if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.close(); }, 800);
+    setTimeout(() => { closeLoading(); }, 800);
     return true;
   } catch (err) {
     log(`[shell] guided first-run failed: ${err.message}`);
