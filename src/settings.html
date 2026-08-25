@@ -1708,7 +1708,14 @@
       notif_historyTitle: '通知历史（最近 500 条）', notif_searchPh: '搜索标题 / 正文…', notif_clear: '清空历史',
       notif_empty: '暂无通知记录。', notif_clearConfirm: '清空全部通知历史？', notif_cleared: '✅ 已清空',
       notif_rulesOn: '通知中心已启用；规则修改即时生效。', notif_rulesOff: '⚠️ 通知中心已关闭：所有通知直接弹窗，不记录历史。',
-      nav_weekly: 'Agent 周报', page_weekly_d: 'Wrapped 风格的每周使用卡片：生成、分享、推送到 IM',
+      nav_weekly: 'Agent 周报',
+      channels_lastInbound: '最近消息 {time}', channels_lastInboundPreview: '（{preview}…）',
+      channels_lastError: '最后错误：{err}', channels_noDiagnostics: '暂无诊断信息',
+      channels_feishuChecklistTitle: '飞书后台检查清单（收不到消息先看这里）',
+      channels_feishuCheck1: '事件与回调 → 订阅方式 = 使用长连接接收事件（WebSocket），并保存',
+      channels_feishuCheck2: '事件订阅包含 im.message.receive_v1',
+      channels_feishuCheck3: '权限包含 im:message:send_as_bot',
+      channels_feishuCheck4: '应用已创建版本并发布（未发布 = 收不到任何事件）', page_weekly_d: 'Wrapped 风格的每周使用卡片：生成、分享、推送到 IM',
       card_shellUpdate: '桌面壳更新', card_runtimeUpdate: 'Harness 运行时更新',
       shellUpdate_version: '当前壳版本', shellAutoUpdate_hint: '启动与每 4 小时自动检查；发现新版本自动下载，退出时安装',
       shellUpdate_check: '立即检查壳更新', shellUpdate_checking: '⏳ 正在检查…', shellUpdate_checkDone: '✅ 已触发检查，结果将通过系统通知告知。',
@@ -2109,7 +2116,14 @@
       notif_historyTitle: 'History (last 500)', notif_searchPh: 'Search title / body…', notif_clear: 'Clear history',
       notif_empty: 'No notifications recorded yet.', notif_clearConfirm: 'Clear the entire notification history?', notif_cleared: '✅ Cleared',
       notif_rulesOn: 'Notification center is on; rule changes apply immediately.', notif_rulesOff: '⚠️ Notification center is off: everything toasts directly and nothing is recorded.',
-      nav_weekly: 'Agent Weekly', page_weekly_d: 'A Wrapped-style weekly card: generate, share, push to IM',
+      nav_weekly: 'Agent Weekly',
+      channels_lastInbound: 'Last message {time}', channels_lastInboundPreview: '({preview}…)',
+      channels_lastError: 'Last error: {err}', channels_noDiagnostics: 'No diagnostics yet',
+      channels_feishuChecklistTitle: 'Feishu console checklist (check here if no messages arrive)',
+      channels_feishuCheck1: 'Events & callbacks → subscription mode = WebSocket long connection, saved',
+      channels_feishuCheck2: 'Event subscription includes im.message.receive_v1',
+      channels_feishuCheck3: 'Permission includes im:message:send_as_bot',
+      channels_feishuCheck4: 'App version created AND published (unpublished = zero events)', page_weekly_d: 'A Wrapped-style weekly card: generate, share, push to IM',
       card_shellUpdate: 'Desktop shell updates', card_runtimeUpdate: 'Harness runtime updates',
       shellUpdate_version: 'Current shell version', shellAutoUpdate_hint: 'Checks on launch and every 4 hours; new versions download automatically and install on quit',
       shellUpdate_check: 'Check for shell updates now', shellUpdate_checking: '⏳ Checking…', shellUpdate_checkDone: '✅ Check triggered; you will be notified of the result.',
@@ -3212,13 +3226,41 @@
     if (!st) return tr('channels_state_offline');
     if (st.state === 'online') return tr('channels_state_online');
     if (st.state === 'connecting') return tr('channels_state_connecting');
-    if (st.state === 'backoff') return tr('channels_state_backoff', { n: st.attempts });
+    if (st.state === 'backoff') {
+      // H-im: visible reconnect countdown instead of a bare attempt count
+      const secs = Math.max(1, Math.round((st.backoffMs || 0) / 1000));
+      return `${tr('channels_state_backoff', { n: st.attempts })} · ${secs}s`;
+    }
     // offline: show the readable park reason (e.g. "implementation not installed")
     return st.lastError ? `${tr('channels_state_offline')} — ${st.lastError}` : tr('channels_state_offline');
   }
 
+  // H-im: per-channel test result kept across passive re-renders
+  const channelTestResults = new Map(); // id -> { ok, text, at }
+
   function renderChannelOperations(card, head, ch) {
     card.appendChild(head);
+    // H-im: diagnostics line — last inbound activity and last error
+    const diag = document.createElement('div');
+    diag.className = 'desc';
+    const bits = [];
+    if (ch.lastInboundAt) {
+      bits.push(tr('channels_lastInbound', { time: new Date(ch.lastInboundAt).toLocaleString() }));
+      if (ch.lastInboundPreview) bits.push(tr('channels_lastInboundPreview', { preview: ch.lastInboundPreview }));
+    }
+    if (ch.status && ch.status.lastError) bits.push(tr('channels_lastError', { err: ch.status.lastError }));
+    if (bits.length) diag.textContent = bits.join(' · ');
+    else diag.textContent = tr('channels_noDiagnostics');
+    card.appendChild(diag);
+    // H-im: persistent test result (survives passive re-renders)
+    const prev = channelTestResults.get(ch.id);
+    if (prev) {
+      const tr_ = document.createElement('div');
+      tr_.className = 'desc';
+      tr_.style.color = prev.ok ? 'var(--ok)' : 'var(--bad)';
+      tr_.textContent = prev.text;
+      card.appendChild(tr_);
+    }
     const actions = document.createElement('div');
     actions.className = 'btnrow';
     const testBtn = document.createElement('button');
@@ -3226,17 +3268,40 @@
     testBtn.textContent = tr('channels_cfg_test');
     testBtn.addEventListener('click', () => runControlOperation(
       testBtn,
-      () => window.dshShell.channelsTest(ch.id),
+      async () => {
+        const r = await window.dshShell.channelsTest(ch.id);
+        const ok = !!(r && r.ok);
+        channelTestResults.set(ch.id, { ok, text: `${ok ? '✓' : '✗'} ${new Date().toLocaleTimeString()}` });
+        return r;
+      },
       () => refreshChannels(),
     ));
     actions.appendChild(testBtn);
     card.appendChild(actions);
   }
 
-  function renderChannelConfiguration(card, head) {
+  function renderChannelConfiguration(card, head, ch) {
     const controls = head.querySelector('.setting-ctrl');
     if (controls) controls.remove();
     card.appendChild(head);
+    // H-im: feishu backend checklist (the four settings that must be right
+    // in the Feishu console or no message ever arrives)
+    if (ch && ch.type === 'feishu') {
+      const list = document.createElement('details');
+      list.className = 'desc';
+      list.style.marginTop = '8px';
+      const summary = document.createElement('summary');
+      summary.textContent = tr('channels_feishuChecklistTitle');
+      list.appendChild(summary);
+      const ol = document.createElement('ol');
+      for (const k of ['channels_feishuCheck1', 'channels_feishuCheck2', 'channels_feishuCheck3', 'channels_feishuCheck4']) {
+        const li = document.createElement('li');
+        li.textContent = tr(k);
+        ol.appendChild(li);
+      }
+      list.appendChild(ol);
+      card.appendChild(list);
+    }
   }
 
   function renderChannels(list, opts) {

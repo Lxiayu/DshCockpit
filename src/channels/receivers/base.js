@@ -101,7 +101,12 @@ function createCommandDispatcher(deps) {
     }
     if (!d.isAllowed(allowFrom, senderId)) {
       audit({ action: 'reject', reason: 'not-in-allowlist', channelId, senderId });
-      return { ok: false, reply: t(lang, 'channels.rx.notAllowed') };
+      // H-im: silent drops made the channel feel dead — reply with the
+      // sender's open_id and how to get allowlisted instead.
+      return {
+        ok: false,
+        reply: t(lang, 'channels.rx.notAllowedGuidance', { senderId: senderId || 'unknown', id: channelId }),
+      };
     }
 
     // ---- approval callbacks (one-shot token, burned on first use)
@@ -133,6 +138,25 @@ function createCommandDispatcher(deps) {
       audit({ action: 'answer', channelId, senderId, ok: handled.ok });
       if (handled && handled.ok) return { ok: true, reply: t(lang, 'channels.rx.answerAccepted') };
       return { ok: false, reply: t(lang, 'channels.rx.hookFailed', { reason: (handled && handled.reason) || '' }) };
+    }
+
+    // ---- H-im query commands: /status /tasks /help (zh aliases too)
+    if (command.type === 'status' || command.type === 'tasks' || command.type === 'help') {
+      const snap = d.statusSnapshot ? d.statusSnapshot() : {};
+      if (command.type === 'help') {
+        return { ok: true, reply: t(lang, 'channels.helpMenu') };
+      }
+      if (command.type === 'status') {
+        return { ok: true, reply: t(lang, 'channels.statusReply', {
+          runtime: snap.runtimeRunning ? t(lang, 'channels.stRunning') : t(lang, 'channels.stIdle'),
+          tasks: String(snap.scheduledCount || 0),
+          last: snap.lastTaskSummary || t(lang, 'channels.stNone'),
+        }) };
+      }
+      const list = Array.isArray(snap.scheduledTasks) && snap.scheduledTasks.length
+        ? snap.scheduledTasks.map((x) => `• ${x.name || x.id}`).join('\n')
+        : t(lang, 'channels.noTasks');
+      return { ok: true, reply: t(lang, 'channels.tasksReply', { list }) };
     }
 
     // ---- free text → sticky headless session
@@ -170,6 +194,8 @@ function createCommandDispatcher(deps) {
 const COMMAND_WORDS = {
   approve: 'approve', deny: 'deny', answer: 'answer',
   批准: 'approve', 拒绝: 'deny', 回答: 'answer',
+  '/status': 'status', '/tasks': 'tasks', '/help': 'help',
+  状态: 'status', 任务: 'tasks', 帮助: 'help',
 };
 
 /**

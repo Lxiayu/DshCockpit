@@ -3134,6 +3134,15 @@ if (!gotLock) {
     // safeStorage-after-ready constraint as the gateway; feishu/wecom/dingtalk
     // ship real adapters now, whatsapp stays a placeholder slot.
     channelsMgr = createChannelManager({
+      // H-im: /status command data source (runtime + scheduled tasks)
+      statusSnapshot: () => ({
+        runtimeRunning: sessionRunning,
+        scheduledCount: (settings.get().scheduledTasks || []).length,
+        scheduledTasks: (settings.get().scheduledTasks || []).map((x) => ({ name: x.name || x.id })),
+        lastTaskSummary: (settings.get().scheduledHistory || [])[0]
+          ? `${(settings.get().scheduledHistory[0].name || '')} ${settings.get().scheduledHistory[0].ok ? '✓' : '✗'}`
+          : '',
+      }),
       settings,
       userDataDir: app.getPath('userData'),
       safeStorage: safeStorageImpl,

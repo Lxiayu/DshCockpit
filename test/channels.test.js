@@ -282,7 +282,7 @@ test('ChannelState: offline→connecting→online, backoff delays double and cap
   s.markOnline();
   assert.strictEqual(s.attempts, 0);
   assert.strictEqual(s.lastError, null);
-  assert.deepStrictEqual(s.snapshot(), { state: 'online', attempts: 0, lastError: null });
+  assert.deepStrictEqual(s.snapshot(), { state: 'online', attempts: 0, lastError: null, backoffMs: 0 });
 });
 
 // ------------------------------------------------------------- credentials
@@ -390,7 +390,7 @@ test('dispatcher: admission runs before token redemption — denied sender canno
     command: { type: 'approve', token },
   });
   assert.strictEqual(denied.ok, false);
-  assert.ok(denied.reply.includes('白名单'), 'readable denial reply');
+  assert.ok(denied.reply.includes('open_id') && denied.reply.includes('允许列表'), 'denial replies with actionable guidance (H-im);');
 
   const allowed = await dispatch({
     channelId: 'feishu', senderId: 'u1', allowFrom: ['u1'],
