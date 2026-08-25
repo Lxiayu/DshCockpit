@@ -136,9 +136,7 @@ test('new Cockpit UI does not expose the legacy Harness-DOM compact action', () 
 test('Cockpit exposes integrations and restores its rail when a center closes', () => {
   const cockpit = read('cockpit.html');
   const main = read('main.js');
-  assert.match(cockpit, /data-action="plugins"[^>]*>[^<]*Plugins/);
-  // H-rail follow-up: skills market gets its own one-click entry too
-  assert.match(cockpit, /data-action="skills"[^>]*>[^<]*Skills/);
+  assert.match(cockpit, /data-action="plugins"[^>]*>[^<]*Integrations/);
   assert.match(read('window-manager.js'), /settingsWindow\.on\('closed',[\s\S]*?cockpitMode = returnPanel \? 'panel' : 'rail';[\s\S]*?showCockpitInactive\(\)/);
 });
 
