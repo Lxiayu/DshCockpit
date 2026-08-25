@@ -263,11 +263,16 @@ function createWindowManager(deps) {
   }
 
   function cockpitNavigate(mode, page, intent) {
+    // H-rail: only pages that actually HAVE a control-scope operations block
+    // may open in control mode — plugins/skills/longsession are settings-only,
+    // so rail requests for them fall back to settings mode (the button then
+    // lands on the full plugin center instead of an empty shell).
     const allowed = {
-      control: ['cost', 'tasks', 'runtime', 'remote', 'plugins', 'skills', 'channels', 'longsession'],
-      settings: ['general', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about'],
+      control: ['cost', 'tasks', 'runtime', 'remote', 'channels'],
+      settings: ['general', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about', 'plugins', 'skills', 'longsession'],
     };
-    const m = mode === 'control' || mode === 'settings' ? mode : 'settings';
+    let m = mode === 'control' || mode === 'settings' ? mode : 'settings';
+    if (m === 'control' && !allowed.control.includes(page) && allowed.settings.includes(page)) m = 'settings';
     const p = allowed[m].includes(page) ? page : (m === 'control' ? 'tasks' : 'general');
     const safeIntent = m === 'control' && p === 'tasks' && intent === 'new-task' ? 'new-task' : '';
     const route = safeIntent === 'new-task'

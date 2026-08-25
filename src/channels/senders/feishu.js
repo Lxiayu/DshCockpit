@@ -70,7 +70,7 @@ function buildFeishuCard(card) {
  *   now() — injectable clock for token expiry tests
  */
 function createFeishuClient({ appId, appSecret, fetchImpl, log, now }) {
-  const fetchFn = fetchImpl;
+  const fetchFn = fetchImpl || (typeof fetch === 'function' ? fetch : null);
   const clock = now || (() => Date.now());
   let token = null;       // { value, expiresAt }
   const logger = log || (() => {});
