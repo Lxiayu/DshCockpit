@@ -693,3 +693,4 @@ test('manager: disabling during the connecting window aborts the start (no zombi
   mgr.stopAll();
   assert.strictEqual(stats.stopped, 1, 'stopAll finds no instance to stop again');
 });
+

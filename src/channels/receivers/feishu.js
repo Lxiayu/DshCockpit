@@ -125,9 +125,14 @@ class FeishuChannel {
   /** @private GET /callback/ws/endpoint (AppId/AppSecret headers). */
   async fetchEndpoint(appId, appSecret) {
     if (!this.fetchImpl) throw Object.assign(new Error('feishu: fetch unavailable'), { status: 0 });
+    // Official long-connection protocol: POST /callback/ws/endpoint with the
+    // credentials as a JSON BODY (a GET here returns a bare `true...` payload
+    // that breaks JSON parsing — the "position 4" error from real-machine
+    // testing). Response: { endpoint: "wss://…", ticket }.
     const res = await this.fetchImpl(`${FEISHU_BASE}${ENDPOINT_PATH}`, {
-      method: 'GET',
-      headers: { AppId: appId, AppSecret: appSecret },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ AppId: appId, AppSecret: appSecret }),
     });
     const body = typeof res.json === 'function' ? await res.json() : res.body;
     const endpoint = body && (body.endpoint || (body.data && body.data.endpoint));
