@@ -125,17 +125,18 @@ class FeishuChannel {
   /** @private GET /callback/ws/endpoint (AppId/AppSecret headers). */
   async fetchEndpoint(appId, appSecret) {
     if (!this.fetchImpl) throw Object.assign(new Error('feishu: fetch unavailable'), { status: 0 });
-    // Official long-connection protocol: POST /callback/ws/endpoint with the
-    // credentials as a JSON BODY (a GET here returns a bare `true...` payload
-    // that breaks JSON parsing — the "position 4" error from real-machine
-    // testing). Response: { endpoint: "wss://…", ticket }.
+    // Official long-connection protocol (mirrors @larksuiteoapi/node-sdk
+    // WSClient exactly): POST /callback/ws/endpoint with { AppID, AppSecret }
+    // — the field is AppID (capital ID); AppId yields 9499 Bad Request.
+    // Response: { code, data: { URL, ClientConfig }, msg } — code 0 = ok and
+    // data.URL is the WSS address.
     const res = await this.fetchImpl(`${FEISHU_BASE}${ENDPOINT_PATH}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ AppId: appId, AppSecret: appSecret }),
+      headers: { 'content-type': 'application/json', 'User-Agent': 'DshCockpit' },
+      body: JSON.stringify({ AppID: appId, AppSecret: appSecret }),
     });
     const body = typeof res.json === 'function' ? await res.json() : res.body;
-    const endpoint = body && (body.endpoint || (body.data && body.data.endpoint));
+    const endpoint = body && body.data && (body.data.URL || body.data.endpoint);
     if (!endpoint) {
       throw Object.assign(
         new Error(`ws endpoint failed: HTTP ${res.status} code=${body && body.code} ${body && body.msg}`),
