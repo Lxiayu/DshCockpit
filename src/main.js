@@ -16,6 +16,21 @@
 'use strict';
 
 const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut, safeStorage, nativeTheme, clipboard } = require('electron');
+
+// H-test: DSH_DESKTOP_NO_KEYCHAIN=1 keeps unattended runs unattended. Ad-hoc
+// rebuilds change the code signature on every build, and macOS Keychain ACLs
+// then prompt for the OLD entry on every launch — blocking boot until someone
+// types the login password (the "silent exit" reports from real-machine
+// testing were this dialog timing out). With the flag, every consumer gets a
+// no-op vault: isEncryptionAvailable()=false routes all stores to their
+// existing plaintext fallback, and no Keychain API is ever touched.
+const safeStorageImpl = process.env.DSH_DESKTOP_NO_KEYCHAIN === '1'
+  ? {
+      isEncryptionAvailable: () => false,
+      encryptString: (plain) => Buffer.from('plain:' + plain, 'utf8'),
+      decryptString: (buf) => { const s = buf.toString('utf8'); return s.startsWith('plain:') ? s.slice(6) : ''; },
+    }
+  : safeStorage;
 const { spawn, execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
@@ -3065,6 +3080,13 @@ process.on('unhandledRejection', (reason) => {
   try { log('[shell] unhandled rejection: ' + msg); }
   catch { console.error('[shell] unhandled rejection:', msg); }
 });
+// Same visibility for synchronous throws (Electron's default dialog is easy
+// to miss and writes nothing to the log).
+process.on('uncaughtException', (err) => {
+  const msg = err && err.message ? err.message : String(err);
+  try { log('[shell] uncaught exception: ' + msg + '\n' + (err && err.stack || '')); }
+  catch { console.error('[shell] uncaught exception:', msg); }
+});
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -3086,7 +3108,7 @@ if (!gotLock) {
     // Phone remote-control gateway: constructed here because safeStorage needs
     // the app to be ready. The runtime URL may still be null while booting -
     // setRuntimeUrl() below feeds it as soon as the URL line appears.
-    remote = new RemoteControl({ userDataDir: app.getPath('userData'), safeStorage, log });
+    remote = new RemoteControl({ userDataDir: app.getPath('userData'), safeStorage: safeStorageImpl, log });
     // C7 public-remote helper: pure detection + cloudflared child process
     // management; lazy, nothing probes until the settings window asks.
     publicRemote = createPublicRemote({ log });
@@ -3099,7 +3121,7 @@ if (!gotLock) {
       settings,
       dshHome: dshHomeOf,
       userDataDir: app.getPath('userData'),
-      safeStorage,
+      safeStorage: safeStorageImpl,
       log,
     });
     if (settings.get().remoteControl) {
@@ -3114,7 +3136,7 @@ if (!gotLock) {
     channelsMgr = createChannelManager({
       settings,
       userDataDir: app.getPath('userData'),
-      safeStorage,
+      safeStorage: safeStorageImpl,
       log,
       lang,
       // free text from IM → the shared headless runner (Quick Ask / scheduler

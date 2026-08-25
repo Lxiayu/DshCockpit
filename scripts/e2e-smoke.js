@@ -107,7 +107,7 @@ function probe(url) {
 async function main() {
   const startedAt = Date.now();
   const child = spawn(appPath, [], {
-    env: { ...process.env, DSH_DESKTOP_USER_DATA: userDataDir, DSH_DESKTOP_NO_TRAY: '1' },
+    env: { ...process.env, DSH_DESKTOP_USER_DATA: userDataDir, DSH_DESKTOP_NO_TRAY: '1', DSH_DESKTOP_NO_KEYCHAIN: '1' },
     windowsHide: true,
     detached: process.platform !== 'win32',
     stdio: 'ignore',
