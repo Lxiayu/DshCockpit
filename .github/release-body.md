@@ -1,8 +1,18 @@
-## 下载
+## 下载（应该下载哪个？）
 
-| 平台 | 文件 |
+| 你想要 | 下载文件 |
 |---|---|
-| Windows x64 | `DshCockpit-0.2.9-win-x64.zip` |
+| **Windows · 推荐安装**（自动更新、开始菜单/桌面快捷方式） | `DshCockpit-0.3.0-win-x64.exe` |
+| Windows · 绿色便携（免安装，解压即用） | `DshCockpit-0.3.0-win-x64.zip` |
+| **macOS Apple Silicon · 推荐安装**（拖入 Applications） | `DshCockpit-0.3.0-mac-arm64.dmg` |
+| macOS · 精简包（不含内置运行时，首次启动自动下载） | `DshCockpit-0.3.0-slim-mac-arm64.zip` |
+| macOS · 完整便携 zip（自动更新使用，手动安装推荐 dmg） | `DshCockpit-0.3.0-mac-arm64.zip` |
+| Intel Mac | `DshCockpit-0.3.0-mac-x64.dmg` |
+
+> 每个文件均可单独下载，无需全部下载。SHA256 校验见 `SHA256SUMS-*.txt`。
+> Windows 安装版支持**应用内自动更新**（后续版本 MB 级差分下载，无需再来 GitHub）。
+
+---| Windows x64 | `DshCockpit-0.2.9-win-x64.zip` |
 | Apple Silicon（M1/M2/M3/M4） | `DshCockpit-0.2.9-mac-arm64.dmg` |
 | Intel Mac | `DshCockpit-0.2.9-mac-x64.dmg` |
 
