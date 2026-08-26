@@ -11,7 +11,14 @@
 // CLI --config precedence surprises.
 'use strict';
 
+const path = require('node:path');
 const slim = process.env.DSH_BUILD_SLIM === '1';
+// DSH_DESKTOP_ELECTRON_DIST: point electron-builder at a locally unpacked
+// Electron distribution (e.g. node_modules/electron/dist) — dev fallback for
+// networks where the default TLS download keeps breaking. CI never sets it.
+const localElectronDist = process.env.DSH_DESKTOP_ELECTRON_DIST
+  ? path.resolve(process.env.DSH_DESKTOP_ELECTRON_DIST)
+  : undefined;
 
 const runtimeSeed = slim
   ? []
@@ -26,6 +33,7 @@ const config = {
     output: 'dist',
     buildResources: 'resources',
   },
+  ...(localElectronDist ? { electronDist: localElectronDist } : {}),
   // Whitelist packaging (v0.2.9): only what the shell reads at runtime.
   files: [
     'src/**/*',
