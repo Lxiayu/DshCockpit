@@ -2957,19 +2957,31 @@ async function handleImCommand({ command, senderId, text }) {
       const ru = getRuntimeUrl();
       if (!ru) return t(L, 'im.bind.offline');
       const rpc = createHarnessRpcWire(ru);
-      const running = (await rpc.listSessions()).filter((s) => s.running);
+      const sessions = await rpc.listSessions();
+      const running = sessions.filter((s) => s.running);
       if (!arg) {
-        if (!running.length) return t(L, 'im.bind.noRunning');
-        const lines = running.map((s, i) =>
-          '\n' + (i + 1) + '. `' + String(s.sessionId).slice(0, 8) + '` ' + (s.agentPreset || 'standard')).join('');
+        // L4 user-friendliness: no arg → bind the single running session;
+        // otherwise the most recently active session; if neither, list options.
+        const target = running.length === 1 ? running[0]
+          : running.length > 1 ? null
+            : sessions.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+        if (target) {
+          imCommandBindings.set(key, target.sessionId);
+          saveImBindings();
+          return t(L, 'im.bind.done', { id: String(target.sessionId).slice(0, 8), state: target.running ? 'running' : 'latest' });
+        }
+        if (!sessions.length) return t(L, 'im.bind.noRunning');
+        const lines = sessions.slice(0, 8).map((s, i) =>
+          '\n' + (i + 1) + '. `' + String(s.sessionId).slice(0, 8) + '` ' + (s.agentPreset || 'standard') + (s.running ? ' ●' : '')).join('');
         return t(L, 'im.bind.choose') + lines;
       }
-      // /bind <prefix>: match the nearest running session by short id
-      const hit = running.find((s) => String(s.sessionId).toLowerCase().startsWith(arg.toLowerCase()));
+      // /bind <prefix>: match the nearest session by short id (running preferred)
+      const hit = running.find((s) => String(s.sessionId).toLowerCase().startsWith(arg.toLowerCase()))
+        || sessions.find((s) => String(s.sessionId).toLowerCase().startsWith(arg.toLowerCase()));
       if (!hit) return t(L, 'im.bind.noMatch', { arg });
       imCommandBindings.set(key, hit.sessionId);
       saveImBindings();
-      return t(L, 'im.bind.done', { id: String(hit.sessionId).slice(0, 8) });
+      return t(L, 'im.bind.done', { id: String(hit.sessionId).slice(0, 8), state: hit.running ? 'running' : 'latest' });
     }
     if (command === 'unbind') {
       imCommandBindings.delete(key);

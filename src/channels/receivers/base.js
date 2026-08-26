@@ -162,7 +162,7 @@ function createCommandDispatcher(deps) {
     // ---- H-im: query + session-binding commands (delegated to the shell)
     if (['status', 'tasks', 'help', 'bind', 'unbind', 'stop'].includes(command.type)) {
       if (!d.onCommand) return { ok: false, reply: t(lang, 'channels.rx.hookFailed', { reason: 'no-command-hook' }) };
-      const r = d.onCommand({ channelId, senderId, command: command.type, text: String(command.text || '') });
+      const r = await d.onCommand({ channelId, senderId, command: command.type, text: String(command.text || '') });
       return { ok: true, reply: r };
     }
 
