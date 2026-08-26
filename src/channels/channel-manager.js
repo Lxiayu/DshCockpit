@@ -118,6 +118,9 @@ function createChannelManager(deps) {
   });
   const dispatcher = createCommandDispatcher({
     statusSnapshot: d.statusSnapshot || null,
+    onCommand: d.onCommand || null,
+    getBinding: d.getBinding || null,
+    onBoundPrompt: d.onBoundPrompt || null,
     tokens,
     isAllowed,
     sessions,

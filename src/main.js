@@ -57,7 +57,7 @@ const { ensurePnpmShim, prependPath, resolvePnpmForProfile } = require('./pnpm-s
 const { createPublicRemote, buildPairUrl } = require('./public-remote');
 const { createModelsManager, PRESETS: MODELS_PRESETS, OLLAMA_PRESET: MODELS_OLLAMA_PRESET } = require('./models-manager');
 const compact = require('./compact');
-const { createHarnessRpcClient } = require('./harness-rpc');
+const { createHarnessRpcClient, createHarnessRpcWire } = require('./harness-rpc');
 const { createQuickAskShortcutManager } = require('./quickask-shortcut');
 const { createMemoryFiles } = require('./memory-files');
 const { createPluginOpGuard, failureCode, shouldCleanupAfterFailure, summarizeOutput, inferStage, parsePnpmBlockedPackage, upsertOnlyBuiltDependencies, pickSubpackage, resolveDepKey, pruneBundles, sanitizeProfile } = require('./plugin-flow');
@@ -2871,10 +2871,15 @@ function startEventsFeed() {
   // host stream: session running state (task done)
   eventsFeed.push(connectEvents(base, '/api/events.host', (frame) => {
     if (frame && frame.type === 'host/session-status') {
+      const wasRunning = sessionRunning;
       sessionRunning = !!frame.running; // busy check for the manual /compact entry (C3)
       if (!eventsFeedLiveLogged) {
         eventsFeedLiveLogged = true;
         log(`[shell] events feed live (session ${frame.sessionId}, running=${frame.running})`);
+      }
+      // H-im L2: rising edge → taskStarted push; falling edge → taskDone (existing)
+      if (frame.running === true && !wasRunning && channelsMgr) {
+        channelsMgr.broadcast({ kind: 'taskStarted' });
       }
       if (frame.running === false) {
         onTaskDone();
@@ -2923,6 +2928,74 @@ function onTaskDone() {
   notifyAs('completion', t(lang(), 'notify.taskDone'), t(lang(), 'notify.taskDoneBody'));
 }
 
+
+// ---------------------------------------------------------------------------
+// H-im: IM ↔ running Harness session binding (/bind /unbind /stop) + lifecycle
+// ---------------------------------------------------------------------------
+const imCommandBindings = new Map(); // 'im:<senderId>' -> harness sessionId
+const imCommandBindingsFile = () => path.join(app.getPath('userData'), 'im-bindings.json');
+function loadImBindings() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(imCommandBindingsFile(), 'utf8'));
+    for (const [k, v] of Object.entries(raw || {})) if (typeof v === 'string') imCommandBindings.set(k, v);
+  } catch { /* first run */ }
+}
+function saveImBindings() {
+  try {
+    fs.writeFileSync(imCommandBindingsFile(), JSON.stringify(Object.fromEntries(imCommandBindings)));
+  } catch { /* best effort */ }
+}
+loadImBindings();
+
+/** Handle the IM-only commands delegated by the channel dispatcher. */
+async function handleImCommand({ command, senderId, text }) {
+  const L = lang();
+  const key = `im:${senderId}`;
+  const arg = String(text || '');
+  try {
+    if (command === 'bind') {
+      const ru = getRuntimeUrl();
+      if (!ru) return t(L, 'im.bind.offline');
+      const rpc = createHarnessRpcWire(ru);
+      const running = (await rpc.listSessions()).filter((s) => s.running);
+      if (!arg) {
+        if (!running.length) return t(L, 'im.bind.noRunning');
+        const lines = running.map((s, i) =>
+          '\n' + (i + 1) + '. `' + String(s.sessionId).slice(0, 8) + '` ' + (s.agentPreset || 'standard')).join('');
+        return t(L, 'im.bind.choose') + lines;
+      }
+      // /bind <prefix>: match the nearest running session by short id
+      const hit = running.find((s) => String(s.sessionId).toLowerCase().startsWith(arg.toLowerCase()));
+      if (!hit) return t(L, 'im.bind.noMatch', { arg });
+      imCommandBindings.set(key, hit.sessionId);
+      saveImBindings();
+      return t(L, 'im.bind.done', { id: String(hit.sessionId).slice(0, 8) });
+    }
+    if (command === 'unbind') {
+      imCommandBindings.delete(key);
+      saveImBindings();
+      return t(L, 'im.unbind.done');
+    }
+    if (command === 'stop') {
+      const ru = getRuntimeUrl();
+      if (!ru) return t(L, 'im.bind.offline');
+      const rpc = createHarnessRpcWire(ru);
+      const list = await rpc.listSessions();
+      const running = list.find((s) => s.running);
+      if (!running) return t(L, 'im.stop.noneRunning');
+      await rpc.cancel(running.sessionId);
+      return t(L, 'im.stop.done', { id: String(running.sessionId).slice(0, 8) });
+    }
+    return t(L, 'im.unknown');
+  } catch (e) {
+    log(`[channels] IM command ${command} failed: ${e.message}`);
+    return t(L, 'im.commandFailed', { reason: e.message });
+  }
+}
+/** binding get/set used by the dispatcher's steer path. */
+function imGetBinding(channelId, senderId) {
+  return imCommandBindings.get(`im:${senderId}`) || null;
+}
 function onApprovalRequested(frame, rpcId) {
   const tool = frame.toolName || '';
   // IM push (C5/C6): approval cards carry a one-shot token (120s TTL) whose
@@ -3143,6 +3216,20 @@ if (!gotLock) {
           ? `${(settings.get().scheduledHistory[0].name || '')} ${settings.get().scheduledHistory[0].ok ? '✓' : '✗'}`
           : '',
       }),
+      // H-im: /bind /unbind /stop command handler (session binding + lifecycle)
+      onCommand: ({ command, senderId, text }) => handleImCommand({ command, senderId, text }),
+      getBinding: (_channelId, senderId) => imGetBinding(_channelId, senderId),
+      onBoundPrompt: async ({ sessionId, text }) => {
+        const ru = getRuntimeUrl();
+        if (!ru) return t(lang(), 'im.bind.offline');
+        try {
+          await createHarnessRpcWire(ru).prompt(sessionId, text, 'steer');
+          return t(lang(), 'im.steer.accepted', { id: String(sessionId).slice(0, 8) });
+        } catch (e) {
+          log(`[channels] steer failed: ${e.message}`);
+          return t(lang(), 'im.bind.commandFailed', { reason: e.message });
+        }
+      },
       settings,
       userDataDir: app.getPath('userData'),
       safeStorage: safeStorageImpl,

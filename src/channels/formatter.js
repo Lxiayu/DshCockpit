@@ -15,6 +15,20 @@ const { t } = require('../i18n');
 const TTL_SECONDS = 120;
 
 /** { kind: 'taskDone' } */
+
+/** H-im L2: task started / runtime error lifecycle notices. */
+function formatTaskStarted(lang) {
+  return {
+    card: { title: t(lang, 'channels.msg.taskStartedTitle'), body: t(lang, 'channels.msg.taskStartedBody') },
+    text: `▶️ ${t(lang, 'channels.msg.taskStartedTitle')} — ${t(lang, 'channels.msg.taskStartedBody')}`,
+  };
+}
+function formatRuntimeError(lang, code) {
+  return {
+    card: { title: t(lang, 'channels.msg.runtimeErrorTitle'), body: t(lang, 'channels.msg.runtimeErrorBody', { code }) },
+    text: `⚠️ ${t(lang, 'channels.msg.runtimeErrorTitle')} — ${t(lang, 'channels.msg.runtimeErrorBody', { code })}`,
+  };
+}
 function formatTaskDone(lang) {
   return {
     card: {
@@ -61,6 +75,8 @@ function formatQuestion(lang, ev) {
 function formatEvent(lang, event) {
   switch (event && event.kind) {
     case 'taskDone': return formatTaskDone(lang);
+    case 'taskStarted': return formatTaskStarted(lang);
+    case 'runtimeError': return formatRuntimeError(lang, event.code);
     case 'approval': return formatApprovalRequest(lang, event);
     case 'question': return formatQuestion(lang, event);
     default: throw new Error(`unknown channel event kind: ${event && event.kind}`);
