@@ -1,9 +1,8 @@
-# DshCockpit v0.3.0 — 控制平面大版本
+# DshCockpit v0.3.1 — MCP 服务管理
 
 > **Harness owns the workspace. DshCockpit owns the operating layer.**
-> **Invisible when working. Obvious when needed.**
 
-v0.3.0 是**功能 × 架构 × 分发**三线大版本：缓存经济学看板、Agent 周报卡片、通知中心三大新功能；主进程架构拆分与产品级 E2E 门禁；Windows NSIS 主推安装轨道 + 应用内自动更新；以及一套完整的 **IM 渠道协作范式**（飞书/企微/钉钉 ↔ 正在运行的 Harness 会话双向操控）。
+v0.3.1 新增 **MCP（Model Context Protocol）服务管理**：在设置页可视化地添加、测试、启用/禁用 MCP Server，无需手动编辑 `cordis.patch.yml`。入口：设置 → MCP 服务，或驾驶舱面板 → 快捷操作 → 🔌 MCP 服务。
 
 ---
 
@@ -11,95 +10,52 @@ v0.3.0 是**功能 × 架构 × 分发**三线大版本：缓存经济学看板�
 
 | 你想要 | 下载文件 |
 |---|---|
-| **Windows · 推荐安装**（应用内自动更新、开始菜单/桌面快捷方式、向导式安装器可选目录） | `DshCockpit-0.3.0-win-x64.exe` |
-| Windows · 绿色便携（免安装，解压即用，无自动更新） | `DshCockpit-0.3.0-win-x64.zip` |
-| **macOS Apple Silicon · 推荐安装**（拖入 Applications 即用） | `DshCockpit-0.3.0-mac-arm64.dmg` |
-| macOS · 完整便携 zip（内嵌运行时，自动更新使用；手动安装推荐 dmg） | `DshCockpit-0.3.0-mac-arm64.zip` |
-| macOS · 精简包（不含内置运行时，首次启动自动下载约 200MB） | `DshCockpit-0.3.0-slim-mac-arm64.zip` |
-| Intel Mac（Apple Intel 芯片） | `DshCockpit-0.3.0-mac-x64.dmg` |
+| **Windows · 推荐安装**（应用内自动更新、开始菜单/桌面快捷方式） | `DshCockpit-0.3.1-win-x64.exe` |
+| Windows · 绿色便携（免安装，解压即用） | `DshCockpit-0.3.1-win-x64.zip` |
+| **macOS Apple Silicon · 推荐安装** | `DshCockpit-0.3.1-mac-arm64.dmg` |
+| macOS Apple Silicon · 完整便携 zip | `DshCockpit-0.3.1-mac-arm64.zip` |
+| macOS Apple Silicon · 精简包（不含内置运行时） | `DshCockpit-0.3.1-slim-mac-arm64.zip` |
+| macOS Intel | `DshCockpit-0.3.1-mac-x64.dmg` |
 
-> **每个文件可单独下载**，无需全部下载。SHA256 校验见 `SHA256SUMS-*.txt`。
-> **Windows 安装版已支持应用内自动更新**：安装后，后续版本有更新时应用内自动提示、下载增量（MB 级差分），无需再来 GitHub。
-
----
-
-## 新增：IM 渠道协作范式（飞书 / 企微 / 钉钉）
-
-### 为什么是 IM？
-IM 渠道（飞书 / 企业微信 / 钉钉）让你的 Agent 可以在桌面上远程对话、审批与操控。**配置好 IM 渠道后，你可以在手机上：**
-- 与 Agent **对话**（新建独立随行会话）
-- **实时操控正在运行的 Harness 会话**（把消息注入进行中的任务，Agent 立即响应）
-- 收到**任务完成 / 需要批准 / 提问**的推送，并直接回复批准或答案
-- 查询状态、查看任务列表
-
-### 渠道配置（以飞书为例）
-1. 设置 → 渠道 → 飞书：填入 **App ID / App Secret**
-2. 飞书开放平台后台确认「后台四件套」（下方检查清单见设置 → 渠道）
-3. 打开飞书开关，与机器人聊一句
-4. 首次收到欢迎消息，即可开始
-
-> 若收不到消息：设置 → 渠道 → 飞书，展开「飞书后台检查清单」逐项核对。
-
-### 支持的命令（在飞书中给机器人发）
-
-| 命令 | 作用 |
-|---|---|
-| `/status` | 查看运行时状态、计划任务数、最近结果 |
-| `/tasks` | 查看计划任务列表 |
-| `/bind` | 绑定到**正在运行的 Harness 会话**：无参数时自动绑（运行中 → 最近活跃；多个运行中则列出，可用 `/bind <前缀>` 指定） |
-| `/bind <前缀>` | 按会话 ID 前缀绑定运行中会话 |
-| `/unbind` | 解绑会话，回到随行对话模式 |
-| `/stop` | 取消当前运行中的任务 |
-| `/help` | 查看能力菜单 |
-
-**中文别名**：状态 = /status、任务 = /tasks、帮助 = /help、绑定 = /bind、解绑 = /unbind、停止 = /stop。
-
-### 支持的事件推送
-
-| 事件 | 飞书收到 |
-|---|---|
-| 任务开始（runtime session 启动） | `▶️ 任务已开始` |
-| 任务完成 | `✅ 任务完成` |
-| 需要批准（工具调用） | 卡片 → 回复 `批准 <token>` / `拒绝 <token>`（或中文：批准/拒绝） |
-| 模型提问 | 卡片 → 回复 `回答 <token> <答案>` |
-| 运行时异常退出 | `⚠️ 运行时异常退出` |
+> **每个文件可单独下载**。SHA256 校验见 `SHA256SUMS-*.txt`。
+> 从 v0.3.0 升级：Windows 安装版会收到应用内更新提示；其他渠道手动下载覆盖。
 
 ---
 
-## 新增：缓存经济学看板（R4）
+## 新增：MCP 服务管理
 
-- **「本月缓存帮你省了 ¥X」**——按真实账单单价与峰谷价差估算，数据来自你的会话日志
-- 命中率、峰/谷拆分、按天趋势条形图（纯 CSS）、会话级 Top 10 下钻
-- 路径：设置 → 成本 → 缓存经济学
+### 配置与管理
+- **可视化添加/编辑/移除** MCP Server，写入 DSH 的 `cordis.patch.yml`（只改动对应配置块，写入前备份、写入后经 `--dump-config` 校验，失败自动回滚）
+- **手动配置（JSON）**：粘贴 `mcpServers` JSON 即导入——支持带 `//` 注释与尾逗号的示例格式（与 Trae 的手动配置方式一致）；也支持从 Claude Desktop / Claude Code / VS Code / Cursor 的现有配置一键导入
+- **启用/禁用开关**：禁用保留配置，重新启用即恢复；配置变更后提示重启运行时生效
 
-## 新增：Agent 周报卡片（R5）
+### 发现（Registry）
+- 内置 20 个常用 MCP Server 离线清单（Filesystem / GitHub / Git / PostgreSQL / SQLite / Brave Search / Memory / Sequential Thinking / Fetch / Time / Google Drive / Maps / Puppeteer / Playwright / Serena / Slack，以及 Notion / Sentry / Stripe / Linear 官方远程端点）
+- 接入 **官方 MCP Registry**（registry.modelcontextprotocol.io）：命名空间经 GitHub/DNS 验证的条目自动生成安装配置（npm → `npx`，PyPI → `uvx`，远程端点 → SSE），带"已验证来源"标记
+- 关键词搜索时补充 GitHub `topic:mcp-server` 社区结果（无验证命令的条目提示需手动填写命令）
+- 网络不可用时离线清单完整可用
 
-- **Wrapped 式** 的一周 Agent 使用卡片：花费、任务完成数、Quick Ask 次数、缓存节省、最忙一天、最活跃工作区（路径自动脱敏）
-- 生成 PNG 到 `userData/weekly/`，可一键推送到已接入的 IM 渠道
-- 设置 → Agent 周报：每周一上午自动生成（可选）
+### 测试与观测
+- **测试连接**：启动 MCP Server 进程完成 MCP 握手（initialize → tools/list），返回发现的工具列表；首次运行需下载依赖时有提示
+- 命令存在性/URL 可达性的静默快查（结果缓存 5 分钟）
+- **使用量统计**：从会话日志统计每个 MCP Server 的工具调用次数、最近使用时间与常用工具（基于本地会话记录，不上传）
+- Windows 上 `npx` 等命令自动包装为 `cmd /c` 执行（界面始终显示原始命令）
+- 环境变量中的敏感值经系统加密存储（macOS 钥匙串 / Windows DPAPI），不写入任何配置文件，重启运行时后经运行时环境注入生效
 
-## 新增：通知中心（R6）
-
-- 审批 / 完成 / 提问 / 预算 / 系统 五类通知统一收口
-- 免打扰时段、按类型静音、60 秒同类折叠
-- 历史记录（最近 500 条，可检索、可清空）
-- 路径：设置 → 通知中心
+### 安全提示
+- MCP Server 会在本机执行第三方命令，可能访问你的文件与凭据。安装前请确认来源：优先选择官方命名空间（`io.modelcontextprotocol/*`）与已验证的 Registry 条目，只添加你信任的服务。
 
 ---
 
-## 架构与稳定性
+## 其他变更
 
-- **主进程拆分**：运行时监督、托盘、辅助窗口、主窗口/驾驶舱各模块化（main.js 精简 ~17%），关键路径有独立单元测试
-- **产物级 E2E 门禁**：每个 Release 构建后自动冷启动 → 校验启动 URL → HTTP 健康检查 → 优雅关闭——坏包不会发布
-- **启动打点**：启动到 URL / 健康 / 主窗口的耗时基准记录（诊断目录 `boot-timing.json`）
-- **内置运行时升级到 0.1.1-rc.2**（0.1.0 → 0.1.1 数据格式代差修复）
+- 驾驶舱快捷操作新增「🔌 MCP 服务」入口（控制中心与设置窗口均可直达）
+- 主进程 MCP 配置写入带验证回滚；日志扫描在使用独立 worker 线程执行
 
-## 其他重要变更
+---
 
-- **Windows 安装器向导化**：可选安装目录、桌面快捷方式、安装详情进度
-- **发行包瘦身**：白名单打包（仅运行必需文件）、运行时种子裁剪（文件数 -55%）
-- **slim 精简轨**：Windows/macOS 均提供不含内置运行时的版本
-- **自动更新**：Windows 安装版启用了应用内自动更新（差分下载）；macOS 为实验特性（未签名，后续签名后转正）
-- **插件健康**：Git 探测（Windows 安装 Git 后插件来源 GitHub 的安装也不会再报找不到 git）
+## 升级说明
 
-> **升级提示**：从 v0.2.x 升级到 v0.3.0，数据（会话、设置、凭据）原样保留。macOS 未签名版本首次打开需右键 → 打开（Gatekeeper）。
+- 从 v0.2.x / v0.3.0 升级：数据（会话、设置、凭据）原样保留
+- macOS 未签名版本首次打开：右键 → 打开，或终端执行 `xattr -dr com.apple.quarantine /Applications/DshCockpit.app`
+- Windows 安装版（v0.3.0 起）将收到应用内自动更新提示
