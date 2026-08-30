@@ -84,6 +84,20 @@ contextBridge.exposeInMainWorld('dshShell', {
   ollamaStatus: () => ipcRenderer.invoke('shell:ollama-status'),
   modelsSetDefault: (provider, model) => ipcRenderer.invoke('shell:models-set-default', provider, model),
   copyText: (text) => ipcRenderer.invoke('shell:copy-text', text),
+  // MCP manager (v0.3.1 T1): CRUD / toggle / two-tier tests / registry /
+  // universal import / usage. Secret env values are passed FORWARD once in
+  // mcpSave(secrets) and never returned by any call (vault discipline).
+  mcpList: () => ipcRenderer.invoke('mcp:list'),
+  mcpGet: (id) => ipcRenderer.invoke('mcp:get', id),
+  mcpSave: (server, secrets) => ipcRenderer.invoke('mcp:save', server, secrets),
+  mcpRemove: (id) => ipcRenderer.invoke('mcp:remove', id),
+  mcpToggle: (id, enabled) => ipcRenderer.invoke('mcp:toggle', id, enabled),
+  mcpTest: (target) => ipcRenderer.invoke('mcp:test', target),
+  mcpTier1: (id) => ipcRenderer.invoke('mcp:tier1', id),
+  mcpRegistry: (query, category) => ipcRenderer.invoke('mcp:registry', query, category),
+  mcpImportScan: () => ipcRenderer.invoke('mcp:import-scan'),
+  mcpImportRun: (sourceKey, selectedNames, clipboardText) => ipcRenderer.invoke('mcp:import-run', sourceKey, selectedNames, clipboardText),
+  mcpUsage: (days) => ipcRenderer.invoke('mcp:usage', days),
   scheduledRun: (id) => ipcRenderer.invoke('shell:scheduled-run', id),
   scheduledHistory: () => ipcRenderer.invoke('shell:scheduled-history'),
   scheduledClearHistory: () => ipcRenderer.invoke('shell:scheduled-clear-history'),

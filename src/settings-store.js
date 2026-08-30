@@ -58,12 +58,16 @@ const DEFAULTS = {
   notifKindsDisabled: [], // R6: subset of approval/completion/question/budget/system
   weeklyReportEnabled: false, // R5: auto-generate the Wrapped card every Monday morning
   weeklyReportPushIm: false, // R5: also push the generated card summary to configured IM channels
+  mcpServers: [],           // MCP servers (T1/R3): { id, name, serverName, transport, command, args,
+                            //   envPlain, envSecretKeys, url, headers, enabled, failOnStartupError,
+                            //   startupTimeoutSec, toolTimeoutSec, source, origin, createdAt }
+                            // Secret env VALUES live only in mcp-secrets.json (safeStorage vault)
 };
 
 const NUMERIC_KEYS = ['keepVersions', 'port', 'contextWindow', 'costInputPerM', 'costOutputPerM', 'costCacheReadPerM', 'costCacheWritePerM', 'costPeakInputPerM', 'costPeakOutputPerM', 'costPeakCacheReadPerM', 'costPeakCacheWritePerM', 'monthlyBudget', 'backupKeep', 'remotePort'];
 const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'cockpitOnboarded', 'shellAutoUpdate', 'costPeakEnabled', 'remoteControl', 'remoteCompat', 'remotePublic', 'bootCheckOnStartup', 'compatStatusEnabled', 'notificationCenterEnabled', 'notifDndEnabled', 'notifFoldEnabled', 'weeklyReportEnabled', 'weeklyReportPushIm'];
 const STRING_KEYS = ['channel', 'pinnedVersion', 'registry', 'workspace', 'dshHome', 'nodeBin', 'dshBin', 'language', 'themeMode', 'quickAskHotkey', 'costPeakWindows', 'remotePublicMode', 'notifDndWindow'];
-const ARRAY_KEYS = ['recentWorkspaces', 'installedPlugins', 'scheduledTasks', 'scheduledHistory', 'modelProviders', 'imChannels', 'notifKindsDisabled'];
+const ARRAY_KEYS = ['recentWorkspaces', 'installedPlugins', 'scheduledTasks', 'scheduledHistory', 'modelProviders', 'imChannels', 'notifKindsDisabled', 'mcpServers'];
 
 class SettingsStore {
   constructor(userDataDir) {

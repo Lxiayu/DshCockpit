@@ -127,6 +127,7 @@ function createRuntimeSupervisor(deps) {
     upgradeDialog = () => {}, isCredentialFormatIssue = () => false,
     bootTimingFile = null, // () => path — A3 boot baselines land here
     notify,
+    envExtras = () => null, // () => object — v0.3.1: MCP secret env vars ride the runtime child env
   } = deps;
 
   const { spawn } = require('node:child_process');
@@ -320,6 +321,10 @@ function createRuntimeSupervisor(deps) {
       log(`[shell] node attempt ${attempt}/${candidates.length}: ${cand.bin}${cand.runAsNode ? ' (electron-as-node)' : ''}`);
       const env = { ...process.env, DSH_HOME: dshHome };
       if (cand.runAsNode) env.ELECTRON_RUN_AS_NODE = '1';
+      // v0.3.1 MCP: vault-decrypted secret env vars reach DSH-spawned MCP
+      // servers via process inheritance — cordis.patch.yml stays plaintext-free
+      const mcpEnv = envExtras();
+      if (mcpEnv && typeof mcpEnv === 'object') Object.assign(env, mcpEnv);
 
       let child;
       try {

@@ -264,7 +264,7 @@ function createWindowManager(deps) {
 
   function cockpitNavigate(mode, page, intent) {
     const allowed = {
-      control: ['cost', 'tasks', 'runtime', 'remote', 'plugins', 'skills', 'channels', 'longsession'],
+      control: ['cost', 'tasks', 'runtime', 'remote', 'plugins', 'mcp', 'skills', 'channels', 'longsession'],
       settings: ['general', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about'],
     };
     const m = mode === 'control' || mode === 'settings' ? mode : 'settings';

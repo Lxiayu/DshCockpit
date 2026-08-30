@@ -372,6 +372,7 @@
       <button class="nav-item" data-page="longsession"><span class="ico">🧠</span><span class="txt" data-i18n="nav.longsession">长会话</span></button>
       <button class="nav-item" data-page="runtime"><span class="ico">⚙️</span><span class="txt" data-i18n="nav.runtime">运行时</span></button>
       <button class="nav-item" data-page="plugins"><span class="ico">🧩</span><span class="txt" data-i18n="nav.plugins">插件</span></button>
+      <button class="nav-item" data-page="mcp"><span class="ico">🔌</span><span class="txt" data-i18n="nav.mcp">MCP 服务</span></button>
       <button class="nav-item" data-page="skills"><span class="ico">✨</span><span class="txt" data-i18n="nav.skills">技能</span></button>
       <button class="nav-item" data-page="tasks"><span class="ico">⏰</span><span class="txt" data-i18n="nav.tasks">任务与自动化</span></button>
      <button class="nav-item" data-page="notifications"><span class="ico">🔔</span><span class="txt" data-i18n="nav.notifications">通知中心</span></button>
@@ -811,6 +812,138 @@
           <h3 data-i18n="plugins.discoverTitle">发现</h3>
           <div class="status" id="plugin-status" style="display:none"></div>
           <div id="plugin-list"></div>
+        </div>
+      </div>
+
+      <!-- ------------------------- page: mcp (T1 v0.3.1) -->
+      <div class="page" id="page-mcp">
+        <div class="page-head">
+          <h2 data-i18n="nav.mcp">MCP 服务</h2>
+          <p data-i18n="page.mcp.d">管理 Model Context Protocol (MCP) 服务器，扩展 Agent 能力</p>
+        </div>
+        <div class="card">
+          <div class="page-head-row">
+            <h3 data-i18n="mcp.installedTitle">已配置的 MCP 服务</h3>
+            <div class="page-actions">
+              <button class="secondary" id="btn-mcp-import-view" data-i18n="mcp.import">导入</button>
+              <button class="secondary" id="btn-mcp-manual" data-i18n="mcp.manual">手动配置</button>
+              <button id="btn-mcp-add" data-i18n="mcp.add">添加服务</button>
+            </div>
+          </div>
+          <div id="mcp-list" style="display:flex;flex-direction:column;gap:6px"></div>
+          <div class="restart-hint" id="mcp-restart-hint" style="display:none">
+            <span data-i18n="mcp.restartHint">MCP 配置已变更，重启运行时后生效。</span>
+            <button class="secondary" id="btn-mcp-restart" data-i18n="plugins.restartNow">立即重启</button>
+          </div>
+          <div id="mcp-form" style="display:none; border-top:1px solid var(--line); margin-top:10px; padding-top:10px">
+            <div class="setting">
+              <div class="setting-info"><label data-i18n="mcp.f.name">名称</label></div>
+              <div class="setting-ctrl"><input type="text" id="mcp-f-name" style="width:220px" /></div>
+            </div>
+            <div class="setting">
+              <div class="setting-info">
+                <label data-i18n="mcp.f.ns">命名空间</label>
+                <span class="desc" data-i18n="mcp.f.nsHint">工具前缀：mcp__&lt;命名空间&gt;__&lt;工具名&gt;</span>
+              </div>
+              <div class="setting-ctrl"><input type="text" class="mono" id="mcp-f-ns" style="width:220px" placeholder="filesystem" /></div>
+            </div>
+            <div class="setting">
+              <div class="setting-info"><label data-i18n="mcp.f.transport">传输方式</label></div>
+              <div class="setting-ctrl">
+                <select id="mcp-f-transport">
+                  <option value="stdio" data-i18n="mcp.f.stdio">stdio（本地进程）</option>
+                  <option value="sse" data-i18n="mcp.f.sse">sse / websocket（远程端点）</option>
+                  <option value="websocket">websocket</option>
+                </select>
+              </div>
+            </div>
+            <div id="mcp-f-stdio-fields">
+              <div class="setting">
+                <div class="setting-info">
+                  <label data-i18n="mcp.f.command">启动命令</label>
+                  <span class="desc" id="mcp-f-wraphint" style="display:none" data-i18n="mcp.f.wrapHint">Windows 上 npx 类命令会自动包装为 cmd /c 执行</span>
+                </div>
+                <div class="setting-ctrl"><input type="text" class="mono" id="mcp-f-command" style="width:320px" placeholder="npx" /></div>
+              </div>
+              <div class="setting">
+                <div class="setting-info"><label data-i18n="mcp.f.args">参数（每行一个）</label></div>
+                <div class="setting-ctrl" style="flex:1"><textarea id="mcp-f-args" class="mono" rows="3" style="width:100%;font-family:var(--mono)" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/tmp"></textarea></div>
+              </div>
+            </div>
+            <div id="mcp-f-remote-fields" style="display:none">
+              <div class="setting">
+                <div class="setting-info"><label data-i18n="mcp.f.url">端点 URL</label></div>
+                <div class="setting-ctrl" style="flex:1"><input type="text" class="mono" id="mcp-f-url" style="width:100%" placeholder="https://example.com/mcp" /></div>
+              </div>
+              <div class="setting">
+                <div class="setting-info">
+                  <label data-i18n="mcp.f.headers">请求头（名称: 值，每行一个）</label>
+                  <span class="desc" data-i18n="mcp.f.headersWarn">远程 Header 值会写入本地配置文件（非加密），请勿在共享机器上放置敏感值。</span>
+                </div>
+                <div class="setting-ctrl" style="flex:1"><textarea id="mcp-f-headers" class="mono" rows="2" style="width:100%;font-family:var(--mono)" placeholder="Authorization: Bearer xxx"></textarea></div>
+              </div>
+            </div>
+            <div class="setting">
+              <div class="setting-info">
+                <label data-i18n="mcp.f.env">环境变量（每行 KEY=VALUE）</label>
+                <span class="desc" data-i18n="mcp.f.envHint">勾选「敏感」的值经系统加密存储，不写入任何配置文件。</span>
+              </div>
+              <div class="setting-ctrl" style="flex:1">
+                <textarea id="mcp-f-env" class="mono" rows="3" style="width:100%;font-family:var(--mono)" placeholder="NODE_ENV=production&#10;GITHUB_TOKEN=ghp_xxx"></textarea>
+                <label style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:12px;color:var(--text-2)">
+                  <input type="checkbox" id="mcp-f-env-secret" /> <span data-i18n="mcp.f.envSecret">以下值按敏感处理（加密存储，不落盘）</span>
+                </label>
+                <input type="text" class="mono" id="mcp-f-env-secret-keys" style="width:100%;margin-top:4px;font-family:var(--mono)" data-i18n-placeholder="mcp.f.envSecretKeysPh" placeholder="敏感变量名，逗号分隔，如 GITHUB_TOKEN, BRAVE_API_KEY" />
+              </div>
+            </div>
+            <div class="setting">
+              <div class="setting-info"><label data-i18n="mcp.f.failfast">启动失败时阻止 DSH 启动</label></div>
+              <div class="setting-ctrl"><input type="checkbox" class="toggle" id="mcp-f-failfast" /></div>
+            </div>
+            <div class="btnrow">
+              <button class="secondary" id="btn-mcp-test" data-i18n="mcp.f.test">测试连接</button>
+              <button id="btn-mcp-save" data-i18n="mcp.f.save">保存</button>
+              <button class="secondary" id="btn-mcp-cancel" data-i18n="mcp.f.cancel">取消</button>
+              <button class="danger" id="btn-mcp-delete" data-i18n="mcp.f.delete" style="display:none">删除</button>
+            </div>
+            <div class="status" id="mcp-test-status"></div>
+          </div>
+        </div>
+        <div class="card" id="mcp-import-card" style="display:none">
+          <h3 data-i18n="mcp.manualTitle">手动配置（原始配置 JSON）</h3>
+          <div class="note" data-i18n="mcp.pasteHint">请从 MCP Server 的介绍页复制配置 JSON（优先使用 NPX 或 UVX 配置），并粘贴到输入框中。支持 mcpServers 整表或单个服务对象。</div>
+          <div class="setting" style="margin-top:10px">
+            <div class="setting-info"><label data-i18n="mcp.pasteLabel">粘贴配置 JSON</label></div>
+            <div class="setting-ctrl" style="flex:1"><textarea id="mcp-paste" class="mono" rows="9" style="width:100%;font-family:var(--mono)" placeholder='// 示例：
+// {
+//   "mcpServers": {
+//     "example-server": {
+//       "command": "npx",
+//       "args": [
+//         "-y",
+//         "mcp-server-example"
+//       ]
+//     }
+//   }
+// }'></textarea></div>
+          </div>
+          <div class="btnrow"><button class="secondary" id="btn-mcp-paste-import" data-i18n="mcp.pasteImport">解析并导入</button></div>
+          <div class="note" style="color:var(--warn,#c90)" data-i18n="mcp.pasteRisk">⚠ 配置前请确认来源，甄别风险：安装的 MCP Server 会在本机执行第三方命令，可能访问你的文件与凭据。</div>
+          <div class="status" id="mcp-import-status"></div>
+          <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px">
+            <h3 style="margin:0 0 8px" data-i18n="mcp.importTitle">从其他工具导入</h3>
+            <div id="mcp-import-sources" style="display:flex;flex-direction:column;gap:8px"></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="mcp.registryTitle">发现 MCP Server</h3>
+          <div class="plugin-tools">
+            <input type="text" id="mcp-search" data-i18n-placeholder="mcp.searchPh" placeholder="搜索 MCP Server…" />
+            <span id="mcp-count"></span>
+          </div>
+          <div class="chips" id="mcp-cats"></div>
+          <div class="note" data-i18n="mcp.registryNote">安装前会展示将要执行的命令与参数，确认后才写入配置；只添加你信任的来源。</div>
+          <div id="mcp-registry-list" style="display:flex;flex-direction:column;gap:6px"></div>
         </div>
       </div>
 
@@ -1366,6 +1499,53 @@
       sec_firstrun: '首次使用', firstrun_step1: '在 Harness 工作区完成 DeepSeek API 配置', firstrun_step2: '使用右上角 Cockpit 管理运行时与工作区', firstrun_step3: '开始对话；Context 指示器会持续显示压力',
       shellAutoUpdate: '自动检查壳更新',
       sec_plugins: '插件市场',
+      // ---- MCP panel (T1 v0.3.1) ----
+      page_mcp_d: '管理 Model Context Protocol (MCP) 服务器，扩展 Agent 能力',
+      mcp_installedTitle: '已配置的 MCP 服务', mcp_add: '添加服务', mcp_import: '导入',
+      mcp_empty: '尚未配置任何 MCP 服务。',
+      mcp_restartHint: 'MCP 配置已变更，重启运行时后生效。',
+      mcp_importTitle: '从其他工具导入',
+      mcp_manual: '手动配置', mcp_manualTitle: '手动配置（原始配置 JSON）',
+      mcp_pasteHint: '请从 MCP Server 的介绍页复制配置 JSON（优先使用 NPX 或 UVX 配置），并粘贴到输入框中。支持 mcpServers 整表或单个服务对象。',
+      mcp_pasteLabel: '粘贴配置 JSON',
+      mcp_pasteRisk: '⚠ 配置前请确认来源，甄别风险：安装的 MCP Server 会在本机执行第三方命令，可能访问你的文件与凭据。',
+      mcp_verifiedNs: '已验证来源',
+      mcp_pasteImport: '解析并导入',
+      mcp_registryTitle: '发现 MCP Server', mcp_searchPh: '搜索 MCP Server…',
+      mcp_registryNote: '列表来自官方 MCP Registry（命名空间经 GitHub/DNS 验证）与内置精选；安装会在本机执行第三方命令，可能访问你的文件与凭据——请确认来源，只添加你信任的服务。',
+      mcp_f_name: '名称', mcp_f_ns: '命名空间', mcp_f_nsHint: '工具前缀：mcp__<命名空间>__<工具名>',
+      mcp_f_transport: '传输方式', mcp_f_stdio: 'stdio（本地进程）', mcp_f_sse: 'sse（远程端点）',
+      mcp_f_command: '启动命令', mcp_f_args: '参数（每行一个）',
+      mcp_f_wrapHint: 'Windows 上 npx 类命令会自动包装为 cmd /c 执行',
+      mcp_f_url: '端点 URL', mcp_f_headers: '请求头（名称: 值，每行一个）',
+      mcp_f_headersWarn: '远程 Header 值会写入本地配置文件（非加密），请勿在共享机器上放置敏感值。',
+      mcp_f_env: '环境变量（每行 KEY=VALUE）',
+      mcp_f_envHint: '按敏感处理的值经系统加密存储（macOS 钥匙串 / Windows DPAPI），不写入任何配置文件，重启运行时后生效。',
+      mcp_f_envSecret: '以下变量按敏感处理（加密存储，不落盘）',
+      mcp_f_envSecretKeysPh: '敏感变量名，逗号分隔，如 GITHUB_TOKEN, BRAVE_API_KEY',
+      mcp_f_failfast: '启动失败时阻止 DSH 启动',
+      mcp_f_test: '测试连接', mcp_f_save: '保存', mcp_f_cancel: '取消', mcp_f_delete: '删除',
+      mcp_testRunning: '⏳ 正在握手（首次运行可能需下载依赖，最多等待配置的超时时间）…',
+      mcp_testOk: '✅ 连接成功，发现 {n} 个工具：{tools}',
+      mcp_testOkNoTools: '✅ 连接成功（未发现工具）',
+      mcp_testNote: '（端点已响应；完整工具列表需在会话中验证）',
+      mcp_testFail: '❌ 连接失败：{reason}',
+      mcp_savedOk: '✅ 已保存。', mcp_saveFail: '❌ 保存失败：',
+      mcp_confirmRemove: '移除 MCP 服务 {name}？对应配置将从 cordis.patch.yml 中删除。',
+      mcp_removedOk: '✅ 已移除。',
+      mcp_secretConfigured: '已配置（不回显）',
+      mcp_usageCalls: '已调用 {n} 次', mcp_usageLast: '最近 {ago}', mcp_usageTop: '常用: {tools}',
+      mcp_usage_never: '从未调用',
+      mcp_registryCmdMissing: '需手动填写启动命令', mcp_registryInstall: '安装',
+      mcp_catAll: '全部', mcp_catStorage: '存储', mcp_catDatabase: '数据库', mcp_catDevtools: '开发工具',
+      mcp_catSearch: '搜索', mcp_catBrowser: '浏览器', mcp_catCoding: '编码', mcp_catCommunication: '通信',
+      mcp_catMemory: '记忆', mcp_catCustom: '自定义', mcp_catOther: '其他',
+      mcp_importScanNone: '未检测到其他客户端的 MCP 配置。',
+      mcp_importSourceNone: '（未找到该来源的配置文件）', mcp_importSourceFail: '（解析失败：{reason}）',
+      mcp_importedOk: '✅ 已导入 {n} 个服务', mcp_importedFail: '；{n} 个失败：{items}',
+      mcp_importPasteFail: '❌ 解析失败：{reason}',
+      mcp_winWrapNote: 'Windows：',
+      ago_justnow: '刚刚', ago_minutes: '{n} 分钟前', ago_hours: '{n} 小时前', ago_days: '{n} 天前',
       plugins_searchPh: '搜索插件（名称 / 描述）…', plugins_refresh: '刷新', plugins_go: '搜索',
       plugins_installedCount: '{n} 个插件',
       plugins_shownCount: '已显示 {n}/{t} 个', plugins_loadMore: '加载更多（还有 {n} 个）…',
@@ -1545,6 +1725,7 @@
       nav_search: '搜索设置…',
       group_general: '常规', group_workspace: '工作', group_system: '系统',
       nav_general: '通用', nav_cost: '用量与成本', nav_runtime: '运行时', nav_plugins: '插件',
+      nav_mcp: 'MCP 服务',
       nav_tasks: '自动化', nav_data: '数据与备份', nav_update: '更新', nav_about: '关于',
       page_remote_d: '在手机浏览器中安全使用本机会话',
       page_general_d: '壳的界面与启动偏好', page_cost_d: 'API 费率、峰谷分时与预算',
@@ -1774,6 +1955,53 @@
       sec_firstrun: 'First run', firstrun_step1: 'Finish DeepSeek API setup in the Harness workspace', firstrun_step2: 'Use Cockpit in the top-right to manage runtime and workspace', firstrun_step3: 'Start chatting; the Context indicator keeps pressure visible',
       shellAutoUpdate: 'Auto-check shell updates',
       sec_plugins: 'Plugin market',
+      // ---- MCP panel (T1 v0.3.1) ----
+      page_mcp_d: 'Manage Model Context Protocol (MCP) servers to extend agent capabilities',
+      mcp_installedTitle: 'Configured MCP Servers', mcp_add: 'Add Server', mcp_import: 'Import',
+      mcp_empty: 'No MCP servers configured yet.',
+      mcp_restartHint: 'MCP configuration changed — restart the runtime to apply.',
+      mcp_importTitle: 'Import from other tools',
+      mcp_manual: 'Manual Config', mcp_manualTitle: 'Manual Config (raw JSON)',
+      mcp_pasteHint: 'Copy the config JSON from the MCP Server introduction page (NPX or UVX configs preferred) and paste it below. Both a full mcpServers map and a single server object work.',
+      mcp_pasteLabel: 'Paste config JSON',
+      mcp_pasteRisk: '⚠ Verify the source before configuring: an installed MCP server executes third-party commands on this machine and may access your files and credentials.',
+      mcp_verifiedNs: 'verified source',
+      mcp_pasteImport: 'Parse & Import',
+      mcp_registryTitle: 'Discover MCP Servers', mcp_searchPh: 'Search MCP servers…',
+      mcp_registryNote: 'The list comes from the official MCP Registry (GitHub/DNS-verified namespaces) plus a curated builtin set; installing executes third-party commands locally and may access your files and credentials — verify the source and only add servers you trust.',
+      mcp_f_name: 'Name', mcp_f_ns: 'Namespace', mcp_f_nsHint: 'Tool prefix: mcp__<namespace>__<tool>',
+      mcp_f_transport: 'Transport', mcp_f_stdio: 'stdio (local process)', mcp_f_sse: 'sse (remote endpoint)',
+      mcp_f_command: 'Command', mcp_f_args: 'Arguments (one per line)',
+      mcp_f_wrapHint: 'On Windows, npx-style commands are auto-wrapped with cmd /c',
+      mcp_f_url: 'Endpoint URL', mcp_f_headers: 'Headers (Name: Value, one per line)',
+      mcp_f_headersWarn: 'Remote header values are stored in the local config file (not encrypted) — avoid sensitive values on shared machines.',
+      mcp_f_env: 'Environment variables (KEY=VALUE per line)',
+      mcp_f_envHint: 'Values marked sensitive are encrypted by the OS (macOS Keychain / Windows DPAPI), never written to any config file, and applied after a runtime restart.',
+      mcp_f_envSecret: 'Treat the variables below as sensitive (encrypted, never on disk)',
+      mcp_f_envSecretKeysPh: 'Sensitive names, comma-separated, e.g. GITHUB_TOKEN, BRAVE_API_KEY',
+      mcp_f_failfast: 'Block DSH startup when this server fails to start',
+      mcp_f_test: 'Test Connection', mcp_f_save: 'Save', mcp_f_cancel: 'Cancel', mcp_f_delete: 'Delete',
+      mcp_testRunning: '⏳ Handshaking (first run may download dependencies; bounded by the configured timeout)…',
+      mcp_testOk: '✅ Connected, {n} tools found: {tools}',
+      mcp_testOkNoTools: '✅ Connected (no tools found)',
+      mcp_testNote: '(endpoint responded; verify the full tool list in a live session)',
+      mcp_testFail: '❌ Connection failed: {reason}',
+      mcp_savedOk: '✅ Saved.', mcp_saveFail: '❌ Save failed: ',
+      mcp_confirmRemove: 'Remove MCP server {name}? Its config block will be deleted from cordis.patch.yml.',
+      mcp_removedOk: '✅ Removed.',
+      mcp_secretConfigured: 'Configured (never shown)',
+      mcp_usageCalls: '{n} calls', mcp_usageLast: 'last {ago}', mcp_usageTop: 'top: {tools}',
+      mcp_usage_never: 'never used',
+      mcp_registryCmdMissing: 'command must be filled in manually', mcp_registryInstall: 'Install',
+      mcp_catAll: 'All', mcp_catStorage: 'Storage', mcp_catDatabase: 'Database', mcp_catDevtools: 'Dev Tools',
+      mcp_catSearch: 'Search', mcp_catBrowser: 'Browser', mcp_catCoding: 'Coding', mcp_catCommunication: 'Comms',
+      mcp_catMemory: 'Memory', mcp_catCustom: 'Custom', mcp_catOther: 'Other',
+      mcp_importScanNone: 'No MCP configs detected from other clients.',
+      mcp_importSourceNone: '(config file not found)', mcp_importSourceFail: '(parse failed: {reason})',
+      mcp_importedOk: '✅ Imported {n} server(s)', mcp_importedFail: '; {n} failed: {items}',
+      mcp_importPasteFail: '❌ Parse failed: {reason}',
+      mcp_winWrapNote: 'Windows: ',
+      ago_justnow: 'just now', ago_minutes: '{n} min ago', ago_hours: '{n} h ago', ago_days: '{n} d ago',
       plugins_searchPh: 'Search plugins (name / description)…', plugins_refresh: 'Refresh', plugins_go: 'Search',
       plugins_installedCount: '{n} plugins',
       plugins_shownCount: 'Showing {n} of {t}', plugins_loadMore: 'Load more ({n} more)…',
@@ -1953,6 +2181,7 @@
       nav_search: 'Search settings…',
       group_general: 'General', group_workspace: 'Workspace', group_system: 'System',
       nav_general: 'General', nav_cost: 'Usage & Cost', nav_runtime: 'Runtime', nav_plugins: 'Plugins',
+      nav_mcp: 'MCP Servers',
       nav_tasks: 'Automation', nav_data: 'Data & Backup', nav_update: 'Updates', nav_about: 'About',
       page_remote_d: "Use this machine's sessions safely from a phone browser",
       page_general_d: 'Shell interface & startup preferences', page_cost_d: 'API rates, peak pricing & budget',
@@ -2169,9 +2398,9 @@
   }
 
   // ------------------------------------------------------------- routing
-  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'skills', 'tasks', 'notifications', 'weekly', 'remote', 'channels', 'models', 'longsession', 'data', 'update', 'about'];
-  const CONTROL_PAGES = new Set(['cost', 'tasks', 'runtime', 'remote', 'plugins', 'skills', 'channels', 'longsession']);
-  const SETTINGS_PAGES = new Set(['general', 'cost', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about', 'notifications', 'weekly']);
+  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'mcp', 'skills', 'tasks', 'notifications', 'weekly', 'remote', 'channels', 'models', 'longsession', 'data', 'update', 'about'];
+  const CONTROL_PAGES = new Set(['cost', 'tasks', 'runtime', 'remote', 'plugins', 'mcp', 'skills', 'channels', 'longsession']);
+  const SETTINGS_PAGES = new Set(['general', 'cost', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about', 'notifications', 'weekly', 'mcp']);
   const CENTER_INTENTS = new Set(['new-task']);
   const routeParams = new URLSearchParams(location.search);
   let centerMode = routeParams.get('mode') === 'control' ? 'control' : 'settings';
@@ -2223,6 +2452,8 @@
     // plugins is a low-traffic page with a network-backed list — load lazily
     // on first visit so opening the settings window stays offline-fast
     if (p === 'plugins') { if (!plug.loaded) { plug.loaded = true; loadPlugins(); } renderInstalled(); }
+    // MCP panel (T1): local list is cheap; tier-1 probes + registry fill in async
+    if (p === 'mcp') refreshMcp();
     // skills center: network-backed market — load lazily on first visit
     if (p === 'skills' && !sk.loaded) { sk.loaded = true; loadSkills(); }
     // automation center: refresh the task list on every visit (cheap, local)
@@ -5083,6 +5314,400 @@
     setInterval(() => { refreshRemote(); refreshPublicRemote(); }, 5000);
     dbg(`page init: done (${Date.now() - tBoot}ms total, refreshInfo already fired)`);
   })();
+
+  // =========================================================================
+  // MCP panel (v0.3.1 T1). Placed after the init IIFE on purpose: the panel
+  // is user-reachable only through showPage('mcp') and every entry point
+  // lazily initialises its state, so early init can never hit it.
+  // =========================================================================
+  let mcpState = null; // { servers, patchBlockIds, seq, tier1: {id:status}, usage }
+  let mcpEditing = null; // server id being edited, or null for "new"
+  let mcpRegCat = 'all';
+  let mcpRegSeq = 0;
+  let mcpSearchTimer = null;
+
+  function mcpSt() {
+    if (!mcpState) mcpState = { servers: [], patchBlockIds: [], seq: 0, tier1: {}, usage: null, dirty: false };
+    return mcpState;
+  }
+  function mcpStatus(msg, cls) {
+    const el = $('mcp-test-status');
+    if (!el) return;
+    el.className = 'status' + (cls ? ' ' + cls : '');
+    el.textContent = msg || '';
+  }
+  function mcpAgo(ms) {
+    if (!ms) return tr('ago_justnow');
+    const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+    if (s < 60) return tr('ago_justnow');
+    if (s < 3600) return tr('ago_minutes', { n: Math.floor(s / 60) });
+    if (s < 86400) return tr('ago_hours', { n: Math.floor(s / 3600) });
+    return tr('ago_days', { n: Math.floor(s / 86400) });
+  }
+  function mcpMarkDirty() {
+    mcpSt().dirty = true;
+    $('mcp-restart-hint').style.display = 'flex';
+  }
+
+  async function refreshMcp() {
+    const st = mcpSt();
+    const seq = ++st.seq;
+    let r;
+    try { r = await window.dshShell.mcpList(); } catch (e) { r = { ok: false, reason: e.message }; }
+    if (seq !== st.seq) return;
+    st.servers = (r && r.servers) || [];
+    st.patchBlockIds = (r && r.patchBlockIds) || [];
+    renderMcpList();
+    if (!st.usage) {
+      try {
+        const u = await window.dshShell.mcpUsage(30);
+        if (seq === st.seq) { st.usage = (u && u.usage) || { servers: {} }; renderMcpList(); }
+      } catch { /* usage is decorative — never block the list */ }
+    }
+    // tier-1 probes fill in asynchronously (bounded 2s each, parallel, cached 5m)
+    for (const s of st.servers) {
+      window.dshShell.mcpTier1(s.id).then((t1) => {
+        if (seq !== st.seq) return;
+        st.tier1[s.id] = t1;
+        renderMcpList();
+      }).catch(() => {});
+    }
+  }
+
+  function mcpUsageLine(server) {
+    const st = mcpSt();
+    const u = st.usage && st.usage.servers && st.usage.servers[server.serverName];
+    if (!u || !u.toolCalls) return `<span class="desc">${tr('mcp_usage_never')}</span>`;
+    const top = (u.topTools || []).map((t) => `${t.tool}(${t.count})`).join(', ');
+    let line = tr('mcp_usageCalls', { n: u.toolCalls });
+    if (u.lastUsedAt) line += ' · ' + tr('mcp_usageLast', { ago: mcpAgo(u.lastUsedAt) });
+    if (top) line += ' · ' + tr('mcp_usageTop', { tools: top });
+    return `<span class="desc">${line}</span>`;
+  }
+
+  function renderMcpList() {
+    const st = mcpSt();
+    const el = $('mcp-list');
+    if (!el) return;
+    el.innerHTML = '';
+    if (!st.servers.length) {
+      const p = document.createElement('div');
+      p.className = 'desc';
+      p.textContent = tr('mcp_empty');
+      el.appendChild(p);
+      return;
+    }
+    for (const s of st.servers) {
+      const row = document.createElement('div');
+      row.className = 'plugin-item';
+      const inPatch = st.patchBlockIds.includes('mcp-' + s.id);
+      const t1 = st.tier1[s.id];
+      // VS Code rule: show a status word only when it carries information
+      let statusWord = '';
+      if (s.enabled && !inPatch) statusWord = tr('mcp_restartHint');
+      else if (t1 && !t1.ok) statusWord = t1.reason || t1.status || '';
+      const transport = s.transport === 'stdio'
+        ? `${s.command} ${(s.args || []).slice(0, 3).join(' ')}`.trim()
+        : s.url;
+      row.innerHTML = '<div class="plugin-info">'
+        + `<div class="plugin-name">${s.name} <span class="desc">(${s.serverName} · ${s.transport}${s.enabled ? '' : ' · off'})</span></div>`
+        + `<div class="plugin-desc desc" style="font-family:var(--mono);font-size:11px">${transport}</div>`
+        + (statusWord ? `<div class="desc" style="color:var(--warn,#c90)">${statusWord}</div>` : '')
+        + mcpUsageLine(s)
+        + '</div>';
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:6px;align-items:center;flex-shrink:0';
+      const on = document.createElement('input');
+      on.type = 'checkbox';
+      on.className = 'toggle';
+      on.checked = !!s.enabled;
+      on.title = s.enabled ? 'disable' : 'enable';
+      on.addEventListener('change', () => mcpToggle(s.id, on.checked));
+      const btnTest = document.createElement('button');
+      btnTest.className = 'secondary';
+      btnTest.textContent = tr('mcp_f_test');
+      btnTest.addEventListener('click', () => mcpTestServer(s));
+      const btnEdit = document.createElement('button');
+      btnEdit.className = 'secondary';
+      btnEdit.textContent = '✎';
+      btnEdit.addEventListener('click', () => openMcpForm(s));
+      actions.append(on, btnTest, btnEdit);
+      row.appendChild(actions);
+      el.appendChild(row);
+    }
+  }
+
+  function openMcpForm(server) {
+    mcpEditing = server ? server.id : null;
+    $('mcp-form').style.display = '';
+    $('btn-mcp-delete').style.display = server ? '' : 'none';
+    $('mcp-f-name').value = server ? server.name : '';
+    $('mcp-f-ns').value = server ? server.serverName : '';
+    $('mcp-f-transport').value = server ? server.transport : 'stdio';
+    $('mcp-f-command').value = server ? (server.command || '') : '';
+    $('mcp-f-args').value = server ? (server.args || []).join('\n') : '';
+    $('mcp-f-url').value = server ? (server.url || '') : '';
+    $('mcp-f-headers').value = server
+      ? Object.entries(server.headers || {}).map(([k, v]) => `${k}: ${v}`).join('\n')
+      : '';
+    const envPlain = server ? (server.envPlain || {}) : {};
+    $('mcp-f-env').value = Object.entries(envPlain).map(([k, v]) => `${k}=${v}`).join('\n');
+    $('mcp-f-env-secret-keys').value = server ? (server.envSecretKeys || []).join(', ') : '';
+    $('mcp-f-env-secret').checked = false; // per-save flag, not persisted state
+    $('mcp-f-failfast').checked = server ? !!server.failOnStartupError : false;
+    mcpSyncTransportFields();
+    mcpStatus('');
+  }
+
+  function mcpSyncTransportFields() {
+    const stdio = $('mcp-f-transport').value === 'stdio';
+    $('mcp-f-stdio-fields').style.display = stdio ? '' : 'none';
+    $('mcp-f-remote-fields').style.display = stdio ? 'none' : '';
+    $('mcp-f-wraphint').style.display = stdio ? '' : 'none';
+  }
+
+  function collectMcpForm() {
+    const args = $('mcp-f-args').value.split('\n').map((x) => x.trim()).filter(Boolean);
+    const headers = {};
+    for (const line of $('mcp-f-headers').value.split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      const i = t.indexOf(':');
+      if (i > 0) headers[t.slice(0, i).trim()] = t.slice(i + 1).trim();
+    }
+    const envPlain = {};
+    for (const line of $('mcp-f-env').value.split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      const i = t.indexOf('=');
+      if (i > 0) envPlain[t.slice(0, i).trim()] = t.slice(i + 1).trim();
+    }
+    const secretKeys = $('mcp-f-env-secret-keys').value.split(',').map((x) => x.trim()).filter(Boolean);
+    const ns = $('mcp-f-ns').value.trim();
+    const slug = ns.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+    return {
+      id: mcpEditing || slug, // unprefixed slug — the patch layer adds the mcp- prefix
+      name: $('mcp-f-name').value.trim(),
+      serverName: ns,
+      transport: $('mcp-f-transport').value,
+      command: $('mcp-f-command').value.trim(),
+      args,
+      url: $('mcp-f-url').value.trim(),
+      headers,
+      envPlain,
+      envSecretKeys: secretKeys,
+      failOnStartupError: $('mcp-f-failfast').checked,
+      enabled: true,
+      source: mcpEditing ? undefined : 'manual',
+    };
+  }
+
+  async function mcpSaveForm() {
+    const input = collectMcpForm();
+    // secrets: values typed into env for keys marked sensitive go forward ONCE
+    const secrets = {};
+    if ($('mcp-f-env-secret').checked) {
+      for (const k of input.envSecretKeys) {
+        const pair = $('mcp-f-env').value.split('\n').find((l) => l.trim().startsWith(k + '='));
+        if (pair && pair.slice(pair.indexOf('=') + 1).trim()) secrets[k] = pair.slice(pair.indexOf('=') + 1).trim();
+      }
+    }
+    mcpStatus('⏳ …');
+    let r;
+    try { r = await window.dshShell.mcpSave(input, secrets); } catch (e) { r = { ok: false, reason: e.message }; }
+    if (r.ok) {
+      mcpStatus(tr('mcp_savedOk'), 'ok');
+      mcpMarkDirty();
+      await refreshMcp();
+      setTimeout(() => { $('mcp-form').style.display = 'none'; }, 400);
+    } else {
+      mcpStatus(tr('mcp_saveFail') + (r.reason || ''), 'bad');
+    }
+  }
+
+  async function mcpTestServer(server) {
+    mcpStatus(tr('mcp_testRunning'));
+    // unsaved form: probe from the form fields; otherwise the stored record
+    const formVisible = $('mcp-form').style.display !== 'none';
+    const target = formVisible && (!mcpEditing || mcpEditing === server.id) ? collectMcpForm() : server;
+    let r;
+    try { r = await window.dshShell.mcpTest(target); } catch (e) { r = { ok: false, reason: e.message }; }
+    if (r && r.ok) {
+      mcpStatus(r.note ? tr('mcp_testOkNoTools') + ' ' + tr('mcp_testNote')
+        : tr('mcp_testOk', { n: (r.tools || []).length, tools: (r.tools || []).slice(0, 6).join(', ') }), 'ok');
+    } else {
+      mcpStatus(tr('mcp_testFail', { reason: (r && r.reason) || 'unknown' }), 'bad');
+    }
+  }
+
+  async function mcpToggle(id, enabled) {
+    let r;
+    try { r = await window.dshShell.mcpToggle(id, enabled); } catch (e) { r = { ok: false, reason: e.message }; }
+    if (r.ok) { mcpMarkDirty(); await refreshMcp(); }
+    else renderMcpList();
+  }
+
+  async function mcpRemoveServer() {
+    if (!mcpEditing) return;
+    const s = mcpSt().servers.find((x) => x.id === mcpEditing);
+    if (!window.confirm(tr('mcp_confirmRemove', { name: s ? s.name : mcpEditing }))) return;
+    let r;
+    try { r = await window.dshShell.mcpRemove(mcpEditing); } catch (e) { r = { ok: false, reason: e.message }; }
+    if (r.ok) { mcpStatus(tr('mcp_removedOk'), 'ok'); mcpMarkDirty(); $('mcp-form').style.display = 'none'; await refreshMcp(); }
+    else mcpStatus(tr('mcp_saveFail') + (r.reason || ''), 'bad');
+  }
+
+  // ------------------------------------------------------------ import card
+  async function refreshMcpImportSources() {
+    let r;
+    try { r = await window.dshShell.mcpImportScan(); } catch (e) { r = { sources: [] }; }
+    renderMcpImportSources((r && r.sources) || []);
+  }
+
+  async function toggleMcpImport() {
+    const card = $('mcp-import-card');
+    const show = card.style.display === 'none';
+    card.style.display = show ? '' : 'none';
+    if (show) refreshMcpImportSources();
+  }
+
+  function renderMcpImportSources(sources) {
+    const el = $('mcp-import-sources');
+    el.innerHTML = '';
+    const withServers = sources.filter((s) => s.count > 0);
+    if (!withServers.length) {
+      const p = document.createElement('div');
+      p.className = 'desc';
+      p.textContent = tr('mcp_importScanNone');
+      el.appendChild(p);
+      return;
+    }
+    for (const s of withServers) {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'border:1px solid var(--line);border-radius:8px;padding:8px 10px';
+      const head = document.createElement('div');
+      head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:8px';
+      head.innerHTML = `<b>${s.label}</b> <span class="desc">${s.count}</span>`;
+      const btn = document.createElement('button');
+      btn.className = 'secondary';
+      btn.textContent = tr('mcp_import');
+      btn.addEventListener('click', () => mcpRunImport(s.key, null));
+      head.appendChild(btn);
+      wrap.appendChild(head);
+      const list = document.createElement('div');
+      list.style.cssText = 'font-size:12px;color:var(--text-3);margin-top:4px';
+      list.textContent = s.servers.map((x) => x.name).join(', ');
+      wrap.appendChild(list);
+      el.appendChild(wrap);
+    }
+  }
+
+  async function mcpRunImport(sourceKey, clipboardText) {
+    const stEl = $('mcp-import-status');
+    let r;
+    try { r = await window.dshShell.mcpImportRun(sourceKey, null, clipboardText); } catch (e) { r = { ok: false, reason: e.message }; }
+    if (!r.ok) { stEl.textContent = tr('mcp_importPasteFail', { reason: r.reason || '' }); return; }
+    let msg = tr('mcp_importedOk', { n: (r.imported || []).length });
+    if ((r.failed || []).length) {
+      msg += ' ' + tr('mcp_importedFail', { n: r.failed.length, items: r.failed.map((f) => `${f.name}: ${f.reason}`).join('; ') });
+    }
+    stEl.textContent = msg;
+    if ((r.imported || []).length) { mcpMarkDirty(); await refreshMcp(); }
+  }
+
+  // ------------------------------------------------------------- registry
+  function renderMcpCats() {
+    const el = $('mcp-cats');
+    el.innerHTML = '';
+    for (const [key, labelKey] of [['all', 'mcp_catAll'], ['storage', 'mcp_catStorage'], ['database', 'mcp_catDatabase'], ['devtools', 'mcp_catDevtools'], ['search', 'mcp_catSearch'], ['browser', 'mcp_catBrowser'], ['coding', 'mcp_catCoding'], ['communication', 'mcp_catCommunication'], ['memory', 'mcp_catMemory'], ['custom', 'mcp_catCustom']]) {
+      const b = document.createElement('button');
+      b.className = 'chip' + (mcpRegCat === key ? ' active' : '');
+      b.textContent = tr(labelKey);
+      b.addEventListener('click', () => { mcpRegCat = key; renderMcpCats(); loadMcpRegistry(); });
+      el.appendChild(b);
+    }
+  }
+
+  async function loadMcpRegistry() {
+    const st = mcpSt();
+    const seq = ++mcpRegSeq;
+    let r;
+    try { r = await window.dshShell.mcpRegistry(($('mcp-search').value || '').trim(), mcpRegCat); } catch { r = { items: [] }; }
+    if (seq !== mcpRegSeq) return;
+    const items = (r && r.items) || [];
+    $('mcp-count').textContent = items.length ? String(items.length) : '';
+    const el = $('mcp-registry-list');
+    el.innerHTML = '';
+    const installedNames = new Set(st.servers.map((s) => s.serverName));
+    for (const it of items) {
+      const row = document.createElement('div');
+      row.className = 'plugin-item';
+      const installed = installedNames.has(String(it.name).toLowerCase())
+        || installedNames.has(String(it.id).replace(/^(reg|gh)-/, ''));
+      const badge = it.registryVerified
+        ? ` <span class="desc" title="${tr('mcp_verifiedNs')}">✔ ${tr('mcp_verifiedNs')}</span>`
+        : (it.stars ? ` <span class="desc">★ ${it.stars}</span>` : '');
+      row.innerHTML = '<div class="plugin-info">'
+        + `<div class="plugin-name">${it.name}${badge}</div>`
+        + `<div class="plugin-desc desc">${it.description || ''}</div>`
+        + (it.requiresConfig ? `<div class="desc" style="color:var(--warn,#c90)">${tr('mcp_registryCmdMissing')}</div>` : '')
+        + '</div>';
+      const btn = document.createElement('button');
+      btn.className = 'secondary';
+      btn.textContent = installed ? '✓' : tr('mcp_registryInstall');
+      btn.disabled = installed;
+      btn.addEventListener('click', () => {
+        openMcpForm(null);
+        // official-registry entries: use the trailing slug of the namespace as
+        // the server name (io.github.user/pkg → pkg); gh- ids keep the repo name
+        const rawId = String(it.id).replace(/^(reg|gh)-/, '');
+        const serverName = String(it.registryName ? it.registryName.split('/').pop() : rawId);
+        $('mcp-f-name').value = it.name;
+        $('mcp-f-ns').value = serverName;
+        if (it.url) { $('mcp-f-transport').value = it.transport === 'websocket' ? 'websocket' : 'sse'; $('mcp-f-url').value = it.url; }
+        else { $('mcp-f-transport').value = 'stdio'; $('mcp-f-command').value = it.command || ''; $('mcp-f-args').value = (it.args || []).join('\n'); }
+        const secretKeys = Object.keys(it.envPlaceholders || {});
+        $('mcp-f-env-secret-keys').value = secretKeys.join(', ');
+        $('mcp-f-env-secret').checked = secretKeys.length > 0;
+        mcpSyncTransportFields();
+        $('mcp-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+      row.appendChild(btn);
+      el.appendChild(row);
+    }
+  }
+
+  // ------------------------------------------------------------- wiring
+  $('btn-mcp-add').addEventListener('click', () => openMcpForm(null));
+  $('btn-mcp-import-view').addEventListener('click', toggleMcpImport);
+  // Trae-style manual config: open the paste card and focus the JSON box
+  $('btn-mcp-manual').addEventListener('click', () => {
+    const card = $('mcp-import-card');
+    const wasHidden = card.style.display === 'none';
+    card.style.display = '';
+    if (wasHidden) refreshMcpImportSources();
+    $('mcp-paste').focus();
+    $('mcp-paste').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  $('btn-mcp-cancel').addEventListener('click', () => { $('mcp-form').style.display = 'none'; });
+  $('btn-mcp-save').addEventListener('click', mcpSaveForm);
+  $('btn-mcp-delete').addEventListener('click', mcpRemoveServer);
+  $('btn-mcp-test').addEventListener('click', () => mcpTestServer(mcpEditing ? mcpSt().servers.find((x) => x.id === mcpEditing) : null));
+  $('btn-mcp-restart').addEventListener('click', async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try { await window.dshShell.restartRuntime(); } catch { /* surfaced elsewhere */ }
+    mcpSt().dirty = false;
+    $('mcp-restart-hint').style.display = 'none';
+    b.disabled = false;
+  });
+  $('btn-mcp-paste-import').addEventListener('click', () => mcpRunImport('clipboard', $('mcp-paste').value));
+  $('mcp-f-transport').addEventListener('change', mcpSyncTransportFields);
+  $('mcp-search').addEventListener('input', () => {
+    clearTimeout(mcpSearchTimer);
+    mcpSearchTimer = setTimeout(() => loadMcpRegistry(), 350);
+  });
+  renderMcpCats();
 </script>
 </body>
 </html>
