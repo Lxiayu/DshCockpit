@@ -340,15 +340,27 @@ class RemoteControl {
   }
 
   /**
-   * Track the runtime URL (http://127.0.0.1:<port>); null while it is down.
+   * Track the runtime URL (http://127.0.0.1:<port>, optionally carrying the
+   * dsh 0.1.2+ launch token as `?token=…`); null while it is down.
    * A changed port means the old runtime is gone: drop piped clients so phone
    * browsers reconnect immediately instead of hanging on dead sockets.
+   *
+   * The token is exchanged once for the runtime's browser-session cookie
+   * (loginToRuntime): the runtime answers an index request without token AND
+   * without cookie with 401, and the cookie is authority-bound, so with
+   * `--port 0` every boot needs a fresh exchange.
    */
   setRuntimeUrl(url) {
     const before = this.runtimePort;
     this.runtimePort = null;
+    this.runtimeToken = null;
+    this.runtimeCookie = null;
     if (url) {
-      try { this.runtimePort = Number(new URL(url).port) || null; } catch { this.runtimePort = null; }
+      try {
+        const parsed = new URL(url);
+        this.runtimePort = Number(parsed.port) || null;
+        this.runtimeToken = parsed.searchParams.get('token') || null;
+      } catch { this.runtimePort = null; }
     }
     if (before !== null && before !== this.runtimePort) {
       for (const sock of this.clientSockets) {
@@ -357,6 +369,42 @@ class RemoteControl {
       this.clientSockets.clear();
       this.log(`[remote] runtime target changed ${before} -> ${this.runtimePort}`);
     }
+    if (this.runtimePort) this.loginToRuntime();
+  }
+
+  /**
+   * Exchange the runtime's process launch token for its browser-session cookie
+   * so proxied phone traffic is authenticated exactly like a local browser.
+   * Best-effort: older runtimes print a token-less URL and need no exchange.
+   */
+  loginToRuntime() {
+    const port = this.runtimePort;
+    const token = this.runtimeToken;
+    if (!port || !token) return;
+    let req;
+    try {
+      req = http.get({
+        host: '127.0.0.1',
+        port,
+        path: `/?token=${encodeURIComponent(token)}`,
+        headers: { host: `127.0.0.1:${port}` },
+        agent: false,
+      }, (res) => {
+        const set = res.headers['set-cookie'];
+        res.resume();
+        if (Array.isArray(set) && set.length) {
+          this.runtimeCookie = set.map((c) => String(c).split(';')[0]).join('; ');
+          this.log('[remote] runtime browser session acquired');
+        } else {
+          this.log(`[remote] runtime auth exchange answered ${res.statusCode} without a cookie`);
+        }
+      });
+    } catch (e) {
+      this.log(`[remote] runtime auth exchange failed: ${e.message}`);
+      return;
+    }
+    req.setTimeout(5_000, () => { try { req.destroy(); } catch { /* ignore */ } });
+    req.on('error', (e) => this.log(`[remote] runtime auth exchange failed: ${e.message}`));
   }
 
   // ------------------------------------------------------------------ auth
@@ -569,7 +617,11 @@ class RemoteControl {
     // the pairing-token check above is the trust boundary here.
     if (headers.origin) headers.origin = `http://127.0.0.1:${this.runtimePort}`;
     const cookieLeft = stripCookieValue(headers.cookie, COOKIE_NAME);
-    if (cookieLeft) headers.cookie = cookieLeft;
+    // Attach the runtime's own browser-session cookie (loginToRuntime): dsh
+    // 0.1.2+ gates the index on it, and the phone never holds it because the
+    // token exchange happens here, on the loopback authority it is bound to.
+    const merged = [cookieLeft, this.runtimeCookie].filter(Boolean).join('; ');
+    if (merged) headers.cookie = merged;
     else delete headers.cookie;
     const up = http.request(
       // agent:false - fresh connection per request; the default agent's
@@ -660,6 +712,8 @@ class RemoteControl {
       // Host/Origin same-origin rule as /api, and the phone's Origin names
       // this gateway's LAN address.
       const lines = [`${req.method} ${req.url} HTTP/1.1`];
+      const runtimeCookie = this.runtimeCookie;
+      let cookieSent = false;
       for (let i = 0; i < req.rawHeaders.length; i += 2) {
         const name = req.rawHeaders[i];
         let value = req.rawHeaders[i + 1];
@@ -668,11 +722,16 @@ class RemoteControl {
         else if (lower === 'origin') value = `http://127.0.0.1:${target}`;
         else if (lower === 'cookie') {
           const left = stripCookieValue(value, COOKIE_NAME);
-          if (!left) continue; // no cookies left: drop the header entirely
-          value = left;
+          const merged = [left, runtimeCookie].filter(Boolean).join('; ');
+          if (!merged) continue; // no cookies left: drop the header entirely
+          value = merged;
+          cookieSent = true;
         }
         lines.push(`${name}: ${value}`);
       }
+      // dsh 0.1.2+: the upgrade request needs the runtime's browser-session
+      // cookie too; add it when the phone sent no cookie header at all.
+      if (runtimeCookie && !cookieSent) lines.push(`cookie: ${runtimeCookie}`);
       up.write(lines.join('\r\n') + '\r\n\r\n');
       if (head && head.length) up.write(head);
       socket.pipe(up);

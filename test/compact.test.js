@@ -167,15 +167,19 @@ test('memory files: remove refuses invalid scopes and non-whitelist paths', asyn
   const mem = createMemoryFiles({ workspaceOf: () => ws, dshHomeOf: () => home });
   assert.strictEqual((await mem.remove('evil')).code, 'scope');
   assert.strictEqual((await mem.remove('../escape')).code, 'scope');
-  // a relative root makes the joined path resolve outside the whitelist —
-  // the closed-resolve guard must refuse to unlink (and to save) it
-  const rel = path.relative(process.cwd(), ws);
-  const relMem = createMemoryFiles({ workspaceOf: () => rel, dshHomeOf: () => home });
+  // The closed-resolve guard refuses any root whose joined path is not already
+  // canonical: the whitelist entry stays relative while the candidate resolves
+  // against the process cwd, so unlink and save must both be denied. The root is
+  // built relative to the repo (never `path.relative(cwd, tmpdir)`, which turns
+  // ABSOLUTE on Windows when cwd and the temp dir live on different drives and
+  // would therefore be legitimately whitelisted).
+  const relRoot = path.join('..', 'dsh-memory-whitelist-fixture');
+  const relMem = createMemoryFiles({ workspaceOf: () => relRoot, dshHomeOf: () => home });
   const refused = await relMem.remove('project');
   assert.strictEqual(refused.ok, false);
   assert.strictEqual(refused.code, 'denied');
   assert.strictEqual((await relMem.save('project', 'x')).code, 'denied');
-  assert.strictEqual(fs.existsSync(path.join(rel, 'AGENTS.md')), false);
+  assert.strictEqual(fs.existsSync(path.resolve(relRoot, 'AGENTS.md')), false);
 });
 
 // ------------------------------------------------- tracker integration

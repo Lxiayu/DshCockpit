@@ -20,7 +20,7 @@ function fakeSettings() {
   };
 }
 
-function makeManager({ dir = tmpDir(), platform = 'linux', verify } = {}) {
+function makeManager({ dir = tmpDir(), platform = 'linux', verify, runtimeVersion = '0.1.5-rc.2' } = {}) {
   const settings = fakeSettings();
   const logs = [];
   const mgr = mm.createMcpManager({
@@ -32,6 +32,7 @@ function makeManager({ dir = tmpDir(), platform = 'linux', verify } = {}) {
     log: (l) => logs.push(l),
     dumpConfigVerify: verify || (async () => ({ ok: true })),
     platform,
+    runtimeVersionOf: () => runtimeVersion,
   });
   return { mgr, settings, dir, logs, patchFile: path.join(dir, 'profiles', 'web', 'cordis.patch.yml') };
 }
@@ -231,7 +232,7 @@ test('runtimeSecretEnv aggregates enabled servers only; collisions last-wins wit
   assert.ok(logs.some((l) => l.includes('multiple servers')), 'collision logged once');
 });
 
-test('remote transports persist url + headers literally (documented limitation), env secrets still vaulted', async () => {
+test('remote transports normalize to the 0.1.5 plugin schema; url + headers stay literal', async () => {
   const { mgr, patchFile } = makeManager();
   const r = await mgr.save({
     id: 'notion', name: 'Notion', serverName: 'notion', transport: 'sse',
@@ -241,12 +242,38 @@ test('remote transports persist url + headers literally (documented limitation),
   }, {});
   assert.strictEqual(r.ok, true);
   const text = fs.readFileSync(patchFile, 'utf8');
-  assert.ok(text.includes('transport: "sse"') || text.includes('transport: sse'));
+  // the shell's legacy `sse` input is accepted, but the patch file must carry
+  // what @deepseek-ai/dsh-mcp-client (0.1.5) validates: streamable-http only
+  assert.ok(text.includes('transport: "streamable-http"') || text.includes('transport: streamable-http'));
+  assert.ok(!/transport: "?sse"?$/.test(text), 'legacy transport never reaches the patch file');
   assert.ok(text.includes('https://mcp.notion.com/mcp'));
   assert.ok(text.includes('Bearer ntn_secret'), 'header value is literal by design (UI warns)');
-  // websocket type round-trips
-  await mgr.save({ id: 'ws1', name: 'WS', serverName: 'ws1', transport: 'websocket', url: 'wss://x/y' }, {});
+  // the legacy websocket value is kept in our own store but also lands on streamable-http
+  await mgr.save({ id: 'ws1', name: 'WS', serverName: 'ws1', transport: 'websocket', url: 'https://x/y' }, {});
   assert.strictEqual(mgr.getServer('ws1').server.transport, 'websocket');
+  const text2 = fs.readFileSync(patchFile, 'utf8');
+  assert.ok(
+    text2.includes('transport: "streamable-http"') || text2.includes('transport: streamable-http'),
+    'websocket also normalizes in the patch file');
+});
+
+test('pre-0.1.5 runtimes keep the legacy transport vocabulary (sse / websocket)', async () => {
+  const { mgr, patchFile } = makeManager({ runtimeVersion: '0.1.1-rc.2' });
+  const r = await mgr.save({
+    id: 'notion', name: 'Notion', serverName: 'notion', transport: 'sse',
+    url: 'https://mcp.notion.com/mcp', headers: {}, envSecretKeys: [],
+  }, {});
+  assert.strictEqual(r.ok, true);
+  const text = fs.readFileSync(patchFile, 'utf8');
+  // 0.1.1's plugin schema is the pre-rework one: `streamable-http` must NOT leak in
+  assert.ok(text.includes('transport: "sse"') || text.includes('transport: sse'));
+  assert.ok(!text.includes('streamable-http'), 'modern transport never reaches an old runtime');
+  assert.ok(!text.includes('toolCallTimeoutMs'), '0.1.5-only keys are not written for old runtimes');
+  // patchTransportFor is the single decision point
+  assert.strictEqual(mm.patchTransportFor('0.1.1-rc.2', 'websocket'), 'websocket');
+  assert.strictEqual(mm.patchTransportFor('0.1.5-rc.1', 'sse'), 'streamable-http');
+  assert.strictEqual(mm.patchTransportFor('', 'sse'), 'sse');
+  assert.strictEqual(mm.patchTransportFor('0.1.5-rc.2', 'stdio'), 'stdio');
 });
 
 // ------------------------------------------------- center routing guard (UI reachability)

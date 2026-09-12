@@ -7,6 +7,7 @@ out/
 .superpowers/
 docs/
 vendor/runtime/
+vendor/compat/
 vendor/.archive/
 wechat-article.md
 ANALYSIS-REPORT.md

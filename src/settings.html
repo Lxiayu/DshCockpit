@@ -765,7 +765,7 @@
           <div class="setting">
             <div class="setting-info">
               <label data-i18n="settings.contextWindow">上下文窗口（估算）</label>
-              <span class="desc" data-i18n="settings.contextWindowHint">Cockpit 的 Context 指示器按此值估算压力；DeepSeek 模型通常 64k–128k</span>
+              <span class="desc" data-i18n="settings.contextWindowHint">Cockpit 的 Context 指示器按此值估算压力；DeepSeek V4.1 / V4-Pro 为 1M</span>
             </div>
             <div class="setting-ctrl"><input type="number" id="contextWindow" min="1024" max="10000000" step="1024" /></div>
           </div>
@@ -1721,7 +1721,7 @@
       privacy_body: '本应用完全在本地运行。我们不会收集、上传或存储您的任何个人信息、API Key、会话内容或用量数据；所有数据仅保存在本机。仅在以下情况访问网络：更新检查（npm registry / GitHub Releases）、插件市场列表（GitHub）、运行时下载（npm registry）。费用估算基于您自行配置的价格参数，不构成计费依据。',
       about_diagnostics: '崩溃诊断', about_diagnosticsCount: '{n} 次（可在诊断目录查看）', about_diagnosticsNone: '无',
       btn_openDiagnostics: '打开诊断目录',
-      settings_contextWindow: '上下文窗口（估算）', settings_contextWindowHint: 'Cockpit 的 Context 指示器按此值估算压力；DeepSeek 模型通常 64k–128k',
+      settings_contextWindow: '上下文窗口（估算）', settings_contextWindowHint: 'Cockpit 的 Context 指示器按此值估算压力；DeepSeek V4.1 / V4-Pro 为 1M',
       nav_search: '搜索设置…',
       group_general: '常规', group_workspace: '工作', group_system: '系统',
       nav_general: '通用', nav_cost: '用量与成本', nav_runtime: '运行时', nav_plugins: '插件',
@@ -2177,7 +2177,7 @@
       privacy_body: 'This app runs fully locally. We never collect, upload or store your personal information, API keys, conversation contents or usage data; everything stays on this machine. Network is only touched for: update checks (npm registry / GitHub Releases), plugin market listing (GitHub), runtime downloads (npm registry). Cost estimates use the rates you configure and are not a billing basis.',
       about_diagnostics: 'Crash diagnostics', about_diagnosticsCount: '{n} (see diagnostics folder)', about_diagnosticsNone: 'none',
       btn_openDiagnostics: 'Open diagnostics',
-      settings_contextWindow: 'Context window (estimate)', settings_contextWindowHint: 'The Cockpit Context indicator estimates pressure against this value; DeepSeek models are typically 64k–128k',
+      settings_contextWindow: 'Context window (estimate)', settings_contextWindowHint: 'The Cockpit Context indicator estimates pressure against this value; DeepSeek V4.1 / V4-Pro are 1M',
       nav_search: 'Search settings…',
       group_general: 'General', group_workspace: 'Workspace', group_system: 'System',
       nav_general: 'General', nav_cost: 'Usage & Cost', nav_runtime: 'Runtime', nav_plugins: 'Plugins',
@@ -2531,7 +2531,7 @@
     ['port', 'port', (el) => Math.max(0, Number(el.value) || 0)],
     ['nodeBin', 'nodeBin', (el) => el.value.trim()],
     ['dshBin', 'dshBin', (el) => el.value.trim()],
-    ['contextWindow', 'contextWindow', (el) => Math.max(1024, Number(el.value) || 128000)],
+    ['contextWindow', 'contextWindow', (el) => Math.max(1024, Number(el.value) || 1000000)],
     ['trayOnClose', 'trayOnClose', (el) => el.checked],
     ['autoStart', 'autoStart', (el) => el.checked],
     ['language', 'language', (el) => el.value],
@@ -2661,7 +2661,7 @@
     $('port').value = s.port;
     $('nodeBin').value = s.nodeBin || '';
     $('dshBin').value = s.dshBin || '';
-    $('contextWindow').value = s.contextWindow || 128000;
+    $('contextWindow').value = s.contextWindow || 1000000;
     $('trayOnClose').checked = !!s.trayOnClose;
     $('autoStart').checked = !!s.autoStart;
     $('quickAskHotkey').value = s.quickAskHotkey || '';

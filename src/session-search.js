@@ -11,6 +11,7 @@
 const { Worker } = require('node:worker_threads');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
+const { pickSessionFile } = require('./session-files');
 
 async function sessionFilesAsync(root) {
   const out = [];
@@ -26,12 +27,8 @@ async function sessionFilesAsync(root) {
       const sesDir = path.join(projDir, ses.name);
       let files;
       try { files = await fsp.readdir(sesDir); } catch { continue; }
-      let found = null;
-      for (const n of files) {
-        if (n === 'session.jsonl.zstd') { found = path.join(sesDir, n); break; }
-        if (n === 'session.jsonl') { found = path.join(sesDir, n); }
-      }
-      if (found) out.push(found);
+      const found = pickSessionFile(files);
+      if (found) out.push(path.join(sesDir, found));
     }
   }
   return out;

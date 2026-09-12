@@ -4,6 +4,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const { EventEmitter } = require('node:events');
+const os = require('node:os');
+const path = require('node:path');
 
 const mc = require('../src/mcp-connect');
 
@@ -96,8 +98,11 @@ test('probeRemote: POST result is classified (ok / auth / network), fetch inject
 });
 
 test('whichCommand resolves an existing command and null for a missing one', async () => {
+  // absolute paths are a file-existence question (where.exe rejects them)
   const found = await mc.whichCommand(process.execPath); // node itself always exists
-  assert.ok(found, 'node binary resolves');
+  assert.strictEqual(found, process.execPath, 'node binary resolves');
+  const missingAbs = await mc.whichCommand(path.join(os.tmpdir(), 'no-such-binary-xyz-9137'));
+  assert.strictEqual(missingAbs, null, 'missing absolute path resolves to null');
   const missing = await mc.whichCommand('definitely-not-a-real-cmd-xyz-9137');
   assert.strictEqual(missing, null);
 });

@@ -16,6 +16,7 @@
 
 const fsp = require('node:fs/promises');
 const path = require('node:path');
+const { pickSessionFile } = require('./session-files');
 
 const MCP_RE = /\bmcp__([a-z0-9][a-z0-9-]{0,63})__([A-Za-z0-9_-]{1,64})\b/g;
 const TIME_KEYS = ['timestamp', 'ts', 'time', 'createdAt'];
@@ -177,14 +178,8 @@ async function collect(dshHome, { maxFiles, decode } = {}) {
       const sesDir = path.join(projDir, ses.name);
       let names;
       try { names = await fsp.readdir(sesDir); } catch { continue; }
-      let zstd = null;
-      let plain = null;
-      for (const n of names) {
-        if (n === 'session.jsonl.zstd') { zstd = path.join(sesDir, n); break; }
-        if (n === 'session.jsonl') plain = path.join(sesDir, n);
-      }
-      const file = zstd || plain;
-      if (file) files.push({ file, isZstd: !!zstd });
+      const name = pickSessionFile(names);
+      if (name) files.push({ file: path.join(sesDir, name), isZstd: name.endsWith('.zstd') });
     }
   }
   // most recent first; a hard cap keeps one visit bounded

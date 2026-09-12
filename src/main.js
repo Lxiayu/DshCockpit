@@ -39,7 +39,7 @@ const os = require('node:os');
 const http = require('node:http');
 
 const { SettingsStore } = require('./settings-store');
-const { RuntimeManager } = require('./runtime-manager');
+const { RuntimeManager, isRuntimeSupported } = require('./runtime-manager');
 const { createRuntimeStateController } = require('./runtime-state');
 const { t, resolveLanguage } = require('./i18n');
 const { backupNow, backupInfo } = require('./backup');
@@ -104,6 +104,7 @@ let eventsFeed = [];
 let eventsRetryTimer = null;
 let lastTaskNotifyAt = 0;
 let eventsFeedLiveLogged = false;
+let eventsFeedFailStreak = 0;
 let lastCostUpdateAt = 0;
 let latestCostSnapshot = { stats: null, key: '', data: null };
 let quickAskRunning = false;
@@ -439,7 +440,13 @@ const supervisor = createRuntimeSupervisor({
   envExtras: () => (mcpMgr ? mcpMgr.runtimeSecretEnv() : null),
   applyPendingUpdate,
 });
-const { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeLogPath, getRuntimeChild } = supervisor;
+const { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeAuthUrl, getRuntimeLogPath, getRuntimeChild } = supervisor;
+
+/** Page-loading URL: the token-carrying authenticated URL when the runtime
+ * printed one (dsh 0.1.2+ gates the index on it), else the clean origin.
+ * /api + WS consumers keep using getRuntimeUrl() — a query token there would
+ * corrupt path concatenation. */
+const runtimeAuthUrlOf = () => getRuntimeAuthUrl() || getRuntimeUrl();
 
 // ---------------------------------------------------------------------------
 // binary resolution
@@ -939,6 +946,17 @@ async function runUpdateCheck(notifyUser, { install = notifyUser } = {}) {
       updateTray();
       return { ...report, deferred: true };
     }
+    // Compatibility matrix (DESIGN.md §6.4): a runtime outside the supported
+    // range loads and chats fine, but the operating layer's feed-derived
+    // features degrade — refuse to install it silently. v0.4.0 lifts this.
+    if (!isRuntimeSupported(report.target)) {
+      manager.state.knownIssues[report.target] = 'outside the shell compat matrix (<0.1.2 Remote API)';
+      manager.saveState();
+      log(`[update] ${report.target} is outside the shell compat matrix — install deferred to v0.4.0`);
+      notify(t(lang(), 'notify.updateGated'), t(lang(), 'notify.updateGatedBody', { v: report.target }));
+      updateTray();
+      return { ...report, available: true, gated: true, installed: false };
+    }
     notify(t(lang(), 'notify.newVersion'), t(lang(), 'notify.downloading', { a: report.current, b: report.target }));
     // Live progress → every window's update console (a long rc install must
     // not look like a hang; the console shows preparing/installing N packages…)
@@ -980,6 +998,10 @@ async function runUpdateCheck(notifyUser, { install = notifyUser } = {}) {
 async function applyPendingUpdate() {
   const pending = manager.state.pendingVersion;
   if (!pending) throw new Error(t(lang(), 'update.noPending'));
+  if (!isRuntimeSupported(pending)) {
+    // defense in depth: a pending version recorded by an older shell build
+    throw new Error(t(lang(), 'update.gated', { v: pending }));
+  }
   const { previous } = await manager.activate(pending);
   log(`[shell] applied update: ${previous} -> ${pending}`);
   restartRuntime();
@@ -1004,7 +1026,7 @@ function applyRemoteSettings(saved) {
   remote.setPublicMode(!!saved.remotePublic); // C7 posture follows the switch, no restart needed
   remote.stop();
   if (saved.remoteControl) {
-    remote.setRuntimeUrl(getRuntimeUrl());
+    remote.setRuntimeUrl(runtimeAuthUrlOf());
     remote.start({ port: saved.remotePort, compat: !!saved.remoteCompat })
       .then((s) => { if (!s.running) notify(t(lang(), 'notify.remoteFailed'), t(lang(), 'notify.remoteFailedBody')); })
       .catch((e) => log(`[remote] start failed: ${e.message}`));
@@ -2996,10 +3018,19 @@ function startEventsFeed() {
   if (!ru || quitting) return;
   const base = ru.endsWith('/') ? ru : `${ru}/`;
   const onFeedError = (err) => {
-    log(`[shell] events feed error: ${err.message}`);
     if (quitting) return;
+    eventsFeedFailStreak += 1;
+    log(`[shell] events feed error: ${err.message} (attempt ${eventsFeedFailStreak})`);
+    if (eventsFeedFailStreak === 3) {
+      // dsh 0.1.2 replaced /api/events.{host,mux} with the /api/remote.mux stream
+      // mux, gated on the browser-session cookie. Until the operating layer speaks
+      // that protocol the feed stays down: say so once and stop the 3s storm —
+      // the runtime itself keeps working, only the feed-derived extras pause.
+      log('[shell] events feed unavailable — the runtime may be 0.1.2+ (feed moved to /api/remote.mux);'
+        + ' notifications, IM pushes and per-turn cost are paused for this runtime');
+    }
     clearTimeout(eventsRetryTimer);
-    eventsRetryTimer = setTimeout(startEventsFeed, 3_000);
+    eventsRetryTimer = setTimeout(startEventsFeed, eventsFeedFailStreak >= 3 ? 60_000 : 3_000);
   };
   // host stream: session running state (task done)
   eventsFeed.push(connectEvents(base, '/api/events.host', (frame) => {
@@ -3008,6 +3039,7 @@ function startEventsFeed() {
       sessionRunning = !!frame.running; // busy check for the manual /compact entry (C3)
       if (!eventsFeedLiveLogged) {
         eventsFeedLiveLogged = true;
+        eventsFeedFailStreak = 0; // a live frame proves the feed is healthy again
         log(`[shell] events feed live (session ${frame.sessionId}, running=${frame.running})`);
       }
       // H-im L2: rising edge → taskStarted push; falling edge → taskDone (existing)
@@ -3353,12 +3385,16 @@ if (!gotLock) {
       safeStorage: safeStorageImpl,
       log,
       dumpConfigVerify,
+      // the mcp-client plugin's config vocabulary changed in 0.1.5
+      // (transport: streamable-http, toolCallTimeoutMs) — write what the
+      // ACTIVE runtime validates
+      runtimeVersionOf: () => manager.getInfo().activeVersion || '',
     });
     mcpReg = createMcpRegistry({ log });
     mcpConn = createMcpConnect({ log });
     mcpImp = createMcpImport({ log });
     if (settings.get().remoteControl) {
-      remote.setRuntimeUrl(getRuntimeUrl());
+      remote.setRuntimeUrl(runtimeAuthUrlOf());
       remote.start({ port: settings.get().remotePort, compat: !!settings.get().remoteCompat })
         .then((s) => { if (!s.running) notify(t(lang(), 'notify.remoteFailed'), t(lang(), 'notify.remoteFailedBody')); })
         .catch((e) => log(`[remote] start failed: ${e.message}`));
@@ -3588,7 +3624,7 @@ if (!gotLock) {
     if (hasVisibleMainWindow()) {
       showMain();
     } else if (getRuntimeUrl()) {
-      createWindow(getRuntimeUrl());
+      createWindow(runtimeAuthUrlOf());
     }
   });
 

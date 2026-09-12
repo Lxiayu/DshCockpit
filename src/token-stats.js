@@ -1,7 +1,9 @@
 // src/token-stats.js — read token usage out of the session logs.
 //
-// Sessions live at <DSH_HOME>/sessions/<project-dir>/<session-id>/session.jsonl[.zstd]
-// (dsh-session-persistence-jsonl layout). Provider-reported usage rides
+// Sessions live at <DSH_HOME>/sessions/<project-dir>/<session-id>/
+// session[.vN].jsonl[.zstd] (dsh-session-persistence-jsonl keeps immutable
+// generations side by side; the highest N is the current one — see
+// session-files.js). Provider-reported usage rides
 // `assistant/message` events as `data.usage = { inputTokens, outputTokens,
 // cacheReadTokens, cacheWriteTokens }` (also `assistant/chunk` usage chunks).
 //
@@ -26,6 +28,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { decompress } = require('fzstd');
 const { isPeakTime } = require('./cost');
+const { pickSessionFile } = require('./session-files');
 
 const ZSTD = '.jsonl.zstd';
 const PLAIN = '.jsonl';
@@ -262,11 +265,8 @@ function walkSessionFiles(root) {
       const sesDir = path.join(projDir, ses.name);
       let found = null;
       try {
-        const files = fs.readdirSync(sesDir);
-        for (const n of files) {
-          if (n === 'session.jsonl.zstd') { found = path.join(sesDir, n); break; }
-          if (n === 'session.jsonl') { found = path.join(sesDir, n); }
-        }
+        const name = pickSessionFile(fs.readdirSync(sesDir));
+        if (name) found = path.join(sesDir, name);
       } catch { /* ignore */ }
       if (found) out.push(found);
     }
@@ -295,12 +295,8 @@ async function walkSessionFilesAsync(root) {
       const sesDir = path.join(projDir, ses.name);
       let files;
       try { files = await fsp.readdir(sesDir); } catch { continue; }
-      let found = null;
-      for (const n of files) {
-        if (n === 'session.jsonl.zstd') { found = path.join(sesDir, n); break; }
-        if (n === 'session.jsonl') { found = path.join(sesDir, n); }
-      }
-      if (found) out.push(found);
+      const found = pickSessionFile(files);
+      if (found) out.push(path.join(sesDir, found));
     }
   }
   walkCache = { root, list: out, expiresAt: Date.now() + WALK_TTL_MS };

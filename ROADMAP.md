@@ -37,7 +37,7 @@
 | 技能（Skills）管理页 | ✅ | Claude Skill 兼容 + 预览防注入 |
 | 插件市场（dsh-plugin 话题） | ✅ | 一键安装/卸载，重启生效 |
 | 英文发布物料（Show HN + 新版 README.en） | ✅ | 2026-08 完成，见仓库根目录 LAUNCH-SHOW-HN-EN.md |
-| 单元测试 | ✅ | **311 项**全绿（`npm test`，约 1.3s） |
+| 单元测试 | ✅ | **469 项**全绿（`npm test`，Windows/macOS/Linux 同一套） |
 | macOS 签名与公证 | ⏸️ 暂缓 | 见 §3 决策记录 D-1 |
 | Windows Authenticode 签名 | ⏸️ 暂缓 | 同上 |
 
@@ -85,6 +85,14 @@ Profile 管理、内置终端（私有 shim 不污染系统 PATH）、恢复助�
 
 > 未来两个月不是"加更多功能"，而是"把可靠性变成产品、把稳定性变成内容"：
 > 签名解决敢不敢装（暂缓，见 D-1）→ 自检解决装不装得上 → 兼容快报解决跟不跟得上 → 成本深水区解决想不想晒。
+
+#### 🚧 v0.4.0（进行中）：上游 0.1.5 远程 API 迁移
+> 实测（2026-09-12，对运行中的 0.1.5-rc.2 探针）：0.1.5 重做了整个远程 API —— 所有 `/api/*` 与事件流升级**都需要浏览器会话 Cookie**（无 Cookie 一律 401）；`/api/events.host|mux` 与 `host/session-status` 事件被 `/api/remote.mux` 的 `$events` 流复用协议取代（首个 item 为 `{type:'ready'}`）；`/api/session.list`、`/api/respond` 已移除（审批/提问改走 `$events/result` 回执）；`commands/execute` 参数新增 `submittedAttachments`。壳完成以下适配并双平台验证后，才把内置运行时升到 0.1.5：
+- [ ] Cookie 化：把 token→Cookie 交换抽成共享组件，接入事件流 / harness-rpc / 审批应答 / 手机网关
+- [ ] 事件流迁到 `/api/remote.mux` + `$events`，重新定位"任务运行中/结束"事件（`turn/start|end` 等）
+- [ ] 用 typert descriptor 重建会话列表 / 审批应答端点与参数
+- [ ] 双平台 compat 冒烟 + 真机跑通：通知、IM 审批、/compact、按轮成本
+- [ ] 内置运行时 `runtimeVersion` 升到 0.1.5-rc.2 并发布 0.4.0
 
 #### R1 启动自检 + 一键修复 + 托盘重启
 - **为什么**：竞品 issue 区最大的火灾就是"装不上/启动崩/没恢复"。我们有独家冒烟测试能力，把它产品化即可直接对打；托盘"重启应用"是他们用户在求的基本项。

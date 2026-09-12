@@ -15,6 +15,8 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 const http = require('node:http');
 const https = require('node:https');
 
@@ -32,8 +34,15 @@ function statusFor(tier1, tier2) {
   return 'unknown';
 }
 
-/** Resolve a command via where.exe (win) / which (posix); null when absent. */
+/** Resolve a command via where.exe (win) / which (posix); null when absent.
+ * An absolute path is a file-existence question, not a PATH lookup: `where.exe`
+ * rejects paths outright ("Invalid pattern is specified in path:pattern"), and
+ * a full path is a perfectly valid MCP stdio command. */
 function whichCommand(command, timeoutMs = TIER1_TIMEOUT_MS) {
+  const cmd = String(command || '');
+  if (path.isAbsolute(cmd)) {
+    try { return Promise.resolve(fs.existsSync(cmd) ? cmd : null); } catch { return Promise.resolve(null); }
+  }
   return new Promise((resolve) => {
     const exe = process.platform === 'win32' ? 'where.exe' : 'which';
     let child;

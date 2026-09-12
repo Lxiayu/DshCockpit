@@ -52,3 +52,32 @@ test('reset() models a healthy boot clearing the guard', () => {
   assert.strictEqual(next.restart, true);
   assert.strictEqual(next.attempt, 1);
 });
+
+// ---- runtime URL line (dsh 0.1.2+ prints the authenticated URL) -------------
+
+test('parseRuntimeUrl keeps the launch token and derives the clean origin', () => {
+  const { parseRuntimeUrl, URL_LINE_RE } = require('../src/runtime-supervisor');
+  // the LAN suffix is a separate whitespace-delimited token — never swallowed
+  const line = 'dsh web: http://127.0.0.1:3080/?token=abc123 (LAN: http://192.168.1.5:3080/?token=abc123)';
+  const m = line.match(URL_LINE_RE);
+  assert.ok(m, 'URL line matches');
+  const parsed = parseRuntimeUrl(m[1]);
+  assert.strictEqual(parsed.origin, 'http://127.0.0.1:3080');
+  assert.strictEqual(parsed.authUrl, 'http://127.0.0.1:3080/?token=abc123');
+});
+
+test('parseRuntimeUrl accepts a token-less (pre-0.1.2) line unchanged', () => {
+  const { parseRuntimeUrl } = require('../src/runtime-supervisor');
+  const legacy = parseRuntimeUrl('http://127.0.0.1:3081');
+  assert.strictEqual(legacy.origin, 'http://127.0.0.1:3081');
+  assert.strictEqual(legacy.authUrl, 'http://127.0.0.1:3081/');
+});
+
+test('parseRuntimeUrl rejects non-loopback or non-http URLs', () => {
+  const { parseRuntimeUrl } = require('../src/runtime-supervisor');
+  for (const bad of ['http://0.0.0.0:3080', 'http://example.com:3080/?token=x', 'ftp://127.0.0.1:3080', 'not-a-url', '', null]) {
+    assert.strictEqual(parseRuntimeUrl(bad), null, `${bad} must be rejected`);
+  }
+  // trailing punctuation from a wrapped log line is tolerated
+  assert.strictEqual(parseRuntimeUrl('http://127.0.0.1:3080/?token=x).').origin, 'http://127.0.0.1:3080');
+});

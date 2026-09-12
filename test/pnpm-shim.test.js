@@ -50,9 +50,12 @@ test('ensurePnpmShim writes runnable shims and is idempotent', () => {
   if (process.platform === 'win32') {
     assert.ok(fs.existsSync(path.join(dir, 'pnpm.cmd')), 'win shim file exists');
   }
-  // the nix shim is executable and runs the fake pnpm via our node
+  // the shim runs the fake pnpm via our node. POSIX execs the extensionless
+  // script; Windows needs the .cmd and a shell (extensionless files are not
+  // executable there) — the same resolution `spawn('pnpm')` does via PATHEXT.
   const { spawnSync } = require('node:child_process');
-  const r = spawnSync(path.join(dir, 'pnpm'), ['--version'], { encoding: 'utf8' });
+  const isWin = process.platform === 'win32';
+  const r = spawnSync(path.join(dir, isWin ? 'pnpm.cmd' : 'pnpm'), ['--version'], { encoding: 'utf8', shell: isWin });
   assert.strictEqual(r.status, 0, `shim exec failed: ${r.stderr}`);
   // marker prevents rewrite churn
   const mtime = fs.statSync(path.join(dir, 'pnpm')).mtimeMs;

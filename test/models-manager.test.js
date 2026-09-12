@@ -77,12 +77,17 @@ test('writeCredentialsFile writes 0600 atomically (no .tmp residue, other files 
   const file = path.join(dir, '.credentials.yaml');
   mm.writeCredentialsFile(file, 'DEEPSEEK_API_KEY: sk-x\n');
   assert.strictEqual(fs.readFileSync(file, 'utf8'), 'DEEPSEEK_API_KEY: sk-x\n');
-  assert.strictEqual(fs.statSync(file).mode & 0o777, 0o600, 'credentials must be 0600 on POSIX');
+  // Windows has no POSIX mode bits (chmod cannot narrow them) — assert on POSIX only
+  if (process.platform !== 'win32') {
+    assert.strictEqual(fs.statSync(file).mode & 0o777, 0o600, 'credentials must be 0600 on POSIX');
+  }
   assert.ok(!fs.existsSync(`${file}.tmp`), 'tmp file must be renamed away');
   // rewrite keeps the mode even after a chmod-widening writer elsewhere
   fs.chmodSync(file, 0o644);
   mm.writeCredentialsFile(file, 'DEEPSEEK_API_KEY: sk-y\n');
-  assert.strictEqual(fs.statSync(file).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') {
+    assert.strictEqual(fs.statSync(file).mode & 0o777, 0o600);
+  }
 });
 
 // ------------------------------------------------ settings.yaml section edits
@@ -278,7 +283,10 @@ test('KeyVault: vault file is 0600 (like .credentials.yaml); a legacy 0644 file 
   const dir = tmpDir();
   const file = path.join(dir, 'model-keys.json');
   new mm.KeyVault(file, null).set('siliconflow', 'sk-x');
-  assert.strictEqual(fs.statSync(file).mode & 0o777, 0o600, 'key vault must be 0600 on POSIX');
+  // Windows has no POSIX mode bits (chmod cannot narrow them) — assert on POSIX only
+  if (process.platform !== 'win32') {
+    assert.strictEqual(fs.statSync(file).mode & 0o777, 0o600, 'key vault must be 0600 on POSIX');
+  }
 
   // legacy wide-perm file: the successful read path tightens it (best effort)
   const legacy = path.join(dir, 'legacy-keys.json');
@@ -286,7 +294,9 @@ test('KeyVault: vault file is 0600 (like .credentials.yaml); a legacy 0644 file 
   fs.chmodSync(legacy, 0o644); // defeat umask: simulate a pre-0600 install
   const reloaded = new mm.KeyVault(legacy, null);
   assert.strictEqual(reloaded.get('siliconflow'), 'sk-y', 'legacy vault still decodes');
-  assert.strictEqual(fs.statSync(legacy).mode & 0o777, 0o600, 'legacy vault tightened on read');
+  if (process.platform !== 'win32') {
+    assert.strictEqual(fs.statSync(legacy).mode & 0o777, 0o600, 'legacy vault tightened on read');
+  }
 });
 
 // ------------------------------------------------------- manager end-to-end

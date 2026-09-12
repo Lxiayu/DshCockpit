@@ -99,7 +99,31 @@ function armWatchdog({ watchdogScript = path.join(__dirname, 'watchdog.js'), nod
 
 const HEALTH_TIMEOUT_MS = 90_000;
 const KILL_GRACE_MS = 4_000;
-const URL_LINE_RE = /dsh web: (https?:\/\/127\.0\.0\.1:\d+)/;
+// Since dsh 0.1.2 the printed line is the AUTHENTICATED url: the web app appends
+// its process launch token (`?token=<launchToken>`) and answers an index request
+// carrying neither the token nor the session cookie with 401 (see
+// dsh-client-connection: authenticatedUrl / authorizeIndex). Capture the whole
+// token — the clean origin is derived from it. The optional " (LAN: …)" suffix is
+// separated by a space, so \S+ never swallows it.
+const URL_LINE_RE = /dsh web: (\S+)/;
+
+/**
+ * Split the runtime's printed URL into { authUrl, origin }.
+ * The auth URL is what the BrowserWindow loads (the runtime mints its session
+ * cookie and redirects to `/`) and what the health probe must hit; the clean
+ * origin is what every /api + WS consumer keeps using. Returns null for
+ * anything that is not a loopback http(s) URL.
+ */
+function parseRuntimeUrl(raw) {
+  try {
+    const url = new URL(String(raw || '').replace(/[),.]+$/, ''));
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    if (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost') return null;
+    return { authUrl: url.href, origin: url.origin };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * @param {object} deps — see main.js construction site for the annotated list.
@@ -138,11 +162,13 @@ function createRuntimeSupervisor(deps) {
 
   let runtimeChild = null;
   let runtimeUrl = null;
+  let runtimeAuthUrl = null; // token-carrying URL (page loads + health probe only)
   let runtimeLogPath = null;
   let urlPollTimer = null;
   const crashGuard = createCrashLoopGuard(); // healthy boot resets; 4th crash in 60s trips safe-mode
 
   function getRuntimeUrl() { return runtimeUrl; }
+  function getRuntimeAuthUrl() { return runtimeAuthUrl; }
   function getRuntimeLogPath() { return runtimeLogPath; }
 
   function waitForHealth(url, timeoutMs = HEALTH_TIMEOUT_MS) {
@@ -154,7 +180,9 @@ function createRuntimeSupervisor(deps) {
         if (Date.now() > deadline) return finish(false);
         const req = http.get(url, (res) => {
           res.resume();
-          if (res.statusCode === 200) return finish(true);
+          // 200 = app served; 3xx = the browser-auth exchange answering the token
+          // URL with its cookie-minting redirect (dsh 0.1.2+).
+          if (res.statusCode === 200 || (res.statusCode >= 300 && res.statusCode < 400)) return finish(true);
           retry();
         });
         // H4: a server that accepts but never responds must not hang forever
@@ -224,16 +252,19 @@ function createRuntimeSupervisor(deps) {
       const m = lastLogText.match(URL_LINE_RE);
       if (m) {
         if (!stateController.isCurrent(generation)) return;
-        runtimeUrl = m[1];
+        const parsed = parseRuntimeUrl(m[1]);
+        if (!parsed) return; // unexpected line shape: keep tailing
+        runtimeUrl = parsed.origin;
+        runtimeAuthUrl = parsed.authUrl;
         clearTimeout(urlWatchdogTimer);
         crashGuard.reset(); // a healthy boot resets the auto-restart counter
         bootTiming.urlMs = Date.now() - spawnT0;
         bootTiming.url = runtimeUrl;
-        log(`[shell] runtime URL: ${runtimeUrl}`);
-        onRemoteUrl(runtimeUrl); // phone gateway follows the runtime port
-        const bootUrl = runtimeUrl;
+        log(`[shell] runtime URL: ${runtimeUrl}${runtimeAuthUrl === runtimeUrl ? '' : ' (authenticated)'}`);
+        onRemoteUrl(runtimeAuthUrl); // gateway exchanges the token for the runtime cookie
+        const bootUrl = runtimeAuthUrl;
         waitForHealth(bootUrl).then((ok) => {
-          if (!stateController.isCurrent(generation) || runtimeUrl !== bootUrl) return;
+          if (!stateController.isCurrent(generation) || runtimeAuthUrl !== bootUrl) return;
           if (!ok) {
             stateController.transition('offline', generation);
             return;
@@ -360,6 +391,7 @@ function createRuntimeSupervisor(deps) {
         // must NOT touch the NEW child's poller or state (H1).
         if (!wasCurrent || isQuitting() || retrying) return;
         runtimeUrl = null;
+        runtimeAuthUrl = null;
         onRemoteUrl(null);
         stateController.transition('offline', generation);
         if (urlPollTimer) { clearInterval(urlPollTimer); urlPollTimer = null; }
@@ -413,6 +445,7 @@ function createRuntimeSupervisor(deps) {
     resetEventsFeedLiveFlag();
     if (runtimeChild) { runtimeChild.kill(); runtimeChild = null; }
     runtimeUrl = null;
+    runtimeAuthUrl = null;
     onRemoteUrl(null); // gateway answers 503 until the new URL arrives
     spawnRuntime();
   }
@@ -442,7 +475,7 @@ function createRuntimeSupervisor(deps) {
 
   function getRuntimeChild() { return runtimeChild; }
 
-  return { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeLogPath, getRuntimeChild };
+  return { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeAuthUrl, getRuntimeLogPath, getRuntimeChild };
 }
 
 module.exports = {
@@ -450,6 +483,8 @@ module.exports = {
   killTree,
   armWatchdog,
   createRuntimeSupervisor,
+  parseRuntimeUrl,
+  URL_LINE_RE,
   CRASH_WINDOW_MS,
   MAX_CRASHES,
 };

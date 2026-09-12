@@ -18,6 +18,33 @@ const semver = require('semver');
 
 const PACKAGE = '@deepseek-ai/dsh';
 const SMOKE_TIMEOUT_MS = 60_000;
+
+// ---------------------------------------------------------------------------
+// Shell ↔ runtime compatibility matrix (DESIGN.md §6.4).
+//
+// The operating layer's runtime integrations (event feed, approval/question
+// answers, compact RPC, IM steering) target the pre-0.1.2 Remote API. 0.1.2
+// replaced it wholesale — verified by probe on 2026-09-12:
+//   · every /api call and WS upgrade now needs the browser-session cookie (401 otherwise)
+//   · /api/events.host|mux moved to the /api/remote.mux `$events` stream mux
+//   · /api/session.list and /api/respond were removed
+//   · commands/execute gained required args (submittedAttachments)
+// A runtime outside this range keeps working for chat, but the shell's
+// feed-derived features (notifications, IM pushes, per-turn cost) degrade.
+// The migration ships with v0.4.0 — until then the updater refuses to install
+// a gated version instead of silently losing those features.
+// `-0` + includePrerelease: prereleases of 0.1.0/0.1.1 stay supported
+// (0.1.1-rc.2 is what we bundle) while every 0.1.2 prerelease/alpha is gated.
+const SUPPORTED_RUNTIME_RANGE = '<0.1.2-0';
+
+/** Is one runtime version inside the shell's supported range?
+ * Unparseable/empty versions answer true: a local dev install must never be
+ * blocked by a version-string technicality. */
+function isRuntimeSupported(version) {
+  const v = String(version || '').trim();
+  if (!semver.valid(v)) return true;
+  try { return semver.satisfies(v, SUPPORTED_RUNTIME_RANGE, { includePrerelease: true }); } catch { return true; }
+}
 /** Hard deadline for one arborist install. rc runtimes are a 60+ package
  * monorepo; without this a stalled registry / cache lock would hold the
  * update pipeline forever (the "check update" button then appears to hang
@@ -734,4 +761,4 @@ class RuntimeManager {
   }
 }
 
-module.exports = { RuntimeManager };
+module.exports = { RuntimeManager, isRuntimeSupported, SUPPORTED_RUNTIME_RANGE };

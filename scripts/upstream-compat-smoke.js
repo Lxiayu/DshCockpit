@@ -25,10 +25,21 @@ const INSTALL_TIMEOUT_MS = 40 * 60_000;
 const DUMP_TIMEOUT_MS = 90_000;
 const HEALTH_TIMEOUT_MS = 120_000;
 
-/** Extract the "dsh web: http://127.0.0.1:<port>" URL from raw output. */
+/** Extract the runtime's printed URL from raw output.
+ * dsh 0.1.2+ prints the AUTHENTICATED url (its process launch token rides as
+ * `?token=…`) and answers an index request without token/cookie with 401, so the
+ * whole token — not just the origin — is what the health probe must use. */
 function parseUrlLine(text) {
-  const m = String(text || '').match(/dsh web: (https?:\/\/127\.0\.0\.1:\d+)/);
-  return m ? m[1] : null;
+  const m = String(text || '').match(/dsh web: (\S+)/);
+  if (!m) return null;
+  try {
+    const url = new URL(m[1].replace(/[),.]+$/, ''));
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    if (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost') return null;
+    return url.href;
+  } catch {
+    return null;
+  }
 }
 
 /** Assemble the verdict document written next to the CI logs. */
@@ -138,7 +149,9 @@ function probeHealth(url, deadline) {
       if (Date.now() > deadline) { resolve({ ok: false, reason: 'health check timed out' }); return; }
       const req = http.get(url, (res) => {
         res.resume();
-        if (res.statusCode === 200) { resolve({ ok: true, reason: '' }); return; }
+        // 200 = index served; 3xx = the browser-auth exchange answering the
+        // token URL with its cookie-minting redirect (dsh 0.1.2+).
+        if (res.statusCode === 200 || (res.statusCode >= 300 && res.statusCode < 400)) { resolve({ ok: true, reason: '' }); return; }
         setTimeout(tick, 500);
       });
       req.setTimeout(3_000, () => { try { req.destroy(); } catch { /* ignore */ } setTimeout(tick, 500); });

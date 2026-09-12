@@ -21,31 +21,36 @@ const DEFAULT_WINDOWS = [[9, 12], [14, 18]];
 const WEEKEND_OFFPEAK_SINCE = Date.UTC(2026, 7, 22, 16, 0, 0);
 
 // Official DeepSeek price matrix (¥ per 1M tokens): model x time-of-day.
-// Peak pricing took effect 2026-08-17 00:00 Beijing time (peak hours above);
-// peak = off-peak x 2 across every dimension. Cache writes are NOT billed by
-// the official API (only hit/miss/output are), so cacheWritePerM is 0.
-// Verified against api-docs.deepseek.com + billing research 2026-08-18;
-// user-set cost*PerM settings keys still override these for the estimate
-// views (manual override path kept intact).
+// Peak windows are Beijing Mon-Fri 9-12 & 14-18; peak = off-peak x 2 in every
+// dimension. Cache writes are NOT billed by the official API (only hit/miss
+// input and output are), so cacheWritePerM is 0.
+// Line-up as of 2026-09-10: `deepseek-flash` (DeepSeek-V4.1-Flash) is the new
+// new-session default and replaced V4-Flash at roughly 2/3 the price. The
+// retired deepseek-v4-flash / deepseek-v4-flash-vision-exp names are still
+// accepted but are served by V4.1-Flash at Flash prices, so they share the
+// tier. Verified against api-docs.deepseek.com 2026-09-12; user-set cost*PerM
+// settings keys still override these for the estimate views (manual override
+// path kept intact).
 const PRICE_MATRIX = {
-  'deepseek-v4-flash': {
-    offPeak: { inputPerM: 1.5, outputPerM: 4.5, cacheReadPerM: 0.05, cacheWritePerM: 0 },
-    peak: { inputPerM: 3, outputPerM: 9, cacheReadPerM: 0.1, cacheWritePerM: 0 },
+  'deepseek-flash': {
+    offPeak: { inputPerM: 1, outputPerM: 4, cacheReadPerM: 0.02, cacheWritePerM: 0 },
+    peak: { inputPerM: 2, outputPerM: 8, cacheReadPerM: 0.04, cacheWritePerM: 0 },
   },
   'deepseek-v4-pro': {
     offPeak: { inputPerM: 4.5, outputPerM: 13.5, cacheReadPerM: 0.15, cacheWritePerM: 0 },
     peak: { inputPerM: 9, outputPerM: 27, cacheReadPerM: 0.3, cacheWritePerM: 0 },
   },
 };
-const DEFAULT_MODEL = 'deepseek-v4-flash';
+const DEFAULT_MODEL = 'deepseek-flash';
 
-/** Map any model name to a PRICE_MATRIX key. The legacy deepseek-chat /
- * deepseek-reasoner names (retired 2026-07-24) mapped onto v4-flash, and any
- * unknown name prices conservatively at the flash tier. */
+/** Map any model name to a PRICE_MATRIX key. `deepseek-flash` (V4.1-Flash) and
+ * the retired deepseek-v4-flash / vision-exp / deepseek-chat / deepseek-
+ * reasoner names all settle on the Flash tier; unknown names price
+ * conservatively there too. Only the Pro line bills at Pro rates. */
 function normalizeModel(name) {
   const n = String(name || '').toLowerCase();
   if (n.includes('pro')) return 'deepseek-v4-pro';
-  return 'deepseek-v4-flash';
+  return 'deepseek-flash';
 }
 
 /** Official rates (¥/1M) for a model and time-of-day; `isPeak` picks the

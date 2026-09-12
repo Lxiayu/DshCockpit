@@ -6,6 +6,22 @@ const path = require('node:path');
 const { normalizeQuickAskShortcut } = require('./quickask-shortcut');
 const LEGACY_TOKEN_WIDGET_KEY = ['token', 'Widget'].join('');
 
+// Pre-V4.1 defaults that are wrong for today's models: DeepSeek moved to
+// V4.1-Flash on 2026-09-10 (lower prices) with a 1M context window, so the old
+// 128k window and V4-Flash rates overstate pressure ~8x and cost ~2x. A stored
+// value that still equals the old default was never customized and is migrated
+// in memory on every load; a user-edited value is left untouched. The file
+// itself only changes on the next natural save.
+const V41_MIGRATIONS = [
+  ['contextWindow', 128000, 1000000],
+  ['costInputPerM', 2, 1],
+  ['costOutputPerM', 8, 4],
+  ['costCacheReadPerM', 0.5, 0.02],
+  ['costPeakInputPerM', 4, 2],
+  ['costPeakOutputPerM', 16, 8],
+  ['costPeakCacheReadPerM', 1, 0.04],
+];
+
 const DEFAULTS = {
   channel: 'rc',            // rc | latest | pinned
   pinnedVersion: '',        // used when channel === 'pinned'
@@ -25,16 +41,16 @@ const DEFAULTS = {
   backupKeep: 5,            // number of backups to retain
   cockpitOnboarded: false,  // first-run Cockpit recognition flow completed
   shellAutoUpdate: true,    // auto-check the shell itself for updates
-  contextWindow: 128000,    // assumed model context window for the pressure meter
-  costInputPerM: 2,         // ¥ per 1M input tokens (estimate, user-adjustable)
-  costOutputPerM: 8,        // ¥ per 1M output tokens
-  costCacheReadPerM: 0.5,   // ¥ per 1M cache-read tokens
+  contextWindow: 1000000,   // assumed model context window (V4.1-Flash / V4-Pro are 1M)
+  costInputPerM: 1,         // ¥ per 1M input tokens, cache-miss (estimate, user-adjustable)
+  costOutputPerM: 4,        // ¥ per 1M output tokens
+  costCacheReadPerM: 0.02,  // ¥ per 1M cache-hit tokens
   costCacheWritePerM: 0,    // official API bills cache writes at 0 (hit/miss/output only)
   costPeakEnabled: false,   // split pricing by peak/off-peak event time
-  costPeakWindows: '9-12,14-18', // peak hour ranges, Beijing time
-  costPeakInputPerM: 4,     // peak ¥ per 1M input tokens (default = 2x off-peak)
-  costPeakOutputPerM: 16,   // peak ¥ per 1M output tokens
-  costPeakCacheReadPerM: 1, // peak ¥ per 1M cache-read tokens
+  costPeakWindows: '9-12,14-18', // peak hour ranges (Beijing Mon-Fri, official)
+  costPeakInputPerM: 2,     // peak ¥ per 1M input tokens (default = 2x off-peak)
+  costPeakOutputPerM: 8,    // peak ¥ per 1M output tokens
+  costPeakCacheReadPerM: 0.04, // peak ¥ per 1M cache-hit tokens
   costPeakCacheWritePerM: 0,// official API bills cache writes at 0
   monthlyBudget: 0,         // ¥/month budget; 0 = disabled
   quickAskHotkey: 'CommandOrControl+Alt+Space',
@@ -81,6 +97,9 @@ class SettingsStore {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
       this.data = { ...DEFAULTS, ...raw };
       delete this.data[LEGACY_TOKEN_WIDGET_KEY];
+      for (const [key, from, to] of V41_MIGRATIONS) {
+        if (this.data[key] === from) this.data[key] = to;
+      }
     } catch {
       // first run or corrupt file: keep defaults
     }
@@ -140,4 +159,4 @@ class SettingsStore {
   }
 }
 
-module.exports = { SettingsStore, DEFAULTS };
+module.exports = { SettingsStore, DEFAULTS, V41_MIGRATIONS };

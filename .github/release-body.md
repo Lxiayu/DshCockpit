@@ -1,8 +1,8 @@
-# DshCockpit v0.3.1 — MCP 服务管理
+# DshCockpit v0.3.2 — 计费对齐 V4.1、上下文 1M、测试全绿
 
 > **Harness owns the workspace. DshCockpit owns the operating layer.**
 
-v0.3.1 新增 **MCP（Model Context Protocol）服务管理**：在设置页可视化地添加、测试、启用/禁用 MCP Server，无需手动编辑 `cordis.patch.yml`。入口：设置 → MCP 服务，或驾驶舱面板 → 快捷操作 → 🔌 MCP 服务。
+v0.3.2 是一个**准确性与可靠性**版本：成本中心对齐 DeepSeek 官方 2026-09-10 起的 V4.1 定价，上下文压力改用真实 1M 窗口，会话日志改为按世代读取（为后续运行时升级铺路），并修平了 Windows 下长期存在的 7 项测试失败。
 
 ---
 
@@ -10,52 +10,58 @@ v0.3.1 新增 **MCP（Model Context Protocol）服务管理**：在设置页可�
 
 | 你想要 | 下载文件 |
 |---|---|
-| **Windows · 推荐安装**（应用内自动更新、开始菜单/桌面快捷方式） | `DshCockpit-0.3.1-win-x64.exe` |
-| Windows · 绿色便携（免安装，解压即用） | `DshCockpit-0.3.1-win-x64.zip` |
-| **macOS Apple Silicon · 推荐安装** | `DshCockpit-0.3.1-mac-arm64.dmg` |
-| macOS Apple Silicon · 完整便携 zip | `DshCockpit-0.3.1-mac-arm64.zip` |
-| macOS Apple Silicon · 精简包（不含内置运行时） | `DshCockpit-0.3.1-slim-mac-arm64.zip` |
-| macOS Intel | `DshCockpit-0.3.1-mac-x64.dmg` |
+| **Windows · 推荐安装**（应用内自动更新、开始菜单/桌面快捷方式） | `DshCockpit-0.3.2-win-x64.exe` |
+| Windows · 绿色便携（免安装，解压即用） | `DshCockpit-0.3.2-win-x64.zip` |
+| **macOS Apple Silicon · 推荐安装** | `DshCockpit-0.3.2-mac-arm64.dmg` |
+| macOS Apple Silicon · 完整便携 zip | `DshCockpit-0.3.2-mac-arm64.zip` |
+| macOS Apple Silicon · 精简包（不含内置运行时） | `DshCockpit-0.3.2-slim-mac-arm64.zip` |
+| macOS Intel | `DshCockpit-0.3.2-mac-x64.dmg` |
 
-> **每个文件可单独下载**。SHA256 校验见 `SHA256SUMS-*.txt`。
-> 从 v0.3.0 升级：Windows 安装版会收到应用内更新提示；其他渠道手动下载覆盖。
-
----
-
-## 新增：MCP 服务管理
-
-### 配置与管理
-- **可视化添加/编辑/移除** MCP Server，写入 DSH 的 `cordis.patch.yml`（只改动对应配置块，写入前备份、写入后经 `--dump-config` 校验，失败自动回滚）
-- **手动配置（JSON）**：粘贴 `mcpServers` JSON 即导入——支持带 `//` 注释与尾逗号的示例格式（与 Trae 的手动配置方式一致）；也支持从 Claude Desktop / Claude Code / VS Code / Cursor 的现有配置一键导入
-- **启用/禁用开关**：禁用保留配置，重新启用即恢复；配置变更后提示重启运行时生效
-
-### 发现（Registry）
-- 内置 20 个常用 MCP Server 离线清单（Filesystem / GitHub / Git / PostgreSQL / SQLite / Brave Search / Memory / Sequential Thinking / Fetch / Time / Google Drive / Maps / Puppeteer / Playwright / Serena / Slack，以及 Notion / Sentry / Stripe / Linear 官方远程端点）
-- 接入 **官方 MCP Registry**（registry.modelcontextprotocol.io）：命名空间经 GitHub/DNS 验证的条目自动生成安装配置（npm → `npx`，PyPI → `uvx`，远程端点 → SSE），带"已验证来源"标记
-- 关键词搜索时补充 GitHub `topic:mcp-server` 社区结果（无验证命令的条目提示需手动填写命令）
-- 网络不可用时离线清单完整可用
-
-### 测试与观测
-- **测试连接**：启动 MCP Server 进程完成 MCP 握手（initialize → tools/list），返回发现的工具列表；首次运行需下载依赖时有提示
-- 命令存在性/URL 可达性的静默快查（结果缓存 5 分钟）
-- **使用量统计**：从会话日志统计每个 MCP Server 的工具调用次数、最近使用时间与常用工具（基于本地会话记录，不上传）
-- Windows 上 `npx` 等命令自动包装为 `cmd /c` 执行（界面始终显示原始命令）
-- 环境变量中的敏感值经系统加密存储（macOS 钥匙串 / Windows DPAPI），不写入任何配置文件，重启运行时后经运行时环境注入生效
-
-### 安全提示
-- MCP Server 会在本机执行第三方命令，可能访问你的文件与凭据。安装前请确认来源：优先选择官方命名空间（`io.modelcontextprotocol/*`）与已验证的 Registry 条目，只添加你信任的服务。
+> 从 v0.3.1 升级：Windows 安装版会收到应用内更新提示；其他渠道手动下载覆盖，数据原样保留。
 
 ---
 
-## 其他变更
+## 修复与改进
 
-- 驾驶舱快捷操作新增「🔌 MCP 服务」入口（控制中心与设置窗口均可直达）
-- 主进程 MCP 配置写入带验证回滚；日志扫描在使用独立 worker 线程执行
+### 成本中心对齐 V4.1 官方定价
+- `deepseek-flash`（DeepSeek-V4.1-Flash）成为默认模型：**输入 ¥1 / 输出 ¥4 / 缓存命中 ¥0.02**（每百万 tokens，空闲时段），高峰时段 ×2（周一至周五 9–12、14–18）
+- 旧模型名（`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp`、`deepseek-chat`、`deepseek-reasoner`）自动归一到 Flash 档——官方已由 V4.1-Flash 提供服务并按 Flash 价计费
+- 修正后：此前按 V4-Flash 旧价估算会**高估约 50% 输入成本、2.5 倍缓存命中成本**，缓存节省额也会被算错
+- 单轮成本、缓存经济学、周报卡片、余额提醒共用同一价目表
+
+### 上下文压力改用 1M 窗口
+- V4.1-Flash / V4-Pro 的上下文窗口是 **1M**，此前默认按 128k 估算 → **压力百分比虚高约 8 倍**，60%/85% 预警频繁误报
+- 默认值改为 1M；**只有仍是旧默认值（未被你自定义过）的配置会自动迁移**，手动改过的不动
+- 设置页提示同步更新
+
+### 会话日志按世代读取（面向未来）
+- 新版 Harness 的会话日志按**不可变世代**命名（`session.jsonl[.zstd]` = v0，`session.v1|v2|v3...jsonl[.zstd]`），运行时读最高世代
+- 壳统一改为"每个会话只取最高世代"（绝不跨世代求和），避免升级运行时后 Token/成本/搜索读不到新会话
+
+### MCP 配置跟随运行时版本
+- 0.1.5+ 的 `dsh-mcp-client` 只接受 `transport: stdio | streamable-http` 且工具超时键为 `toolCallTimeoutMs`（毫秒）；旧版接受 `stdio | sse | websocket`
+- 现在**按当前激活运行时的版本写对应词汇**，升级前不会把配置写坏
+
+### 事件流健壮性
+- 若运行时不再提供 `/api/events.*`（0.1.2+ 已改为 `/api/remote.mux`），壳会打一条明确日志并退避到 60s，而不是每 3 秒无意义重连
+
+### 其他修复
+- 修复 Windows 下 MCP 服务器命令为**绝对路径**时被误判为"命令不存在"（`where.exe` 不接受路径模式）
+- 测试基线：**469 项测试在 Windows 全绿**（此前 7 项平台性失败：POSIX 0600 断言、跨盘符路径假设、shim 执行方式等）；macOS/Linux 逻辑不变
+
+---
+
+## 关于内置运行时（重要）
+
+- 本版内置运行时仍为 **`0.1.1-rc.2`**（已验证），你现有的一切功能不受影响
+- 上游 0.1.5 重做了整个远程 API：所有 `/api/*` 需浏览器会话 Cookie，事件流改为 `/api/remote.mux`（`$events` 流复用协议），`/api/session.list`、`/api/respond` 已移除，审批/提问改用 `$events/result` 回执
+- 壳对这些接口的完整适配正在进行，**将随 v0.4.0 发布**；届时运行时可升级到 0.1.5，并同时保持通知、审批推送、IM 审批与按轮成本可用
+- 如果你现在手动把运行时升级到 0.1.5：界面与对话可用，但**通知、IM 推送与按轮成本会暂停**（壳会在运行日志中说明原因）
 
 ---
 
 ## 升级说明
 
-- 从 v0.2.x / v0.3.0 升级：数据（会话、设置、凭据）原样保留
+- 从 v0.2.x / v0.3.x 升级：数据（会话、设置、凭据）原样保留
 - macOS 未签名版本首次打开：右键 → 打开，或终端执行 `xattr -dr com.apple.quarantine /Applications/DshCockpit.app`
-- Windows 安装版（v0.3.0 起）将收到应用内自动更新提示
+- Windows 安装版将收到应用内自动更新提示

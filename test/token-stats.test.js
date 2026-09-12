@@ -182,3 +182,34 @@ test('integration: parses the real live session log if present (zstd, small only
     assert.ok(r.totals.input >= 0 && r.totals.output >= 0);
   }
 });
+
+// ---- session format V3: generation-aware file discovery --------------------
+
+test('V3 generation: the highest session.vN file wins over a stale v0 sibling', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-token-v3-'));
+  const dir = path.join(home, 'sessions', 'proj', 'sess-v3');
+  fs.mkdirSync(dir, { recursive: true });
+  const line = (n) => JSON.stringify({ type: 'assistant/message', data: { usage: { inputTokens: n } } });
+  // the v0 generation keeps the pre-migration numbers; v3 carries the current ones
+  fs.writeFileSync(path.join(dir, 'session.jsonl'), line(1) + '\n');
+  fs.writeFileSync(path.join(dir, 'session.v3.jsonl'), line(42) + '\n');
+  const r = await ts.collect(home);
+  assert.strictEqual(r.sessionCount, 1, 'one session directory yields exactly one log');
+  assert.strictEqual(r.current.input, 42, 'reads the v3 generation, not the stale v0 sibling');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('V3 generation: a v3-only session (new session on dsh 0.1.5) is discovered', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-token-v3only-'));
+  const dir = path.join(home, 'sessions', '_no-cwd', 'sess-a');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'session.v3.jsonl.zstd'), '');
+  fs.writeFileSync(path.join(dir, 'session.v3.jsonl'),
+    JSON.stringify({ type: 'assistant/message', data: { usage: { inputTokens: 5, outputTokens: 6 } } }) + '\n');
+  fs.rmSync(path.join(dir, 'session.v3.jsonl.zstd')); // keep the fixture plain-JSONL readable
+  const r = await ts.collect(home);
+  assert.strictEqual(r.sessionCount, 1);
+  assert.strictEqual(r.current.input, 5);
+  assert.strictEqual(r.current.output, 6);
+  fs.rmSync(home, { recursive: true, force: true });
+});

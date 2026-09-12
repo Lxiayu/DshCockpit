@@ -26,7 +26,7 @@ function normalizeUsage(value, contextWindow) {
   if (!value) return null;
   const current = value.current ? usageTotals(value.current) : null;
   const totals = usageTotals(value.totals);
-  const window = Math.max(1, number(contextWindow, 128000));
+  const window = Math.max(1, number(contextWindow, 1000000));
   const pressureSource = value.current && value.current.lastUsage ? usageTotals(value.current.lastUsage) : current;
   const pressureTokens = pressureSource
     ? pressureSource.input + pressureSource.cacheRead + pressureSource.cacheWrite

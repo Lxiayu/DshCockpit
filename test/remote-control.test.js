@@ -185,7 +185,10 @@ test('token is persisted encrypted and reloads identically', async () => {
 test('token file is 0600 (plaintext safeStorage fallback is owner-only); a legacy 0644 file is tightened on load', () => {
   const file = path.join(tmpDir(), 'remote-token.bin');
   new RemoteControl({ userDataDir: path.dirname(file), safeStorage: null, log: () => {} });
-  assert.strictEqual(fs.statSync(file).mode & 0o777, 0o600, 'token file must be 0600 on POSIX');
+  // Windows has no POSIX mode bits (chmod cannot narrow them) — assert on POSIX only
+  if (process.platform !== 'win32') {
+    assert.strictEqual(fs.statSync(file).mode & 0o777, 0o600, 'token file must be 0600 on POSIX');
+  }
 
   // legacy wide-perm file: the successful read path tightens it (best effort)
   const legacyDir = tmpDir();
@@ -194,7 +197,9 @@ test('token file is 0600 (plaintext safeStorage fallback is owner-only); a legac
   fs.chmodSync(legacyFile, 0o644); // defeat umask: simulate a pre-0600 install
   const rc = new RemoteControl({ userDataDir: legacyDir, safeStorage: null, log: () => {} });
   assert.strictEqual(rc.tokens.value, 'cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe');
-  assert.strictEqual(fs.statSync(legacyFile).mode & 0o777, 0o600, 'legacy token file tightened on read');
+  if (process.platform !== 'win32') {
+    assert.strictEqual(fs.statSync(legacyFile).mode & 0o777, 0o600, 'legacy token file tightened on read');
+  }
 });
 
 test('gateway full flow: 401 -> pair -> cookie proxy -> ws pipe -> revoke', async (t) => {

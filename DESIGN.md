@@ -199,14 +199,26 @@
 
 ---
 
-## 10. 已验证的 CLI 事实（基于 0.1.0-rc.6 源码勘察）
+## 10. 已验证的 CLI 事实（0.1.0-rc.6 勘察 + 0.1.5-rc.2 复核）
 
 - `dsh --version` → `0.1.0-rc.6`，exit 0。
-- web 应用 flag：`--host <host>`、`--port <port>`（**`0` = OS 分配**）、`--trusted-host <authority...>`；`--host 0.0.0.0` 被安全拒绝。
-- 启动时 stdout 打印：`dsh web: http://127.0.0.1:<port>`（可选 ` (LAN: ...)` 后缀）——端口解析依据。
+- web 应用 flag：`--host <host>`、`--port <port>`（**`0` = OS 分配**）、`--trusted-host <authority...>`、`--no-open`；`--host 0.0.0.0` 被安全拒绝。
+- 启动时 stdout 打印：`dsh web: http://127.0.0.1:<port>/?token=<launchToken>`（可选 ` (LAN: ...)` 后缀）——端口解析依据；**0.1.2 起 URL 带进程级鉴权 token**。
 - 默认端口 3080（`dsh-cmdline`：`port: !!js ctx.webStartup.port ?? 3080`）。
-- 启动器 flag：`--profile`、`--dump-config` / `--dump-default-config`（不启动、非零退出表示配置错误）。
+- 启动器 flag：`--profile`、`--from-default-profile`、`--patch`、`--dump-config` / `--dump-default-config`（不启动、非零退出表示配置错误）；`dsh web` 是 `--profile web` 的别名。
 - `dsh` 在 Windows 上以 `.ps1/.cmd` shim 形式存在于 `node_modules\.bin`，壳应直接定位 `lib/bin.js` 用 node 执行，避免 shell shim 差异。
+
+### 0.1.5-rc.2 复核（2026-09-12，直接核对 `vendor/runtime/0.1.5-rc.2` 安装树源码）
+- **启动 URL 带进程 launch token**：`dsh-web-app` 打印 `connection.authenticatedUrl()`；`dsh-client-connection`（`BrowserAuth.authorizeIndex`）只在「根路径 `/` + 恰好一个 token 参数 + 可解析的 Host authority」时回 303 并种下 **authority 绑定**的签名 Cookie（默认 30 天），无 token 且无 Cookie 的 index/静态请求一律 401。于是：
+  - 壳用**完整 token URL** 打开窗口与做健康探测（`runtime-supervisor` 的 `parseRuntimeUrl` / `getRuntimeAuthUrl()`，探测接受 200 或 3xx）；
+  - 所有 `/api` + WS 消费者继续用**干净 origin**（`getRuntimeUrl()`），token 参不进路径拼接；
+  - 手机网关必须先做一次 token→Cookie 交换，再把该 Cookie 附到每条代理请求与 WS 升级重放上（`RemoteControl.loginToRuntime`）；`--port 0` 每次启动端口变化 → Cookie 每次都要换。
+- web 应用 flag 仍为 `--host` / `--port` / `--trusted-host` / `--no-open`（`dsh-web-app/lib/startup.js`），`--port 0` 仍为 OS 分配，`--dump-config` 仍可用。
+- 会话日志按**不可变世代**命名：`session.jsonl[.zstd]` = v0，`session.v1|v2|v3.jsonl[.zstd]`；运行时读**最高世代**，v0 无中缀，`v0` 标记 / 前导零 / 大写 / 同目录临时文件名均**非规范名**。壳统一走 `src/session-files.js` 的 `pickSessionFile()`（每个会话目录只取一个文件，绝不跨世代求和）。
+- MCP（`@deepseek-ai/dsh-mcp-client`）schema 只接受 `transport: stdio | streamable-http`，工具超时键是 `toolCallTimeoutMs`（毫秒），另有 `serverName/command/args/env/cwd/url/headers/failOnStartupError/reconnect`；壳里历史的 `sse`/`websocket` 在写 patch 时归一为 `streamable-http`。
+- `compaction/start|summary|end` 事件名与 `assistant/message.data.usage`（`inputTokens`/`outputTokens`/`cacheReadTokens`/`cacheWriteTokens`）**未变**（token 统计口径不受 V3 影响）。
+- 上游 `engines`：`node ^22.19.0 || >=24.0.0`；Electron 37.10.3 内置 Node **22.21.1**（实测 `ELECTRON_RUN_AS_NODE=1`），满足要求。
+- 上游官方桌面端（`apps/desktop`，私有宿主包 `@deepseek-ai/dsh-desktop-host`，不发布 npm）保留 `$DSH_HOME/profiles/desktop`，**CLI 拒绝启动/配置/插件操作该 profile** —— 社区壳继续使用 `web` profile。
 
 ### 阶段 1 原型开发中的实测发现（2026-08）
 - **spawn 的 cwd 陷阱**：`spawn()` 的 `cwd` 目录不存在时，Windows 的 CreateProcess 报 `ERROR_FILE_NOT_FOUND` → Node 抛 **ENOENT**（看起来像"可执行文件不存在"）。壳必须在 spawn 前 `fs.mkdirSync(cwd, {recursive:true})`。

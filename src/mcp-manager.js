@@ -37,6 +37,15 @@ const BACKUP_SUFFIX = '.mcp-bak';
 const ID_RE = /^[a-z][a-z0-9-]{0,63}$/;          // server id / serverName
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/; // env/header names
 const TRANSPORTS = ['stdio', 'sse', 'websocket'];
+// dsh 0.1.5's @deepseek-ai/dsh-mcp-client accepts exactly two transports
+// (verified against its Config schema): `stdio` and `streamable-http`. The
+// shell's legacy values `sse` / `websocket` are still accepted as input and
+// normalized on the way into the patch file, so stored configs keep working.
+const PATCH_TRANSPORT = {
+  stdio: 'stdio',
+  sse: 'streamable-http',
+  websocket: 'streamable-http',
+};
 
 // D-5: Claude Code documents that npx-based servers crash with "Connection
 // closed" on native Windows unless wrapped in `cmd /c`. UI shows/edits the
@@ -100,12 +109,25 @@ function scanPatchItems(lines) {
   return { insAt, itemIndent, items };
 }
 
-/** Render one server's canonical patch block (4-space item indent). */
-function buildPatchBlockLines(server) {
+/** Transport value the ACTIVE runtime's mcp-client plugin validates.
+ * 0.1.5+ accepts exactly `stdio` / `streamable-http`; 0.1.x before that
+ * accepted `stdio` / `sse` / `websocket`. An unknown/empty version keeps the
+ * legacy spelling — the bundled runtime is the conservative default. */
+function patchTransportFor(version, transport) {
+  const modern = (() => {
+    try { return require('semver').gte(String(version || ''), '0.1.5-0'); } catch { return false; }
+  })();
+  if (modern) return PATCH_TRANSPORT[transport] || 'stdio';
+  return transport === 'stdio' ? 'stdio' : transport; // sse / websocket as stored
+}
+
+/** Render one server's canonical patch block (4-space item indent).
+ * `opts.runtimeVersion` selects the transport vocabulary — see patchTransportFor. */
+function buildPatchBlockLines(server, opts = {}) {
   const p = yamlScalar;
   const cfg = [
     `        serverName: ${p(server.serverName)}`,
-    `        transport: ${p(server.transport)}`,
+    `        transport: ${p(patchTransportFor(opts.runtimeVersion, server.transport))}`,
   ];
   if (server.transport === 'stdio') {
     cfg.push(`        command: ${p(server.command)}`);
@@ -132,6 +154,15 @@ function buildPatchBlockLines(server) {
     }
   }
   if (server.failOnStartupError) cfg.push('        failOnStartupError: true');
+  // 0.1.5's plugin measures tool timeouts in ms (toolCallTimeoutMs); the shell's
+  // UI keeps seconds, so convert on the way out. Pre-0.1.5 schemas have no such
+  // key — writing it there would be an unknown field.
+  const runtimeV = String(opts.runtimeVersion || '');
+  const modernTimeoutKey = (() => {
+    try { return require('semver').gte(runtimeV, '0.1.5-0'); } catch { return false; }
+  })();
+  const toolMs = Math.round(Number(server.toolTimeoutSec) || 0) * 1000;
+  if (modernTimeoutKey && toolMs > 0) cfg.push(`        toolCallTimeoutMs: ${toolMs}`);
   return [
     `    - id: mcp-${server.id}`,
     `      name: ${p(PLUGIN_NAME)}`,
@@ -209,10 +240,11 @@ function sanitizeServer(input, prev, existingList) {
     if (args.some((a) => a.length > 512)) return { err: 'argument too long' };
   } else {
     url = String(src.url || '').trim();
-    // sse rides http(s); websocket rides ws(s) — each transport validates its own scheme
-    const schemeRe = transport === 'websocket' ? /^wss?:\/\// : /^https?:\/\//;
+    // Every remote transport now lands on the plugin's `streamable-http`, which
+    // rides http(s); ws://-only endpoints have no 0.1.5 equivalent.
+    const schemeRe = /^https?:\/\//;
     if (!schemeRe.test(url)) {
-      return { err: `invalid url for ${transport} (must start with ${transport === 'websocket' ? 'ws:// or wss://' : 'http:// or https://'})` };
+      return { err: 'invalid url (must start with http:// or https://)' };
     }
     const rawHeaders = src.headers && typeof src.headers === 'object' ? src.headers : {};
     for (const [k, v] of Object.entries(rawHeaders).slice(0, 16)) {
@@ -330,7 +362,10 @@ function createMcpManager(deps) {
     const id = `mcp-${server.id}`;
     if (server.enabled) {
       const { command, args } = wrapForWindows(server.command, server.args, platform);
-      const block = buildPatchBlockLines({ ...server, command, args });
+      const block = buildPatchBlockLines(
+        { ...server, command, args },
+        { runtimeVersion: d.runtimeVersionOf ? d.runtimeVersionOf() : '' },
+      );
       const r = await writePatch((text) => upsertPatchBlock(text, id, block), `save ${server.id}`);
       return r;
     }
@@ -459,6 +494,7 @@ module.exports = {
   unwrapForWindows,
   scanPatchItems,
   buildPatchBlockLines,
+  patchTransportFor,
   upsertPatchBlock,
   removePatchBlock,
   listPatchBlockIds,

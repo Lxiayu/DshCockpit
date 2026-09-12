@@ -324,7 +324,10 @@ test('ChannelSecrets: vault file is 0600; a legacy 0644 file is tightened on loa
   const dir = tmpDir();
   const file = path.join(dir, 'secrets.json');
   new ChannelSecrets(file, null, () => {}).set('feishu', 's1');
-  assert.strictEqual(fs.statSync(file).mode & 0o777, 0o600, 'channel secrets must be 0600 on POSIX');
+  // Windows has no POSIX mode bits (chmod cannot narrow them) — assert on POSIX only
+  if (process.platform !== 'win32') {
+    assert.strictEqual(fs.statSync(file).mode & 0o777, 0o600, 'channel secrets must be 0600 on POSIX');
+  }
 
   // legacy wide-perm file: the successful read path tightens it (best effort)
   const legacy = path.join(dir, 'legacy-secrets.json');
@@ -332,7 +335,9 @@ test('ChannelSecrets: vault file is 0600; a legacy 0644 file is tightened on loa
   fs.chmodSync(legacy, 0o644); // defeat umask: simulate a pre-0600 install
   const reloaded = new ChannelSecrets(legacy, null, () => {});
   assert.strictEqual(reloaded.get('feishu'), 's2', 'legacy vault still decrypts');
-  assert.strictEqual(fs.statSync(legacy).mode & 0o777, 0o600, 'legacy vault tightened on read');
+  if (process.platform !== 'win32') {
+    assert.strictEqual(fs.statSync(legacy).mode & 0o777, 0o600, 'legacy vault tightened on read');
+  }
 });
 
 // --------------------------------------------------------- session bindings

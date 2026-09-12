@@ -97,11 +97,30 @@ function probe(url) {
   return new Promise((resolve) => {
     const req = http.get(url, (res) => {
       res.resume();
-      resolve(res.statusCode === 200);
+      // 200 = index served; 3xx = the browser-auth exchange answering the token
+      // URL with its cookie-minting redirect (dsh 0.1.2+).
+      resolve(res.statusCode === 200 || (res.statusCode >= 300 && res.statusCode < 400));
     });
     req.setTimeout(3000, () => { try { req.destroy(); } catch { /* ignore */ } resolve(false); });
     req.on('error', () => resolve(false));
   });
+}
+
+/** Newest authenticated runtime URL from the runtime's own stdout log.
+ * The shell strips the launch token from its own log line, and since dsh
+ * 0.1.2 an index request without that token/cookie is answered 401 — the probe
+ * must use the runtime's printed URL (…/?token=…). */
+function findRuntimeAuthUrl() {
+  let best = null;
+  try {
+    for (const name of fs.readdirSync(logsDir)) {
+      if (!name.endsWith('.out')) continue;
+      let text = '';
+      try { text = fs.readFileSync(path.join(logsDir, name), 'utf8'); } catch { continue; }
+      for (const m of text.matchAll(/dsh web: (\S+)/g)) best = m[1].replace(/[),.]+$/, '');
+    }
+  } catch { /* runtime log may not exist yet */ }
+  return best;
 }
 
 async function main() {
@@ -134,7 +153,7 @@ async function main() {
         lastUrl = url;
         console.log(`[e2e] URL line found after ${((Date.now() - startedAt) / 1000).toFixed(1)}s: ${url}`);
       }
-    } else if (await probe(lastUrl)) {
+    } else if (await probe(findRuntimeAuthUrl() || lastUrl)) {
       healthOk = true;
       break;
     }

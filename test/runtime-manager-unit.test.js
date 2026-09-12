@@ -524,3 +524,22 @@ test('rollback throws when there is no previous version to return to', async () 
   manager.state.previousVersion = null;
   await assert.rejects(manager.rollback(), /no previous version/);
 });
+
+// ---- shell ↔ runtime compatibility matrix (DESIGN.md §6.4) ------------------
+
+test('compat matrix gates 0.1.2+ runtimes (Remote API rework) but not older ones', () => {
+  const { isRuntimeSupported, SUPPORTED_RUNTIME_RANGE } = require('../src/runtime-manager');
+  assert.strictEqual(SUPPORTED_RUNTIME_RANGE, '<0.1.2-0');
+  // what we bundle + what users run today
+  for (const v of ['0.1.1-rc.2', '0.1.0-rc.8', '0.1.0-rc.6', '0.1.1']) {
+    assert.strictEqual(isRuntimeSupported(v), true, `${v} must stay installable`);
+  }
+  // 0.1.2 replaced the whole Remote API (cookie auth, /api/remote.mux, no /api/respond)
+  for (const v of ['0.1.2-rc.1', '0.1.2-alpha.5', '0.1.3-alpha.1', '0.1.5-rc.1', '0.1.5-rc.2']) {
+    assert.strictEqual(isRuntimeSupported(v), false, `${v} must be gated until v0.4.0`);
+  }
+  // never block on a version string we cannot parse (local dev installs)
+  assert.strictEqual(isRuntimeSupported(''), true);
+  assert.strictEqual(isRuntimeSupported(null), true);
+  assert.strictEqual(isRuntimeSupported('not-a-version'), true);
+});
