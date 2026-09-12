@@ -382,6 +382,10 @@ test('copyTreePruningNodeModules skips node_modules (junction farm)', () => {
 test('snapshotDshHome excludes profiles/node_modules', async () => {
   const { ud, manager } = makeManager();
   const dshHome = path.join(ud, 'dsh-home');
+  // pin DSH_HOME inside the fixture: snapshotDshHome() would otherwise read
+  // the developer's REAL ~/.dsh (non-hermetic, and the settings.yaml assert
+  // fails on machines without one)
+  manager.settings.patch({ dshHome });
   const nm = path.join(dshHome, 'profiles', 'node_modules', '@deepseek-ai', 'dsh');
   fs.mkdirSync(nm, { recursive: true });
   fs.writeFileSync(path.join(nm, 'index.js'), 'y');

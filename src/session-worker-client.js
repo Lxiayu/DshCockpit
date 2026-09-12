@@ -70,6 +70,7 @@ function createSessionWorkerClient(options) {
   return {
     collect(dshHome, options) { return request('collect', { dshHome, options: options || {} }); },
     scanCompactions(file) { return request('compact', { file }); },
+    mcpUsage(dshHome, options) { return request('mcpusage', { dshHome, options: options || {} }); },
     stats() { return { jobs: metrics.jobs, pending: pending.size, worker: !!worker }; },
     async close() {
       closed = true;

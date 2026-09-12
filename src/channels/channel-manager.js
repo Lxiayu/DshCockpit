@@ -80,7 +80,13 @@ class ChannelState {
   }
 
   snapshot() {
-    return { state: this.state, attempts: this.attempts, lastError: this.lastError };
+    return {
+      state: this.state,
+      attempts: this.attempts,
+      lastError: this.lastError,
+      // H-im: visible reconnect countdown while in backoff
+      backoffMs: this.state === 'backoff' ? Math.min(BACKOFF_BASE_MS * 2 ** this.attempts, BACKOFF_MAX_MS) : 0,
+    };
   }
 }
 
@@ -94,6 +100,9 @@ function createChannelManager(deps) {
   const timers = d.timers || { setTimeout, clearTimeout };
 
   const registry = new Map(); // type -> ctor | null (null = registered slot, impl pending)
+  // H-im: per-channel diagnostics surfaced on the channel card
+  const inboundStats = new Map(); // id -> { lastInboundAt, lastInboundPreview }
+  const welcomed = new Set();     // ids that already got the onboarding message this process
   const testers = new Map();  // type -> async (creds) => {ok, kind?, reason?}
   for (const type of BUILTIN_SLOTS) registry.set(type, null);
 
@@ -108,6 +117,10 @@ function createChannelManager(deps) {
     audit: (rec) => log(`[channels] audit ${rec.action} ${rec.kind || ''} ${rec.reason || ''}`.trim()),
   });
   const dispatcher = createCommandDispatcher({
+    statusSnapshot: d.statusSnapshot || null,
+    onCommand: d.onCommand || null,
+    getBinding: d.getBinding || null,
+    onBoundPrompt: d.onBoundPrompt || null,
     tokens,
     isAllowed,
     sessions,
@@ -228,6 +241,16 @@ function createChannelManager(deps) {
       state.markOnline();
       emitState();
       log(`[channels] ${id} online`);
+      // L1 (H-im): onboarding message — first successful connect per process.
+      // Tells the user what the channel can do instead of leaving a dead-end
+      // blank chat. Best-effort: never blocks or fails the start.
+      if (!welcomed.has(id) && rec.sender) {
+        welcomed.add(id);
+        rec.sender.sendText(t(lang(), 'channels.welcome', {
+          id,
+          commands: t(lang(), 'channels.welcomeCommands'),
+        })).catch((e) => log(`[channels] ${id} welcome send failed: ${e.message}`));
+      }
       // replay what piled up while offline (taskDone only, by queue policy)
       queue.drain((ev) => rec.sender.sendEvent(lang(), ev))
         .then((n) => { if (n) log(`[channels] ${id} replayed ${n} queued event(s)`); })
@@ -305,6 +328,11 @@ function createChannelManager(deps) {
   // ------------------------------------------------------------ inbound
 
   function onInbound(channelId, msg) {
+    // H-im: make inbound activity visible on the channel card
+    try {
+      const preview = String((msg && msg.command && (msg.command.text || msg.command.token)) || '').slice(0, 40);
+      inboundStats.set(channelId, { lastInboundAt: Date.now(), lastInboundPreview: preview });
+    } catch { /* diagnostics only */ }
     const cfg = configOf(channelId);
     // The adapter parsed a v1 command; admission + token logic live downstream.
     dispatcher.dispatch({
@@ -353,6 +381,17 @@ function createChannelManager(deps) {
     }
   }
 
+  /** R5: fan a plain-text message out to every ONLINE channel (no queueing —
+   * generated reports are pushed once; offline channels simply miss it). */
+  function broadcastText(text) {
+    const jobs = [];
+    for (const [id, rec] of instances) {
+      if (!rec.sender) continue;
+      jobs.push(rec.sender.sendText(String(text)).catch((e) => handleSendError(id, e)));
+    }
+    return Promise.all(jobs);
+  }
+
   // -------------------------------------------------------------- status
 
   function statusAll() {
@@ -366,6 +405,8 @@ function createChannelManager(deps) {
         installed: !!registry.get(type),
         credentialsConfigured: hasSecrets(type),
         status: stateOf(type).snapshot(),
+        lastInboundAt: (inboundStats.get(type) || {}).lastInboundAt || 0,
+        lastInboundPreview: (inboundStats.get(type) || {}).lastInboundPreview || '',
       };
     });
   }
@@ -471,6 +512,7 @@ function createChannelManager(deps) {
     startEnabled,
     stopAll,
     broadcast,
+    broadcastText,
     toggle,
     setAllowFrom,
     statusAll,

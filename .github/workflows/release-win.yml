@@ -1,6 +1,11 @@
-# Build & publish a Windows x64 portable .zip on tag push or manual run.
-# Portable zip (no installer, no admin) — extract and double-click
-# DshCockpit.exe. Unsigned for now; swap in CSC_LINK etc. for Authenticode later.
+# Build & publish Windows x64 artifacts on tag push or manual run.
+# Two distribution tracks (v0.3.0 D2/D5):
+#   NSIS installer (.exe)  — PRIMARY: double-click install, per-user no UAC,
+#                            in-app auto-update via electron-updater
+#                            (latest.yml + .exe.blockmap differential).
+#   Portable zip           — green/escape hatch, extract & double-click.
+# Both share the same pruned bundled runtime seed. Unsigned for now; swap in
+# CSC_LINK etc. for Authenticode later.
 name: release-win
 
 on:
@@ -29,6 +34,15 @@ jobs:
       # Single source of truth for the bundled runtime: package.json
       # "runtimeVersion". Never "latest from registry" — a DeepSeek rc.9/rc.10
       # must NOT change what this release bundles.
+      # D5: the packaged app-update.yml must point at the REAL GitHub repo
+      # (build.js otherwise falls back to owner "local", which would make the
+      # in-app updater 404 forever).
+      - name: Set updater feed coordinates
+        shell: bash
+        run: |
+          echo "DSH_REPO_OWNER=${{ github.repository_owner }}" >> "$GITHUB_ENV"
+          echo "DSH_REPO_NAME=${{ github.event.repository.name }}" >> "$GITHUB_ENV"
+
       - name: Resolve runtime version
         id: rtv
         shell: bash
@@ -55,12 +69,40 @@ jobs:
 
       - run: node scripts/build.js --win --x64 --publish never
 
+      # A2 artifact-level gate: cold-boot the packaged exe from the extracted
+      # zip layout, wait for the boot URL line, probe HTTP 200 — a red step
+      # blocks the artifact upload.
+      - name: E2E smoke (portable artifact)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/e2e-app | Out-Null
+          $zip = (Get-ChildItem dist -Filter 'DshCockpit-*-win-x64.zip' | Select-Object -First 1).FullName
+          tar -xf $zip -C dist/e2e-app
+          $exe = (Get-ChildItem dist/e2e-app -Recurse -Filter DshCockpit.exe | Select-Object -First 1).FullName
+          node scripts/e2e-smoke.js --expect-feed --app $exe --timeout 240000
+
+      # SHA256SUMS for the release page (integrity check before running).
+      - name: Generate SHA256SUMS
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem dist -File | Where-Object { $_.Name -match '^(DshCockpit-.*\.(zip|exe|blockmap)|latest\.yml)$' }
+          $lines = foreach ($f in $files) {
+            $h = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+            "$h  $($f.Name)"
+          }
+          $lines | Set-Content dist/SHA256SUMS-win.txt
+          Get-Content dist/SHA256SUMS-win.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: win-x64
           if-no-files-found: error
           path: |
             dist/DshCockpit-*-win-x64.zip
+            dist/DshCockpit-*-win-x64.exe
+            dist/DshCockpit-*-win-x64.exe.blockmap
+            dist/latest.yml
+            dist/SHA256SUMS-win.txt
 
   release:
     name: publish to GitHub Releases
@@ -82,3 +124,7 @@ jobs:
           body_path: .github/release-body.md
           files: |
             artifacts/DshCockpit-*-win-x64.zip
+            artifacts/DshCockpit-*-win-x64.exe
+            artifacts/DshCockpit-*-win-x64.exe.blockmap
+            artifacts/latest.yml
+            artifacts/SHA256SUMS-win.txt

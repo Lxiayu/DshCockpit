@@ -40,6 +40,24 @@ contextBridge.exposeInMainWorld('dshShell', {
   skillsImport: (dir, pick) => ipcRenderer.invoke('shell:skills-import', dir, pick),
   onSkillsProgress: (cb) => ipcRenderer.on('skills:progress', (_e, d) => cb(d)),
   restartRuntime: () => ipcRenderer.invoke('shell:restart-runtime'),
+  // R1 boot self-check (Settings → About): last report / rerun / one-click repair
+  bootReport: () => ipcRenderer.invoke('boot:report'),
+  bootRerun: () => ipcRenderer.invoke('boot:rerun'),
+  bootRepair: (ids) => ipcRenderer.invoke('boot:repair', ids),
+  // R2 upstream compatibility status (Settings → Updates, read-only)
+  compatStatus: () => ipcRenderer.invoke('compat:status'),
+  // R6 notification center history
+  notificationsList: (query, kind, limit) => ipcRenderer.invoke('notifications:list', query, kind, limit),
+  notificationsClear: () => ipcRenderer.invoke('notifications:clear'),
+  // R4 cache economics (Settings → Cost)
+  cacheEconomics: () => ipcRenderer.invoke('cache-economics:summary'),
+  // H10 shell update check (Settings → Updates)
+  shellCheckUpdate: () => ipcRenderer.invoke('shell:check-shell-update'),
+  // R5 weekly report (Settings → Tasks & automation)
+  weeklyGenerate: () => ipcRenderer.invoke('weekly:generate'),
+  weeklyList: () => ipcRenderer.invoke('weekly:list'),
+  weeklyOpenDir: () => ipcRenderer.invoke('weekly:open-dir'),
+  weeklyPush: () => ipcRenderer.invoke('weekly:push'),
   costInfo: () => ipcRenderer.invoke('shell:cost-info'),
   balanceInfo: () => ipcRenderer.invoke('shell:balance-info'),
   balanceRefresh: () => ipcRenderer.invoke('shell:balance-refresh'),
@@ -66,6 +84,20 @@ contextBridge.exposeInMainWorld('dshShell', {
   ollamaStatus: () => ipcRenderer.invoke('shell:ollama-status'),
   modelsSetDefault: (provider, model) => ipcRenderer.invoke('shell:models-set-default', provider, model),
   copyText: (text) => ipcRenderer.invoke('shell:copy-text', text),
+  // MCP manager (v0.3.1 T1): CRUD / toggle / two-tier tests / registry /
+  // universal import / usage. Secret env values are passed FORWARD once in
+  // mcpSave(secrets) and never returned by any call (vault discipline).
+  mcpList: () => ipcRenderer.invoke('mcp:list'),
+  mcpGet: (id) => ipcRenderer.invoke('mcp:get', id),
+  mcpSave: (server, secrets) => ipcRenderer.invoke('mcp:save', server, secrets),
+  mcpRemove: (id) => ipcRenderer.invoke('mcp:remove', id),
+  mcpToggle: (id, enabled) => ipcRenderer.invoke('mcp:toggle', id, enabled),
+  mcpTest: (target) => ipcRenderer.invoke('mcp:test', target),
+  mcpTier1: (id) => ipcRenderer.invoke('mcp:tier1', id),
+  mcpRegistry: (query, category) => ipcRenderer.invoke('mcp:registry', query, category),
+  mcpImportScan: () => ipcRenderer.invoke('mcp:import-scan'),
+  mcpImportRun: (sourceKey, selectedNames, clipboardText) => ipcRenderer.invoke('mcp:import-run', sourceKey, selectedNames, clipboardText),
+  mcpUsage: (days) => ipcRenderer.invoke('mcp:usage', days),
   scheduledRun: (id) => ipcRenderer.invoke('shell:scheduled-run', id),
   scheduledHistory: () => ipcRenderer.invoke('shell:scheduled-history'),
   scheduledClearHistory: () => ipcRenderer.invoke('shell:scheduled-clear-history'),

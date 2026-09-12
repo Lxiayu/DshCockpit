@@ -210,7 +210,7 @@ it('feishu receiver: 3-second rule — event frame ACKed synchronously, command 
   const { tokens, dispatch, calls } = makePipeline();
   const token = tokens.issue({ kind: 'approval', tool: 'Bash' });
 
-  const endpoints = fakeFetch({ 'https://open.feishu.cn/callback/ws/endpoint': { body: { endpoint: 'wss://gw/callback/ws/77' } } });
+  const endpoints = fakeFetch({ 'https://open.feishu.cn/callback/ws/endpoint': { body: { code: 0, data: { URL: 'wss://gw/callback/ws/77' } } } });
   const inbound = [];
   const hooks = {
     notifyDisconnect: () => {},
@@ -274,7 +274,7 @@ it('feishu receiver: 3-second rule — event frame ACKed synchronously, command 
 
 it('feishu receiver: gzip event payloads inflate; non-text messages ignored; disconnect reports', async () => {
   const zlib = require('node:zlib');
-  const endpoints = fakeFetch({ 'https://open.feishu.cn/callback/ws/endpoint': { body: { endpoint: 'wss://gw/callback/ws/1' } } });
+  const endpoints = fakeFetch({ 'https://open.feishu.cn/callback/ws/endpoint': { body: { code: 0, data: { URL: 'wss://gw/callback/ws/1' } } } });
   const disconnects = [];
   const inbound = [];
   const ch = new FeishuChannel({

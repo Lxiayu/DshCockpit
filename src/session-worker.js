@@ -7,6 +7,7 @@ const { parentPort } = require('node:worker_threads');
 const fs = require('node:fs/promises');
 const tokenStats = require('./token-stats');
 const compact = require('./compact');
+const mcpUsage = require('./mcp-usage');
 
 const compactTextCache = new Map();
 // Keep multi-MB decoded logs out of the cache: a giant active session would
@@ -34,6 +35,15 @@ async function handle(msg) {
     if (!active) return { records: [], open: null };
     const text = await decodeForCompaction(active);
     return text === null ? { records: [], open: null, unavailable: true } : compact.scanCompactions(text);
+  }
+  // MCP usage observability (v0.3.1 T1): same isolated CPU lane, same zstd
+  // decoder; scanning session logs for mcp__server__tool calls must never
+  // run on the main thread (large histories)
+  if (msg.op === 'mcpusage') {
+    return mcpUsage.collect(msg.dshHome, {
+      maxFiles: msg.options && msg.options.maxFiles,
+      decode: (file) => tokenStats.decodeSessionLogAsync(file),
+    });
   }
   throw new Error(`unknown session worker operation: ${msg.op}`);
 }

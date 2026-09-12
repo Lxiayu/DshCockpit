@@ -345,6 +345,13 @@
   #install-stage { font-weight: 600; }
   #install-stage::before { content: '▸ '; color: var(--acc); }
   [hidden] { display: none !important; }
+  /* R4 cache economics */
+  .cache-econ-hero { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 10px; }
+  .cache-econ-hero .big { font-size: 34px; font-weight: 700; color: var(--ok); letter-spacing: -0.5px; }
+  .cache-trend { display: flex; align-items: flex-end; gap: 4px; height: 96px; padding: 8px 0; }
+  .cache-trend .bar { flex: 1 1 auto; min-width: 6px; max-width: 42px; background: linear-gradient(180deg, var(--ok), color-mix(in srgb, var(--ok) 45%, transparent)); border-radius: 3px 3px 0 0; position: relative; }
+  .cache-trend .bar:hover::after { content: attr(data-tip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line); padding: 3px 7px; font-size: 11px; white-space: nowrap; border-radius: 4px; z-index: 2; }
+  .cache-trend-empty { opacity: .55; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -365,9 +372,12 @@
       <button class="nav-item" data-page="longsession"><span class="ico">🧠</span><span class="txt" data-i18n="nav.longsession">长会话</span></button>
       <button class="nav-item" data-page="runtime"><span class="ico">⚙️</span><span class="txt" data-i18n="nav.runtime">运行时</span></button>
       <button class="nav-item" data-page="plugins"><span class="ico">🧩</span><span class="txt" data-i18n="nav.plugins">插件</span></button>
+      <button class="nav-item" data-page="mcp"><span class="ico">🔌</span><span class="txt" data-i18n="nav.mcp">MCP 服务</span></button>
       <button class="nav-item" data-page="skills"><span class="ico">✨</span><span class="txt" data-i18n="nav.skills">技能</span></button>
       <button class="nav-item" data-page="tasks"><span class="ico">⏰</span><span class="txt" data-i18n="nav.tasks">任务与自动化</span></button>
-      <button class="nav-item" data-page="remote"><span class="ico">📱</span><span class="txt" data-i18n="nav.remote">手机远程</span></button>
+     <button class="nav-item" data-page="notifications"><span class="ico">🔔</span><span class="txt" data-i18n="nav.notifications">通知中心</span></button>
+      <button class="nav-item" data-page="weekly"><span class="ico">📊</span><span class="txt" data-i18n="nav.weekly">Agent 周报</span></button>
+     <button class="nav-item" data-page="remote"><span class="ico">📱</span><span class="txt" data-i18n="nav.remote">手机远程</span></button>
       <button class="nav-item" data-page="channels"><span class="ico">💬</span><span class="txt" data-i18n="nav.channels">渠道</span></button>
       <div class="group-label" data-i18n="group.system">系统</div>
       <button class="nav-item" data-page="data"><span class="ico">💾</span><span class="txt" data-i18n="nav.data">数据与备份</span></button>
@@ -420,10 +430,6 @@
               </select>
             </div>
           </div>
-          <div class="setting">
-            <div class="setting-info"><label data-i18n="shellAutoUpdate">自动检查壳更新</label></div>
-            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="shellAutoUpdate" /></div>
-          </div>
         </div>
         <div class="card">
           <h3 data-i18n="card.appearance">外观</h3>
@@ -450,6 +456,16 @@
           <p data-i18n="page.cost.d">API 费率、峰谷分时与预算</p>
         </div>
         <div id="cost-overview" data-center-scope="control">
+          <div class="card" id="cache-econ-card">
+            <h3 data-i18n="card.cacheEcon">缓存经济学</h3>
+            <div class="cache-econ-hero">
+              <div class="big" id="cache-econ-saved">--</div>
+              <div class="desc" data-i18n="cacheEcon.hero">本月缓存帮你省了（按当前单价估算）</div>
+            </div>
+            <div class="kv"><span data-i18n="cacheEcon.hitRate">缓存命中率</span><b id="cache-econ-hitrate">--</b></div>
+            <div class="kv"><span data-i18n="cacheEcon.peakSplit">峰时节省 / 谷时节省</span><b id="cache-econ-split">--</b></div>
+            <div class="status" id="cache-econ-status"></div>
+          </div>
           <div class="card">
             <h3 data-i18n="card.balance">账户余额（官方）</h3>
             <div class="status" id="balance-status"></div>
@@ -464,6 +480,13 @@
             <h3 data-i18n="card.costUsage">用量统计</h3>
             <div class="status" id="cost-status"></div>
             <div class="note" data-i18n="cost.ratesHint">费用按你配置的价格估算，仅供参考，不构成实际计费。</div>
+          </div>
+          <div class="card" id="cache-econ-detail">
+            <h3 data-i18n="card.cacheEconDetail">缓存节省明细</h3>
+            <div class="note" data-i18n="cacheEcon.trendHint">按天节省（按平价差估算）；月度总额为峰谷精确口径。悬停查看数值。</div>
+            <div class="cache-trend" id="cache-econ-days"></div>
+            <h3 data-i18n="cacheEcon.topTitle" style="margin-top:14px">会话节省 Top 10</h3>
+            <div id="cache-econ-top"></div>
           </div>
         </div>
         <div id="cost-config" data-center-scope="settings">
@@ -792,6 +815,138 @@
         </div>
       </div>
 
+      <!-- ------------------------- page: mcp (T1 v0.3.1) -->
+      <div class="page" id="page-mcp">
+        <div class="page-head">
+          <h2 data-i18n="nav.mcp">MCP 服务</h2>
+          <p data-i18n="page.mcp.d">管理 Model Context Protocol (MCP) 服务器，扩展 Agent 能力</p>
+        </div>
+        <div class="card">
+          <div class="page-head-row">
+            <h3 data-i18n="mcp.installedTitle">已配置的 MCP 服务</h3>
+            <div class="page-actions">
+              <button class="secondary" id="btn-mcp-import-view" data-i18n="mcp.import">导入</button>
+              <button class="secondary" id="btn-mcp-manual" data-i18n="mcp.manual">手动配置</button>
+              <button id="btn-mcp-add" data-i18n="mcp.add">添加服务</button>
+            </div>
+          </div>
+          <div id="mcp-list" style="display:flex;flex-direction:column;gap:6px"></div>
+          <div class="restart-hint" id="mcp-restart-hint" style="display:none">
+            <span data-i18n="mcp.restartHint">MCP 配置已变更，重启运行时后生效。</span>
+            <button class="secondary" id="btn-mcp-restart" data-i18n="plugins.restartNow">立即重启</button>
+          </div>
+          <div id="mcp-form" style="display:none; border-top:1px solid var(--line); margin-top:10px; padding-top:10px">
+            <div class="setting">
+              <div class="setting-info"><label data-i18n="mcp.f.name">名称</label></div>
+              <div class="setting-ctrl"><input type="text" id="mcp-f-name" style="width:220px" /></div>
+            </div>
+            <div class="setting">
+              <div class="setting-info">
+                <label data-i18n="mcp.f.ns">命名空间</label>
+                <span class="desc" data-i18n="mcp.f.nsHint">工具前缀：mcp__&lt;命名空间&gt;__&lt;工具名&gt;</span>
+              </div>
+              <div class="setting-ctrl"><input type="text" class="mono" id="mcp-f-ns" style="width:220px" placeholder="filesystem" /></div>
+            </div>
+            <div class="setting">
+              <div class="setting-info"><label data-i18n="mcp.f.transport">传输方式</label></div>
+              <div class="setting-ctrl">
+                <select id="mcp-f-transport">
+                  <option value="stdio" data-i18n="mcp.f.stdio">stdio（本地进程）</option>
+                  <option value="sse" data-i18n="mcp.f.sse">sse / websocket（远程端点）</option>
+                  <option value="websocket">websocket</option>
+                </select>
+              </div>
+            </div>
+            <div id="mcp-f-stdio-fields">
+              <div class="setting">
+                <div class="setting-info">
+                  <label data-i18n="mcp.f.command">启动命令</label>
+                  <span class="desc" id="mcp-f-wraphint" style="display:none" data-i18n="mcp.f.wrapHint">Windows 上 npx 类命令会自动包装为 cmd /c 执行</span>
+                </div>
+                <div class="setting-ctrl"><input type="text" class="mono" id="mcp-f-command" style="width:320px" placeholder="npx" /></div>
+              </div>
+              <div class="setting">
+                <div class="setting-info"><label data-i18n="mcp.f.args">参数（每行一个）</label></div>
+                <div class="setting-ctrl" style="flex:1"><textarea id="mcp-f-args" class="mono" rows="3" style="width:100%;font-family:var(--mono)" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/tmp"></textarea></div>
+              </div>
+            </div>
+            <div id="mcp-f-remote-fields" style="display:none">
+              <div class="setting">
+                <div class="setting-info"><label data-i18n="mcp.f.url">端点 URL</label></div>
+                <div class="setting-ctrl" style="flex:1"><input type="text" class="mono" id="mcp-f-url" style="width:100%" placeholder="https://example.com/mcp" /></div>
+              </div>
+              <div class="setting">
+                <div class="setting-info">
+                  <label data-i18n="mcp.f.headers">请求头（名称: 值，每行一个）</label>
+                  <span class="desc" data-i18n="mcp.f.headersWarn">远程 Header 值会写入本地配置文件（非加密），请勿在共享机器上放置敏感值。</span>
+                </div>
+                <div class="setting-ctrl" style="flex:1"><textarea id="mcp-f-headers" class="mono" rows="2" style="width:100%;font-family:var(--mono)" placeholder="Authorization: Bearer xxx"></textarea></div>
+              </div>
+            </div>
+            <div class="setting">
+              <div class="setting-info">
+                <label data-i18n="mcp.f.env">环境变量（每行 KEY=VALUE）</label>
+                <span class="desc" data-i18n="mcp.f.envHint">勾选「敏感」的值经系统加密存储，不写入任何配置文件。</span>
+              </div>
+              <div class="setting-ctrl" style="flex:1">
+                <textarea id="mcp-f-env" class="mono" rows="3" style="width:100%;font-family:var(--mono)" placeholder="NODE_ENV=production&#10;GITHUB_TOKEN=ghp_xxx"></textarea>
+                <label style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:12px;color:var(--text-2)">
+                  <input type="checkbox" id="mcp-f-env-secret" /> <span data-i18n="mcp.f.envSecret">以下值按敏感处理（加密存储，不落盘）</span>
+                </label>
+                <input type="text" class="mono" id="mcp-f-env-secret-keys" style="width:100%;margin-top:4px;font-family:var(--mono)" data-i18n-placeholder="mcp.f.envSecretKeysPh" placeholder="敏感变量名，逗号分隔，如 GITHUB_TOKEN, BRAVE_API_KEY" />
+              </div>
+            </div>
+            <div class="setting">
+              <div class="setting-info"><label data-i18n="mcp.f.failfast">启动失败时阻止 DSH 启动</label></div>
+              <div class="setting-ctrl"><input type="checkbox" class="toggle" id="mcp-f-failfast" /></div>
+            </div>
+            <div class="btnrow">
+              <button class="secondary" id="btn-mcp-test" data-i18n="mcp.f.test">测试连接</button>
+              <button id="btn-mcp-save" data-i18n="mcp.f.save">保存</button>
+              <button class="secondary" id="btn-mcp-cancel" data-i18n="mcp.f.cancel">取消</button>
+              <button class="danger" id="btn-mcp-delete" data-i18n="mcp.f.delete" style="display:none">删除</button>
+            </div>
+            <div class="status" id="mcp-test-status"></div>
+          </div>
+        </div>
+        <div class="card" id="mcp-import-card" style="display:none">
+          <h3 data-i18n="mcp.manualTitle">手动配置（原始配置 JSON）</h3>
+          <div class="note" data-i18n="mcp.pasteHint">请从 MCP Server 的介绍页复制配置 JSON（优先使用 NPX 或 UVX 配置），并粘贴到输入框中。支持 mcpServers 整表或单个服务对象。</div>
+          <div class="setting" style="margin-top:10px">
+            <div class="setting-info"><label data-i18n="mcp.pasteLabel">粘贴配置 JSON</label></div>
+            <div class="setting-ctrl" style="flex:1"><textarea id="mcp-paste" class="mono" rows="9" style="width:100%;font-family:var(--mono)" placeholder='// 示例：
+// {
+//   "mcpServers": {
+//     "example-server": {
+//       "command": "npx",
+//       "args": [
+//         "-y",
+//         "mcp-server-example"
+//       ]
+//     }
+//   }
+// }'></textarea></div>
+          </div>
+          <div class="btnrow"><button class="secondary" id="btn-mcp-paste-import" data-i18n="mcp.pasteImport">解析并导入</button></div>
+          <div class="note" style="color:var(--warn,#c90)" data-i18n="mcp.pasteRisk">⚠ 配置前请确认来源，甄别风险：安装的 MCP Server 会在本机执行第三方命令，可能访问你的文件与凭据。</div>
+          <div class="status" id="mcp-import-status"></div>
+          <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px">
+            <h3 style="margin:0 0 8px" data-i18n="mcp.importTitle">从其他工具导入</h3>
+            <div id="mcp-import-sources" style="display:flex;flex-direction:column;gap:8px"></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="mcp.registryTitle">发现 MCP Server</h3>
+          <div class="plugin-tools">
+            <input type="text" id="mcp-search" data-i18n-placeholder="mcp.searchPh" placeholder="搜索 MCP Server…" />
+            <span id="mcp-count"></span>
+          </div>
+          <div class="chips" id="mcp-cats"></div>
+          <div class="note" data-i18n="mcp.registryNote">安装前会展示将要执行的命令与参数，确认后才写入配置；只添加你信任的来源。</div>
+          <div id="mcp-registry-list" style="display:flex;flex-direction:column;gap:6px"></div>
+        </div>
+      </div>
+
       <!-- ------------------------- page: skills (技能中心) -->
       <div class="page" id="page-skills">
         <div class="page-head">
@@ -863,6 +1018,87 @@
           <div class="auto-grid" id="auto-tpl"></div>
         </div>
         <div class="note" data-i18n="auto.note">到点后会在后台用无头会话运行该任务的提示词（需已配置 API Key），完成后系统通知并记录到执行历史。</div>
+      </div>
+
+
+
+      <!-- ------------------------- page: notifications (R6 通知中心) -->
+      <div class="page" id="page-notifications">
+        <div class="page-head">
+          <h2 data-i18n="nav.notifications">通知中心</h2>
+          <p data-i18n="page.notifications.d">系统通知统一收口：规则、免打扰与可检索历史</p>
+        </div>
+        <div class="card">
+          <h3 data-i18n="notif.rulesTitle">通知规则</h3>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="notif.master">启用通知中心</label><span class="desc" data-i18n="notif.masterHint">关闭后回到旧版直发行为，不再记录历史</span></div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="notificationCenterEnabled" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="notif.dnd">免打扰时段</label><span class="desc" data-i18n="notif.dndHint">时段内只记录不弹窗，支持跨零点（如 23:00-07:00）</span></div>
+            <div class="setting-ctrl">
+              <input type="checkbox" class="toggle" id="notifDndEnabled" style="margin-right:8px" />
+              <input type="text" class="mono" id="notifDndWindow" placeholder="23:00-07:00" style="width:130px" />
+            </div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="notif.fold">同类折叠</label><span class="desc" data-i18n="notif.foldHint">60 秒窗口内相同标题的通知只弹一次（仍会记录）</span></div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="notifFoldEnabled" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="notif.kinds">按类型禁用</label><span class="desc" data-i18n="notif.kindsHint">勾选的类型只记录不弹窗</span></div>
+            <div class="setting-ctrl notif-kinds" id="notif-kinds">
+              <label><input type="checkbox" value="approval" /> <span data-i18n="notif.kindApproval">审批</span></label>
+              <label><input type="checkbox" value="completion" /> <span data-i18n="notif.kindCompletion">完成</span></label>
+              <label><input type="checkbox" value="question" /> <span data-i18n="notif.kindQuestion">提问</span></label>
+              <label><input type="checkbox" value="budget" /> <span data-i18n="notif.kindBudget">预算</span></label>
+              <label><input type="checkbox" value="system" /> <span data-i18n="notif.kindSystem">系统</span></label>
+            </div>
+          </div>
+          <div class="status" id="notif-rules-status"></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="notif.historyTitle">通知历史（最近 500 条）</h3>
+          <div class="btnrow" style="gap:8px">
+            <input type="text" class="mono" id="notif-search" data-i18n-placeholder="notif.searchPh" placeholder="搜索标题 / 正文…" style="flex:1" />
+            <select id="notif-kind-filter" style="width:auto">
+              <option value="" data-i18n="notif.kindAll">全部类型</option>
+              <option value="approval" data-i18n="notif.kindApproval">审批</option>
+              <option value="completion" data-i18n="notif.kindCompletion">完成</option>
+              <option value="question" data-i18n="notif.kindQuestion">提问</option>
+              <option value="budget" data-i18n="notif.kindBudget">预算</option>
+              <option value="system" data-i18n="notif.kindSystem">系统</option>
+            </select>
+            <button class="secondary" id="btn-notif-clear" data-i18n="notif.clear">清空历史</button>
+          </div>
+          <div id="notif-list" aria-live="polite"></div>
+          <div class="status" id="notif-list-status"></div>
+        </div>
+      </div>
+
+      <!-- ------------------------- page: weekly (R5 Agent 周报) -->
+      <div class="page" id="page-weekly">
+        <div class="page-head">
+          <h2 data-i18n="nav.weekly">Agent 周报</h2>
+          <p data-i18n="page.weekly.d">Wrapped 风格的每周使用卡片：生成、分享、推送到 IM</p>
+        </div>
+<div class="card" id="weekly-card">
+        <h3 data-i18n="weekly.title">Agent 周报卡片</h3>
+        <div class="setting">
+          <div class="setting-info"><label data-i18n="weekly.enabled">每周一上午自动生成</label><span class="desc" data-i18n="weekly.enabledHint">生成 Wrapped 风格的本周卡片（PNG，保存到报告目录）</span></div>
+          <div class="setting-ctrl"><input type="checkbox" class="toggle" id="weeklyReportEnabled" /></div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><label data-i18n="weekly.pushIm">生成后推送 IM 渠道</label><span class="desc" data-i18n="weekly.pushImHint">向已接入并在线的渠道发送周报摘要（需在渠道页配置）</span></div>
+          <div class="setting-ctrl"><input type="checkbox" class="toggle" id="weeklyReportPushIm" /></div>
+        </div>
+        <div class="btnrow">
+          <button class="secondary" id="btn-weekly-generate" data-i18n="weekly.generate">立即生成本周卡片</button>
+          <button class="secondary" id="btn-weekly-push" data-i18n="weekly.push">推送到 IM</button>
+          <button class="secondary" id="btn-weekly-open" data-i18n="weekly.openDir">打开报告目录</button>
+        </div>
+        <div class="status" id="weekly-status"></div>
+      </div>
       </div>
 
       <!-- ------------------------- page: remote (手机远程控制) -->
@@ -1022,10 +1258,33 @@
       <div class="page" id="page-update">
         <div class="page-head">
           <h2 data-i18n="nav.update">更新</h2>
-          <p data-i18n="page.update.d">运行时更新通道与版本</p>
+          <p data-i18n="page.update.d">桌面壳与 Harness 运行时的更新管理</p>
+        </div>
+        <div class="card" id="shell-update-card">
+          <h3 data-i18n="card.shellUpdate">桌面壳更新</h3>
+          <div class="kv"><span data-i18n="shellUpdate.version">当前壳版本</span><b id="update-shell-version">--</b></div>
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="shellAutoUpdate">自动检查壳更新</label>
+              <span class="desc" data-i18n="shellAutoUpdate.hint">启动与每 4 小时自动检查；发现新版本自动下载，退出时安装</span>
+            </div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="shellAutoUpdate" /></div>
+          </div>
+          <div class="btnrow">
+            <button class="secondary" id="btn-shell-check" data-i18n="shellUpdate.check">立即检查壳更新</button>
+          </div>
+          <div class="status" id="shell-update-status"></div>
+          <div class="note" data-i18n="shellUpdate.note">Windows 安装版（NSIS）支持应用内差分更新；便携版与 macOS 请前往 GitHub Releases 手动下载。</div>
+        </div>
+        <div class="card" id="compat-card">
+          <h3 data-i18n="card.compat">上游兼容状态</h3>
+          <div class="kv"><span data-i18n="compat.current">当前运行时版本</span><b id="compat-current">--</b></div>
+          <div class="kv"><span data-i18n="compat.state">上游验证</span><b id="compat-state">--</b></div>
+          <div class="status" id="compat-note"></div>
         </div>
         <div class="card">
-          <h3 data-i18n="card.updateChannel">通道与来源</h3>
+          <h3 data-i18n="card.runtimeUpdate">Harness 运行时更新</h3>
+          <div class="note" data-i18n="runtimeUpdate.note">以下设置只影响 Harness 运行时（与上方的桌面壳更新相互独立）。</div>
           <div class="setting">
             <div class="setting-info"><label data-i18n="channel">更新通道</label></div>
             <div class="setting-ctrl">
@@ -1092,6 +1351,17 @@
             <button class="secondary" id="open-logs" data-i18n="btn.openLogs">打开日志目录</button>
             <button class="secondary" id="open-diagnostics" data-i18n="btn.openDiagnostics">打开诊断目录</button>
           </div>
+        </div>
+        <div class="card" id="boot-check-card">
+          <h3 data-i18n="card.bootCheck">启动自检</h3>
+          <div class="kv"><span data-i18n="boot.lastRun">上次自检</span><b id="boot-last-run">--</b></div>
+          <div class="kv"><span data-i18n="boot.overall">总体状态</span><b id="boot-overall">--</b></div>
+          <div id="boot-results"></div>
+          <div class="btnrow">
+            <button class="secondary" id="btn-boot-rerun" data-i18n="btn.bootRerun">立即重检</button>
+            <button class="secondary" id="btn-boot-repair" data-i18n="btn.bootRepair" style="display:none">一键修复</button>
+          </div>
+          <div class="status" id="boot-status"></div>
         </div>
       </div>
 
@@ -1229,6 +1499,53 @@
       sec_firstrun: '首次使用', firstrun_step1: '在 Harness 工作区完成 DeepSeek API 配置', firstrun_step2: '使用右上角 Cockpit 管理运行时与工作区', firstrun_step3: '开始对话；Context 指示器会持续显示压力',
       shellAutoUpdate: '自动检查壳更新',
       sec_plugins: '插件市场',
+      // ---- MCP panel (T1 v0.3.1) ----
+      page_mcp_d: '管理 Model Context Protocol (MCP) 服务器，扩展 Agent 能力',
+      mcp_installedTitle: '已配置的 MCP 服务', mcp_add: '添加服务', mcp_import: '导入',
+      mcp_empty: '尚未配置任何 MCP 服务。',
+      mcp_restartHint: 'MCP 配置已变更，重启运行时后生效。',
+      mcp_importTitle: '从其他工具导入',
+      mcp_manual: '手动配置', mcp_manualTitle: '手动配置（原始配置 JSON）',
+      mcp_pasteHint: '请从 MCP Server 的介绍页复制配置 JSON（优先使用 NPX 或 UVX 配置），并粘贴到输入框中。支持 mcpServers 整表或单个服务对象。',
+      mcp_pasteLabel: '粘贴配置 JSON',
+      mcp_pasteRisk: '⚠ 配置前请确认来源，甄别风险：安装的 MCP Server 会在本机执行第三方命令，可能访问你的文件与凭据。',
+      mcp_verifiedNs: '已验证来源',
+      mcp_pasteImport: '解析并导入',
+      mcp_registryTitle: '发现 MCP Server', mcp_searchPh: '搜索 MCP Server…',
+      mcp_registryNote: '列表来自官方 MCP Registry（命名空间经 GitHub/DNS 验证）与内置精选；安装会在本机执行第三方命令，可能访问你的文件与凭据——请确认来源，只添加你信任的服务。',
+      mcp_f_name: '名称', mcp_f_ns: '命名空间', mcp_f_nsHint: '工具前缀：mcp__<命名空间>__<工具名>',
+      mcp_f_transport: '传输方式', mcp_f_stdio: 'stdio（本地进程）', mcp_f_sse: 'sse（远程端点）',
+      mcp_f_command: '启动命令', mcp_f_args: '参数（每行一个）',
+      mcp_f_wrapHint: 'Windows 上 npx 类命令会自动包装为 cmd /c 执行',
+      mcp_f_url: '端点 URL', mcp_f_headers: '请求头（名称: 值，每行一个）',
+      mcp_f_headersWarn: '远程 Header 值会写入本地配置文件（非加密），请勿在共享机器上放置敏感值。',
+      mcp_f_env: '环境变量（每行 KEY=VALUE）',
+      mcp_f_envHint: '按敏感处理的值经系统加密存储（macOS 钥匙串 / Windows DPAPI），不写入任何配置文件，重启运行时后生效。',
+      mcp_f_envSecret: '以下变量按敏感处理（加密存储，不落盘）',
+      mcp_f_envSecretKeysPh: '敏感变量名，逗号分隔，如 GITHUB_TOKEN, BRAVE_API_KEY',
+      mcp_f_failfast: '启动失败时阻止 DSH 启动',
+      mcp_f_test: '测试连接', mcp_f_save: '保存', mcp_f_cancel: '取消', mcp_f_delete: '删除',
+      mcp_testRunning: '⏳ 正在握手（首次运行可能需下载依赖，最多等待配置的超时时间）…',
+      mcp_testOk: '✅ 连接成功，发现 {n} 个工具：{tools}',
+      mcp_testOkNoTools: '✅ 连接成功（未发现工具）',
+      mcp_testNote: '（端点已响应；完整工具列表需在会话中验证）',
+      mcp_testFail: '❌ 连接失败：{reason}',
+      mcp_savedOk: '✅ 已保存。', mcp_saveFail: '❌ 保存失败：',
+      mcp_confirmRemove: '移除 MCP 服务 {name}？对应配置将从 cordis.patch.yml 中删除。',
+      mcp_removedOk: '✅ 已移除。',
+      mcp_secretConfigured: '已配置（不回显）',
+      mcp_usageCalls: '已调用 {n} 次', mcp_usageLast: '最近 {ago}', mcp_usageTop: '常用: {tools}',
+      mcp_usage_never: '从未调用',
+      mcp_registryCmdMissing: '需手动填写启动命令', mcp_registryInstall: '安装',
+      mcp_catAll: '全部', mcp_catStorage: '存储', mcp_catDatabase: '数据库', mcp_catDevtools: '开发工具',
+      mcp_catSearch: '搜索', mcp_catBrowser: '浏览器', mcp_catCoding: '编码', mcp_catCommunication: '通信',
+      mcp_catMemory: '记忆', mcp_catCustom: '自定义', mcp_catOther: '其他',
+      mcp_importScanNone: '未检测到其他客户端的 MCP 配置。',
+      mcp_importSourceNone: '（未找到该来源的配置文件）', mcp_importSourceFail: '（解析失败：{reason}）',
+      mcp_importedOk: '✅ 已导入 {n} 个服务', mcp_importedFail: '；{n} 个失败：{items}',
+      mcp_importPasteFail: '❌ 解析失败：{reason}',
+      mcp_winWrapNote: 'Windows：',
+      ago_justnow: '刚刚', ago_minutes: '{n} 分钟前', ago_hours: '{n} 小时前', ago_days: '{n} 天前',
       plugins_searchPh: '搜索插件（名称 / 描述）…', plugins_refresh: '刷新', plugins_go: '搜索',
       plugins_installedCount: '{n} 个插件',
       plugins_shownCount: '已显示 {n}/{t} 个', plugins_loadMore: '加载更多（还有 {n} 个）…',
@@ -1408,14 +1725,20 @@
       nav_search: '搜索设置…',
       group_general: '常规', group_workspace: '工作', group_system: '系统',
       nav_general: '通用', nav_cost: '用量与成本', nav_runtime: '运行时', nav_plugins: '插件',
+      nav_mcp: 'MCP 服务',
       nav_tasks: '自动化', nav_data: '数据与备份', nav_update: '更新', nav_about: '关于',
       page_remote_d: '在手机浏览器中安全使用本机会话',
       page_general_d: '壳的界面与启动偏好', page_cost_d: 'API 费率、峰谷分时与预算',
       page_runtime_d: '工作区、端口与可执行文件路径', page_plugins_d: '发现与管理 dsh 插件',
       page_tasks_d: '配置和管理自动化任务，让 AI 按计划执行工作流。', page_data_d: '备份、存储与隐私',
-      page_update_d: '运行时更新通道与版本', page_about_d: '版本、诊断与帮助',
+      page_update_d: '桌面壳与 Harness 运行时的更新管理', page_about_d: '版本、诊断与帮助',
       card_costRates: '谷时费率（默认）', card_costPeak: '峰谷分时计价', card_costUsage: '用量统计',
       card_balance: '账户余额（官方）',
+      card_cacheEcon: '缓存经济学', card_cacheEconDetail: '缓存节省明细',
+      cacheEcon_hero: '本月缓存帮你省了（按当前单价估算）', cacheEcon_hitRate: '缓存命中率',
+      cacheEcon_peakSplit: '峰时节省 / 谷时节省', cacheEcon_peakOff: '未启用峰谷分时（统一平价口径）',
+      cacheEcon_trendHint: '按天节省（按平价差估算）；月度总额为峰谷精确口径。悬停查看数值。',
+      cacheEcon_topTitle: '会话节省 Top 10', cacheEcon_noDays: '暂无带时间戳的用量数据（旧会话日志不含事件时间）。', cacheEcon_noSessions: '暂无会话数据。',
       balance_hint: '官方数据，与本地估算口径可能有差异（赠款 / 失败请求）。',
       balance_total: '总额', balance_granted: '赠送余额', balance_toppedUp: '充值余额',
       balance_updatedJust: '刚刚刷新', balance_updatedAgo: '{n} 分钟前刷新',
@@ -1538,6 +1861,51 @@
       skills_w1: '目录名与技能名不一致，已自动对齐为 {name}（跨平台兼容）',
       skills_w2: '该技能附带可执行脚本或命令类指令，安装后 agent 可能请求运行它们（每次经 dsh 审批）',
       skills_pluginForm: '该仓库是插件型技能包（package.json + dsh bundle），请通过插件市场安装',
+      card_bootCheck: '启动自检',
+      boot_lastRun: '上次自检', boot_overall: '总体状态',
+      boot_overallOk: '全部通过', boot_overallFailed: '{n} 项未通过', boot_overallDegraded: '{n} 项存在兼容性提示', boot_none: '尚未运行自检。',
+      btn_bootRerun: '立即重检', btn_bootRepair: '一键修复',
+      boot_running: '⏳ 自检中…', boot_repairing: '⏳ 修复中…',
+      boot_done: '✅ 自检完成：{p}/{t} 项通过。',
+      boot_repaired: '✅ 已修复 {items}；重新自检 {p}/{t} 项通过。',
+      boot_repairSkipped: '未修复（需手动处理）：{items}',
+      boot_checkRuntimeBin: '运行时可执行', boot_checkRuntimePointer: '版本指针',
+      boot_checkDshHomeWritable: 'DSH_HOME 可写', boot_checkProfileLinks: 'Profile 链接健康',
+      boot_checkPortAvailable: '端口可用性', boot_checkCredentialsExists: '凭据存在',
+      boot_checkCredentialsLayout: '凭据格式兼容',
+      card_compat: '上游兼容状态',
+      compat_current: '当前运行时版本', compat_state: '上游验证',
+      compat_stateVerified: '✅ 已验证兼容', compat_stateUnverified: '⚠️ 尚未验证（最新已验证：{v}）',
+      compat_stateUnknown: '未知', compat_stateDisabled: '已关闭',
+      compat_noteSource: '数据来自仓库兼容快报（{date} · {source}）',
+      compat_sourceLive: '实时', compat_sourceCache: '缓存',
+      compat_noteUnavailable: '无法读取兼容快报：{reason}',
+      nav_notifications: '通知中心', page_notifications_d: '系统通知统一收口：规则、免打扰与可检索历史',
+      notif_rulesTitle: '通知规则', notif_master: '启用通知中心', notif_masterHint: '关闭后回到旧版直发行为，不再记录历史',
+      notif_dnd: '免打扰时段', notif_dndHint: '时段内只记录不弹窗，支持跨零点（如 23:00-07:00）',
+      notif_fold: '同类折叠', notif_foldHint: '60 秒窗口内相同标题的通知只弹一次（仍会记录）',
+      notif_kinds: '按类型禁用', notif_kindsHint: '勾选的类型只记录不弹窗',
+      notif_kindApproval: '审批', notif_kindCompletion: '完成', notif_kindQuestion: '提问', notif_kindBudget: '预算', notif_kindSystem: '系统', notif_kindAll: '全部类型',
+      notif_historyTitle: '通知历史（最近 500 条）', notif_searchPh: '搜索标题 / 正文…', notif_clear: '清空历史',
+      notif_empty: '暂无通知记录。', notif_clearConfirm: '清空全部通知历史？', notif_cleared: '✅ 已清空',
+      notif_rulesOn: '通知中心已启用；规则修改即时生效。', notif_rulesOff: '⚠️ 通知中心已关闭：所有通知直接弹窗，不记录历史。',
+      nav_weekly: 'Agent 周报',
+      channels_lastInbound: '最近消息 {time}', channels_lastInboundPreview: '（{preview}…）',
+      channels_lastError: '最后错误：{err}', channels_noDiagnostics: '暂无诊断信息',
+      channels_feishuChecklistTitle: '飞书后台检查清单（收不到消息先看这里）',
+      channels_feishuCheck1: '事件与回调 → 订阅方式 = 使用长连接接收事件（WebSocket），并保存',
+      channels_feishuCheck2: '事件订阅包含 im.message.receive_v1',
+      channels_feishuCheck3: '权限包含 im:message:send_as_bot',
+      channels_feishuCheck4: '应用已创建版本并发布（未发布 = 收不到任何事件）', page_weekly_d: 'Wrapped 风格的每周使用卡片：生成、分享、推送到 IM',
+      card_shellUpdate: '桌面壳更新', card_runtimeUpdate: 'Harness 运行时更新',
+      shellUpdate_version: '当前壳版本', shellAutoUpdate_hint: '启动与每 4 小时自动检查；发现新版本自动下载，退出时安装',
+      shellUpdate_check: '立即检查壳更新', shellUpdate_checking: '⏳ 正在检查…', shellUpdate_checkDone: '✅ 已触发检查，结果将通过系统通知告知。',
+      shellUpdate_note: 'Windows 安装版（NSIS）支持应用内差分更新；便携版请手动下载。macOS 自动更新为实验特性（未签名构建，失败时请手动下载）。',
+      runtimeUpdate_note: '以下设置只影响 Harness 运行时（与上方的桌面壳更新相互独立）。',
+      weekly_title: 'Agent 周报卡片', weekly_enabled: '每周一上午自动生成', weekly_enabledHint: '生成 Wrapped 风格的本周卡片（PNG，保存到报告目录）',
+      weekly_pushIm: '生成后推送 IM 渠道', weekly_pushImHint: '向已接入并在线的渠道发送周报摘要（需在渠道页配置）',
+      weekly_generate: '立即生成本周卡片', weekly_push: '推送到 IM', weekly_openDir: '打开报告目录',
+      weekly_generating: '⏳ 正在渲染卡片…', weekly_generated: '✅ 已生成：{file}', weekly_pushing: '⏳ 正在推送…', weekly_pushed: '✅ 已推送到在线渠道。',
     },
     en: {
       title: 'DshCockpit Settings',
@@ -1587,6 +1955,53 @@
       sec_firstrun: 'First run', firstrun_step1: 'Finish DeepSeek API setup in the Harness workspace', firstrun_step2: 'Use Cockpit in the top-right to manage runtime and workspace', firstrun_step3: 'Start chatting; the Context indicator keeps pressure visible',
       shellAutoUpdate: 'Auto-check shell updates',
       sec_plugins: 'Plugin market',
+      // ---- MCP panel (T1 v0.3.1) ----
+      page_mcp_d: 'Manage Model Context Protocol (MCP) servers to extend agent capabilities',
+      mcp_installedTitle: 'Configured MCP Servers', mcp_add: 'Add Server', mcp_import: 'Import',
+      mcp_empty: 'No MCP servers configured yet.',
+      mcp_restartHint: 'MCP configuration changed — restart the runtime to apply.',
+      mcp_importTitle: 'Import from other tools',
+      mcp_manual: 'Manual Config', mcp_manualTitle: 'Manual Config (raw JSON)',
+      mcp_pasteHint: 'Copy the config JSON from the MCP Server introduction page (NPX or UVX configs preferred) and paste it below. Both a full mcpServers map and a single server object work.',
+      mcp_pasteLabel: 'Paste config JSON',
+      mcp_pasteRisk: '⚠ Verify the source before configuring: an installed MCP server executes third-party commands on this machine and may access your files and credentials.',
+      mcp_verifiedNs: 'verified source',
+      mcp_pasteImport: 'Parse & Import',
+      mcp_registryTitle: 'Discover MCP Servers', mcp_searchPh: 'Search MCP servers…',
+      mcp_registryNote: 'The list comes from the official MCP Registry (GitHub/DNS-verified namespaces) plus a curated builtin set; installing executes third-party commands locally and may access your files and credentials — verify the source and only add servers you trust.',
+      mcp_f_name: 'Name', mcp_f_ns: 'Namespace', mcp_f_nsHint: 'Tool prefix: mcp__<namespace>__<tool>',
+      mcp_f_transport: 'Transport', mcp_f_stdio: 'stdio (local process)', mcp_f_sse: 'sse (remote endpoint)',
+      mcp_f_command: 'Command', mcp_f_args: 'Arguments (one per line)',
+      mcp_f_wrapHint: 'On Windows, npx-style commands are auto-wrapped with cmd /c',
+      mcp_f_url: 'Endpoint URL', mcp_f_headers: 'Headers (Name: Value, one per line)',
+      mcp_f_headersWarn: 'Remote header values are stored in the local config file (not encrypted) — avoid sensitive values on shared machines.',
+      mcp_f_env: 'Environment variables (KEY=VALUE per line)',
+      mcp_f_envHint: 'Values marked sensitive are encrypted by the OS (macOS Keychain / Windows DPAPI), never written to any config file, and applied after a runtime restart.',
+      mcp_f_envSecret: 'Treat the variables below as sensitive (encrypted, never on disk)',
+      mcp_f_envSecretKeysPh: 'Sensitive names, comma-separated, e.g. GITHUB_TOKEN, BRAVE_API_KEY',
+      mcp_f_failfast: 'Block DSH startup when this server fails to start',
+      mcp_f_test: 'Test Connection', mcp_f_save: 'Save', mcp_f_cancel: 'Cancel', mcp_f_delete: 'Delete',
+      mcp_testRunning: '⏳ Handshaking (first run may download dependencies; bounded by the configured timeout)…',
+      mcp_testOk: '✅ Connected, {n} tools found: {tools}',
+      mcp_testOkNoTools: '✅ Connected (no tools found)',
+      mcp_testNote: '(endpoint responded; verify the full tool list in a live session)',
+      mcp_testFail: '❌ Connection failed: {reason}',
+      mcp_savedOk: '✅ Saved.', mcp_saveFail: '❌ Save failed: ',
+      mcp_confirmRemove: 'Remove MCP server {name}? Its config block will be deleted from cordis.patch.yml.',
+      mcp_removedOk: '✅ Removed.',
+      mcp_secretConfigured: 'Configured (never shown)',
+      mcp_usageCalls: '{n} calls', mcp_usageLast: 'last {ago}', mcp_usageTop: 'top: {tools}',
+      mcp_usage_never: 'never used',
+      mcp_registryCmdMissing: 'command must be filled in manually', mcp_registryInstall: 'Install',
+      mcp_catAll: 'All', mcp_catStorage: 'Storage', mcp_catDatabase: 'Database', mcp_catDevtools: 'Dev Tools',
+      mcp_catSearch: 'Search', mcp_catBrowser: 'Browser', mcp_catCoding: 'Coding', mcp_catCommunication: 'Comms',
+      mcp_catMemory: 'Memory', mcp_catCustom: 'Custom', mcp_catOther: 'Other',
+      mcp_importScanNone: 'No MCP configs detected from other clients.',
+      mcp_importSourceNone: '(config file not found)', mcp_importSourceFail: '(parse failed: {reason})',
+      mcp_importedOk: '✅ Imported {n} server(s)', mcp_importedFail: '; {n} failed: {items}',
+      mcp_importPasteFail: '❌ Parse failed: {reason}',
+      mcp_winWrapNote: 'Windows: ',
+      ago_justnow: 'just now', ago_minutes: '{n} min ago', ago_hours: '{n} h ago', ago_days: '{n} d ago',
       plugins_searchPh: 'Search plugins (name / description)…', plugins_refresh: 'Refresh', plugins_go: 'Search',
       plugins_installedCount: '{n} plugins',
       plugins_shownCount: 'Showing {n} of {t}', plugins_loadMore: 'Load more ({n} more)…',
@@ -1766,14 +2181,20 @@
       nav_search: 'Search settings…',
       group_general: 'General', group_workspace: 'Workspace', group_system: 'System',
       nav_general: 'General', nav_cost: 'Usage & Cost', nav_runtime: 'Runtime', nav_plugins: 'Plugins',
+      nav_mcp: 'MCP Servers',
       nav_tasks: 'Automation', nav_data: 'Data & Backup', nav_update: 'Updates', nav_about: 'About',
       page_remote_d: "Use this machine's sessions safely from a phone browser",
       page_general_d: 'Shell interface & startup preferences', page_cost_d: 'API rates, peak pricing & budget',
       page_runtime_d: 'Workspace, port & executable paths', page_plugins_d: 'Discover & manage dsh plugins',
       page_tasks_d: 'Configure and manage automation tasks — AI workflows on a schedule.', page_data_d: 'Backups, storage & privacy',
-      page_update_d: 'Runtime update channel & versions', page_about_d: 'Versions, diagnostics & help',
+      page_update_d: 'Desktop shell & Harness runtime update management', page_about_d: 'Versions, diagnostics & help',
       card_costRates: 'Off-peak rates (default)', card_costPeak: 'Peak & off-peak pricing', card_costUsage: 'Usage',
       card_balance: 'Account balance (official)',
+      card_cacheEcon: 'Cache economics', card_cacheEconDetail: 'Cache savings detail',
+      cacheEcon_hero: 'Saved this month by prompt caching (at current prices)', cacheEcon_hitRate: 'Cache hit rate',
+      cacheEcon_peakSplit: 'Peak saved / off-peak saved', cacheEcon_peakOff: 'Peak split disabled (flat pricing)',
+      cacheEcon_trendHint: 'Per-day savings (flat-gap estimate); the month headline uses exact peak/off-peak pricing. Hover for values.',
+      cacheEcon_topTitle: 'Top 10 sessions by savings', cacheEcon_noDays: 'No timestamped usage yet (older session logs lack event times).', cacheEcon_noSessions: 'No session data.',
       balance_hint: 'Official data; may differ from local estimates (grants / failed requests).',
       balance_total: 'Total', balance_granted: 'Granted', balance_toppedUp: 'Topped up',
       balance_updatedJust: 'updated just now', balance_updatedAgo: 'updated {n} min ago',
@@ -1896,6 +2317,51 @@
       skills_w1: 'Directory name differs from the skill name; aligned automatically to {name} (cross-platform compatibility)',
       skills_w2: 'This skill bundles executable scripts or command-style instructions; the agent may ask to run them after install (each run goes through dsh approval)',
       skills_pluginForm: 'This repo is a bundle-plugin skill pack (package.json + dsh bundle); install it from the plugin market',
+      card_bootCheck: 'Boot self-check',
+      boot_lastRun: 'Last check', boot_overall: 'Overall',
+      boot_overallOk: 'All checks passed', boot_overallFailed: '{n} check(s) failed', boot_overallDegraded: '{n} compatibility notice(s)', boot_none: 'No self-check has run yet.',
+      btn_bootRerun: 'Re-run now', btn_bootRepair: 'One-click repair',
+      boot_running: '⏳ Checking…', boot_repairing: '⏳ Repairing…',
+      boot_done: '✅ Check finished: {p}/{t} passed.',
+      boot_repaired: '✅ Repaired {items}; re-check passed {p}/{t}.',
+      boot_repairSkipped: 'Not repaired (manual action needed): {items}',
+      boot_checkRuntimeBin: 'Runtime executable', boot_checkRuntimePointer: 'Version pointer',
+      boot_checkDshHomeWritable: 'DSH_HOME writable', boot_checkProfileLinks: 'Profile links healthy',
+      boot_checkPortAvailable: 'Port availability', boot_checkCredentialsExists: 'Credentials present',
+      boot_checkCredentialsLayout: 'Credential layout compatible',
+      card_compat: 'Upstream compatibility',
+      compat_current: 'Current runtime version', compat_state: 'Upstream verification',
+      compat_stateVerified: '✅ Verified compatible', compat_stateUnverified: '⚠️ Not yet verified (latest verified: {v})',
+      compat_stateUnknown: 'Unknown', compat_stateDisabled: 'Disabled',
+      compat_noteSource: 'Data from the repo compat report ({date} · {source})',
+      compat_sourceLive: 'live', compat_sourceCache: 'cached',
+      compat_noteUnavailable: 'Compat report unavailable: {reason}',
+      nav_notifications: 'Notifications', page_notifications_d: 'Unified system notifications: rules, DND and searchable history',
+      notif_rulesTitle: 'Notification rules', notif_master: 'Enable notification center', notif_masterHint: 'When off, legacy direct-toast behaviour; no history is kept',
+      notif_dnd: 'Do-not-disturb window', notif_dndHint: 'Recorded but silent inside the window; may cross midnight (e.g. 23:00-07:00)',
+      notif_fold: 'Fold identical toasts', notif_foldHint: 'Same-title notifications within 60s toast once (still recorded)',
+      notif_kinds: 'Muted kinds', notif_kindsHint: 'Checked kinds are recorded but never toast',
+      notif_kindApproval: 'Approval', notif_kindCompletion: 'Completion', notif_kindQuestion: 'Question', notif_kindBudget: 'Budget', notif_kindSystem: 'System', notif_kindAll: 'All kinds',
+      notif_historyTitle: 'History (last 500)', notif_searchPh: 'Search title / body…', notif_clear: 'Clear history',
+      notif_empty: 'No notifications recorded yet.', notif_clearConfirm: 'Clear the entire notification history?', notif_cleared: '✅ Cleared',
+      notif_rulesOn: 'Notification center is on; rule changes apply immediately.', notif_rulesOff: '⚠️ Notification center is off: everything toasts directly and nothing is recorded.',
+      nav_weekly: 'Agent Weekly',
+      channels_lastInbound: 'Last message {time}', channels_lastInboundPreview: '({preview}…)',
+      channels_lastError: 'Last error: {err}', channels_noDiagnostics: 'No diagnostics yet',
+      channels_feishuChecklistTitle: 'Feishu console checklist (check here if no messages arrive)',
+      channels_feishuCheck1: 'Events & callbacks → subscription mode = WebSocket long connection, saved',
+      channels_feishuCheck2: 'Event subscription includes im.message.receive_v1',
+      channels_feishuCheck3: 'Permission includes im:message:send_as_bot',
+      channels_feishuCheck4: 'App version created AND published (unpublished = zero events)', page_weekly_d: 'A Wrapped-style weekly card: generate, share, push to IM',
+      card_shellUpdate: 'Desktop shell updates', card_runtimeUpdate: 'Harness runtime updates',
+      shellUpdate_version: 'Current shell version', shellAutoUpdate_hint: 'Checks on launch and every 4 hours; new versions download automatically and install on quit',
+      shellUpdate_check: 'Check for shell updates now', shellUpdate_checking: '⏳ Checking…', shellUpdate_checkDone: '✅ Check triggered; you will be notified of the result.',
+      shellUpdate_note: 'Windows installer (NSIS) supports in-app differential updates; portable builds: download manually. macOS auto-update is experimental (unsigned build) — download manually if it fails.',
+      runtimeUpdate_note: 'These settings only affect the Harness runtime (independent of the desktop shell updates above).',
+      weekly_title: 'Agent weekly card', weekly_enabled: 'Auto-generate every Monday morning', weekly_enabledHint: 'Renders a Wrapped-style PNG card for the week into the report folder',
+      weekly_pushIm: 'Push to IM channels after generating', weekly_pushImHint: 'Sends the summary to connected online channels (configure them on the Channels page)',
+      weekly_generate: 'Generate this week now', weekly_push: 'Push to IM', weekly_openDir: 'Open report folder',
+      weekly_generating: '⏳ Rendering card…', weekly_generated: '✅ Generated: {file}', weekly_pushing: '⏳ Pushing…', weekly_pushed: '✅ Pushed to online channels.',
     },
   };
 
@@ -1932,9 +2398,9 @@
   }
 
   // ------------------------------------------------------------- routing
-  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'skills', 'tasks', 'remote', 'channels', 'models', 'longsession', 'data', 'update', 'about'];
-  const CONTROL_PAGES = new Set(['cost', 'tasks', 'runtime', 'remote', 'plugins', 'skills', 'channels', 'longsession']);
-  const SETTINGS_PAGES = new Set(['general', 'cost', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about']);
+  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'mcp', 'skills', 'tasks', 'notifications', 'weekly', 'remote', 'channels', 'models', 'longsession', 'data', 'update', 'about'];
+  const CONTROL_PAGES = new Set(['cost', 'tasks', 'runtime', 'remote', 'plugins', 'mcp', 'skills', 'channels', 'longsession']);
+  const SETTINGS_PAGES = new Set(['general', 'cost', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about', 'notifications', 'weekly', 'mcp']);
   const CENTER_INTENTS = new Set(['new-task']);
   const routeParams = new URLSearchParams(location.search);
   let centerMode = routeParams.get('mode') === 'control' ? 'control' : 'settings';
@@ -1986,6 +2452,8 @@
     // plugins is a low-traffic page with a network-backed list — load lazily
     // on first visit so opening the settings window stays offline-fast
     if (p === 'plugins') { if (!plug.loaded) { plug.loaded = true; loadPlugins(); } renderInstalled(); }
+    // MCP panel (T1): local list is cheap; tier-1 probes + registry fill in async
+    if (p === 'mcp') refreshMcp();
     // skills center: network-backed market — load lazily on first visit
     if (p === 'skills' && !sk.loaded) { sk.loaded = true; loadSkills(); }
     // automation center: refresh the task list on every visit (cheap, local)
@@ -1997,13 +2465,15 @@
     if (p === 'channels') refreshChannels();
     if (p === 'runtime' && centerMode === 'control') refreshRuntimeOperations();
     // cost center: refresh the official balance card + per-turn cost on visit
-    if (p === 'cost') { refreshCost(); refreshBalance(); }
+    if (p === 'cost') { refreshCost(); refreshBalance(); refreshCacheEcon(); }
     // model panel: local profile list is cheap; the Ollama probe is async
     if (p === 'models') refreshModels();
     // long-session center: refresh the compaction state/history + memory file
     if (p === 'longsession') { refreshCompact(); loadMemory(); }
     if (p === 'data') { refreshStorageInfo(); renderSnapshots(); refreshBackupInfo(); }
-    if (p === 'about') refreshDiagnostics();
+    if (p === 'about') { refreshDiagnostics(); refreshBootCheck(); }
+    if (p === 'update') refreshCompat();
+    if (p === 'notifications') { refreshNotifRulesStatus(); renderNotifHistory(); }
   }
   function consumeCenterIntent(intent) {
     if (CENTER_INTENTS.has(intent) && centerMode === 'control') {
@@ -2084,6 +2554,13 @@
     ['remotePort', 'remotePort', (el) => Math.min(65535, Math.max(1024, Number(el.value) || 31780))],
     ['remoteCompat', 'remoteCompat', (el) => el.checked],
     ['remotePublicMode', 'remotePublicMode', (el) => el.value],
+    // R6 notification center rules
+    ['notificationCenterEnabled', 'notificationCenterEnabled', (el) => el.checked],
+    ['notifDndEnabled', 'notifDndEnabled', (el) => el.checked],
+    ['notifDndWindow', 'notifDndWindow', (el) => el.value.trim()],
+    ['notifFoldEnabled', 'notifFoldEnabled', (el) => el.checked],
+    ['weeklyReportEnabled', 'weeklyReportEnabled', (el) => el.checked],
+    ['weeklyReportPushIm', 'weeklyReportPushIm', (el) => el.checked],
   ];
   for (const [id, key, pick] of AUTO_FIELDS) {
     $(id).addEventListener('change', async () => {
@@ -2167,6 +2644,18 @@
     $('registry').value = s.registry;
     $('keepVersions').value = s.keepVersions;
     $('checkUpdatesOnStartup').checked = !!s.checkUpdatesOnStartup;
+    // R6 notification rules
+    $('notificationCenterEnabled').checked = s.notificationCenterEnabled !== false;
+    $('notifDndEnabled').checked = !!s.notifDndEnabled;
+    $('notifDndWindow').value = s.notifDndWindow || '23:00-07:00';
+    $('notifFoldEnabled').checked = !!s.notifFoldEnabled;
+    const disabledKinds = new Set(s.notifKindsDisabled || []);
+    document.querySelectorAll('#notif-kinds input').forEach((cb) => { cb.checked = disabledKinds.has(cb.value); });
+    // R5 weekly report
+    $('weeklyReportEnabled').checked = !!s.weeklyReportEnabled;
+    // H10 shell update card
+    $('update-shell-version').textContent = s.shellVersion || '--';
+    $('weeklyReportPushIm').checked = !!s.weeklyReportPushIm;
     $('workspace').value = s.workspace || '';
     $('dshHome').value = s.dshHome || '';
     $('port').value = s.port;
@@ -2968,13 +3457,41 @@
     if (!st) return tr('channels_state_offline');
     if (st.state === 'online') return tr('channels_state_online');
     if (st.state === 'connecting') return tr('channels_state_connecting');
-    if (st.state === 'backoff') return tr('channels_state_backoff', { n: st.attempts });
+    if (st.state === 'backoff') {
+      // H-im: visible reconnect countdown instead of a bare attempt count
+      const secs = Math.max(1, Math.round((st.backoffMs || 0) / 1000));
+      return `${tr('channels_state_backoff', { n: st.attempts })} · ${secs}s`;
+    }
     // offline: show the readable park reason (e.g. "implementation not installed")
     return st.lastError ? `${tr('channels_state_offline')} — ${st.lastError}` : tr('channels_state_offline');
   }
 
+  // H-im: per-channel test result kept across passive re-renders
+  const channelTestResults = new Map(); // id -> { ok, text, at }
+
   function renderChannelOperations(card, head, ch) {
     card.appendChild(head);
+    // H-im: diagnostics line — last inbound activity and last error
+    const diag = document.createElement('div');
+    diag.className = 'desc';
+    const bits = [];
+    if (ch.lastInboundAt) {
+      bits.push(tr('channels_lastInbound', { time: new Date(ch.lastInboundAt).toLocaleString() }));
+      if (ch.lastInboundPreview) bits.push(tr('channels_lastInboundPreview', { preview: ch.lastInboundPreview }));
+    }
+    if (ch.status && ch.status.lastError) bits.push(tr('channels_lastError', { err: ch.status.lastError }));
+    if (bits.length) diag.textContent = bits.join(' · ');
+    else diag.textContent = tr('channels_noDiagnostics');
+    card.appendChild(diag);
+    // H-im: persistent test result (survives passive re-renders)
+    const prev = channelTestResults.get(ch.id);
+    if (prev) {
+      const tr_ = document.createElement('div');
+      tr_.className = 'desc';
+      tr_.style.color = prev.ok ? 'var(--ok)' : 'var(--bad)';
+      tr_.textContent = prev.text;
+      card.appendChild(tr_);
+    }
     const actions = document.createElement('div');
     actions.className = 'btnrow';
     const testBtn = document.createElement('button');
@@ -2982,17 +3499,40 @@
     testBtn.textContent = tr('channels_cfg_test');
     testBtn.addEventListener('click', () => runControlOperation(
       testBtn,
-      () => window.dshShell.channelsTest(ch.id),
+      async () => {
+        const r = await window.dshShell.channelsTest(ch.id);
+        const ok = !!(r && r.ok);
+        channelTestResults.set(ch.id, { ok, text: `${ok ? '✓' : '✗'} ${new Date().toLocaleTimeString()}` });
+        return r;
+      },
       () => refreshChannels(),
     ));
     actions.appendChild(testBtn);
     card.appendChild(actions);
   }
 
-  function renderChannelConfiguration(card, head) {
+  function renderChannelConfiguration(card, head, ch) {
     const controls = head.querySelector('.setting-ctrl');
     if (controls) controls.remove();
     card.appendChild(head);
+    // H-im: feishu backend checklist (the four settings that must be right
+    // in the Feishu console or no message ever arrives)
+    if (ch && ch.type === 'feishu') {
+      const list = document.createElement('details');
+      list.className = 'desc';
+      list.style.marginTop = '8px';
+      const summary = document.createElement('summary');
+      summary.textContent = tr('channels_feishuChecklistTitle');
+      list.appendChild(summary);
+      const ol = document.createElement('ol');
+      for (const k of ['channels_feishuCheck1', 'channels_feishuCheck2', 'channels_feishuCheck3', 'channels_feishuCheck4']) {
+        const li = document.createElement('li');
+        li.textContent = tr(k);
+        ol.appendChild(li);
+      }
+      list.appendChild(ol);
+      card.appendChild(list);
+    }
   }
 
   function renderChannels(list, opts) {
@@ -3430,6 +3970,205 @@
   }
 
   $('open-diagnostics').addEventListener('click', () => window.dshShell.openDiagnostics());
+
+  // ------------------------------------------------- boot self-check (R1)
+  const BOOT_CHECK_TITLES = {
+    'runtime.bin': 'boot.checkRuntimeBin',
+    'runtime.pointer': 'boot.checkRuntimePointer',
+    'dshhome.writable': 'boot.checkDshHomeWritable',
+    'profile.links': 'boot.checkProfileLinks',
+    'port.available': 'boot.checkPortAvailable',
+    'credentials.exists': 'boot.checkCredentialsExists',
+    'credentials.layout': 'boot.checkCredentialsLayout',
+  };
+  function renderBootCheck(report) {
+    const fixable = (report && report.results || []).filter((r) => !r.ok && r.fixable);
+    $('btn-boot-repair').style.display = fixable.length ? '' : 'none';
+    if (!report) {
+      $('boot-last-run').textContent = '--';
+      $('boot-overall').textContent = tr('boot.none');
+      $('boot-overall').removeAttribute('style');
+      $('boot-results').innerHTML = '';
+      return;
+    }
+    try { $('boot-last-run').textContent = new Date(report.at).toLocaleString(); }
+    catch { $('boot-last-run').textContent = String(report.at || '--'); }
+    const overall = report.overall || ((report.summary && report.summary.failed) ? 'failed' : 'ok');
+    const overallText = overall === 'ok' ? tr('boot.overallOk')
+      : overall === 'degraded' ? tr('boot.overallDegraded', { n: (report.summary && report.summary.degraded) || 0 })
+        : tr('boot.overallFailed', { n: (report.summary && report.summary.failed) || 0 });
+    $('boot-overall').textContent = overallText;
+    $('boot-overall').style.color = overall === 'ok' ? 'var(--ok)' : (overall === 'degraded' ? 'var(--warn)' : 'var(--bad)');
+    $('boot-results').innerHTML = (report.results || []).map((r) => {
+      const title = BOOT_CHECK_TITLES[r.id] ? tr(BOOT_CHECK_TITLES[r.id]) : r.id;
+      const mark = r.ok ? '✅' : (r.severity === 'warning' ? '⚠️' : '❌');
+      const color = r.ok ? '' : (r.severity === 'warning' ? ' style="color:var(--warn)"' : ' style="color:var(--bad)"');
+      return `<div class="kv"><span>${escapeHtml(title)}</span><b${color} style="font-weight:400;font-size:12px;text-align:right">${mark} ${escapeHtml(r.detail || '')}</b></div>`;
+    }).join('');
+  }
+  async function refreshBootCheck() {
+    try { renderBootCheck((await window.dshShell.bootReport()).report); }
+    catch (e) { dbg(`refreshBootCheck: failed ${e.message}`); }
+  }
+  $('btn-boot-rerun').addEventListener('click', async () => {
+    const btn = $('btn-boot-rerun');
+    btn.disabled = true;
+    setStatus($('boot-status'), tr('boot.running'));
+    try {
+      const r = await window.dshShell.bootRerun();
+      renderBootCheck(r.report);
+      setStatus($('boot-status'), r.report ? tr('boot.done', { p: r.report.summary.passed, t: r.report.summary.total }) : tr('boot.none'));
+    } catch (e) {
+      setStatus($('boot-status'), tr('control.operationFailed', { reason: e.message }), 'warn');
+    } finally { btn.disabled = false; }
+  });
+  $('btn-boot-repair').addEventListener('click', async () => {
+    const btn = $('btn-boot-repair');
+    btn.disabled = true;
+    setStatus($('boot-status'), tr('boot.repairing'));
+    try {
+      const r = await window.dshShell.bootRepair();
+      renderBootCheck(r.report);
+      const items = (r.repaired || []).map((id) => BOOT_CHECK_TITLES[id] ? tr(BOOT_CHECK_TITLES[id]) : id).join(', ');
+      if ((r.repaired || []).length) setStatus($('boot-status'), tr('boot.repaired', { items, p: r.report.summary.passed, t: r.report.summary.total }));
+      else setStatus($('boot-status'), tr('boot.repairSkipped', { items: (r.skipped || []).join(', ') }), 'warn');
+    } catch (e) {
+      setStatus($('boot-status'), tr('control.operationFailed', { reason: e.message }), 'warn');
+    } finally { btn.disabled = false; }
+  });
+
+  // ------------------------------------------- upstream compat status (R2)
+  async function refreshCompat() {
+    try {
+      const s = await window.dshShell.compatStatus();
+      $('compat-current').textContent = s.current || '--';
+      if (!s.enabled) { $('compat-state').textContent = tr('compat.stateDisabled'); $('compat-note').textContent = ''; return; }
+      if (!s.ok) { $('compat-state').textContent = tr('compat.stateUnknown'); setStatus($('compat-note'), tr('compat.noteUnavailable', { reason: s.reason || '' }), 'warn'); return; }
+      $('compat-state').textContent = s.compatible
+        ? tr('compat.stateVerified', { v: s.latestVerified })
+        : tr('compat.stateUnverified', { v: s.latestVerified, c: s.current });
+      $('compat-note').textContent = tr('compat.noteSource', { date: s.updatedAt || '--', source: s.source === 'cache' ? tr('compat.sourceCache') : tr('compat.sourceLive') });
+      dbg(`refreshCompat: ok source=${s.source} compatible=${s.compatible}`);
+    } catch (e) { dbg(`refreshCompat: failed ${e.message}`); }
+  }
+
+  // --------------------------------------------- cache economics (R4)
+  function fmtYuan(v) { return '¥' + (Number(v) || 0).toFixed(2); }
+  async function refreshCacheEcon() {
+    try {
+      const r = await window.dshShell.cacheEconomics();
+      if (!r || !r.ok) { setStatus($('cache-econ-status'), tr('control.operationFailed', { reason: (r && r.reason) || '' }), 'warn'); return; }
+      $('cache-econ-saved').textContent = fmtYuan(r.month.savedYuan);
+      $('cache-econ-hitrate').textContent = Math.round((r.overall.hitRate || 0) * 100) + '%';
+      $('cache-econ-split').textContent = r.pricing.peakEnabled
+        ? `${fmtYuan(r.overall.peakSavedYuan)} / ${fmtYuan(r.overall.offPeakSavedYuan)}`
+        : tr('cacheEcon.peakOff');
+      // per-day bars (flat-gap estimate; heights normalised to the max day)
+      const days = r.byDay || [];
+      const max = days.reduce((m, d) => Math.max(m, d.savedYuan), 0);
+      $('cache-econ-days').innerHTML = days.length
+        ? days.map((d) => {
+            const h = max > 0 ? Math.max(4, Math.round((d.savedYuan / max) * 88)) : 4;
+            return `<div class="bar" style="height:${h}px" data-tip="${d.day} · ${fmtYuan(d.savedYuan)} · ${Math.round((d.hitRate || 0) * 100)}%"></div>`;
+          }).join('')
+        : `<div class="cache-trend-empty">${tr('cacheEcon.noDays')}</div>`;
+      // top sessions
+      const top = r.topSessions || [];
+      $('cache-econ-top').innerHTML = top.length
+        ? top.map((s, i) => `<div class="kv"><span>${i + 1}. ${escapeHtml(s.alias)}</span><b style="font-weight:400;font-size:12px">${fmtYuan(s.savedYuan)} · ${Math.round((s.hitRate || 0) * 100)}%</b></div>`).join('')
+        : `<div class="status">${tr('cacheEcon.noSessions')}</div>`;
+      dbg(`refreshCacheEcon: ok saved=${r.month.savedYuan.toFixed(2)} days=${days.length}`);
+    } catch (e) { dbg(`refreshCacheEcon: failed ${e.message}`); }
+  }
+
+  // ------------------------------------------- shell update card (H10)
+  $('btn-shell-check').addEventListener('click', async () => {
+    const btn = $('btn-shell-check');
+    btn.disabled = true;
+    setStatus($('shell-update-status'), tr('shellUpdate.checking'));
+    try {
+      const r = await window.dshShell.shellCheckUpdate();
+      setStatus($('shell-update-status'), r && r.ok ? tr('shellUpdate.checkDone') : tr('control.operationFailed', { reason: (r && r.reason) || '' }), r && r.ok ? '' : 'warn');
+    } catch (e) { setStatus($('shell-update-status'), tr('control.operationFailed', { reason: e.message }), 'warn'); }
+    finally { btn.disabled = false; }
+  });
+
+  // --------------------------------------------- weekly report card (R5)
+  $('btn-weekly-generate').addEventListener('click', async () => {
+    const btn = $('btn-weekly-generate');
+    btn.disabled = true;
+    setStatus($('weekly-status'), tr('weekly.generating'));
+    try {
+      const r = await window.dshShell.weeklyGenerate();
+      if (r.ok) setStatus($('weekly-status'), tr('weekly.generated', { file: r.file }));
+      else setStatus($('weekly-status'), tr('control.operationFailed', { reason: r.reason || '' }), 'warn');
+    } catch (e) { setStatus($('weekly-status'), tr('control.operationFailed', { reason: e.message }), 'warn'); }
+    finally { btn.disabled = false; }
+  });
+  $('btn-weekly-push').addEventListener('click', async () => {
+    const btn = $('btn-weekly-push');
+    btn.disabled = true;
+    setStatus($('weekly-status'), tr('weekly.pushing'));
+    try {
+      const r = await window.dshShell.weeklyPush();
+      if (r.ok) setStatus($('weekly-status'), tr('weekly.pushed'));
+      else setStatus($('weekly-status'), tr('control.operationFailed', { reason: r.reason || '' }), 'warn');
+    } catch (e) { setStatus($('weekly-status'), tr('control.operationFailed', { reason: e.message }), 'warn'); }
+    finally { btn.disabled = false; }
+  });
+  $('btn-weekly-open').addEventListener('click', () => window.dshShell.weeklyOpenDir());
+
+  // --------------------------------------------- notification center (R6)
+  const NOTIF_KIND_BADGE = { approval: '🔔', completion: '✅', question: '❓', budget: '💰', system: '⚙️' };
+  const NOTIF_KIND_LABEL = {
+    approval: 'notif.kindApproval',
+    completion: 'notif.kindCompletion',
+    question: 'notif.kindQuestion',
+    budget: 'notif.kindBudget',
+    system: 'notif.kindSystem',
+  };
+  let notifSearchTimer = null;
+  async function renderNotifHistory() {
+    try {
+      const q = ($('notif-search').value || '').trim();
+      const kind = $('notif-kind-filter').value || '';
+      const r = await window.dshShell.notificationsList(q, kind, 100);
+      const items = (r && r.items) || [];
+      $('notif-list').innerHTML = items.length
+        ? items.map((n) => `<div class="kv" style="align-items:flex-start"><span style="white-space:nowrap">${NOTIF_KIND_BADGE[n.kind] || '•'} ${escapeHtml(tr(NOTIF_KIND_LABEL[n.kind] || 'notif.kindSystem'))}<br><span style="opacity:.6;font-size:11px">${escapeHtml(new Date(n.ts).toLocaleString())}</span></span><b style="font-weight:400;font-size:12px;text-align:right;word-break:break-word">${n.shown ? '' : '🔕 '}${escapeHtml(n.title)}${n.body ? '<br>' + escapeHtml(n.body) : ''}</b></div>`).join('')
+        : `<div class="status">${tr('notif.empty')}</div>`;
+    } catch (e) { dbg(`renderNotifHistory: failed ${e.message}`); }
+  }
+  function refreshNotifRulesStatus() {
+    const on = $('notificationCenterEnabled').checked;
+    setStatus($('notif-rules-status'), on ? tr('notif.rulesOn') : tr('notif.rulesOff'), on ? '' : 'warn');
+  }
+  // per-kind disable checkboxes save the array as a whole
+  document.querySelectorAll('#notif-kinds input').forEach((cb) => {
+    cb.addEventListener('change', async () => {
+      const disabled = [...document.querySelectorAll('#notif-kinds input:checked')].map((x) => x.value);
+      try {
+        const saved = await window.dshShell.saveSettings({ notifKindsDisabled: disabled });
+        if (current) current.notifKindsDisabled = saved.notifKindsDisabled;
+      } catch (e) { flash(tr('saved_fail') + e.message); }
+    });
+  });
+  ['notificationCenterEnabled', 'notifDndEnabled', 'notifFoldEnabled', 'notifDndWindow'].forEach((id) => {
+    $(id).addEventListener('change', refreshNotifRulesStatus);
+  });
+  $('notif-search').addEventListener('input', () => {
+    clearTimeout(notifSearchTimer);
+    notifSearchTimer = setTimeout(renderNotifHistory, 250);
+  });
+  $('notif-kind-filter').addEventListener('change', renderNotifHistory);
+  $('btn-notif-clear').addEventListener('click', async () => {
+    if (!confirm(tr('notif.clearConfirm'))) return;
+    try {
+      await window.dshShell.notificationsClear();
+      await renderNotifHistory();
+      setStatus($('notif-list-status'), tr('notif.cleared'));
+    } catch (e) { setStatus($('notif-list-status'), tr('control.operationFailed', { reason: e.message }), 'warn'); }
+  });
 
   // ---------------------------------------------------------- plugin center
   function escapeHtml(s) {
@@ -4575,6 +5314,400 @@
     setInterval(() => { refreshRemote(); refreshPublicRemote(); }, 5000);
     dbg(`page init: done (${Date.now() - tBoot}ms total, refreshInfo already fired)`);
   })();
+
+  // =========================================================================
+  // MCP panel (v0.3.1 T1). Placed after the init IIFE on purpose: the panel
+  // is user-reachable only through showPage('mcp') and every entry point
+  // lazily initialises its state, so early init can never hit it.
+  // =========================================================================
+  let mcpState = null; // { servers, patchBlockIds, seq, tier1: {id:status}, usage }
+  let mcpEditing = null; // server id being edited, or null for "new"
+  let mcpRegCat = 'all';
+  let mcpRegSeq = 0;
+  let mcpSearchTimer = null;
+
+  function mcpSt() {
+    if (!mcpState) mcpState = { servers: [], patchBlockIds: [], seq: 0, tier1: {}, usage: null, dirty: false };
+    return mcpState;
+  }
+  function mcpStatus(msg, cls) {
+    const el = $('mcp-test-status');
+    if (!el) return;
+    el.className = 'status' + (cls ? ' ' + cls : '');
+    el.textContent = msg || '';
+  }
+  function mcpAgo(ms) {
+    if (!ms) return tr('ago_justnow');
+    const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+    if (s < 60) return tr('ago_justnow');
+    if (s < 3600) return tr('ago_minutes', { n: Math.floor(s / 60) });
+    if (s < 86400) return tr('ago_hours', { n: Math.floor(s / 3600) });
+    return tr('ago_days', { n: Math.floor(s / 86400) });
+  }
+  function mcpMarkDirty() {
+    mcpSt().dirty = true;
+    $('mcp-restart-hint').style.display = 'flex';
+  }
+
+  async function refreshMcp() {
+    const st = mcpSt();
+    const seq = ++st.seq;
+    let r;
+    try { r = await window.dshShell.mcpList(); } catch (e) { r = { ok: false, reason: e.message }; }
+    if (seq !== st.seq) return;
+    st.servers = (r && r.servers) || [];
+    st.patchBlockIds = (r && r.patchBlockIds) || [];
+    renderMcpList();
+    if (!st.usage) {
+      try {
+        const u = await window.dshShell.mcpUsage(30);
+        if (seq === st.seq) { st.usage = (u && u.usage) || { servers: {} }; renderMcpList(); }
+      } catch { /* usage is decorative — never block the list */ }
+    }
+    // tier-1 probes fill in asynchronously (bounded 2s each, parallel, cached 5m)
+    for (const s of st.servers) {
+      window.dshShell.mcpTier1(s.id).then((t1) => {
+        if (seq !== st.seq) return;
+        st.tier1[s.id] = t1;
+        renderMcpList();
+      }).catch(() => {});
+    }
+  }
+
+  function mcpUsageLine(server) {
+    const st = mcpSt();
+    const u = st.usage && st.usage.servers && st.usage.servers[server.serverName];
+    if (!u || !u.toolCalls) return `<span class="desc">${tr('mcp_usage_never')}</span>`;
+    const top = (u.topTools || []).map((t) => `${t.tool}(${t.count})`).join(', ');
+    let line = tr('mcp_usageCalls', { n: u.toolCalls });
+    if (u.lastUsedAt) line += ' · ' + tr('mcp_usageLast', { ago: mcpAgo(u.lastUsedAt) });
+    if (top) line += ' · ' + tr('mcp_usageTop', { tools: top });
+    return `<span class="desc">${line}</span>`;
+  }
+
+  function renderMcpList() {
+    const st = mcpSt();
+    const el = $('mcp-list');
+    if (!el) return;
+    el.innerHTML = '';
+    if (!st.servers.length) {
+      const p = document.createElement('div');
+      p.className = 'desc';
+      p.textContent = tr('mcp_empty');
+      el.appendChild(p);
+      return;
+    }
+    for (const s of st.servers) {
+      const row = document.createElement('div');
+      row.className = 'plugin-item';
+      const inPatch = st.patchBlockIds.includes('mcp-' + s.id);
+      const t1 = st.tier1[s.id];
+      // VS Code rule: show a status word only when it carries information
+      let statusWord = '';
+      if (s.enabled && !inPatch) statusWord = tr('mcp_restartHint');
+      else if (t1 && !t1.ok) statusWord = t1.reason || t1.status || '';
+      const transport = s.transport === 'stdio'
+        ? `${s.command} ${(s.args || []).slice(0, 3).join(' ')}`.trim()
+        : s.url;
+      row.innerHTML = '<div class="plugin-info">'
+        + `<div class="plugin-name">${s.name} <span class="desc">(${s.serverName} · ${s.transport}${s.enabled ? '' : ' · off'})</span></div>`
+        + `<div class="plugin-desc desc" style="font-family:var(--mono);font-size:11px">${transport}</div>`
+        + (statusWord ? `<div class="desc" style="color:var(--warn,#c90)">${statusWord}</div>` : '')
+        + mcpUsageLine(s)
+        + '</div>';
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:6px;align-items:center;flex-shrink:0';
+      const on = document.createElement('input');
+      on.type = 'checkbox';
+      on.className = 'toggle';
+      on.checked = !!s.enabled;
+      on.title = s.enabled ? 'disable' : 'enable';
+      on.addEventListener('change', () => mcpToggle(s.id, on.checked));
+      const btnTest = document.createElement('button');
+      btnTest.className = 'secondary';
+      btnTest.textContent = tr('mcp_f_test');
+      btnTest.addEventListener('click', () => mcpTestServer(s));
+      const btnEdit = document.createElement('button');
+      btnEdit.className = 'secondary';
+      btnEdit.textContent = '✎';
+      btnEdit.addEventListener('click', () => openMcpForm(s));
+      actions.append(on, btnTest, btnEdit);
+      row.appendChild(actions);
+      el.appendChild(row);
+    }
+  }
+
+  function openMcpForm(server) {
+    mcpEditing = server ? server.id : null;
+    $('mcp-form').style.display = '';
+    $('btn-mcp-delete').style.display = server ? '' : 'none';
+    $('mcp-f-name').value = server ? server.name : '';
+    $('mcp-f-ns').value = server ? server.serverName : '';
+    $('mcp-f-transport').value = server ? server.transport : 'stdio';
+    $('mcp-f-command').value = server ? (server.command || '') : '';
+    $('mcp-f-args').value = server ? (server.args || []).join('\n') : '';
+    $('mcp-f-url').value = server ? (server.url || '') : '';
+    $('mcp-f-headers').value = server
+      ? Object.entries(server.headers || {}).map(([k, v]) => `${k}: ${v}`).join('\n')
+      : '';
+    const envPlain = server ? (server.envPlain || {}) : {};
+    $('mcp-f-env').value = Object.entries(envPlain).map(([k, v]) => `${k}=${v}`).join('\n');
+    $('mcp-f-env-secret-keys').value = server ? (server.envSecretKeys || []).join(', ') : '';
+    $('mcp-f-env-secret').checked = false; // per-save flag, not persisted state
+    $('mcp-f-failfast').checked = server ? !!server.failOnStartupError : false;
+    mcpSyncTransportFields();
+    mcpStatus('');
+  }
+
+  function mcpSyncTransportFields() {
+    const stdio = $('mcp-f-transport').value === 'stdio';
+    $('mcp-f-stdio-fields').style.display = stdio ? '' : 'none';
+    $('mcp-f-remote-fields').style.display = stdio ? 'none' : '';
+    $('mcp-f-wraphint').style.display = stdio ? '' : 'none';
+  }
+
+  function collectMcpForm() {
+    const args = $('mcp-f-args').value.split('\n').map((x) => x.trim()).filter(Boolean);
+    const headers = {};
+    for (const line of $('mcp-f-headers').value.split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      const i = t.indexOf(':');
+      if (i > 0) headers[t.slice(0, i).trim()] = t.slice(i + 1).trim();
+    }
+    const envPlain = {};
+    for (const line of $('mcp-f-env').value.split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      const i = t.indexOf('=');
+      if (i > 0) envPlain[t.slice(0, i).trim()] = t.slice(i + 1).trim();
+    }
+    const secretKeys = $('mcp-f-env-secret-keys').value.split(',').map((x) => x.trim()).filter(Boolean);
+    const ns = $('mcp-f-ns').value.trim();
+    const slug = ns.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+    return {
+      id: mcpEditing || slug, // unprefixed slug — the patch layer adds the mcp- prefix
+      name: $('mcp-f-name').value.trim(),
+      serverName: ns,
+      transport: $('mcp-f-transport').value,
+      command: $('mcp-f-command').value.trim(),
+      args,
+      url: $('mcp-f-url').value.trim(),
+      headers,
+      envPlain,
+      envSecretKeys: secretKeys,
+      failOnStartupError: $('mcp-f-failfast').checked,
+      enabled: true,
+      source: mcpEditing ? undefined : 'manual',
+    };
+  }
+
+  async function mcpSaveForm() {
+    const input = collectMcpForm();
+    // secrets: values typed into env for keys marked sensitive go forward ONCE
+    const secrets = {};
+    if ($('mcp-f-env-secret').checked) {
+      for (const k of input.envSecretKeys) {
+        const pair = $('mcp-f-env').value.split('\n').find((l) => l.trim().startsWith(k + '='));
+        if (pair && pair.slice(pair.indexOf('=') + 1).trim()) secrets[k] = pair.slice(pair.indexOf('=') + 1).trim();
+      }
+    }
+    mcpStatus('⏳ …');
+    let r;
+    try { r = await window.dshShell.mcpSave(input, secrets); } catch (e) { r = { ok: false, reason: e.message }; }
+    if (r.ok) {
+      mcpStatus(tr('mcp_savedOk'), 'ok');
+      mcpMarkDirty();
+      await refreshMcp();
+      setTimeout(() => { $('mcp-form').style.display = 'none'; }, 400);
+    } else {
+      mcpStatus(tr('mcp_saveFail') + (r.reason || ''), 'bad');
+    }
+  }
+
+  async function mcpTestServer(server) {
+    mcpStatus(tr('mcp_testRunning'));
+    // unsaved form: probe from the form fields; otherwise the stored record
+    const formVisible = $('mcp-form').style.display !== 'none';
+    const target = formVisible && (!mcpEditing || mcpEditing === server.id) ? collectMcpForm() : server;
+    let r;
+    try { r = await window.dshShell.mcpTest(target); } catch (e) { r = { ok: false, reason: e.message }; }
+    if (r && r.ok) {
+      mcpStatus(r.note ? tr('mcp_testOkNoTools') + ' ' + tr('mcp_testNote')
+        : tr('mcp_testOk', { n: (r.tools || []).length, tools: (r.tools || []).slice(0, 6).join(', ') }), 'ok');
+    } else {
+      mcpStatus(tr('mcp_testFail', { reason: (r && r.reason) || 'unknown' }), 'bad');
+    }
+  }
+
+  async function mcpToggle(id, enabled) {
+    let r;
+    try { r = await window.dshShell.mcpToggle(id, enabled); } catch (e) { r = { ok: false, reason: e.message }; }
+    if (r.ok) { mcpMarkDirty(); await refreshMcp(); }
+    else renderMcpList();
+  }
+
+  async function mcpRemoveServer() {
+    if (!mcpEditing) return;
+    const s = mcpSt().servers.find((x) => x.id === mcpEditing);
+    if (!window.confirm(tr('mcp_confirmRemove', { name: s ? s.name : mcpEditing }))) return;
+    let r;
+    try { r = await window.dshShell.mcpRemove(mcpEditing); } catch (e) { r = { ok: false, reason: e.message }; }
+    if (r.ok) { mcpStatus(tr('mcp_removedOk'), 'ok'); mcpMarkDirty(); $('mcp-form').style.display = 'none'; await refreshMcp(); }
+    else mcpStatus(tr('mcp_saveFail') + (r.reason || ''), 'bad');
+  }
+
+  // ------------------------------------------------------------ import card
+  async function refreshMcpImportSources() {
+    let r;
+    try { r = await window.dshShell.mcpImportScan(); } catch (e) { r = { sources: [] }; }
+    renderMcpImportSources((r && r.sources) || []);
+  }
+
+  async function toggleMcpImport() {
+    const card = $('mcp-import-card');
+    const show = card.style.display === 'none';
+    card.style.display = show ? '' : 'none';
+    if (show) refreshMcpImportSources();
+  }
+
+  function renderMcpImportSources(sources) {
+    const el = $('mcp-import-sources');
+    el.innerHTML = '';
+    const withServers = sources.filter((s) => s.count > 0);
+    if (!withServers.length) {
+      const p = document.createElement('div');
+      p.className = 'desc';
+      p.textContent = tr('mcp_importScanNone');
+      el.appendChild(p);
+      return;
+    }
+    for (const s of withServers) {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'border:1px solid var(--line);border-radius:8px;padding:8px 10px';
+      const head = document.createElement('div');
+      head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:8px';
+      head.innerHTML = `<b>${s.label}</b> <span class="desc">${s.count}</span>`;
+      const btn = document.createElement('button');
+      btn.className = 'secondary';
+      btn.textContent = tr('mcp_import');
+      btn.addEventListener('click', () => mcpRunImport(s.key, null));
+      head.appendChild(btn);
+      wrap.appendChild(head);
+      const list = document.createElement('div');
+      list.style.cssText = 'font-size:12px;color:var(--text-3);margin-top:4px';
+      list.textContent = s.servers.map((x) => x.name).join(', ');
+      wrap.appendChild(list);
+      el.appendChild(wrap);
+    }
+  }
+
+  async function mcpRunImport(sourceKey, clipboardText) {
+    const stEl = $('mcp-import-status');
+    let r;
+    try { r = await window.dshShell.mcpImportRun(sourceKey, null, clipboardText); } catch (e) { r = { ok: false, reason: e.message }; }
+    if (!r.ok) { stEl.textContent = tr('mcp_importPasteFail', { reason: r.reason || '' }); return; }
+    let msg = tr('mcp_importedOk', { n: (r.imported || []).length });
+    if ((r.failed || []).length) {
+      msg += ' ' + tr('mcp_importedFail', { n: r.failed.length, items: r.failed.map((f) => `${f.name}: ${f.reason}`).join('; ') });
+    }
+    stEl.textContent = msg;
+    if ((r.imported || []).length) { mcpMarkDirty(); await refreshMcp(); }
+  }
+
+  // ------------------------------------------------------------- registry
+  function renderMcpCats() {
+    const el = $('mcp-cats');
+    el.innerHTML = '';
+    for (const [key, labelKey] of [['all', 'mcp_catAll'], ['storage', 'mcp_catStorage'], ['database', 'mcp_catDatabase'], ['devtools', 'mcp_catDevtools'], ['search', 'mcp_catSearch'], ['browser', 'mcp_catBrowser'], ['coding', 'mcp_catCoding'], ['communication', 'mcp_catCommunication'], ['memory', 'mcp_catMemory'], ['custom', 'mcp_catCustom']]) {
+      const b = document.createElement('button');
+      b.className = 'chip' + (mcpRegCat === key ? ' active' : '');
+      b.textContent = tr(labelKey);
+      b.addEventListener('click', () => { mcpRegCat = key; renderMcpCats(); loadMcpRegistry(); });
+      el.appendChild(b);
+    }
+  }
+
+  async function loadMcpRegistry() {
+    const st = mcpSt();
+    const seq = ++mcpRegSeq;
+    let r;
+    try { r = await window.dshShell.mcpRegistry(($('mcp-search').value || '').trim(), mcpRegCat); } catch { r = { items: [] }; }
+    if (seq !== mcpRegSeq) return;
+    const items = (r && r.items) || [];
+    $('mcp-count').textContent = items.length ? String(items.length) : '';
+    const el = $('mcp-registry-list');
+    el.innerHTML = '';
+    const installedNames = new Set(st.servers.map((s) => s.serverName));
+    for (const it of items) {
+      const row = document.createElement('div');
+      row.className = 'plugin-item';
+      const installed = installedNames.has(String(it.name).toLowerCase())
+        || installedNames.has(String(it.id).replace(/^(reg|gh)-/, ''));
+      const badge = it.registryVerified
+        ? ` <span class="desc" title="${tr('mcp_verifiedNs')}">✔ ${tr('mcp_verifiedNs')}</span>`
+        : (it.stars ? ` <span class="desc">★ ${it.stars}</span>` : '');
+      row.innerHTML = '<div class="plugin-info">'
+        + `<div class="plugin-name">${it.name}${badge}</div>`
+        + `<div class="plugin-desc desc">${it.description || ''}</div>`
+        + (it.requiresConfig ? `<div class="desc" style="color:var(--warn,#c90)">${tr('mcp_registryCmdMissing')}</div>` : '')
+        + '</div>';
+      const btn = document.createElement('button');
+      btn.className = 'secondary';
+      btn.textContent = installed ? '✓' : tr('mcp_registryInstall');
+      btn.disabled = installed;
+      btn.addEventListener('click', () => {
+        openMcpForm(null);
+        // official-registry entries: use the trailing slug of the namespace as
+        // the server name (io.github.user/pkg → pkg); gh- ids keep the repo name
+        const rawId = String(it.id).replace(/^(reg|gh)-/, '');
+        const serverName = String(it.registryName ? it.registryName.split('/').pop() : rawId);
+        $('mcp-f-name').value = it.name;
+        $('mcp-f-ns').value = serverName;
+        if (it.url) { $('mcp-f-transport').value = it.transport === 'websocket' ? 'websocket' : 'sse'; $('mcp-f-url').value = it.url; }
+        else { $('mcp-f-transport').value = 'stdio'; $('mcp-f-command').value = it.command || ''; $('mcp-f-args').value = (it.args || []).join('\n'); }
+        const secretKeys = Object.keys(it.envPlaceholders || {});
+        $('mcp-f-env-secret-keys').value = secretKeys.join(', ');
+        $('mcp-f-env-secret').checked = secretKeys.length > 0;
+        mcpSyncTransportFields();
+        $('mcp-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+      row.appendChild(btn);
+      el.appendChild(row);
+    }
+  }
+
+  // ------------------------------------------------------------- wiring
+  $('btn-mcp-add').addEventListener('click', () => openMcpForm(null));
+  $('btn-mcp-import-view').addEventListener('click', toggleMcpImport);
+  // Trae-style manual config: open the paste card and focus the JSON box
+  $('btn-mcp-manual').addEventListener('click', () => {
+    const card = $('mcp-import-card');
+    const wasHidden = card.style.display === 'none';
+    card.style.display = '';
+    if (wasHidden) refreshMcpImportSources();
+    $('mcp-paste').focus();
+    $('mcp-paste').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  $('btn-mcp-cancel').addEventListener('click', () => { $('mcp-form').style.display = 'none'; });
+  $('btn-mcp-save').addEventListener('click', mcpSaveForm);
+  $('btn-mcp-delete').addEventListener('click', mcpRemoveServer);
+  $('btn-mcp-test').addEventListener('click', () => mcpTestServer(mcpEditing ? mcpSt().servers.find((x) => x.id === mcpEditing) : null));
+  $('btn-mcp-restart').addEventListener('click', async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try { await window.dshShell.restartRuntime(); } catch { /* surfaced elsewhere */ }
+    mcpSt().dirty = false;
+    $('mcp-restart-hint').style.display = 'none';
+    b.disabled = false;
+  });
+  $('btn-mcp-paste-import').addEventListener('click', () => mcpRunImport('clipboard', $('mcp-paste').value));
+  $('mcp-f-transport').addEventListener('change', mcpSyncTransportFields);
+  $('mcp-search').addEventListener('input', () => {
+    clearTimeout(mcpSearchTimer);
+    mcpSearchTimer = setTimeout(() => loadMcpRegistry(), 350);
+  });
+  renderMcpCats();
 </script>
 </body>
 </html>

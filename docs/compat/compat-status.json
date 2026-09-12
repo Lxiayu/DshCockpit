@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "updatedAt": "2026-08-23T16:21:41.661Z",
+  "latestVerified": "0.1.1-rc.2",
+  "runs": [
+    {
+      "schema": 1,
+      "version": "0.1.1-rc.2",
+      "date": "2026-08-23",
+      "ok": true,
+      "platforms": {
+        "darwin-arm64": "pass"
+      },
+      "reason": "",
+      "trigger": "manual",
+      "detail": {
+        "darwin-arm64": {
+          "install": {
+            "ok": true,
+            "ms": 419,
+            "reason": ""
+          },
+          "dumpConfig": {
+            "ok": true,
+            "ms": 115,
+            "reason": ""
+          },
+          "healthCheck": {
+            "ok": true,
+            "reason": "",
+            "ms": 2724
+          }
+        }
+      }
+    },
+    {
+      "schema": 1,
+      "version": "0.1.0-rc.8",
+      "date": "2026-08-23",
+      "ok": true,
+      "platforms": {
+        "win32-x64": "pass",
+        "darwin-arm64": "pass"
+      },
+      "reason": "",
+      "trigger": "manual",
+      "detail": {
+        "win32-x64": {
+          "install": {
+            "ok": true,
+            "ms": 0,
+            "reason": ""
+          },
+          "dumpConfig": {
+            "ok": true,
+            "ms": 0,
+            "reason": ""
+          },
+          "healthCheck": {
+            "ok": true,
+            "ms": 0,
+            "reason": ""
+          }
+        },
+        "darwin-arm64": {
+          "install": {
+            "ok": true,
+            "ms": 0,
+            "reason": ""
+          },
+          "dumpConfig": {
+            "ok": true,
+            "ms": 0,
+            "reason": ""
+          },
+          "healthCheck": {
+            "ok": true,
+            "ms": 0,
+            "reason": ""
+          }
+        }
+      }
+    }
+  ]
+}

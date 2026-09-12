@@ -195,6 +195,29 @@ it('feishu: endpoint fetch failure rejects start() with a readable error', async
   await assert.rejects(ch.start(), /ws endpoint failed: HTTP 404/);
 });
 
+it('feishu endpoint request uses the official POST + JSON-body protocol (H-im)', async () => {
+  const calls = [];
+  const routingFetch = async (url, opts = {}) => {
+    calls.push({ url: String(url), method: opts.method, body: opts.body });
+    if (String(url).includes('/callback/ws/endpoint')) {
+      return { status: 200, json: async () => ({ code: 0, data: { URL: 'wss://gw/x', ClientConfig: {} } }) };
+    }
+    return { status: 404, json: async () => ({}) };
+  };
+  const ch = new FeishuChannel({
+    id: 'feishu', config: {}, secrets: fakeSecretsStore({ feishu: JSON.stringify({ appId: 'cli_x', appSecret: 'sec' }) }),
+    log: () => {}, hooks: {},
+    deps: { WS: FakeWS, fetchImpl: routingFetch },
+  });
+  await ch.start();
+  const ep = calls.find((c) => c.url.includes('/callback/ws/endpoint'));
+  assert.ok(ep, 'endpoint request made');
+  assert.strictEqual(ep.method, 'POST', 'official protocol is POST (a GET returns a bare true payload that breaks JSON parsing — the position-4 incident)');
+  const body = JSON.parse(ep.body);
+  assert.strictEqual(body.AppID, 'cli_x', 'credential field is AppID (capital ID — AppId yields 9499)');
+  assert.strictEqual(body.AppSecret, 'sec');
+});
+
 it('feishu: ws error before open rejects start() (network-shaped)', async () => {
   class BrokenWS {
     constructor() {
@@ -207,7 +230,7 @@ it('feishu: ws error before open rejects start() (network-shaped)', async () => 
     log: () => {}, hooks: {},
     deps: {
       WS: BrokenWS,
-      fetchImpl: fakeFetch({ 'https://open.feishu.cn/callback/ws/endpoint': { status: 200, body: { endpoint: 'wss://gw/x' } } }),
+      fetchImpl: fakeFetch({ 'https://open.feishu.cn/callback/ws/endpoint': { status: 200, body: { code: 0, data: { URL: 'wss://gw/x' } } } }),
     },
   });
   await assert.rejects(ch.start(), /feishu ws:/);

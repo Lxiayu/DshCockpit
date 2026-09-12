@@ -282,7 +282,7 @@ test('ChannelState: offline→connecting→online, backoff delays double and cap
   s.markOnline();
   assert.strictEqual(s.attempts, 0);
   assert.strictEqual(s.lastError, null);
-  assert.deepStrictEqual(s.snapshot(), { state: 'online', attempts: 0, lastError: null });
+  assert.deepStrictEqual(s.snapshot(), { state: 'online', attempts: 0, lastError: null, backoffMs: 0 });
 });
 
 // ------------------------------------------------------------- credentials
@@ -390,7 +390,7 @@ test('dispatcher: admission runs before token redemption — denied sender canno
     command: { type: 'approve', token },
   });
   assert.strictEqual(denied.ok, false);
-  assert.ok(denied.reply.includes('白名单'), 'readable denial reply');
+  assert.ok(denied.reply.includes('open_id') && denied.reply.includes('允许列表'), 'denial replies with actionable guidance (H-im);');
 
   const allowed = await dispatch({
     channelId: 'feishu', senderId: 'u1', allowFrom: ['u1'],
@@ -692,4 +692,115 @@ test('manager: disabling during the connecting window aborts the start (no zombi
   assert.strictEqual(stats.started, 1, 'only one impl was ever constructed');
   mgr.stopAll();
   assert.strictEqual(stats.stopped, 1, 'stopAll finds no instance to stop again');
+});
+
+
+test('H-im: wire RPC client speaks the current protocol (post + client-request envelope)', async () => {
+  const { createHarnessRpcWire } = require('../src/harness-rpc');
+  const calls = [];
+  const fakeFetch = async (url, opts = {}) => {
+    calls.push({ url, method: opts.method, body: JSON.parse(opts.body) });
+    return {
+      json: async () => ({ type: 'server-response', rpcId: 'x', result: { ok: true, value: { items: [{ sessionId: 's1', running: true }] } } }),
+    };
+  };
+  const rpc = createHarnessRpcWire('http://127.0.0.1:1', { fetchImpl: fakeFetch });
+  const sessions = await rpc.listSessions();
+  assert.strictEqual(sessions.length, 1);
+  assert.strictEqual(calls[0].method, 'POST');
+  assert.strictEqual(calls[0].body.type, 'client-request');
+  assert.strictEqual(calls[0].body.method, 'session.list');
+  assert.strictEqual(calls[0].url, 'http://127.0.0.1:1/api/session.list');
+});
+
+test('H-im: wire client prompt/cancel/history payloads are correct', async () => {
+  const { createHarnessRpcWire } = require('../src/harness-rpc');
+  const calls = [];
+  const fakeFetch = async (url, opts = {}) => {
+    calls.push({ url, body: JSON.parse(opts.body) });
+    return { json: async () => ({ result: { ok: true, value: { accepted: true } } }) };
+  };
+  const rpc = createHarnessRpcWire('http://x', { fetchImpl: fakeFetch });
+  await rpc.prompt('s1', 'hello', 'steer');
+  const p = calls[0].body;
+  assert.strictEqual(p.method, 'session.prompt');
+  assert.strictEqual(p.payload.sessionId, 's1');
+  assert.strictEqual(p.payload.mode, 'steer');
+  assert.deepStrictEqual(p.payload.content, [{ type: 'text', text: 'hello' }]);
+  await rpc.cancel('s1');
+  assert.strictEqual(calls[1].body.method, 'session.cancel');
+});
+
+test('H-im: wire client surfaces RPC errors as readable Errors', async () => {
+  const { createHarnessRpcWire } = require('../src/harness-rpc');
+  const rpc = createHarnessRpcWire('http://x', {
+    fetchImpl: async () => ({ json: async () => ({ result: { ok: false, error: { code: 'bad-request', message: 'invalid' } } }) }),
+  });
+  await assert.rejects(rpc.listSessions(), /invalid/);
+});
+
+test('H-im: /status /tasks /help reply inline; /bind /stop route through onCommand', async () => {
+  const { createCommandDispatcher } = require('../src/channels/receivers/base');
+  const seen = [];
+  const dispatcher = createCommandDispatcher({
+    audit: () => {},
+    isAllowed: () => true,
+    sessions: { ensure: () => 'sess', touch: () => {} },
+    token: { redeem: () => ({ ok: false }) },
+    lang: () => 'en',
+    statusSnapshot: () => ({ runtimeRunning: true, scheduledCount: 2, scheduledTasks: [{ name: 'daily' }], lastTaskSummary: '' }),
+    onCommand: async ({ command, senderId, text }) => { seen.push({ command, senderId, text }); return 'ok:' + command; },
+  });
+  const status = await dispatcher.dispatch({ channelId: 'feishu', senderId: 'u1', allowFrom: ['u1'], command: { type: 'status' } });
+  assert.match(status.reply, /running/);
+  const help = await dispatcher.dispatch({ channelId: 'feishu', senderId: 'u1', allowFrom: ['u1'], command: { type: 'help' } });
+  assert.match(help.reply, /status/);
+  const bind = await dispatcher.dispatch({ channelId: 'feishu', senderId: 'u1', allowFrom: ['u1'], command: { type: 'bind', text: 'abc' } });
+  assert.strictEqual(bind.ok, true);
+  const stop = await dispatcher.dispatch({ channelId: 'feishu', senderId: 'u1', allowFrom: ['u1'], command: { type: 'stop' } });
+  assert.strictEqual(stop.ok, true);
+  assert.strictEqual(seen.length, 2);
+  assert.strictEqual(seen[0].command, 'bind');
+  assert.strictEqual(seen[0].text, 'abc');
+});
+
+test('H-im: bound session steers text; no binding falls back to headless', async () => {
+  const { createCommandDispatcher } = require('../src/channels/receivers/base');
+  let steered = null;
+  const dispatcher = createCommandDispatcher({
+    audit: () => {}, isAllowed: () => true,
+    sessions: { ensure: () => 'sess', touch: () => {} },
+    lang: () => 'en',
+    getBinding: () => 'live-session-1',
+    onBoundPrompt: async ({ sessionId, text }) => { steered = { sessionId, text }; return 'steered'; },
+    runPrompt: async () => ({ ok: true, output: 'headless', durationMs: 1 }),
+  });
+  const r = await dispatcher.dispatch({ channelId: 'feishu', senderId: 'u1', allowFrom: ['u1'], command: { type: 'text', text: 'continue' } });
+  assert.deepStrictEqual(steered, { sessionId: 'live-session-1', text: 'continue' });
+  assert.strictEqual(r.ok, true);
+});
+
+test('H-im: /help zh aliases parse and card/text formatters render lifecycle kinds', async () => {
+  const { parseCommandText } = require('../src/channels/receivers/base');
+  const { formatEvent } = require('../src/channels/formatter');
+  assert.deepStrictEqual(parseCommandText('/status'), { type: 'status' });
+  assert.deepStrictEqual(parseCommandText('/bind abc123'), { type: 'bind', text: 'abc123' });
+  assert.deepStrictEqual(parseCommandText('帮助'), { type: 'help' });
+  const started = formatEvent('en', { kind: 'taskStarted' });
+  assert.match(started.text, /Task started/);
+  const err = formatEvent('en', { kind: 'runtimeError', code: 1 });
+  assert.match(err.text, /Runtime exited unexpectedly/);
+});
+
+test('H-im: free-text summary is truncated to 200 chars (concise replies)', async () => {
+  const { createCommandDispatcher } = require('../src/channels/receivers/base');
+  const longOutput = 'x'.repeat(500);
+  const dispatcher = createCommandDispatcher({
+    audit: () => {}, isAllowed: () => true,
+    sessions: { ensure: () => 'sess', touch: () => {} },
+    lang: () => 'en',
+    runPrompt: async () => ({ ok: true, output: longOutput, durationMs: 1000 }),
+  });
+  const r = await dispatcher.dispatch({ channelId: 'feishu', senderId: 'u1', allowFrom: ['u1'], command: { type: 'text', text: 'hi' } });
+  assert.ok(r.reply.length < 260, 'reply stays concise');
 });

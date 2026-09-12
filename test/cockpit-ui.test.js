@@ -59,8 +59,8 @@ test('new-task center intent is allowlisted and consumed only after dirty naviga
   const settings = read('settings.html');
   const preload = read('settings-preload.js');
   assert.match(main, /ipcMain\.handle\('cockpit:new-task'/);
-  assert.match(main, /intent:\s*'new-task'/);
-  assert.match(main, /center:navigate[^\n]*intent/);
+  assert.match(read('window-manager.js'), /intent:\s*'new-task'/);
+  assert.match(read('window-manager.js'), /center:navigate[^\n]*intent/);
   assert.match(settings, /const CENTER_INTENTS = new Set\(\['new-task'\]\)/);
   assert.match(settings, /if \(!confirmCenterExit\(\)\) return;[\s\S]*applyCenterMode\(mode, page\);[\s\S]*consumeCenterIntent\(route && route\.intent\)/);
   assert.match(settings, /function consumeCenterIntent\(intent\)[\s\S]*openAutoDialog\(/);
@@ -72,7 +72,7 @@ test('Harness preload contains no injected DshCockpit chrome', () => {
   assert.doesNotMatch(preload, /appendChild|querySelector|querySelectorAll|document\.body|chrome:tokens|dsh-shell/);
   assert.doesNotMatch(read('main.js'), /mainWindow\.webContents\.send\('chrome:tokens'/);
   assert.doesNotMatch(read('main.js'), /chrome:|tokenWidget/);
-  assert.match(read('main.js'), /parent:\s*mainWindow/);
+  assert.match(read('window-manager.js'), /parent:\s*mainWindow/);
   assert.match(read('main.js'), /cockpit:get-snapshot/);
   assert.match(read('main.js'), /cockpit:set-mode/);
   assert.match(read('main.js'), /cockpit:set-language/);
@@ -137,14 +137,14 @@ test('Cockpit exposes integrations and restores its rail when a center closes', 
   const cockpit = read('cockpit.html');
   const main = read('main.js');
   assert.match(cockpit, /data-action="plugins"[^>]*>[^<]*Integrations/);
-  assert.match(main, /settingsWindow\.on\('closed',[\s\S]*?cockpitMode = returnPanel \? 'panel' : 'rail';[\s\S]*?showCockpitInactive\(\)/);
+  assert.match(read('window-manager.js'), /settingsWindow\.on\('closed',[\s\S]*?cockpitMode = returnPanel \? 'panel' : 'rail';[\s\S]*?showCockpitInactive\(\)/);
 });
 
 test('returning from the control center preserves the requested Cockpit panel mode', () => {
   const main = read('main.js');
-  assert.match(main, /returnToCockpitPending/);
-  assert.match(main, /const returnPanel = returnToCockpitPending;[\s\S]*?cockpitMode = returnPanel \? 'panel' : 'rail'/);
-  assert.match(main, /returnToCockpitPending = true;[\s\S]*?settingsWindow\.close\(\)/);
+  assert.match(read('window-manager.js'), /returnToCockpitPending/);
+  assert.match(read('window-manager.js'), /const returnPanel = returnToCockpitPending;[\s\S]*?cockpitMode = returnPanel \? 'panel' : 'rail'/);
+  assert.match(read('window-manager.js'), /returnToCockpitPending = true;[\s\S]*?settingsWindow\.close\(\)/);
 });
 
 test('center close and return routes honor dirty task dialogs before destroying the window', () => {
@@ -162,9 +162,10 @@ test('Cockpit rail is a single flat draggable surface without stacked window sha
   assert.match(cockpit, /-webkit-app-region:\s*drag/);
   assert.match(cockpit, /button\s*\{[^}]*-webkit-app-region:\s*no-drag/s);
   assert.doesNotMatch(cockpit, /box-shadow:\s*0 12px 36px|backdrop-filter/);
-  assert.match(main, /hasShadow:\s*false/);
-  assert.match(main, /cockpitOffset/);
-  assert.match(main, /cockpitWindow\.on\('will-move'/);
+  const wm = read('window-manager.js');
+  assert.match(wm, /hasShadow:\s*false/);
+  assert.match(wm, /cockpitOffset/);
+  assert.match(read('window-manager.js'), /cockpitWindow\.on\('will-move'/);
 });
 
 test('Cockpit rail exposes a bordered, wide drag hit area with pointer-capture cleanup', () => {
@@ -180,11 +181,13 @@ test('Cockpit rail exposes a bordered, wide drag hit area with pointer-capture c
 
 test('startup keeps the loading surface until the real page is ready and uses packaged assets', () => {
   const main = read('main.js');
+  const aux = read('aux-windows.js'); // A1: splash construction moved here
   const loading = read('loading.html');
-  assert.match(main, /loadingWindow = new BrowserWindow\(\{[\s\S]*show:\s*false/);
-  assert.match(main, /loadingWindow\.once\('ready-to-show',/);
-  assert.match(main, /mainWindow\.once\('ready-to-show',/);
-  assert.match(main, /did-fail-load/);
+  assert.match(aux, /loadingWindow = new BrowserWindow\(\{[\s\S]*show:\s*false/);
+  assert.match(aux, /loadingWindow\.once\('ready-to-show',/);
+  assert.match(read('window-manager.js'), /mainWindow\.once\('ready-to-show',/);
+  assert.match(main, /closeLoading\(\)/); // splash closes when the main window paints
+  assert.match(aux, /did-fail-load/);
   assert.match(loading, /src="assets\/cockpit-logo\.jpg"/);
 });
 
@@ -200,18 +203,43 @@ test('session-heavy startup paths use the worker and defer optional services', (
 
 test('main window can never stay hidden: ready-to-show fallback timer + limited load retry', () => {
   const main = read('main.js');
-  assert.match(main, /mainWindow\.once\('ready-to-show', showMainWhenReady\)/);
-  assert.match(main, /ready-to-show timed out; forcing show/);
-  assert.match(main, /mainLoadRetries < 2/);
-  assert.match(main, /code === -3/); // ERR_ABORTED superseded loads ignored
+  assert.match(read('window-manager.js'), /mainWindow\.once\('ready-to-show', showMainWhenReady\)/);
+  assert.match(read('window-manager.js'), /ready-to-show timed out; forcing show/);
+  const wmr = read('window-manager.js');
+  assert.match(wmr, /mainLoadRetries < 2/);
+  assert.match(wmr, /code === -3/); // ERR_ABORTED superseded loads ignored
+});
+
+test('no free references to state moved into extracted modules (A1 guard)', () => {
+  const main = read('main.js');
+  // strip strings & comments so dictionary keys like 'tray.settings' do not
+  // count as identifier uses
+  const code = main
+    .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
+    .replace(/`(?:[^`\\]|\\.)*`/g, '``')
+    .replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+  for (const name of ['tray', 'runtimeChild', 'runtimeUrl', 'runtimeLogPath', 'urlPollTimer', 'crashGuard', 'lastCrashAt',
+    'mainWindowPending', 'settingsWindow', 'cockpitWindow', 'cockpitMode', 'cockpitOffset',
+    'cockpitHiddenForAuxWindow', 'returnToCockpitPending', 'cockpitSnapshotCache', 'cockpitSyncTimer', 'windowStateSaveTimer']) {
+    const uses = [...code.matchAll(new RegExp(`(?<![\\w$.])${name}(?![\\w$])`, 'g'))];
+    assert.deepStrictEqual(uses.map(() => name), [],
+      `main.js still references "${name}" as a free variable — that state moved to an extracted module (tray-menu / runtime-supervisor / runtime-log-tail); use the injected accessor instead`);
+  }
 });
 
 test('runtime log tailing reads only appended bytes, never the whole file', () => {
   const main = read('main.js');
-  assert.match(main, /st\.size === lastLogOffset\) return/); // no-growth short-circuit
-  assert.match(main, /fs\.openSync\(runtimeLogPath, 'r'\)/);
-  assert.match(main, /fs\.readSync\(fd, buf, 0, len, lastLogOffset\)/);
-  assert.match(main, /st\.size < lastLogOffset\) lastLogOffset = 0/); // truncation reset
+  // A1: the poller lives in runtime-supervisor.js; raw fs.readSync
+  // bookkeeping must stay OUT of main.js AND out of the supervisor.
+  assert.match(main, /createRuntimeSupervisor\(/);
+  const sup = read('runtime-supervisor.js');
+  assert.match(sup, /createRuntimeLogTailer\(runtimeLogPath\)/);
+  assert.doesNotMatch(sup, /readSync\(fd, buf, 0, len, lastLogOffset\)/);
+  const tailerSrc = read('runtime-log-tail.js');
+  assert.match(tailerSrc, /st\.size === offset\) return ''/); // no-growth short-circuit
+  assert.match(tailerSrc, /st\.size < offset\) offset = 0/); // truncation reset
+  assert.match(tailerSrc, /typeof ret === 'number'/, // readSync return-shape normalization
+    'fs.readSync return must be normalized (the destructuring incident)');
 });
 
 test('Settings does not launch a recursive storage scan on every open', () => {
@@ -250,29 +278,33 @@ test('application quit cancels runtime installation workers before runtime shutd
 
 test('Cockpit snapshot construction has a short-lived cache for repeated IPC reads', () => {
   const main = read('main.js');
-  assert.match(main, /let cockpitSnapshotCache\s*=\s*\{\s*at:\s*0/);
-  assert.match(main, /now - cockpitSnapshotCache\.at/);
-  assert.match(main, /cockpitSnapshotCache\s*=\s*\{\s*at:\s*now/);
+  const wmc = read('window-manager.js');
+  assert.match(wmc, /let cockpitSnapshotCache\s*=\s*\{\s*at:\s*0/);
+  assert.match(wmc, /now - cockpitSnapshotCache\.at/);
+  assert.match(wmc, /cockpitSnapshotCache\s*=\s*\{\s*at:\s*now/);
 });
 
 test('runtime lifecycle is generation-guarded and routed through the state controller', () => {
   const main = read('main.js');
+  const sup = read('runtime-supervisor.js');
+  // the controller is created in main and INJECTED into the supervisor
   assert.match(main, /createRuntimeStateController\(/);
-  assert.match(main, /const generation = runtimeStateController\.begin\('starting'\)/);
-  assert.match(main, /runtimeStateController\.transition\('healthy', generation\)/);
-  assert.match(main, /runtimeStateController\.transition\('offline', generation\)/);
-  assert.match(main, /runtimeStateController\.isCurrent\(generation\)/);
+  assert.match(main, /stateController: runtimeStateController/);
+  assert.match(sup, /stateController\.begin\('starting'\)/);
+  assert.match(sup, /stateController\.transition\('healthy', generation\)/);
+  assert.match(sup, /stateController\.transition\('offline', generation\)/);
+  assert.match(sup, /stateController\.isCurrent\(generation\)/);
   assert.doesNotMatch(main, /^\s*cockpitRuntimeState\s*=\s*'(?:healthy|offline|restarting|starting)'/m);
 });
 
 test('desktop runtime disables Harness default-browser handoff', () => {
-  const main = read('main.js');
-  assert.match(main, /const args = \[dshBin, '--profile', 'web', '--port', String\(port\), '--no-open'\]/);
+  const sup = read('runtime-supervisor.js');
+  assert.match(sup, /const args = \[dshBin, '--profile', 'web', '--port', String\(port\), '--no-open'\]/);
 });
 
 test('runtime consumers receive the controller state instead of inferring health from a version', () => {
   const main = read('main.js');
-  assert.match(main, /runtime:\s*\{\s*state:\s*cockpitRuntimeState/);
+  assert.match(read('window-manager.js'), /runtime:\s*\{\s*state:\s*getCockpitRuntimeState\(\)/);
   assert.match(main, /ipcMain\.handle\('shell:runtime-info'[\s\S]*?manager\.getInfo\(\)[\s\S]*?state:\s*cockpitRuntimeState/);
 });
 
@@ -302,9 +334,12 @@ test('cost snapshots reuse the last calculation for the same stats object', () =
 
 test('auxiliary Cockpit windows restore the rail after they close', () => {
   const main = read('main.js');
-  assert.match(main, /quickAskWindow\.on\('closed',[\s\S]*?restoreCockpitRail\(\)/);
-  assert.match(main, /searchWindow\.on\('closed',[\s\S]*?restoreCockpitRail\(\)/);
-  assert.match(main, /function restoreCockpitRail\(\)/);
+  const aux = read('aux-windows.js'); // A1: quickask/search construction moved here
+  assert.match(aux, /quickAskWindow\.on\('closed',[\s\S]*?restoreCockpitRail\(\)/);
+  assert.match(aux, /searchWindow\.on\('closed',[\s\S]*?restoreCockpitRail\(\)/);
+  assert.match(main, /restoreCockpitRail,/); // injected into the aux factory
+  assert.match(read('window-manager.js'), /function restoreCockpitRail\(\)/);
+  assert.match(main, /restoreCockpitRail,/);
 });
 
 test('Quick Ask does not auto-close after a completed result merely because focus changes', () => {
@@ -322,7 +357,11 @@ test('Quick Ask shutdown releases only its tracked accelerator', () => {
 
 test('Cockpit rail visibility is guarded across main-window restore and auxiliary focus', () => {
   const main = read('main.js');
-  assert.match(main, /mainWindow\.on\('show',[\s\S]*?showCockpitInactive\(\)/);
-  assert.match(main, /function showCockpitInactive\(\)[\s\S]*?quickAskWindow && !quickAskWindow\.isDestroyed\(\)/);
-  assert.match(main, /function showCockpitInactive\(\)[\s\S]*?searchWindow && !searchWindow\.isDestroyed\(\)/);
+  const aux = read('aux-windows.js');
+  assert.match(read('window-manager.js'), /mainWindow\.on\('show',[\s\S]*?showCockpitInactive\(\)/);
+  // A1: the guards now query the aux module (hasQuickAsk/hasSearch)
+  assert.match(aux, /function hasQuickAsk\(\)/);
+  assert.match(aux, /function hasSearch\(\)/);
+  assert.match(main, /auxWindows\.hasQuickAsk\(\)/);
+  assert.match(main, /auxWindows\.hasSearch\(\)/);
 });

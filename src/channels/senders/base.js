@@ -37,6 +37,12 @@ function createSender(transport) {
       await transport.sendText(formatted.text);
       return 'text';
     },
+    // R5: raw-text escape hatch for generated content (e.g. the weekly report)
+    // that has no fixed event template.
+    async sendText(text) {
+      await transport.sendText(String(text));
+      return 'text';
+    },
   };
 }
 

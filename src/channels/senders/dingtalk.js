@@ -44,8 +44,8 @@ function classifyDingtalkError(err) {
  * L1 credential probe: open a gateway connection slot. `fetchImpl` injectable
  * for tests. Never logs the clientSecret.
  */
-async function openGatewayConnection({ clientId, clientSecret, fetchImpl, tag = 'DshCockpit', timeoutMs = DEFAULT_TIMEOUT_MS }) {
-  if (!fetchImpl) throw Object.assign(new Error('dingtalk: fetch unavailable'), { status: 0 });
+async function openGatewayConnection({ clientId, clientSecret, fetchImpl: fetchImplInjected, tag = 'DshCockpit', timeoutMs = DEFAULT_TIMEOUT_MS }) {
+  const fetchImpl = fetchImplInjected || (typeof fetch === 'function' ? fetch : null);
   let ac = null;
   let timer = null;
   if (typeof AbortController !== 'undefined') {
@@ -104,9 +104,8 @@ async function testDingtalkConnection({ clientId, clientSecret, fetchImpl, timeo
  * example — the protocol doc leaves the header unspecified, so this is a
  * best-effort addition (以官方文档为准，需真机验证).
  */
-async function sendViaSessionWebhook({ sessionWebhook, title, text, fetchImpl, accessToken, timeoutMs = DEFAULT_TIMEOUT_MS }) {
-  if (!sessionWebhook) throw new Error('dingtalk: no active session webhook');
-  if (!fetchImpl) throw Object.assign(new Error('dingtalk: fetch unavailable'), { status: 0 });
+async function sendViaSessionWebhook({ sessionWebhook, title, text, fetchImpl: fetchImplInjected, accessToken, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+  const fetchImpl = fetchImplInjected || (typeof fetch === 'function' ? fetch : null);
   let ac = null;
   let timer = null;
   if (typeof AbortController !== 'undefined') {

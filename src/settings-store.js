@@ -49,12 +49,25 @@ const DEFAULTS = {
   remotePublicMode: 'lan',  // C7 access route: lan | tailscale | cloudflare
   modelProviders: [],       // model provider profiles (C2): { id, name, baseURL, apiKeyRef, models[], preset, ollama?, createdAt }
   imChannels: [],           // IM channel configs (C5): { id, type, enabled, allowFrom[] } — credentials stay in channel-secrets.json
+  bootCheckOnStartup: true, // R1: run the boot self-check automatically at app start
+  compatStatusEnabled: true, // R2: show upstream compatibility status in Settings → Updates
+  notificationCenterEnabled: true, // R6: master switch; false = legacy direct-toast behaviour
+  notifDndEnabled: false, // R6: do-not-disturb window (default off = pass-through)
+  notifDndWindow: '23:00-07:00', // R6: DND window, HH:MM-HH:MM, may cross midnight
+  notifFoldEnabled: false, // R6: fold identical toasts inside a 60s window (default off)
+  notifKindsDisabled: [], // R6: subset of approval/completion/question/budget/system
+  weeklyReportEnabled: false, // R5: auto-generate the Wrapped card every Monday morning
+  weeklyReportPushIm: false, // R5: also push the generated card summary to configured IM channels
+  mcpServers: [],           // MCP servers (T1/R3): { id, name, serverName, transport, command, args,
+                            //   envPlain, envSecretKeys, url, headers, enabled, failOnStartupError,
+                            //   startupTimeoutSec, toolTimeoutSec, source, origin, createdAt }
+                            // Secret env VALUES live only in mcp-secrets.json (safeStorage vault)
 };
 
 const NUMERIC_KEYS = ['keepVersions', 'port', 'contextWindow', 'costInputPerM', 'costOutputPerM', 'costCacheReadPerM', 'costCacheWritePerM', 'costPeakInputPerM', 'costPeakOutputPerM', 'costPeakCacheReadPerM', 'costPeakCacheWritePerM', 'monthlyBudget', 'backupKeep', 'remotePort'];
-const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'cockpitOnboarded', 'shellAutoUpdate', 'costPeakEnabled', 'remoteControl', 'remoteCompat', 'remotePublic'];
-const STRING_KEYS = ['channel', 'pinnedVersion', 'registry', 'workspace', 'dshHome', 'nodeBin', 'dshBin', 'language', 'themeMode', 'quickAskHotkey', 'costPeakWindows', 'remotePublicMode'];
-const ARRAY_KEYS = ['recentWorkspaces', 'installedPlugins', 'scheduledTasks', 'scheduledHistory', 'modelProviders', 'imChannels'];
+const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'cockpitOnboarded', 'shellAutoUpdate', 'costPeakEnabled', 'remoteControl', 'remoteCompat', 'remotePublic', 'bootCheckOnStartup', 'compatStatusEnabled', 'notificationCenterEnabled', 'notifDndEnabled', 'notifFoldEnabled', 'weeklyReportEnabled', 'weeklyReportPushIm'];
+const STRING_KEYS = ['channel', 'pinnedVersion', 'registry', 'workspace', 'dshHome', 'nodeBin', 'dshBin', 'language', 'themeMode', 'quickAskHotkey', 'costPeakWindows', 'remotePublicMode', 'notifDndWindow'];
+const ARRAY_KEYS = ['recentWorkspaces', 'installedPlugins', 'scheduledTasks', 'scheduledHistory', 'modelProviders', 'imChannels', 'notifKindsDisabled', 'mcpServers'];
 
 class SettingsStore {
   constructor(userDataDir) {

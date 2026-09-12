@@ -16,6 +16,21 @@
 'use strict';
 
 const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut, safeStorage, nativeTheme, clipboard } = require('electron');
+
+// H-test: DSH_DESKTOP_NO_KEYCHAIN=1 keeps unattended runs unattended. Ad-hoc
+// rebuilds change the code signature on every build, and macOS Keychain ACLs
+// then prompt for the OLD entry on every launch — blocking boot until someone
+// types the login password (the "silent exit" reports from real-machine
+// testing were this dialog timing out). With the flag, every consumer gets a
+// no-op vault: isEncryptionAvailable()=false routes all stores to their
+// existing plaintext fallback, and no Keychain API is ever touched.
+const safeStorageImpl = process.env.DSH_DESKTOP_NO_KEYCHAIN === '1'
+  ? {
+      isEncryptionAvailable: () => false,
+      encryptString: (plain) => Buffer.from('plain:' + plain, 'utf8'),
+      decryptString: (buf) => { const s = buf.toString('utf8'); return s.startsWith('plain:') ? s.slice(6) : ''; },
+    }
+  : safeStorage;
 const { spawn, execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
@@ -38,10 +53,15 @@ const { runHeadless } = require('./headless');
 const { Scheduler } = require('./scheduler');
 const { searchSessions } = require('./session-search');
 const { RemoteControl, PAIR_PATH } = require('./remote-control');
+const { ensurePnpmShim, prependPath, resolvePnpmForProfile } = require('./pnpm-shim');
 const { createPublicRemote, buildPairUrl } = require('./public-remote');
 const { createModelsManager, PRESETS: MODELS_PRESETS, OLLAMA_PRESET: MODELS_OLLAMA_PRESET } = require('./models-manager');
+const { createMcpManager, wrapForWindows } = require('./mcp-manager');
+const { createMcpRegistry } = require('./mcp-registry');
+const { createMcpConnect } = require('./mcp-connect');
+const { createMcpImport } = require('./mcp-import');
 const compact = require('./compact');
-const { createHarnessRpcClient } = require('./harness-rpc');
+const { createHarnessRpcClient, createHarnessRpcWire } = require('./harness-rpc');
 const { createQuickAskShortcutManager } = require('./quickask-shortcut');
 const { createMemoryFiles } = require('./memory-files');
 const { createPluginOpGuard, failureCode, shouldCleanupAfterFailure, summarizeOutput, inferStage, parsePnpmBlockedPackage, upsertOnlyBuiltDependencies, pickSubpackage, resolveDepKey, pruneBundles, sanitizeProfile } = require('./plugin-flow');
@@ -55,6 +75,19 @@ const { WecomChannel } = require('./channels/receivers/wecom');
 const { testWecomConnection } = require('./channels/senders/wecom');
 const { DingtalkChannel } = require('./channels/receivers/dingtalk');
 const { testDingtalkConnection } = require('./channels/senders/dingtalk');
+const { createBootCheck, runOnStartup } = require('./boot-check'); // R1
+const { createCompatStatus } = require('./compat-status'); // R2
+const { pickRuntimeCandidate } = require('./runtime-pick'); // H5 runtime priority
+const { detectCredentialFormatMismatch, readLogTail } = require('./crash-reason'); // H5 crash root cause
+const { createRuntimeLogTailer } = require('./runtime-log-tail'); // boot URL poller (incident-hardened)
+const { createNotificationCenter } = require('./notification-center'); // R6
+const { buildCacheEconomics, pricingFromSettings } = require('./cache-economics'); // R4
+const { createWeeklyReport } = require('./weekly-report'); // R5
+const { createCrashLoopGuard, armWatchdog, createRuntimeSupervisor } = require('./runtime-supervisor'); // A1 supervision primitives
+const { createTrayMenu } = require('./tray-menu'); // A1 tray extraction
+const { createAuxWindows } = require('./aux-windows'); // A1 aux window extraction
+const { createWindowManager } = require('./window-manager'); // A1 step 5
+const { registerFeatureIpc } = require('./ipc-features'); // A1 feature IPC
 
 if (process.env.DSH_DESKTOP_USER_DATA) {
   // must happen before app is ready; keeps logs/state inside the workspace
@@ -63,49 +96,36 @@ if (process.env.DSH_DESKTOP_USER_DATA) {
 
 const APP_NAME = 'DshCockpit';
 const APP_VERSION = require('../package.json').version;
-const URL_LINE_RE = /dsh web: (https?:\/\/127\.0\.0\.1:\d+)/;
-const HEALTH_TIMEOUT_MS = 90_000;
-const KILL_GRACE_MS = 4_000;
 
-let mainWindow = null;
-let settingsWindow = null;
-let cockpitWindow = null;
-let tray = null;
-let runtimeChild = null;
-let runtimeUrl = null;
 let quitting = false;
 let logStream = null;
-let runtimeLogPath = null;
-let urlPollTimer = null;
 let updateInFlight = false;
-let crashCount = 0;
-let lastCrashAt = 0;
 let eventsFeed = [];
 let eventsRetryTimer = null;
 let lastTaskNotifyAt = 0;
 let eventsFeedLiveLogged = false;
-let windowStateSaveTimer = null;
 let lastCostUpdateAt = 0;
 let latestCostSnapshot = { stats: null, key: '', data: null };
-let quickAskWindow = null;
 let quickAskRunning = false;
-let searchWindow = null;
 let scheduler = null;
 let remote = null; // phone remote-control gateway (constructed after app ready)
 let publicRemote = null; // C7: Tailscale detection + cloudflared quick tunnel helper
 let channelsMgr = null; // IM channels hub (C5 skeleton; constructed after app ready)
-let loadingWindow = null;
 let trayPeakTimer = null; // 1-minute tray refresh for the peak/off-peak countdown
 let balanceMonitor = null; // official balance poller (constructed after app ready)
 let balanceTimer = null; // 5-minute fallback poll for the balance monitor
 let modelsMgr = null; // model provider panel state (constructed after app ready)
+let mcpMgr = null;    // MCP server panel (v0.3.1 T1) — patch-file CRUD + secret vault
+let mcpReg = null;    // MCP registry (builtin list + GitHub search)
+let mcpConn = null;   // MCP two-tier health checks
+let mcpImp = null;    // MCP universal importer
 let compactTracker = null; // compaction watcher (C3, constructed after app ready)
+let weekly = null; // R5 weekly report (constructed after app ready)
 let compactTimer = null; // 5-second compaction scan cadence
 let sessionWorkerClient = null;
 let deferredServicesStarted = false;
 let sessionRunning = false; // live host/session-status frames (C3 busy check)
 let guidedInstallInProgress = false;
-let mainWindowPending = false; // guided first-run: runtime booting, main window not open yet
 let cockpitRuntimeState = 'starting';
 const runtimeStateController = createRuntimeStateController({
   initial: cockpitRuntimeState,
@@ -113,18 +133,13 @@ const runtimeStateController = createRuntimeStateController({
   onInvalidate: () => invalidateCockpitSnapshot(),
   onBroadcast: () => broadcastCockpitSnapshot(),
 });
-let cockpitSyncTimer = null;
-let cockpitMode = 'rail';
-let cockpitOffset = { x: 0, y: 0 };
-let returnToCockpitPending = false;
-let cockpitHiddenForAuxWindow = false;
-let cockpitSnapshotCache = { at: 0, snapshot: null };
-const COCKPIT_SNAPSHOT_TTL_MS = 250;
 let lastLoginItemSetting = null;
 const pluginGuard = createPluginOpGuard(); // one dsh plugin op at a time (profile safety)
 const skillsGuard = createPluginOpGuard(); // one skill install/upgrade at a time (atomic writes)
 const scheduledRunning = new Set();
 const budgetNotified = new Set();
+
+
 const materializing = new Set();
 
 const settings = new SettingsStore(app.getPath('userData'));
@@ -220,6 +235,26 @@ const skillsMgr = createSkillsManager({
   progress: sendSkillsProgress,
 });
 
+// R1: boot self-check + one-click repair (report → diagnostics/boot-report.json)
+const bootCheck = createBootCheck({
+  userDataDir: app.getPath('userData'),
+  effectiveSettings: () => settings.effective(),
+  patchSettings: (p) => settings.patch(p),
+  runtimeInfo: () => manager.getInfo(),
+  revalidateRuntime: () => manager.revalidate(),
+  resolveNodeBin: () => bestNodeBin(),
+  shellVersion: APP_VERSION,
+  log,
+});
+// R2: upstream compat status for the Updates page (read-only)
+const bundledRuntimeVersion = (() => { try { return require('../package.json').runtimeVersion || ''; } catch { return ''; } })();
+const compatStatus = createCompatStatus({
+  getSettings: () => settings.get(),
+  getRuntimeVersion: () => manager.getInfo().activeVersion || bundledRuntimeVersion,
+  userDataDir: app.getPath('userData'),
+  log,
+});
+
 // ---------------------------------------------------------------------------
 // logging
 // ---------------------------------------------------------------------------
@@ -275,11 +310,136 @@ function log(line) {
 }
 
 function notify(title, body) {
-  if (Notification.isSupported()) {
-    try { new Notification({ title, body }).show(); } catch { /* ignore */ }
-  }
-  log(`[shell] notify: ${title} — ${body}`);
+  // R6: single egress through the notification hub (kind defaults to system).
+  // The hub decides pass-through/fold/DND and records history; the OS toast
+  // itself fires via the showSystem sink below — same behaviour as before
+  // when every rule is off.
+  nc.enqueue({ kind: 'system', title, body });
 }
+
+/** Kind-annotated egress for the four event families (R6). Event-source
+ * logic is untouched — only the exit function changes. */
+function notifyAs(kind, title, body) {
+  nc.enqueue({ kind, title, body });
+}
+
+// R6 notification hub: OS toast sink + searchable JSONL history under userData
+const nc = createNotificationCenter({
+  getSettings: () => settings.get(),
+  historyFile: () => path.join(app.getPath('userData'), 'notification-history.jsonl'),
+  showSystem: ({ title, body }) => {
+    if (Notification.isSupported()) {
+      try { new Notification({ title, body }).show(); } catch { /* ignore */ }
+    }
+    log(`[shell] notify: ${title} — ${body}`);
+  },
+  log,
+});
+
+// A1: auxiliary windows extracted to src/aux-windows.js (loading splash,
+// Quick Ask, session search). Cockpit coordination stays injected here.
+const auxWindows = createAuxWindows({
+  BrowserWindow,
+  themeBackground,
+  // late-bound: these become const destructures further down (A1 step 5)
+  prepareCockpitForAuxWindow: () => prepareCockpitForAuxWindow(),
+  restoreCockpitRail: () => restoreCockpitRail(),
+  appVersion: () => app.getVersion(),
+  onLoadingError: (code, description) => {
+    setLoading(t(lang(), 'loading.failed', { msg: description || code }));
+  },
+  log,
+});
+const {
+  createQuickAsk, openQuickAsk,
+  openSearchWindow,
+  createLoadingWindow, setLoading, closeLoading, showLoadingOnError,
+} = auxWindows;
+
+// A1 step 5: window management (main window + Cockpit rail + Settings
+// center) extracted to src/window-manager.js. The deps object is the explicit
+// coupling surface (was ~35 free-variable references).
+const COCKPIT_SNAPSHOT_TTL_MS = 250; // cockpit snapshot cache TTL (consumed by window-manager)
+const windowManager = createWindowManager({
+  BrowserWindow, screen,
+  appName: APP_NAME,
+  iconPath,
+  themeBackground, resolvedTheme,
+  windowState, windowStateFile: () => windowStateFile(),
+  log, t, lang,
+  settingsGet: () => settings.get(),
+  noTray,
+  isQuitting: () => quitting,
+  getRuntimeUrl: () => getRuntimeUrl(),
+  getRuntimeChild: () => getRuntimeChild(),
+  traySetTooltip: (text) => trayMenu.setTooltip(text),
+  closeLoading,
+  startDeferredServices,
+  computeCockpitBounds,
+  getCockpitRuntimeState: () => cockpitRuntimeState,
+  getUsageCache: () => costCache.data,
+  costSnapshot,
+  getScheduledRunning: () => [...scheduledRunning],
+  getRemoteStatus: () => (remote ? { ...remote.status(), enabled: !!settings.get().remoteControl, publicMode: settings.get().remotePublicMode } : null),
+  appVersion: APP_VERSION,
+  dshHomeOf,
+  hasQuickAsk: () => auxWindows.hasQuickAsk(),
+  hasSearch: () => auxWindows.hasSearch(),
+  hasTray: () => trayMenu.hasTray(),
+  setLoading: (text) => setLoading(text),
+  showLoadingOnError: () => showLoadingOnError(),
+  COCKPIT_SNAPSHOT_TTL_MS,
+  buildSnapshot,
+  runtimeInfo: () => manager.getInfo(),
+});
+const {
+  createWindow, showMain, createCockpitWindow, showCockpitInactive, hideCockpit,
+  prepareCockpitForAuxWindow, restoreCockpitRail, syncCockpitBounds, scheduleCockpitSync,
+  getSettingsWindowWebContents,
+  cockpitNavigate, createSettingsWindow,
+  buildCockpitSnapshot, invalidateCockpitSnapshot, broadcastCockpitSnapshot,
+  closeSettingsWindow, returnToCockpit, setCockpitMode, moveCockpitOffset,
+  reloadMainWindow, toggleMainDevTools, pickDialogParent, isMainWindowPending,
+  setMainWindowPending, getMainWindowWebContents, hasVisibleMainWindow,
+  onRuntimeHealthy,
+} = windowManager;
+
+// A1 step 3: full runtime lifecycle supervision extracted from main.js.
+// The deps object is the explicit coupling surface between the shell and the
+// supervisor domain (was ~40 scattered free-variable references).
+const supervisor = createRuntimeSupervisor({
+  app,
+  dialog,
+  log,
+  t,
+  lang,
+  appName: APP_NAME,
+  stateController: runtimeStateController,
+  resolveDshBin: activeDshBin,
+  describeDshBin: dshBinMeta,
+  nodeCandidates,
+  effectiveSettings: () => settings.effective(),
+  selfHealProfile,
+  ensureLogDir,
+  resolveNodeBin: bestNodeBin,
+  onRemoteUrl: (url) => { if (remote) remote.setRuntimeUrl(url); },
+  startEventsFeed,
+  stopEventsFeed,
+  resetEventsFeedLiveFlag: () => { eventsFeedLiveLogged = false; },
+  onHealthy: (bootUrl) => onRuntimeHealthy(bootUrl),
+  hasMainWindow: () => !!pickDialogParent(),
+  isQuitting: () => quitting,
+  recordCrash,
+  enterSafeMode,
+  upgradeDialog: (message) => showCredentialUpgradeDialog(message),
+  isCredentialFormatIssue: (logPath) => detectCredentialFormatMismatch(readLogTail(logPath)),
+  bootTimingFile: () => path.join(app.getPath('userData'), 'diagnostics', 'boot-timing.json'),
+  notify,
+  upgradeNow: () => runUpdateCheck(true),
+  envExtras: () => (mcpMgr ? mcpMgr.runtimeSecretEnv() : null),
+  applyPendingUpdate,
+});
+const { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeLogPath, getRuntimeChild } = supervisor;
 
 // ---------------------------------------------------------------------------
 // binary resolution
@@ -304,6 +464,7 @@ function firstLineOf(cmd, args) {
 let _nodeBinCache = null;
 let _nodeCandidatesCache = null;
 let _nodeLookupKey = undefined;
+let _pnpmShimDirCached; // undefined = not probed yet; null = no shim available
 
 function _resolveNodeFromPath() {
   // Disk cache short-circuits the `where.exe` spawn entirely: one existsSync
@@ -406,11 +567,15 @@ function dshBinMeta(binJs) {
 }
 
 /**
- * Make sure a runtime version is registered. Order: existing entry -> bundled
- * seed (installer, instant) -> discovered install (npx/global). Then kicks off
- * background materialization so the app never depends on ephemeral paths.
+ * Make sure a runtime version is registered. Order (H5): existing entry ->
+ * discovered system install when it is at least as new as the bundled seed
+ * (the system dsh most likely wrote ~/.dsh and understands its credential
+ * layout) -> bundled seed (installer, instant). Every non-active candidate
+ * passes the --dump-config smoke guard first; failures fall through. Then
+ * kicks off background materialization so the app never depends on ephemeral
+ * paths.
  */
-function ensureRuntimeRegistered() {
+async function ensureRuntimeRegistered() {
   manager.revalidate(); // drop entries pointing at moved/deleted installs
   const info = manager.getInfo();
   if (info.activeVersion && manager.entry(info.activeVersion)) {
@@ -421,22 +586,50 @@ function ensureRuntimeRegistered() {
     setTimeout(() => { registerBundledRuntime(); materializeIfNeeded(); }, 1_000);
     return true;
   }
-  // nothing active: bundled seed first (instant), then discovered install
+  const binJs = discoverDshBin();
+  const meta = dshBinMeta(binJs);
+  const bundle = findBundledRuntime();
+  log(`[shell] runtime discovery: envBin=${binJs ? 'set' : 'null'} meta=${meta ? meta.version : 'null'} bundled=${bundle ? bundle.version : 'null'}`);
+  const sysCandidate = meta ? { version: meta.version || 'unknown', path: meta.installRoot } : null;
+  log(`[shell] runtime candidates: system=${JSON.stringify(sysCandidate)} bundled=${bundle ? bundle.version : 'null'}`);
+  const pick = await pickRuntimeCandidate({
+    active: null,
+    system: sysCandidate,
+    bundled: bundle ? { version: bundle.version, path: bundle.path } : null,
+    smoke: async (cand) => {
+      try {
+        const r = await manager.smokeTest(cand);
+        log(`[shell] candidate ${cand.version}@${cand.path} smoke ok=${r.ok} reason=${r.reason || r.exitCode || ''}`);
+        return r.ok;
+      } catch (err) {
+        log(`[shell] candidate ${cand.version}@${cand.path} smoke THREW: ${err.message}`);
+        return false;
+      }
+    },
+  });
+  if (!pick) {
+    log('[shell] no dsh runtime found to bootstrap');
+    return false;
+  }
+  if (pick.choice === 'system') {
+    log(`[shell] bootstrap runtime ${meta.version} from system install ${meta.installRoot} (newer than or equal to the bundled seed)`);
+    manager.bootstrapFrom(meta.installRoot, meta.version || 'unknown');
+    materializeIfNeeded();
+    return true;
+  }
   if (registerBundledRuntime()) {
     materializeIfNeeded();
     return true;
   }
-  const binJs = discoverDshBin();
-  const meta = dshBinMeta(binJs);
-  if (!meta) {
-    log('[shell] no dsh runtime found to bootstrap');
-    return false;
+  if (meta) {
+    // picked bundled but registration failed (dev mode / broken seed)
+    log(`[shell] bundled seed unusable; falling back to system dsh ${meta.version}`);
+    manager.bootstrapFrom(meta.installRoot, meta.version || 'unknown');
+    materializeIfNeeded();
+    return true;
   }
-  const version = meta.version || 'unknown';
-  log(`[shell] bootstrap runtime ${version} from ${meta.installRoot}`);
-  manager.bootstrapFrom(meta.installRoot, version);
-  materializeIfNeeded();
-  return true;
+  log('[shell] no dsh runtime found to bootstrap');
+  return false;
 }
 
 /** Make the active runtime owned (managed dir or bundled seed) in the background. */
@@ -517,340 +710,16 @@ function selfHealProfile() {
   }
 }
 
-function spawnRuntime() {
-  const generation = runtimeStateController.begin('starting');
-  const dshBin = activeDshBin();
-  if (!dshBin) {
-    dialog.showErrorBox(APP_NAME, t(lang(), 'dialog.noRuntime'));
-    app.quit();
-    return null;
-  }
-  const meta = dshBinMeta(dshBin);
-  const eff = settings.effective();
-  const port = eff.port || 0;
-  const dshHome = eff.dshHome || path.join(os.homedir(), '.dsh');
-  const cwd = eff.workspace || os.homedir();
-
-  selfHealProfile();
-
-  try { fs.mkdirSync(cwd, { recursive: true }); } catch { /* best effort */ }
-
-  // The Harness web profile opens the system browser by default. DshCockpit
-  // owns the desktop surface, so keep that handoff disabled and load the same
-  // runtime URL in the Electron BrowserWindow below.
-  const args = [dshBin, '--profile', 'web', '--port', String(port), '--no-open'];
-  const candidates = nodeCandidates();
-
-  // Runtime stdout/stderr go straight into a file via an fd (no pipes; the URL
-  // line is discovered by tailing this file). Pipe capture is more fragile and
-  // is blocked by the harness sandbox; see DESIGN.md §7.
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  runtimeLogPath = path.join(ensureLogDir(), `runtime-${stamp}.out`);
-  let outFd = -1;
-  try { outFd = fs.openSync(runtimeLogPath, 'a'); } catch (err) { log(`[shell] cannot open runtime log: ${err.message}`); }
-
-  log(`[shell] dsh bin:  ${dshBin}${meta && meta.version ? ` (v${meta.version})` : ''}`);
-  log(`[shell] args:     ${args.slice(1).join(' ')}`);
-  log(`[shell] DSH_HOME: ${dshHome}`);
-  log(`[shell] cwd:      ${cwd}`);
-  log(`[shell] runtime log: ${runtimeLogPath}`);
-
-  // Tail the runtime log for the URL line (started once; survives retries).
-  // Skip the readFileSync when the file has not grown since the last poll
-  // (perf #8): on slow disks / long runtimes this avoids re-reading a
-  // multi-MB file every 500ms during the boot window.
-  if (urlPollTimer) clearInterval(urlPollTimer);
-  let lastLogText = '';
-  let lastLogOffset = 0; // consumed byte offset — only new bytes are ever read
-  urlPollTimer = setInterval(() => {
-    if (runtimeUrl) { clearInterval(urlPollTimer); urlPollTimer = null; return; }
-    let st;
-    try { st = fs.statSync(runtimeLogPath); } catch { return; }
-    if (st.size === lastLogOffset) return; // no new bytes since last poll
-    try {
-      // Read only the bytes appended since the last poll instead of re-reading
-      // the whole (potentially multi-MB) runtime log on every tick — on
-      // Windows + AV a full sync read in the boot window stalls the shell.
-      if (st.size < lastLogOffset) lastLogOffset = 0; // truncated / rewritten
-      if (st.size > lastLogOffset) {
-        const fd = fs.openSync(runtimeLogPath, 'r');
-        try {
-          const len = st.size - lastLogOffset;
-          const buf = Buffer.alloc(len);
-          const { bytesRead } = fs.readSync(fd, buf, 0, len, lastLogOffset);
-          lastLogText += buf.toString('utf8', 0, bytesRead);
-          lastLogOffset += bytesRead;
-        } finally {
-          fs.closeSync(fd);
-        }
-      }
-    } catch { return; }
-    const m = lastLogText.match(URL_LINE_RE);
-    if (m) {
-      if (!runtimeStateController.isCurrent(generation)) return;
-      runtimeUrl = m[1];
-      crashCount = 0; // a healthy boot resets the auto-restart counter
-      log(`[shell] runtime URL: ${runtimeUrl}`);
-      if (remote) remote.setRuntimeUrl(runtimeUrl); // phone gateway follows the runtime port
-      const bootUrl = runtimeUrl;
-      waitForHealth(bootUrl).then((ok) => {
-        if (!runtimeStateController.isCurrent(generation) || runtimeUrl !== bootUrl) return;
-        if (!ok) {
-          runtimeStateController.transition('offline', generation);
-          return;
-        }
-        runtimeStateController.transition('healthy', generation);
-        startEventsFeed();
-        if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.loadURL(bootUrl); createCockpitWindow(); showCockpitInactive(); }
-        else createWindow(bootUrl);
-      });
-    }
-  }, 500);
-
-  const fail = (message) => {
-    runtimeStateController.transition('offline', generation);
-    if (urlPollTimer) { clearInterval(urlPollTimer); urlPollTimer = null; }
-    if (outFd !== -1) { try { fs.closeSync(outFd); } catch { /* ignore */ } outFd = -1; }
-    if (!mainWindow) {
-      // boot-time failure: nothing to fall back to
-      dialog.showErrorBox(APP_NAME, message);
-      app.quit();
-    } else {
-      // runtime failure while the app is up: keep the shell alive (M8)
-      dialog.showErrorBox(APP_NAME, message);
-      notify(t(lang(), 'notify.runtimeExited'), message);
-    }
-  };
-
-  let attempt = 0;
-  let retrying = false;
-  const launch = () => {
-    const cand = candidates[Math.min(attempt, candidates.length - 1)];
-    attempt += 1;
-    retrying = false;
-    log(`[shell] node attempt ${attempt}/${candidates.length}: ${cand.bin}${cand.runAsNode ? ' (electron-as-node)' : ''}`);
-    const env = { ...process.env, DSH_HOME: dshHome };
-    if (cand.runAsNode) env.ELECTRON_RUN_AS_NODE = '1';
-
-    let child;
-    try {
-      child = spawn(cand.bin, args, {
-        env,
-        cwd,
-        windowsHide: true,
-        stdio: outFd === -1 ? 'ignore' : ['ignore', outFd, outFd],
-      });
-    } catch (err) {
-      fail(t(lang(), 'dialog.spawnFailed', { msg: err.message }));
-      return;
-    }
-
-    child.on('error', (err) => {
-      log(`[runtime] spawn error: ${err.message}`);
-      if (err && err.code === 'ENOENT' && attempt < candidates.length) {
-        retrying = true;
-        log('[shell] retrying with next node candidate');
-        launch();
-        return;
-      }
-      runtimeStateController.transition('offline', generation);
-      fail(t(lang(), 'dialog.spawnFailed', { msg: err.message }));
-    });
-    child.on('close', (code, signal) => {
-      const wasCurrent = runtimeChild === child;
-      if (wasCurrent) runtimeChild = null;
-      // close the runtime log fd regardless (H2: fd leak)
-      if (outFd !== -1) { try { fs.closeSync(outFd); } catch { /* ignore */ } outFd = -1; }
-      log(`[runtime] exited code=${code} signal=${signal}${wasCurrent ? '' : ' (superseded by restart)'}`);
-      // A superseded child (killed by restart/update/rollback/workspace switch)
-      // must NOT touch the NEW child's poller or state (H1).
-      if (!wasCurrent || quitting || retrying) return;
-      runtimeUrl = null;
-      if (remote) remote.setRuntimeUrl(null);
-      runtimeStateController.transition('offline', generation);
-      if (urlPollTimer) { clearInterval(urlPollTimer); urlPollTimer = null; }
-      if (!mainWindow) {
-        fail(t(lang(), 'dialog.runtimeDied', { code, signal, path: runtimeLogPath }));
-        return;
-      }
-      // crash guard: auto-restart with loop protection (max 3 in 60s);
-      // a clean exit (code 0) or a manual restart is not a crash (M9)
-      if (code !== 0) recordCrash(code, signal);
-      const now = Date.now();
-      if (now - lastCrashAt > 60_000) crashCount = 0;
-      lastCrashAt = now;
-      crashCount += 1;
-      if (crashCount <= 3) {
-        notify(t(lang(), 'notify.runtimeExited'), t(lang(), 'notify.autoRestart', { code, signal, attempt: crashCount }));
-        setTimeout(restartRuntime, 1_500);
-      } else {
-        // crash loop: the runtime cannot boot — most likely a broken plugin.
-        // Offer safe mode (official bundles only) right here instead of a bare
-        // "gave up" notification the user cannot act on.
-        notify(t(lang(), 'notify.runtimeExited'), t(lang(), 'notify.autoRestartStopped', { code, signal }));
-        dialog.showMessageBox({
-          type: 'error',
-          title: APP_NAME,
-          message: t(lang(), 'crashloop.title'),
-          detail: t(lang(), 'crashloop.body', { log: runtimeLogPath }),
-          buttons: [t(lang(), 'crashloop.safeMode'), t(lang(), 'crashloop.later')],
-          defaultId: 0,
-          cancelId: 1,
-        }).then(({ response }) => {
-          if (response === 0) enterSafeMode();
-        }).catch(() => { /* dialog failed — notifications already sent */ });
-      }
-    });
-
-    runtimeChild = child;
-    try { spawnWatchdog(child.pid); } catch { /* ignore */ }
-  };
-
-  launch();
-  return runtimeChild;
-}
 
 /** Spawn a detached watchdog that reaps the runtime if this shell dies hard. */
-function spawnWatchdog(runtimePid) {
-  try {
-    const node = bestNodeBin();
-    const env = { ...process.env };
-    if (node.runAsNode) env.ELECTRON_RUN_AS_NODE = '1';
-    const wd = spawn(node.bin, [path.join(__dirname, 'watchdog.js'), String(process.pid), String(runtimePid)], {
-      detached: true,
-      stdio: 'ignore',
-      env,
-      windowsHide: true,
-    });
-    wd.unref();
-    log(`[shell] watchdog armed (shell=${process.pid}, runtime=${runtimePid})`);
-  } catch (e) {
-    log(`[shell] watchdog spawn failed: ${e.message}`);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // health check
 // ---------------------------------------------------------------------------
-function waitForHealth(url, timeoutMs = HEALTH_TIMEOUT_MS) {
-  const deadline = Date.now() + timeoutMs;
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (ok) => { if (!settled) { settled = true; resolve(ok); } };
-    const tick = () => {
-      if (Date.now() > deadline) return finish(false);
-      const req = http.get(url, (res) => {
-        res.resume();
-        if (res.statusCode === 200) return finish(true);
-        retry();
-      });
-      // H4: a server that accepts but never responds must not hang forever
-      req.setTimeout(3000, () => { try { req.destroy(); } catch { /* ignore */ } retry(); });
-      req.on('error', retry);
-      function retry() {
-        if (Date.now() > deadline) return finish(false);
-        setTimeout(tick, 500);
-      }
-    };
-    tick();
-  });
-}
 
 // ---------------------------------------------------------------------------
 // windows
 // ---------------------------------------------------------------------------
-function createWindow(url) {
-  mainWindowPending = false; // the main window is (about to be) open
-  const saved = windowState.load(windowStateFile());
-  const bounds = safeBounds(saved) || { width: 1280, height: 840 };
-  mainWindow = new BrowserWindow({
-    ...bounds,
-    backgroundColor: themeBackground(), // match the splash: no white flash before the web UI paints
-    title: APP_NAME,
-    show: false,
-    autoHideMenuBar: true,
-    icon: iconPath(),
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, 'preload.js'),
-    },
-  });
-
-  mainWindow.on('show', () => { createCockpitWindow(); syncCockpitBounds(); showCockpitInactive(); });
-  mainWindow.on('restore', () => { createCockpitWindow(); syncCockpitBounds(); showCockpitInactive(); });
-  mainWindow.on('hide', () => hideCockpit());
-  mainWindow.on('minimize', () => hideCockpit());
-  mainWindow.on('maximize', () => syncCockpitBounds());
-  mainWindow.on('unmaximize', () => syncCockpitBounds());
-  mainWindow.on('enter-full-screen', () => { hideCockpit(); setTimeout(() => { syncCockpitBounds(); showCockpitInactive(); }, 80); });
-  mainWindow.on('leave-full-screen', () => { setTimeout(() => { syncCockpitBounds(); showCockpitInactive(); }, 80); });
-
-  mainWindow.loadURL(url);
-  // Show + start deferred services when the page is truly paintable (no white
-  // flash). A timeout fallback covers Windows GPU / older-Electron combos that
-  // never emit ready-to-show even after a successful load, and a did-fail-load
-  // retry recovers transient load failures. Without the fallback a stuck main
-  // window would leave deferred services (token poll, scheduler, balance,
-  // compaction, …) disabled forever.
-  let mainShown = false;
-  let mainShowFallbackTimer = null;
-  const showMainWhenReady = () => {
-    if (mainShown || !mainWindow || mainWindow.isDestroyed()) return;
-    mainShown = true;
-    clearTimeout(mainShowFallbackTimer);
-    mainWindow.show();
-    if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.close();
-    startDeferredServices();
-  };
-  mainWindow.once('ready-to-show', showMainWhenReady);
-  mainShowFallbackTimer = setTimeout(() => {
-    if (!mainShown) {
-      log('[shell] main window ready-to-show timed out; forcing show');
-      showMainWhenReady();
-    }
-  }, 15_000);
-  let mainLoadRetries = 0;
-  mainWindow.webContents.on('did-fail-load', (_event, code, description) => {
-    if (code === -3) return; // ERR_ABORTED: superseded navigation, not a real failure
-    log(`[shell] main window failed to load (${code}): ${description}`);
-    if (mainLoadRetries < 2 && mainWindow && !mainWindow.isDestroyed()) {
-      mainLoadRetries += 1;
-      setTimeout(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(url); }, 1_000);
-    } else {
-      setLoading(t(lang(), 'loading.failed', { msg: description || code }));
-      if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.show();
-    }
-  });
-  mainWindow.on('close', (e) => {
-    if (!quitting && !noTray && settings.get().trayOnClose && tray) {
-      e.preventDefault();
-      mainWindow.hide();
-    }
-  });
-  mainWindow.on('closed', () => { mainWindow = null; });
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-
-  // persist window bounds (debounced)
-  const saveBounds = () => {
-    if (mainWindow && !mainWindow.isDestroyed()) windowState.save(windowStateFile(), mainWindow.getBounds());
-  };
-  mainWindow.on('resize', () => {
-    scheduleCockpitSync();
-    clearTimeout(windowStateSaveTimer);
-    windowStateSaveTimer = setTimeout(saveBounds, 500);
-  });
-  mainWindow.on('move', () => {
-    scheduleCockpitSync();
-    clearTimeout(windowStateSaveTimer);
-    windowStateSaveTimer = setTimeout(saveBounds, 500);
-  });
-  mainWindow.on('close', saveBounds);
-
-  if (tray) tray.setToolTip(`${APP_NAME} — ${runtimeUrl || 'starting…'}`);
-  setTimeout(() => { createCockpitWindow(); showCockpitInactive(); }, 0);
-}
 
 /** Start optional integrations only after the first real renderer is visible. */
 function startDeferredServices() {
@@ -866,219 +735,20 @@ function startDeferredServices() {
   log('[perf] deferred services started after main window ready');
 }
 
-function cockpitDisplay() {
-  if (!mainWindow || mainWindow.isDestroyed()) return null;
-  try { return screen.getDisplayMatching(mainWindow.getBounds()); } catch { return screen.getPrimaryDisplay(); }
-}
 
-function syncCockpitBounds() {
-  if (!cockpitWindow || cockpitWindow.isDestroyed() || !mainWindow || mainWindow.isDestroyed()) return;
-  const display = cockpitDisplay();
-  if (!display) return;
-  const bounds = computeCockpitBounds(mainWindow.getBounds(), display.workArea, cockpitMode, undefined, cockpitOffset);
-  cockpitWindow.setBounds(bounds, false);
-}
 
-function scheduleCockpitSync() {
-  clearTimeout(cockpitSyncTimer);
-  cockpitSyncTimer = setTimeout(() => { cockpitSyncTimer = null; syncCockpitBounds(); }, 40);
-}
 
-function showCockpitInactive() {
-  if (!cockpitWindow || cockpitWindow.isDestroyed() || !mainWindow || mainWindow.isDestroyed()) return;
-  if (!mainWindow.isVisible() || mainWindow.isMinimized()) return;
-  // Never place the rail over an active auxiliary or configuration window.
-  if (settingsWindow && !settingsWindow.isDestroyed()) return;
-  if (quickAskWindow && !quickAskWindow.isDestroyed()) return;
-  if (searchWindow && !searchWindow.isDestroyed()) return;
-  syncCockpitBounds();
-  try { cockpitWindow.showInactive(); } catch { cockpitWindow.show(); }
-}
 
-function hideCockpit() {
-  if (cockpitWindow && !cockpitWindow.isDestroyed()) cockpitWindow.hide();
-}
 
-function prepareCockpitForAuxWindow() {
-  // Auxiliary windows temporarily own the foreground. Remember only cases
-  // where the visible main window can safely receive the rail back later.
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized()
-      && !(settingsWindow && !settingsWindow.isDestroyed())) {
-    cockpitHiddenForAuxWindow = true;
-  }
-  cockpitMode = 'rail';
-  hideCockpit();
-}
 
-function restoreCockpitRail() {
-  if (!cockpitHiddenForAuxWindow) return;
-  // Do not reveal the rail underneath another auxiliary or settings window.
-  if (settingsWindow && !settingsWindow.isDestroyed()) return;
-  if (quickAskWindow && !quickAskWindow.isDestroyed()) return;
-  if (searchWindow && !searchWindow.isDestroyed()) return;
-  cockpitHiddenForAuxWindow = false;
-  cockpitMode = 'rail';
-  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMinimized()) return;
-  createCockpitWindow();
-  showCockpitInactive();
-}
 
-function createCockpitWindow() {
-  if (cockpitWindow && !cockpitWindow.isDestroyed()) return cockpitWindow;
-  if (!mainWindow || mainWindow.isDestroyed()) return null;
-  cockpitWindow = new BrowserWindow({
-    parent: mainWindow,
-    modal: false,
-    frame: false,
-    transparent: true,
-    show: false,
-    skipTaskbar: true,
-    resizable: false,
-    fullscreenable: false,
-    focusable: true,
-    backgroundColor: '#00000000',
-    hasShadow: false,
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, 'cockpit-preload.js'),
-    },
-  });
-  cockpitWindow.loadFile(path.join(__dirname, 'cockpit.html'));
-  cockpitWindow.webContents.on('will-navigate', (e) => e.preventDefault());
-  cockpitWindow.on('will-move', (_event, nextBounds) => {
-    const display = cockpitDisplay();
-    if (!display || !nextBounds) return;
-    const base = computeCockpitBounds(mainWindow.getBounds(), display.workArea, cockpitMode);
-    cockpitOffset = { x: nextBounds.x - base.x, y: nextBounds.y - base.y };
-  });
-  cockpitWindow.on('moved', () => {
-    const display = cockpitDisplay();
-    if (!display || !mainWindow || mainWindow.isDestroyed()) return;
-    const base = computeCockpitBounds(mainWindow.getBounds(), display.workArea, cockpitMode);
-    const current = cockpitWindow.getBounds();
-    cockpitOffset = { x: current.x - base.x, y: current.y - base.y };
-  });
-  cockpitWindow.on('blur', () => {
-    if (cockpitMode !== 'rail' && cockpitMode !== 'onboarding') {
-      cockpitMode = 'rail';
-      cockpitWindow.webContents.send('cockpit:mode', 'rail');
-      syncCockpitBounds();
-    }
-  });
-  cockpitWindow.on('closed', () => { cockpitWindow = null; cockpitMode = 'rail'; });
-  syncCockpitBounds();
-  return cockpitWindow;
-}
 
-function cockpitNavigate(mode, page, intent) {
-  const allowed = {
-    control: ['cost', 'tasks', 'runtime', 'remote', 'plugins', 'skills', 'channels', 'longsession'],
-    settings: ['general', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about'],
-  };
-  const m = mode === 'control' || mode === 'settings' ? mode : 'settings';
-  const p = allowed[m].includes(page) ? page : (m === 'control' ? 'tasks' : 'general');
-  const safeIntent = m === 'control' && p === 'tasks' && intent === 'new-task' ? 'new-task' : '';
-  const route = safeIntent === 'new-task'
-    ? { mode: m, page: p, intent: 'new-task' }
-    : { mode: m, page: p, intent: '' };
-  createSettingsWindow(route);
-  hideCockpit();
-}
 
-async function buildCockpitSnapshot() {
-  const now = Date.now();
-  if (cockpitSnapshotCache.snapshot && now - cockpitSnapshotCache.at < COCKPIT_SNAPSHOT_TTL_MS) {
-    return cockpitSnapshotCache.snapshot;
-  }
-  const cfg = settings.get();
-  const runtime = manager.getInfo();
-  let usage = null;
-  let costData = null;
-  try { usage = costCache.data; } catch { /* no-op */ }
-  try { costData = usage ? await costSnapshot(usage) : null; } catch { /* no-op */ }
-  const tasks = cfg.scheduledTasks || [];
-  const history = cfg.scheduledHistory || [];
-  const snapshot = buildSnapshot({
-    runtime: { state: cockpitRuntimeState, child: !!runtimeChild, url: runtimeUrl, restarting: cockpitRuntimeState === 'restarting', version: runtime.activeVersion, activeVersion: runtime.activeVersion },
-    usage,
-    contextWindow: cfg.contextWindow,
-    cost: costData,
-    monthlyBudget: cfg.monthlyBudget,
-    tasks,
-    history,
-    running: [...scheduledRunning],
-    remote: remote ? { ...remote.status(), enabled: !!cfg.remoteControl, publicMode: cfg.remotePublicMode } : null,
-    shell: { version: APP_VERSION, language: lang(), theme: resolvedTheme(), needsSetup: !fs.existsSync(path.join(dshHomeOf(), '.credentials.yaml')), onboardingComplete: !!cfg.cockpitOnboarded },
-  });
-  cockpitSnapshotCache = { at: now, snapshot };
-  return snapshot;
-}
 
-function invalidateCockpitSnapshot() {
-  cockpitSnapshotCache.at = 0;
-}
 
-async function broadcastCockpitSnapshot() {
-  if (!cockpitWindow || cockpitWindow.isDestroyed()) return;
-  try { cockpitWindow.webContents.send('cockpit:snapshot', await buildCockpitSnapshot()); } catch { /* ignore */ }
-}
 
 /** Keep restored bounds at least partially visible on some display. */
-function safeBounds(saved) {
-  if (!saved) return null;
-  const ok = screen.getAllDisplays().some((d) => {
-    const a = d.workArea;
-    return saved.x < a.x + a.width - 40 && saved.y < a.y + a.height - 40
-      && saved.x + saved.width > a.x + 40 && saved.y + saved.height > a.y + 40;
-  });
-  return ok ? saved : null;
-}
 
-function createSettingsWindow(route) {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    if (route && route.mode) settingsWindow.webContents.send('center:navigate', { mode: route.mode, page: route.page || '', intent: route.intent === 'new-task' ? 'new-task' : '' });
-    settingsWindow.focus();
-    return settingsWindow;
-  }
-  settingsWindow = new BrowserWindow({
-    // 16:10-ish landscape: room for the planned sidebar (208px) + content
-    // column (~680px) per UI-REDESIGN-RESEARCH.md §4.3, instead of the old
-    // narrow tall strip.
-    width: 960,
-    height: 720,
-    minWidth: 760,
-    minHeight: 560,
-    backgroundColor: themeBackground(),
-    title: t(lang(), 'settings.title', { name: APP_NAME }),
-    icon: iconPath(),
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, 'settings-preload.js'),
-    },
-  });
-  const query = route && route.mode ? `?mode=${encodeURIComponent(route.mode)}&page=${encodeURIComponent(route.page || '')}${route.intent === 'new-task' ? '&intent=new-task' : ''}` : '';
-  settingsWindow.loadFile(path.join(__dirname, 'settings.html'), { search: query });
-  settingsWindow.webContents.on('will-navigate', (e) => e.preventDefault());
-  settingsWindow.on('closed', () => {
-    settingsWindow = null;
-    const returnPanel = returnToCockpitPending;
-    returnToCockpitPending = false;
-    cockpitMode = returnPanel ? 'panel' : 'rail';
-    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized()) {
-      createCockpitWindow();
-      showCockpitInactive();
-    }
-  });
-  settingsWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
-    if (level >= 2) log(`[settings:console] ${message} (${sourceId}:${line})`);
-  });
-  log('[shell] settings window opened');
-  return settingsWindow;
-}
 
 function iconPath() {
   if (app.isPackaged) return path.join(process.resourcesPath, 'icon.png');
@@ -1115,116 +785,49 @@ nativeTheme.on('theme-changed', () => broadcastTheme());
 // ---------------------------------------------------------------------------
 // tray
 // ---------------------------------------------------------------------------
+// A1: tray construction/menu lives in src/tray-menu.js (moved verbatim);
+// these wrappers keep every existing updateTray()/createTray() call site.
+const trayMenu = createTrayMenu({
+  Tray, Menu, nativeImage: require('electron').nativeImage, app,
+  iconPath,
+  noTray,
+  appName: APP_NAME,
+  lang,
+  t,
+  runtimeInfo: () => manager.getInfo(),
+  settingsGet: () => settings.get(),
+  peakWindowsOf,
+  costPeakStatus: cost.peakStatus,
+  quickAskAccelerator: () => quickAskShortcut.current(),
+  isMainWindowAlive: () => !!pickDialogParent(),
+  toggleDevTools: toggleMainDevTools,
+  quittingFlag: () => quitting,
+  setQuitting: (v) => { quitting = v; },
+  notify,
+  log,
+  actions: {
+    showMain,
+    openSettingsWindow: createSettingsWindow,
+    openQuickAsk,
+    runUpdateCheck,
+    applyPendingUpdate,
+    doRollback,
+    restartRuntime,
+    restartApp: () => { quitting = true; log('[shell] app relaunch requested'); app.relaunch(); app.exit(0); },
+    checkShellUpdate,
+    setWorkspace,
+  },
+});
+
 function updateTray() {
-  if (!tray) return;
-  const L = lang();
-  const info = manager.getInfo();
-  const pending = info.pendingVersion;
-  const canRollback = info.installed && info.installed.length > 1;
-  // peak/off-peak status line (only when split pricing is enabled)
-  const cfg = settings.get();
-  const windows = peakWindowsOf(cfg);
-  const peakItems = [];
-  if (windows) {
-    const ps = cost.peakStatus(Date.now(), windows);
-    const flatOut = cfg.costOutputPerM || 0;
-    const peakOut = cfg.costPeakOutputPerM || 0;
-    const hasPeakRate = !!(cfg.costPeakInputPerM || cfg.costPeakOutputPerM || cfg.costPeakCacheReadPerM || cfg.costPeakCacheWritePerM);
-    const rate = ps.peak ? (hasPeakRate ? peakOut : flatOut) : flatOut;
-    peakItems.push({
-      label: ps.peak
-        ? t(L, 'tray.peakOn', { r: rate, m: ps.nextChangeInMin })
-        : t(L, 'tray.peakOff', { r: rate, m: ps.nextChangeInMin }),
-      enabled: false,
-    });
-  }
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: t(L, 'tray.open'), click: () => showMain() },
-    ...peakItems,
-    { label: t(L, 'tray.settings'), click: () => createSettingsWindow() },
-    { label: t(L, 'tray.quickAsk'), accelerator: quickAskShortcut.current(), click: () => openQuickAsk() },
-    { type: 'separator' },
-    {
-      label: t(L, 'tray.checkUpdates'),
-      click: async () => { await runUpdateCheck(true); },
-    },
-    {
-      label: pending ? `${t(L, 'tray.applyUpdate')}（${info.activeVersion} → ${pending}）` : t(L, 'tray.applyUpdate'),
-      enabled: !!pending,
-      click: async () => {
-        try { await applyPendingUpdate(); } catch (err) { notify(t(L, 'notify.applyFailed'), err.message); }
-      },
-    },
-    {
-      label: t(L, 'tray.rollback'),
-      enabled: canRollback,
-      click: async () => {
-        try { await doRollback(); } catch (err) { notify(t(L, 'notify.rollbackFailed'), err.message); }
-      },
-    },
-    { type: 'separator' },
-    { label: t(L, 'tray.restartRuntime'), click: restartRuntime },
-    {
-      label: t(L, 'tray.checkShellUpdate'),
-      click: () => checkShellUpdate(true),
-    },
-    {
-      label: t(L, 'tray.workspaces'),
-      submenu: (settings.get().recentWorkspaces || []).filter(Boolean).length
-        ? settings.get().recentWorkspaces.filter(Boolean).map((ws) => ({
-            label: ws,
-            type: 'checkbox',
-            checked: settings.get().workspace === ws,
-            click: () => setWorkspace(ws),
-          }))
-        : [{ label: t(L, 'tray.noWorkspaces'), enabled: false }],
-    },
-    { label: t(L, 'tray.devtools'), click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.toggleDevTools(); } },
-    { type: 'separator' },
-    { label: t(L, 'tray.runtime', { v: info.activeVersion || '—' }), enabled: false },
-    { label: t(L, 'tray.quit'), click: () => { quitting = true; app.quit(); } },
-  ]));
+  trayMenu.updateTray();
 }
 
 function createTray() {
-  if (noTray) return;
-  const nativeImage = require('electron').nativeImage;
-  const baseIcon = nativeImage.createFromPath(iconPath());
-  if (process.platform === 'darwin') {
-    // macOS menu bar icon. The bundled icon.png is a 512x512 RGBA app icon
-    // with an opaque background — using it as a template image (Electron's
-    // default for small icons) renders it as a solid block because the whole
-    // alpha channel is fully opaque. Show it as a colored icon instead:
-    // resize to 22x22 (the standard menubar size) and explicitly opt out of
-    // template mode so macOS shows the original artwork.
-    const resized = baseIcon.resize({ width: 22, height: 22 });
-    resized.setTemplateImage(false);
-    tray = new Tray(resized);
-  } else {
-    tray = new Tray(baseIcon.resize({ width: 16, height: 16 }));
-  }
-  tray.setToolTip(APP_NAME);
-  tray.on('click', () => showMain());
-  updateTray();
+  trayMenu.createTray();
 }
 
-function showMain() {
-  if (!mainWindow) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
-}
 
-function restartRuntime() {
-  log('[shell] restart requested');
-  runtimeStateController.begin('restarting');
-  stopEventsFeed();
-  eventsFeedLiveLogged = false;
-  if (runtimeChild) { runtimeChild.kill(); runtimeChild = null; }
-  runtimeUrl = null;
-  if (remote) remote.setRuntimeUrl(null); // gateway answers 503 until the new URL arrives
-  spawnRuntime();
-}
 
 /**
  * Minimal application menu: keeps keyboard shortcuts alive (Ctrl+R reload,
@@ -1259,9 +862,9 @@ function buildAppMenu() {
     {
       label: t(L, 'menu.view'),
       submenu: [
-        { label: t(L, 'menu.reload'), accelerator: 'CmdOrCtrl+R', click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload(); } },
-        { label: t(L, 'menu.devtools'), accelerator: 'CmdOrCtrl+Shift+I', click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.toggleDevTools(); } },
-        { label: t(L, 'menu.openBrowser'), accelerator: 'CmdOrCtrl+Shift+O', click: () => { if (runtimeUrl) shell.openExternal(runtimeUrl); } },
+        { label: t(L, 'menu.reload'), accelerator: 'CmdOrCtrl+R', click: () => reloadMainWindow() },
+        { label: t(L, 'menu.devtools'), accelerator: 'CmdOrCtrl+Shift+I', click: () => toggleMainDevTools() },
+        { label: t(L, 'menu.openBrowser'), accelerator: 'CmdOrCtrl+Shift+O', click: () => { const ru = getRuntimeUrl(); if (ru) shell.openExternal(ru); } },
       ],
     },
   ];
@@ -1401,7 +1004,7 @@ function applyRemoteSettings(saved) {
   remote.setPublicMode(!!saved.remotePublic); // C7 posture follows the switch, no restart needed
   remote.stop();
   if (saved.remoteControl) {
-    remote.setRuntimeUrl(runtimeUrl);
+    remote.setRuntimeUrl(getRuntimeUrl());
     remote.start({ port: saved.remotePort, compat: !!saved.remoteCompat })
       .then((s) => { if (!s.running) notify(t(lang(), 'notify.remoteFailed'), t(lang(), 'notify.remoteFailedBody')); })
       .catch((e) => log(`[remote] start failed: ${e.message}`));
@@ -1534,7 +1137,7 @@ function registerIpc() {
   });
   ipcMain.handle('shell:get-theme', () => resolvedTheme());
   ipcMain.handle('shell:pick-folder', async (_e, kind) => {
-    const res = await dialog.showOpenDialog(settingsWindow || mainWindow, {
+    const res = await dialog.showOpenDialog(pickDialogParent(), {
       properties: ['openDirectory', 'createDirectory'],
       title: kind === 'workspace'
         ? t(lang(), 'dialog.pickWorkspace')
@@ -1629,9 +1232,33 @@ function registerIpc() {
   // manual fallback for "plugin installed but webUI did not refresh": same
   // restart the tray uses; refuse (instead of quitting) when no runtime exists
   ipcMain.handle('shell:restart-runtime', () => {
-    if (!activeDshBin()) return { ok: false, reason: 'no runtime found' };
+    log('[shell] restart requested');
     restartRuntime();
     return { ok: true };
+  });
+  // H10: manual shell-update check from Settings → Updates
+  ipcMain.handle('shell:check-shell-update', async () => {
+    try { await checkShellUpdate(true); return { ok: true }; }
+    catch (err) { return { ok: false, reason: err.message }; }
+  });
+  // A1: v0.3.0 feature-domain IPC (boot/notifications/weekly/cache-econ/compat)
+  // registered in src/ipc-features.js
+  registerFeatureIpc(ipcMain, {
+    bootCheck,
+    nc,
+    weeklyGet: () => weekly,
+    channelsGet: () => channelsMgr,
+    collectStats,
+    buildCacheEconomics,
+    pricingFromSettings,
+    settingsGet: () => settings.get(),
+    compatStatus,
+    shellOpen: (p) => shell.openPath(p),
+    appGetPath: (k) => app.getPath(k),
+    notify,
+    t,
+    lang,
+    log,
   });
   ipcMain.handle('shell:cost-info', async () => {
     const stats = await collectStats();
@@ -1654,7 +1281,7 @@ function registerIpc() {
   ipcMain.handle('shell:diagnostics-info', () => diagnosticsInfo());
   ipcMain.handle('shell:open-diagnostics', () => shell.openPath(diagnosticsDir()));
   ipcMain.handle('quickask:submit', (_e, prompt) => handleQuickAskSubmit(prompt));
-  ipcMain.on('quickask:close', () => { if (quickAskWindow) quickAskWindow.close(); });
+  ipcMain.on('quickask:close', () => auxWindows.closeQuickAsk());
   ipcMain.handle('shell:scheduled-list', () => ({
     tasks: settings.get().scheduledTasks || [],
     running: [...scheduledRunning],
@@ -1826,13 +1453,102 @@ function registerIpc() {
     if (typeof text === 'string' && text.length > 0 && text.length <= 4096) clipboard.writeText(text);
     return null;
   });
-  ipcMain.on('search:close', () => { if (searchWindow) searchWindow.close(); });
+
+  // ------------------------------ MCP manager (v0.3.1 T1) ----------------
+  // Secret values cross renderer→main exactly once (mcp:save) and are stored
+  // in the safeStorage vault; list/get responses carry configured-flags only,
+  // never values (same discipline as the models panel above).
+  const mcpReady = () => (mcpMgr ? null : { ok: false, reason: 'not ready' });
+  ipcMain.handle('mcp:list', () => (mcpMgr ? mcpMgr.listServers() : { ok: true, servers: [], patchBlockIds: [], patchFile: '' }));
+  ipcMain.handle('mcp:get', (_e, id) => (mcpMgr ? mcpMgr.getServer(String(id || '')) : mcpReady()));
+  ipcMain.handle('mcp:save', async (_e, input, secrets) => {
+    const notReady = mcpReady();
+    if (notReady) return notReady;
+    try { return await mcpMgr.save(input || {}, secrets || {}); } catch (e) {
+      log(`[mcp] save failed: ${e.message}`);
+      return { ok: false, reason: e.message };
+    }
+  });
+  ipcMain.handle('mcp:remove', async (_e, id) => {
+    const notReady = mcpReady();
+    if (notReady) return notReady;
+    try { return await mcpMgr.remove(String(id || '')); } catch (e) {
+      log(`[mcp] remove failed: ${e.message}`);
+      return { ok: false, reason: e.message };
+    }
+  });
+  ipcMain.handle('mcp:toggle', async (_e, id, enabled) => {
+    const notReady = mcpReady();
+    if (notReady) return notReady;
+    try { return await mcpMgr.toggle(String(id || ''), !!enabled); } catch (e) {
+      log(`[mcp] toggle failed: ${e.message}`);
+      return { ok: false, reason: e.message };
+    }
+  });
+  ipcMain.handle('mcp:test', async (_e, target) => {
+    if (!mcpConn || !mcpMgr) return { ok: false, reason: 'not ready' };
+    try {
+      const t = target || {};
+      const stored = t.id ? mcpMgr.getServer(String(t.id)) : null;
+      const server = t.transport ? t : (stored && stored.ok ? stored.server : null);
+      if (!server) return { ok: false, reason: 'unknown server' };
+      // the probe uses the WRAPPED command, exactly what the patch file runs
+      const wrapped = server.transport === 'stdio' ? wrapForWindows(server.command, server.args) : server;
+      return await mcpConn.tier2({ ...server, command: wrapped.command, args: wrapped.args || server.args }, (id, key) => mcpMgr.resolveSecret(id, key));
+    } catch (e) {
+      log(`[mcp] test failed: ${e.message}`);
+      return { ok: false, reason: e.message };
+    }
+  });
+  ipcMain.handle('mcp:tier1', async (_e, id) => {
+    if (!mcpConn || !mcpMgr) return { ok: false, status: 'error', reason: 'not ready' };
+    const stored = mcpMgr.getServer(String(id || ''));
+    return stored && stored.ok ? mcpConn.tier1(stored.server) : { ok: false, status: 'error', reason: 'unknown server' };
+  });
+  ipcMain.handle('mcp:registry', async (_e, query, category) => {
+    if (!mcpReg) return { ok: true, items: [] };
+    try { return { ok: true, items: await mcpReg.list(String(query || ''), String(category || 'all')) }; } catch (e) {
+      return { ok: true, items: mcpReg.BUILTIN };
+    }
+  });
+  ipcMain.handle('mcp:import-scan', () => (mcpImp ? { ok: true, sources: mcpImp.scanSources() } : { ok: true, sources: [] }));
+  ipcMain.handle('mcp:import-run', async (_e, sourceKey, selectedNames, clipboardText) => {
+    if (!mcpImp || !mcpMgr) return { ok: false, reason: 'not ready' };
+    try {
+      const existing = mcpMgr.listServers().servers.map((s) => s.id);
+      const prep = mcpImp.prepare(String(sourceKey || ''), Array.isArray(selectedNames) ? selectedNames : null, clipboardText, existing);
+      if (!prep.ok) return prep;
+      const imported = [];
+      const failed = [];
+      for (const item of prep.items) {
+        if (item.error) { failed.push({ name: item.name, reason: item.error }); continue; }
+        const r = await mcpMgr.save(item.server, item.secrets || {});
+        if (r.ok) imported.push(r.server.id);
+        else failed.push({ name: item.name, reason: r.reason });
+      }
+      return { ok: true, imported, failed };
+    } catch (e) {
+      log(`[mcp] import failed: ${e.message}`);
+      return { ok: false, reason: e.message };
+    }
+  });
+  ipcMain.handle('mcp:usage', async (_e, days) => {
+    // rides the session worker: zstd + log parsing never touch the main thread
+    if (!sessionWorkerClient) return { ok: true, usage: { servers: {} } };
+    try {
+      const usage = await sessionWorkerClient.mcpUsage(dshHomeOf(), { maxFiles: 400 });
+      return { ok: true, usage };
+    } catch (e) {
+      return { ok: true, usage: { servers: {} }, reason: e.message };
+    }
+  });
+  ipcMain.on('search:close', () => auxWindows.closeSearchWindow());
 
   ipcMain.handle('cockpit:get-snapshot', () => buildCockpitSnapshot());
   ipcMain.handle('cockpit:set-mode', (_e, mode) => {
-    cockpitMode = ['rail', 'peek', 'taskpeek', 'panel', 'onboarding'].includes(mode) ? mode : 'rail';
+    const r = setCockpitMode(mode);
     syncCockpitBounds();
-    return { ok: true, mode: cockpitMode };
+    return r;
   });
   ipcMain.handle('cockpit:set-language', (_e, language) => {
     const value = language === 'en' ? 'en' : 'zh';
@@ -1845,9 +1561,9 @@ function registerIpc() {
   ipcMain.handle('cockpit:move-offset', (_e, dx, dy) => {
     const x = Number(dx); const y = Number(dy);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return { ok: false };
-    cockpitOffset = { x: Math.max(-2000, Math.min(2000, cockpitOffset.x + x)), y: Math.max(-1200, Math.min(1200, cockpitOffset.y + y)) };
+    const r = moveCockpitOffset(x, y);
     syncCockpitBounds();
-    return { ok: true, offset: cockpitOffset };
+    return r;
   });
   ipcMain.handle('cockpit:complete-onboarding', () => {
     settings.patch({ cockpitOnboarded: true });
@@ -1865,19 +1581,8 @@ function registerIpc() {
     return setWorkspace(ws);
   });
   ipcMain.on('cockpit:close', () => hideCockpit());
-  ipcMain.on('center:close', () => { if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close(); });
-  ipcMain.on('center:return-cockpit', () => {
-    if (settingsWindow && !settingsWindow.isDestroyed()) {
-      returnToCockpitPending = true;
-      settingsWindow.close();
-    } else {
-      returnToCockpitPending = false;
-    }
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
-    cockpitMode = 'panel';
-    if (cockpitWindow && !cockpitWindow.isDestroyed()) cockpitWindow.webContents.send('cockpit:mode', 'panel');
-    showCockpitInactive();
-  });
+  ipcMain.on('center:close', () => closeSettingsWindow());
+  ipcMain.on('center:return-cockpit', () => returnToCockpit('panel'));
 
   // long-session center (C3): compaction + AGENTS.md memory files
   ipcMain.handle('shell:compact-now', async () => compactNow());
@@ -2157,13 +1862,120 @@ async function marketPayload(force) {
   return { ok: true, source, fetchedAt, ...buildMarketPayload(entries, starMap, installed) };
 }
 
+/** Best-effort directory that provides a runnable `pnpm` (bundled shim first,
+ * then common Homebrew/usr-local locations on macOS). Null when nothing is
+ * available, in which case callers keep the ambient PATH. */
+function pnpmShimDir() {
+  if (_pnpmShimDirCached === undefined) {
+    const node = bestNodeBin();
+    _pnpmShimDirCached = ensurePnpmShim({
+      userDataDir: app.getPath('userData'),
+      nodeBin: node.bin,
+      fromDir: __dirname,
+    });
+  }
+  return _pnpmShimDirCached;
+}
+
+/** env for dsh CLI child processes with the pnpm shim prepended to PATH. */
+function dshCliEnv(extra) {
+  const env = { ...process.env, ...extra };
+  const shim = pnpmShimDir();
+  if (shim) env.PATH = prependPath(shim, env.PATH);
+  // H8: git is required for GitHub-sourced plugins (pnpm -> git ls-remote).
+  // GUI-launched apps inherit a minimal PATH, so probe the usual install
+  // locations and inject what we find.
+  const gitDir = locateGitDir();
+  if (gitDir) env.PATH = prependPath(gitDir, env.PATH);
+  return env;
+}
+
+/** v0.3.1 MCP (M-1): after every cordis.patch.yml write, `--dump-config` must
+ * exit 0 — a rejected write rolls the file back before the user ever sees it.
+ * Checks are serialized; a spawn error or missing runtime bin skips (never
+ * blocks) verification, and a timeout also skips: dump-config exits non-zero
+ * on bad config, it does not hang — hangs are cold machines / AV scans. */
+let _dumpConfigInflight = null;
+function dumpConfigVerify() {
+  if (_dumpConfigInflight) return _dumpConfigInflight;
+  const node = bestNodeBin();
+  const binJs = activeDshBin();
+  if (!node || !node.bin || !binJs || !fs.existsSync(binJs)) {
+    return Promise.resolve({ ok: true, skipped: 'no-runtime' });
+  }
+  const env = dshCliEnv({ DSH_HOME: dshHomeOf() });
+  if (node.runAsNode) env.ELECTRON_RUN_AS_NODE = '1';
+  _dumpConfigInflight = new Promise((resolve) => {
+    let child;
+    const done = (r) => { _dumpConfigInflight = null; resolve(r); };
+    try {
+      child = spawn(node.bin, [binJs, '--profile', 'web', '--dump-config'], {
+        env, cwd: dshHomeOf(), windowsHide: true, stdio: 'ignore', timeout: 8000,
+      });
+    } catch {
+      done({ ok: true, skipped: 'spawn' });
+      return;
+    }
+    child.on('error', () => done({ ok: true, skipped: 'spawn' }));
+    child.on('close', (code, signal) => {
+      if (signal) done({ ok: true, skipped: 'timeout' });
+      else done({ ok: code === 0, reason: code === 0 ? null : `dump-config exit ${code}` });
+    });
+  });
+  return _dumpConfigInflight;
+}
+
+let _gitDirCache; // undefined = not probed; null = not found
+/** Locate a usable git: common install locations first (Windows GUI apps
+ * get a stripped PATH), then the ambient PATH. Returns its directory. */
+function locateGitDir() {
+  if (_gitDirCache !== undefined) return _gitDirCache;
+  const exe = process.platform === 'win32' ? 'git.exe' : 'git';
+  const candidates = process.platform === 'win32'
+    ? [
+        'C:\\Program Files\\Git\\cmd',
+        'C:\\Program Files (x86)\\Git\\cmd',
+        path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Git', 'cmd'),
+      ]
+    : ['/usr/local/bin', '/opt/homebrew/bin', '/usr/bin'];
+  for (const dir of candidates) {
+    try { if (fs.existsSync(path.join(dir, exe))) { _gitDirCache = dir; return dir; } } catch { /* ignore */ }
+  }
+  const line = firstLineOf(process.platform === 'win32' ? 'where.exe' : 'which', ['git']);
+  _gitDirCache = line ? path.dirname(line) : null;
+  return _gitDirCache;
+}
+
 /** Run `dsh plugin --profile web <args>`; output to a log file (fd, sandbox-safe).
  * Resolves { ok, code: 'exit'|'timeout'|'spawn', output }. `onTail({stage,tail})`
- * streams incremental child output so the market UI can show live progress. */
-function runDshPlugin(args, timeoutMs = 120_000, onTail = null) {
+ * streams incremental child output so the market UI can show live progress.
+ * H6: before spawning, resolve a pnpm matching the profile's creating major
+ * (.modules.yaml) — bundled pnpm 10 stays the fallback; only plugin ops pay
+ * for this resolution (startup never touches it). */
+async function runDshPlugin(args, timeoutMs = 120_000, onTail = null) {
   const node = bestNodeBin();
   const binJs = activeDshBin();
   const dshHome = dshHomeOf();
+  // H6: follow the user's environment — the profile decides which pnpm runs
+  let pnpmRes = { shimDir: null };
+  try {
+    pnpmRes = await resolvePnpmForProfile({
+      profileDir: profileDirOf(),
+      userDataDir: app.getPath('userData'),
+      nodeBin: node.bin,
+      fromDir: __dirname,
+    });
+  } catch (err) {
+    pnpmRes = { error: 'install-failed', reason: err.message };
+  }
+  if (pnpmRes.error) {
+    log(`[shell] pnpm resolve failed (major=${pnpmRes.major}): ${pnpmRes.reason || pnpmRes.error}`);
+    return {
+      ok: false,
+      code: 'spawn',
+      output: t(lang(), 'plugin.pnpmMismatch', { major: pnpmRes.major || '?' }),
+    };
+  }
   const outFile = path.join(ensureLogDir(), `plugin-${Date.now()}.out`);
   let fd = -1;
   try { fd = fs.openSync(outFile, 'a'); } catch { /* ignore */ }
@@ -2174,7 +1986,10 @@ function runDshPlugin(args, timeoutMs = 120_000, onTail = null) {
     try { fs.closeSync(fd); } catch { /* ignore */ }
   };
   return new Promise((resolve) => {
-    const env = { ...process.env, DSH_HOME: dshHome };
+    // H6: the profile-matched shim dir wins; fall back to the legacy bundled
+    // shim dir (dshCliEnv) when resolution produced nothing usable
+    const env = dshCliEnv({ DSH_HOME: dshHome });
+    if (pnpmRes.shimDir) env.PATH = prependPath(pnpmRes.shimDir, env.PATH);
     if (node.runAsNode) env.ELECTRON_RUN_AS_NODE = '1';
     let child;
     try {
@@ -2224,6 +2039,15 @@ function runDshPlugin(args, timeoutMs = 120_000, onTail = null) {
       let out = '';
       try { out = fs.readFileSync(outFile, 'utf8'); } catch { /* ignore */ }
       log(`[shell] dsh plugin ${args.join(' ')} -> exit ${code}`);
+      // H8: a git-source plugin failing on git ls-remote means git is not
+      // reachable from this app — wrap the raw pnpm error in guidance.
+      let outText = '';
+      try { outText = fs.readFileSync(outFile, 'utf8'); } catch { /* ignore */ }
+      if (code !== 0 && /git (ls-remote|clone)|unable to find git|git is not recognized/i.test(outText)) {
+        log('[shell] git unreachable for plugin install');
+        resolve({ ok: false, code: 'exit', output: t(lang(), 'plugin.gitMissing', { msg: String(out).slice(-300) }) });
+        return;
+      }
       resolve({ ok: code === 0, code: 'exit', output: out.slice(-2000) });
     });
   });
@@ -2231,15 +2055,17 @@ function runDshPlugin(args, timeoutMs = 120_000, onTail = null) {
 
 /** Forward plugin-install progress to the settings window (plugin center). */
 function sendMarketProgress(info) {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    try { settingsWindow.webContents.send('plugins:progress', info); } catch { /* ignore */ }
+  const swc = getSettingsWindowWebContents();
+  if (swc) {
+    try { swc.send('plugins:progress', info); } catch { /* ignore */ }
   }
 }
 
 /** Forward skill install/upgrade progress (resolve → download → verify → write). */
 function sendSkillsProgress(info) {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    try { settingsWindow.webContents.send('skills:progress', info); } catch { /* ignore */ }
+  const swc = getSettingsWindowWebContents();
+  if (swc) {
+    try { swc.send('skills:progress', info); } catch { /* ignore */ }
   }
 }
 
@@ -2626,7 +2452,8 @@ async function pluginAction(action, fullName) {
   }
 }
 function pushTokens(stats) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const mw = getMainWindowWebContents();
+  if (!mw) return;
   if (!stats) return; // async collect now drives all callers; no sync fallback
   // The Harness renderer is intentionally untouched. Cockpit consumes the
   // normalized snapshot from its own window instead of receiving injected UI data.
@@ -2645,9 +2472,9 @@ async function compactNow() {
   if (sessionRunning || (compactTracker && compactTracker.isCompacting())) {
     return { ok: false, code: 'busy', reason: t(lang(), 'compact.busy') };
   }
-  if (!runtimeUrl) return { ok: false, code: 'runtime-offline', reason: t(lang(), 'compact.noWindow') };
+  if (!getRuntimeUrl()) return { ok: false, code: 'runtime-offline', reason: t(lang(), 'compact.noWindow') };
   const info = manager.getInfo();
-  const client = createHarnessRpcClient({ baseUrl: runtimeUrl, version: info.activeVersion || '' });
+  const client = createHarnessRpcClient({ baseUrl: getRuntimeUrl(), version: info.activeVersion || '' });
   const r = await client.compactLatestSession();
   if (!r.ok) {
     const reason = t(lang(), 'compact.failedBody', { code: r.code });
@@ -2660,8 +2487,9 @@ async function compactNow() {
 }
 
 function broadcastCompactStatus() {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    settingsWindow.webContents.send('compact:status', {
+  const swc = getSettingsWindowWebContents();
+  if (swc) {
+    swc.send('compact:status', {
       compacting: compactTracker ? compactTracker.isCompacting() : false,
       sessionRunning,
     });
@@ -2768,9 +2596,9 @@ function checkBudget(monthCost) {
   budgetNotified.add(key);
   const pct = Math.round((monthCost / budget) * 100);
   if (status === 'exceed') {
-    notify(t(lang(), 'notify.budgetExceed'), t(lang(), 'notify.budgetExceedBody', { pct }));
+    notifyAs('budget', t(lang(), 'notify.budgetExceed'), t(lang(), 'notify.budgetExceedBody', { pct }));
   } else {
-    notify(t(lang(), 'notify.budgetWarn'), t(lang(), 'notify.budgetWarnBody', { pct }));
+    notifyAs('budget', t(lang(), 'notify.budgetWarn'), t(lang(), 'notify.budgetWarnBody', { pct }));
   }
 }
 
@@ -2906,6 +2734,28 @@ function initCompactTracking() {
   compactTimer = setInterval(() => { if (!quitting) compactTracker.tick(); }, TOKEN_POLL_MS);
 }
 
+function showCredentialUpgradeDialog(message) {
+  log('[shell] credential format mismatch detected in runtime log');
+  dialog.showMessageBox({
+    type: 'error',
+    title: APP_NAME,
+    message: t(lang(), 'crash.credFormat.title'),
+    detail: `${t(lang(), 'crash.credFormat.body')}\n\n${message}`,
+    buttons: [t(lang(), 'crash.credFormat.upgradeNow'), t(lang(), 'crash.credFormat.later')],
+    defaultId: 0,
+    cancelId: 1,
+  }).then(({ response }) => {
+    if (response !== 0) return;
+    // reuse the standard update pipeline: check -> install -> smoke -> activate -> restart
+    Promise.resolve(runUpdateCheck(true))
+      .then((report) => {
+        if (!report || !report.ok) return; // failure already surfaced by the pipeline
+        return applyPendingUpdate().catch((err) => notify(t(lang(), 'notify.applyFailed'), err.message));
+      })
+      .catch(() => { /* pipeline already notified */ });
+  }).catch(() => { /* dialog failed */ });
+}
+
 // ---------------------------------------------------------------------------
 // crash diagnostics
 // ---------------------------------------------------------------------------
@@ -2914,11 +2764,12 @@ function recordCrash(code, signal) {
     const dir = diagnosticsDir();
     fs.mkdirSync(dir, { recursive: true });
     let tail = '';
-    try { tail = fs.readFileSync(runtimeLogPath, 'utf8').split('\n').slice(-20).join('\n'); } catch { /* ignore */ }
+    const logPath = getRuntimeLogPath();
+    try { tail = logPath ? fs.readFileSync(logPath, 'utf8').split('\n').slice(-20).join('\n') : ''; } catch { /* ignore */ }
     const rec = {
       ts: new Date().toISOString(), code, signal,
       activeVersion: manager.getInfo().activeVersion,
-      logPath: runtimeLogPath,
+      logPath,
       logTail: tail,
     };
     fs.writeFileSync(path.join(dir, `crash-${Date.now()}.json`), JSON.stringify(rec, null, 2));
@@ -2936,136 +2787,17 @@ function diagnosticsInfo() {
 // ---------------------------------------------------------------------------
 // Quick Ask (global hotkey -> background headless run)
 // ---------------------------------------------------------------------------
-function createQuickAsk() {
-  if (quickAskWindow && !quickAskWindow.isDestroyed()) {
-    quickAskWindow.show();
-    quickAskWindow.focus();
-    return quickAskWindow;
-  }
-  quickAskWindow = new BrowserWindow({
-    width: 460,
-    height: 190,
-    frame: false,
-    alwaysOnTop: true,
-    resizable: false,
-    skipTaskbar: true,
-    show: false,
-    backgroundColor: themeBackground(),
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, 'quickask-preload.js'),
-    },
-  });
-  quickAskWindow.loadFile(path.join(__dirname, 'quickask.html'));
-  quickAskWindow.webContents.on('will-navigate', (e) => e.preventDefault());
-  quickAskWindow.once('ready-to-show', () => quickAskWindow.show());
-  quickAskWindow.on('closed', () => {
-    quickAskWindow = null;
-    restoreCockpitRail();
-  });
-  return quickAskWindow;
-}
 
-function openQuickAsk() {
-  prepareCockpitForAuxWindow();
-  return createQuickAsk();
-}
 
-function createSearchWindow() {
-  if (searchWindow && !searchWindow.isDestroyed()) {
-    searchWindow.show();
-    searchWindow.focus();
-    return searchWindow;
-  }
-  searchWindow = new BrowserWindow({
-    width: 520,
-    height: 420,
-    frame: false,
-    alwaysOnTop: true,
-    resizable: false,
-    skipTaskbar: true,
-    show: false,
-    backgroundColor: themeBackground(),
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, 'search-preload.js'),
-    },
-  });
-  searchWindow.loadFile(path.join(__dirname, 'search.html'));
-  searchWindow.webContents.on('will-navigate', (e) => e.preventDefault());
-  searchWindow.once('ready-to-show', () => searchWindow.show());
-  searchWindow.on('closed', () => {
-    searchWindow = null;
-    restoreCockpitRail();
-  });
-  return searchWindow;
-}
 
-function openSearchWindow() {
-  prepareCockpitForAuxWindow();
-  return createSearchWindow();
-}
+
+
 
 // ---------------------------------------------------------------------------
 // guided first run (no runtime anywhere: install from the registry)
 // ---------------------------------------------------------------------------
-let pendingLoadingText = null;
 
-function createLoadingWindow() {
-  if (loadingWindow && !loadingWindow.isDestroyed()) { loadingWindow.focus(); return loadingWindow; }
-  loadingWindow = new BrowserWindow({
-    width: 480,
-    height: 260,
-    frame: false,
-    resizable: false,
-    show: false,
-    backgroundColor: themeBackground(), // cover the first paint; the page bg matches
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, 'loading-preload.js'),
-    },
-  });
-  loadingWindow.loadFile(path.join(__dirname, 'loading.html'));
-  loadingWindow.webContents.on('will-navigate', (e) => e.preventDefault());
-  loadingWindow.once('ready-to-show', () => {
-    if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.show();
-  });
-  loadingWindow.webContents.on('did-fail-load', (_event, code, description) => {
-    log(`[shell] loading window failed to load (${code}): ${description}`);
-    setLoading(t(lang(), 'loading.failed', { msg: description || code }));
-  });
-  // re-send the latest text once the page is ready (setLoading may have been
-  // called before the renderer registered its IPC listener)
-  loadingWindow.webContents.once('did-finish-load', () => {
-    if (loadingWindow && !loadingWindow.isDestroyed()) {
-      if (pendingLoadingText) loadingWindow.webContents.send('loading:progress', pendingLoadingText);
-      loadingWindow.webContents.send('loading:meta', { version: app.getVersion() });
-      // `ready-to-show` is the normal path; this fallback covers older
-      // Electron/Windows GPU combinations that never emit it for a frameless
-      // window even though the document is fully loaded.
-      if (!loadingWindow.isVisible()) loadingWindow.show();
-    }
-  });
-  loadingWindow.on('closed', () => { loadingWindow = null; pendingLoadingText = null; });
-  return loadingWindow;
-}
 
-function setLoading(text) {
-  pendingLoadingText = text;
-  try {
-    if (loadingWindow && !loadingWindow.isDestroyed() && !loadingWindow.webContents.isDestroyed()) {
-      loadingWindow.webContents.send('loading:progress', text);
-    }
-  } catch (err) {
-    log(`[shell] loading progress delivery skipped: ${err.message}`);
-  }
-}
 
 /**
  * Find the runtime bundled into the installer (resources/runtime/<version>).
@@ -3111,7 +2843,7 @@ function registerBundledRuntime() {
 }
 
 async function ensureRuntimeWithGuide() {
-  if (ensureRuntimeRegistered()) return true;
+  if (await ensureRuntimeRegistered()) return true;
   // brand-new machine with NO dsh and NO usable bundle: registry install (rare)
   log('[shell] guided first-run: no usable runtime found, installing from the registry');
   try {
@@ -3140,7 +2872,7 @@ async function ensureRuntimeWithGuide() {
     await manager.activate(target);
     log(`[shell] guided first-run: installed runtime ${target} from the registry`);
     setLoading(t(lang(), 'loading.done'));
-    setTimeout(() => { if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.close(); }, 800);
+    setTimeout(() => { closeLoading(); }, 800);
     return true;
   } catch (err) {
     log(`[shell] guided first-run failed: ${err.message}`);
@@ -3179,7 +2911,8 @@ async function handleQuickAskSubmit(prompt) {
       logDir: ensureLogDir(),
       prompt: prompt.trim(),
     });
-    notify(t(lang(), 'notify.quickAskDone'), t(lang(), 'notify.quickAskDoneBody', { ok: result.ok ? '✓' : '✗' }));
+    notifyAs('completion', t(lang(), 'notify.quickAskDone'), t(lang(), 'notify.quickAskDoneBody', { ok: result.ok ? '✓' : '✗' }));
+    if (weekly && result.ok) weekly.record('quickask', true); // R5 activity stream
     return result;
   } finally {
     quickAskRunning = false;
@@ -3227,10 +2960,11 @@ async function runScheduledTask(task) {
     log(`[scheduler] history write failed: ${e.message}`);
   }
   log(`[scheduler] ${task.name || task.id} finished ok=${result.ok} (${Math.round(result.durationMs / 1000)}s)`);
-  notify(
+  notifyAs('completion',
     t(lang(), 'notify.taskDone'),
     t(lang(), 'notify.scheduledDoneBody', { name: task.name || task.id, ok: result.ok ? '✓' : '✗' })
   );
+  if (weekly) weekly.record('task', !!result.ok); // R5 activity stream
   broadcastScheduled();
   return result;
 }
@@ -3258,8 +2992,9 @@ function startScheduler() {
 // ---------------------------------------------------------------------------
 function startEventsFeed() {
   stopEventsFeed();
-  if (!runtimeUrl || quitting) return;
-  const base = runtimeUrl.endsWith('/') ? runtimeUrl : `${runtimeUrl}/`;
+  const ru = getRuntimeUrl();
+  if (!ru || quitting) return;
+  const base = ru.endsWith('/') ? ru : `${ru}/`;
   const onFeedError = (err) => {
     log(`[shell] events feed error: ${err.message}`);
     if (quitting) return;
@@ -3269,10 +3004,15 @@ function startEventsFeed() {
   // host stream: session running state (task done)
   eventsFeed.push(connectEvents(base, '/api/events.host', (frame) => {
     if (frame && frame.type === 'host/session-status') {
+      const wasRunning = sessionRunning;
       sessionRunning = !!frame.running; // busy check for the manual /compact entry (C3)
       if (!eventsFeedLiveLogged) {
         eventsFeedLiveLogged = true;
         log(`[shell] events feed live (session ${frame.sessionId}, running=${frame.running})`);
+      }
+      // H-im L2: rising edge → taskStarted push; falling edge → taskDone (existing)
+      if (frame.running === true && !wasRunning && channelsMgr) {
+        channelsMgr.broadcast({ kind: 'taskStarted' });
       }
       if (frame.running === false) {
         onTaskDone();
@@ -3307,7 +3047,7 @@ function stopEventsFeed() {
 }
 
 function windowHidden() {
-  return !mainWindow || !mainWindow.isVisible() || mainWindow.isMinimized();
+  return !hasVisibleMainWindow();
 }
 
 function onTaskDone() {
@@ -3318,9 +3058,89 @@ function onTaskDone() {
   // inside the channel manager; no-ops while no channel is enabled.
   if (channelsMgr) channelsMgr.broadcast({ kind: 'taskDone' });
   if (!windowHidden()) return; // user is watching
-  notify(t(lang(), 'notify.taskDone'), t(lang(), 'notify.taskDoneBody'));
+  notifyAs('completion', t(lang(), 'notify.taskDone'), t(lang(), 'notify.taskDoneBody'));
 }
 
+
+// ---------------------------------------------------------------------------
+// H-im: IM ↔ running Harness session binding (/bind /unbind /stop) + lifecycle
+// ---------------------------------------------------------------------------
+const imCommandBindings = new Map(); // 'im:<senderId>' -> harness sessionId
+const imCommandBindingsFile = () => path.join(app.getPath('userData'), 'im-bindings.json');
+function loadImBindings() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(imCommandBindingsFile(), 'utf8'));
+    for (const [k, v] of Object.entries(raw || {})) if (typeof v === 'string') imCommandBindings.set(k, v);
+  } catch { /* first run */ }
+}
+function saveImBindings() {
+  try {
+    fs.writeFileSync(imCommandBindingsFile(), JSON.stringify(Object.fromEntries(imCommandBindings)));
+  } catch { /* best effort */ }
+}
+loadImBindings();
+
+/** Handle the IM-only commands delegated by the channel dispatcher. */
+async function handleImCommand({ command, senderId, text }) {
+  const L = lang();
+  const key = `im:${senderId}`;
+  const arg = String(text || '');
+  try {
+    if (command === 'bind') {
+      const ru = getRuntimeUrl();
+      if (!ru) return t(L, 'im.bind.offline');
+      const rpc = createHarnessRpcWire(ru);
+      const sessions = await rpc.listSessions();
+      const running = sessions.filter((s) => s.running);
+      if (!arg) {
+        // L4 user-friendliness: no arg → bind the single running session;
+        // otherwise the most recently active session; if neither, list options.
+        const target = running.length === 1 ? running[0]
+          : running.length > 1 ? null
+            : sessions.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+        if (target) {
+          imCommandBindings.set(key, target.sessionId);
+          saveImBindings();
+          return t(L, 'im.bind.done', { id: String(target.sessionId).slice(0, 8), state: target.running ? 'running' : 'latest' });
+        }
+        if (!sessions.length) return t(L, 'im.bind.noRunning');
+        const lines = sessions.slice(0, 8).map((s, i) =>
+          '\n' + (i + 1) + '. `' + String(s.sessionId).slice(0, 8) + '` ' + (s.agentPreset || 'standard') + (s.running ? ' ●' : '')).join('');
+        return t(L, 'im.bind.choose') + lines;
+      }
+      // /bind <prefix>: match the nearest session by short id (running preferred)
+      const hit = running.find((s) => String(s.sessionId).toLowerCase().startsWith(arg.toLowerCase()))
+        || sessions.find((s) => String(s.sessionId).toLowerCase().startsWith(arg.toLowerCase()));
+      if (!hit) return t(L, 'im.bind.noMatch', { arg });
+      imCommandBindings.set(key, hit.sessionId);
+      saveImBindings();
+      return t(L, 'im.bind.done', { id: String(hit.sessionId).slice(0, 8), state: hit.running ? 'running' : 'latest' });
+    }
+    if (command === 'unbind') {
+      imCommandBindings.delete(key);
+      saveImBindings();
+      return t(L, 'im.unbind.done');
+    }
+    if (command === 'stop') {
+      const ru = getRuntimeUrl();
+      if (!ru) return t(L, 'im.bind.offline');
+      const rpc = createHarnessRpcWire(ru);
+      const list = await rpc.listSessions();
+      const running = list.find((s) => s.running);
+      if (!running) return t(L, 'im.stop.noneRunning');
+      await rpc.cancel(running.sessionId);
+      return t(L, 'im.stop.done', { id: String(running.sessionId).slice(0, 8) });
+    }
+    return t(L, 'im.unknown');
+  } catch (e) {
+    log(`[channels] IM command ${command} failed: ${e.message}`);
+    return t(L, 'im.commandFailed', { reason: e.message });
+  }
+}
+/** binding get/set used by the dispatcher's steer path. */
+function imGetBinding(channelId, senderId) {
+  return imCommandBindings.get(`im:${senderId}`) || null;
+}
 function onApprovalRequested(frame, rpcId) {
   const tool = frame.toolName || '';
   // IM push (C5/C6): approval cards carry a one-shot token (120s TTL) whose
@@ -3336,7 +3156,7 @@ function onApprovalRequested(frame, rpcId) {
     });
   }
   if (!windowHidden()) return;
-  notify(t(lang(), 'notify.approval'), t(lang(), 'notify.approvalBody', { tool }));
+  notifyAs('approval', t(lang(), 'notify.approval'), t(lang(), 'notify.approvalBody', { tool }));
 }
 
 function onQuestionRequested(frame, rpcId) {
@@ -3352,7 +3172,7 @@ function onQuestionRequested(frame, rpcId) {
     });
   }
   if (!windowHidden()) return;
-  notify(t(lang(), 'notify.question'), t(lang(), 'notify.questionBody'));
+  notifyAs('question', t(lang(), 'notify.question'), t(lang(), 'notify.questionBody'));
 }
 
 /**
@@ -3362,13 +3182,14 @@ function onQuestionRequested(frame, rpcId) {
  * {ok, reason} the channel dispatcher replies with over IM.
  */
 async function respondToRuntime({ rpcId, value, what }) {
-  if (!runtimeUrl) return { ok: false, reason: 'runtime offline' };
+  const ru = getRuntimeUrl();
+  if (!ru) return { ok: false, reason: 'runtime offline' };
   if (!rpcId || !value) {
     log(`[channels] ${what || 'respond'} dropped: missing runtime routing id`);
     return { ok: false, reason: 'no rpc id' };
   }
   try {
-    const base = runtimeUrl.endsWith('/') ? runtimeUrl : `${runtimeUrl}/`;
+    const base = ru.endsWith('/') ? ru : `${ru}/`;
     const res = await fetch(`${base}api/respond`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -3435,7 +3256,7 @@ async function promptInstallShellUpdate(info) {
   if (!autoUpdater) return;
   const L = lang();
   const detail = [t(L, 'updateDialogDetail'), releaseNotesText(info)].filter(Boolean).join('\n\n');
-  const { response } = await dialog.showMessageBox(mainWindow || undefined, {
+  const { response } = await dialog.showMessageBox(pickDialogParent() || undefined, {
     type: 'info',
     buttons: [t(L, 'updateDialogRestart'), t(L, 'updateDialogLater')],
     defaultId: 0,
@@ -3466,31 +3287,24 @@ function checkShellUpdate(notifyUser) {
 // ---------------------------------------------------------------------------
 // teardown
 // ---------------------------------------------------------------------------
-function killRuntime() {
-  if (remote) remote.setRuntimeUrl(null);
-  if (!runtimeChild || runtimeChild.killed) return;
-  stopEventsFeed();
-  const child = runtimeChild;
-  try { child.kill(); } catch { /* ignore */ }
-  const start = Date.now();
-  const wait = setInterval(() => {
-    if (child.exitCode !== null || Date.now() - start > KILL_GRACE_MS) {
-      clearInterval(wait);
-      if (child.exitCode === null) {
-        log('[shell] runtime did not exit in time, forcing kill');
-        if (process.platform === 'win32') {
-          try { execFileSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }); } catch { /* ignore */ }
-        } else {
-          try { child.kill('SIGKILL'); } catch { /* ignore */ }
-        }
-      }
-    }
-  }, 200);
-}
 
 // ---------------------------------------------------------------------------
 // app lifecycle
 // ---------------------------------------------------------------------------
+// Unhandled rejections must be VISIBLE: a rejected whenReady chain used to
+// fail silently (no window, no logs) during the A1 extraction.
+process.on('unhandledRejection', (reason) => {
+  const msg = reason && reason.message ? reason.message : String(reason);
+  try { log('[shell] unhandled rejection: ' + msg); }
+  catch { console.error('[shell] unhandled rejection:', msg); }
+});
+// Same visibility for synchronous throws (Electron's default dialog is easy
+// to miss and writes nothing to the log).
+process.on('uncaughtException', (err) => {
+  const msg = err && err.message ? err.message : String(err);
+  try { log('[shell] uncaught exception: ' + msg + '\n' + (err && err.stack || '')); }
+  catch { console.error('[shell] uncaught exception:', msg); }
+});
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -3512,7 +3326,7 @@ if (!gotLock) {
     // Phone remote-control gateway: constructed here because safeStorage needs
     // the app to be ready. The runtime URL may still be null while booting -
     // setRuntimeUrl() below feeds it as soon as the URL line appears.
-    remote = new RemoteControl({ userDataDir: app.getPath('userData'), safeStorage, log });
+    remote = new RemoteControl({ userDataDir: app.getPath('userData'), safeStorage: safeStorageImpl, log });
     // C7 public-remote helper: pure detection + cloudflared child process
     // management; lazy, nothing probes until the settings window asks.
     publicRemote = createPublicRemote({ log });
@@ -3525,11 +3339,26 @@ if (!gotLock) {
       settings,
       dshHome: dshHomeOf,
       userDataDir: app.getPath('userData'),
-      safeStorage,
+      safeStorage: safeStorageImpl,
       log,
     });
+    // MCP panel (v0.3.1 T1): same safeStorage-after-ready constraint. The
+    // registry/connect/import helpers are electron-free and share the vault
+    // accessor; mcp:usage rides the session worker (never the main thread).
+    mcpMgr = createMcpManager({
+      settings,
+      dshHome: dshHomeOf,
+      profileName: 'web',
+      userDataDir: app.getPath('userData'),
+      safeStorage: safeStorageImpl,
+      log,
+      dumpConfigVerify,
+    });
+    mcpReg = createMcpRegistry({ log });
+    mcpConn = createMcpConnect({ log });
+    mcpImp = createMcpImport({ log });
     if (settings.get().remoteControl) {
-      remote.setRuntimeUrl(runtimeUrl);
+      remote.setRuntimeUrl(getRuntimeUrl());
       remote.start({ port: settings.get().remotePort, compat: !!settings.get().remoteCompat })
         .then((s) => { if (!s.running) notify(t(lang(), 'notify.remoteFailed'), t(lang(), 'notify.remoteFailedBody')); })
         .catch((e) => log(`[remote] start failed: ${e.message}`));
@@ -3538,9 +3367,32 @@ if (!gotLock) {
     // safeStorage-after-ready constraint as the gateway; feishu/wecom/dingtalk
     // ship real adapters now, whatsapp stays a placeholder slot.
     channelsMgr = createChannelManager({
+      // H-im: /status command data source (runtime + scheduled tasks)
+      statusSnapshot: () => ({
+        runtimeRunning: sessionRunning,
+        scheduledCount: (settings.get().scheduledTasks || []).length,
+        scheduledTasks: (settings.get().scheduledTasks || []).map((x) => ({ name: x.name || x.id })),
+        lastTaskSummary: (settings.get().scheduledHistory || [])[0]
+          ? `${(settings.get().scheduledHistory[0].name || '')} ${settings.get().scheduledHistory[0].ok ? '✓' : '✗'}`
+          : '',
+      }),
+      // H-im: /bind /unbind /stop command handler (session binding + lifecycle)
+      onCommand: ({ command, senderId, text }) => handleImCommand({ command, senderId, text }),
+      getBinding: (_channelId, senderId) => imGetBinding(_channelId, senderId),
+      onBoundPrompt: async ({ sessionId, text }) => {
+        const ru = getRuntimeUrl();
+        if (!ru) return t(lang(), 'im.bind.offline');
+        try {
+          await createHarnessRpcWire(ru).prompt(sessionId, text, 'steer');
+          return t(lang(), 'im.steer.accepted', { id: String(sessionId).slice(0, 8) });
+        } catch (e) {
+          log(`[channels] steer failed: ${e.message}`);
+          return t(lang(), 'im.bind.commandFailed', { reason: e.message });
+        }
+      },
       settings,
       userDataDir: app.getPath('userData'),
-      safeStorage,
+      safeStorage: safeStorageImpl,
       log,
       lang,
       // free text from IM → the shared headless runner (Quick Ask / scheduler
@@ -3588,6 +3440,17 @@ if (!gotLock) {
     channelsMgr.register('feishu', FeishuChannel, (c) => testFeishuConnection({ appId: c.appId, appSecret: c.appSecret }));
     channelsMgr.register('wecom', WecomChannel, (c) => testWecomConnection({ botId: c.botId, secret: c.secret }));
     channelsMgr.register('dingtalk', DingtalkChannel, (c) => testDingtalkConnection({ clientId: c.clientId, clientSecret: c.clientSecret }));
+    // R5 weekly report (Wrapped card): needs channels for the IM push leg
+    weekly = createWeeklyReport({
+      userDataDir: () => app.getPath('userData'),
+      collectStatsShared: () => collectStats(false),
+      getSettings: () => settings.get(),
+      broadcastText: channelsMgr ? (text) => channelsMgr.broadcastText(text) : null,
+      BrowserWindow,
+      isDark: () => resolvedTheme() !== 'light',
+      lang,
+      log,
+    });
     // push channel state changes (online/offline/backoff) to every open window.
     // Coalesce bursty updates (reconnect storms fire emitState repeatedly) into
     // a single push — without this the renderer rebuilds the whole channel
@@ -3609,7 +3472,7 @@ if (!gotLock) {
     // refresh the tray's peak/off-peak countdown line once a minute (the
     // menu is only rebuilt when split pricing is actually enabled)
     trayPeakTimer = setInterval(() => {
-      if (quitting || !tray || tray.isDestroyed()) return;
+      if (quitting || !trayMenu.hasTray()) return;
       if (settings.get().costPeakEnabled) updateTray();
     }, 60_000);
     // Splash on EVERY boot, not just guided first-run: without it Windows
@@ -3625,7 +3488,7 @@ if (!gotLock) {
       // The guided flow may have just closed its loading window; with no main
       // window open yet, window-all-closed would otherwise quit the app while
       // the runtime is still booting (M15). Hold quit until the window opens.
-      mainWindowPending = true;
+      setMainWindowPending(true);
       spawnRuntime();
     }
     if (process.env.DSH_DESKTOP_OPEN_SETTINGS === '1') createSettingsWindow();
@@ -3673,10 +3536,45 @@ if (!gotLock) {
     if (settings.get().checkUpdatesOnStartup) {
       setTimeout(() => { runUpdateCheck(false, { install: false }); }, 15_000);
     }
+
+    // R1: automatic boot self-check shortly after launch (C-6 switch; manual
+    // reruns from Settings → About ignore the switch)
+    if (runOnStartup(settings.get())) {
+      setTimeout(() => {
+        if (quitting) return;
+        bootCheck.runChecks().then((report) => {
+          // D6: surface the self-check result on the splash instead of dead air
+          if (!isMainWindowPending()) return;
+          setLoading(t(lang(), 'loading.selfcheck', { p: report.summary.passed, t: report.summary.total }));
+        }).catch((e) => log(`[boot-check] failed: ${e.message}`));
+      }, 4_000);
+    }
+
+    // R5: weekly auto-generation — check every 30 min; fires on Monday
+    // morning Beijing time when enabled and this week's card is missing.
+    let weeklyLastWeekStart = null;
+    const weeklyAutoCheck = async () => {
+      try {
+        if (!weekly || quitting) return;
+        if (!settings.get().weeklyReportEnabled) return;
+        const { weekWindowCst } = require('./weekly-report');
+        const { start } = weekWindowCst(Date.now());
+        if (weeklyLastWeekStart === start) return; // already generated this week
+        const bjDay = (Math.floor((Date.now() + 8 * 3_600_000) / 86_400_000) + 4) % 7; // 1 = Monday
+        const bjHour = Math.floor(((Date.now() / 3_600_000) % 24 + 8 + 24) % 24);
+        if (bjDay !== 1 || bjHour < 6 || bjHour >= 12) return; // Monday 06:00–12:00 CST window
+        weeklyLastWeekStart = start;
+        log('[weekly] auto-generating this week\'s card');
+        const out = await weekly.generate();
+        if (settings.get().weeklyReportPushIm && channelsMgr) await channelsMgr.broadcastText(`📊 ${out.data.weekLabel} · ¥${(out.data.costYuan || 0).toFixed(2)} · ${out.file}`);
+      } catch (err) { log(`[weekly] auto-generate failed: ${err.message}`); }
+    };
+    setInterval(weeklyAutoCheck, 30 * 60_000);
+    setTimeout(weeklyAutoCheck, 60_000);
   });
 
   app.on('window-all-closed', () => {
-    if (mainWindowPending) return; // runtime still booting; the main window opens soon
+    if (isMainWindowPending()) return; // runtime still booting; the main window opens soon
     if (noTray || quitting || !settings.get().trayOnClose) app.quit();
   });
 
@@ -3687,12 +3585,10 @@ if (!gotLock) {
   // if it was actually destroyed.
   app.on('activate', () => {
     if (quitting) return;
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (!mainWindow.isVisible()) mainWindow.show();
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    } else if (runtimeUrl) {
-      createWindow(runtimeUrl);
+    if (hasVisibleMainWindow()) {
+      showMain();
+    } else if (getRuntimeUrl()) {
+      createWindow(getRuntimeUrl());
     }
   });
 

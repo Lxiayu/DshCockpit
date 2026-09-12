@@ -700,6 +700,7 @@ module.exports = {
   upsertCredential,
   removeCredential,
   writeCredentialsFile,
+  writeSettingsFile,
   classifyFailure,
   parseModelsPayload,
   testConnection,

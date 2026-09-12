@@ -197,4 +197,59 @@ module.exports = {
   commandArgsForVersion,
   isArgumentShapeError,
   createHarnessRpcClient,
+  createHarnessRpcWire,
 };
+
+
+// ---------------------------------------------------------------------------
+// Wire-level RPC client (H-im): the typed methods below speak the CURRENT
+// runtime wire protocol (POST /api/session.prompt etc. with a dot-named
+// method). The compact-oriented client above targets an older wire shape
+// (session/list) and is left untouched.
+// ---------------------------------------------------------------------------
+const crypto = require('node:crypto');
+
+function wireRpcId() { return 'rpc-' + crypto.randomBytes(6).toString('hex'); }
+
+/**
+ * Wire client for the live runtime — verified against rc.2:
+ *   POST /api/<method>  body {type:'client-request', rpcId, method, payload}
+ *   resp { result: { ok, value | error } }
+ * @param {string} baseUrl
+ * @param {{ fetchImpl?: Function, timeoutMs?: number }} [deps]
+ */
+function createHarnessRpcWire(baseUrl, { fetchImpl, timeoutMs = 15_000 } = {}) {
+  const doFetch = fetchImpl || ((url, opts) => fetch(url, opts));
+  const origin = String(baseUrl || '').replace(/\/+$/, '');
+  async function rpc(method, payload = {}) {
+    const id = wireRpcId();
+    const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = setTimeout(() => { try { ac.abort(); } catch { /* ignore */ } }, timeoutMs);
+    try {
+      const res = await doFetch(`${origin}/api/${method}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'client-request', rpcId: id, method, payload }),
+        signal: ac ? ac.signal : undefined,
+      });
+      const body = await res.json();
+      const result = body && body.result ? body.result : {};
+      if (!result.ok) {
+        const reason = result.error && result.error.message ? result.error.message : `RPC ${method} failed`;
+        throw Object.assign(new Error(reason), { code: result.error && result.error.code });
+      }
+      return result.value;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return {
+    rpc,
+    listSessions: () => rpc('session.list').then((v) => (v && v.items) || []),
+    createSession: () => rpc('session.create').then((v) => v.sessionId),
+    prompt: (sessionId, text, mode = 'steer') =>
+      rpc('session.prompt', { sessionId, mode, content: [{ type: 'text', text }] }),
+    cancel: (sessionId) => rpc('session.cancel', { sessionId }),
+    history: (sessionId) => rpc('session.history', { sessionId }).then((v) => (v && v.events) || []),
+  };
+}

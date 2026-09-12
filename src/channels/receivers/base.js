@@ -101,7 +101,12 @@ function createCommandDispatcher(deps) {
     }
     if (!d.isAllowed(allowFrom, senderId)) {
       audit({ action: 'reject', reason: 'not-in-allowlist', channelId, senderId });
-      return { ok: false, reply: t(lang, 'channels.rx.notAllowed') };
+      // H-im: silent drops made the channel feel dead — reply with the
+      // sender's open_id and how to get allowlisted instead.
+      return {
+        ok: false,
+        reply: t(lang, 'channels.rx.notAllowedGuidance', { senderId: senderId || 'unknown', id: channelId }),
+      };
     }
 
     // ---- approval callbacks (one-shot token, burned on first use)
@@ -135,10 +140,49 @@ function createCommandDispatcher(deps) {
       return { ok: false, reply: t(lang, 'channels.rx.hookFailed', { reason: (handled && handled.reason) || '' }) };
     }
 
-    // ---- free text → sticky headless session
+    // ---- H-im query commands: /status /tasks /help (zh aliases too)
+    if (command.type === 'status' || command.type === 'tasks' || command.type === 'help') {
+      const snap = d.statusSnapshot ? d.statusSnapshot() : {};
+      if (command.type === 'help') {
+        return { ok: true, reply: t(lang, 'channels.helpMenu') };
+      }
+      if (command.type === 'status') {
+        return { ok: true, reply: t(lang, 'channels.statusReply', {
+          runtime: snap.runtimeRunning ? t(lang, 'channels.stRunning') : t(lang, 'channels.stIdle'),
+          tasks: String(snap.scheduledCount || 0),
+          last: snap.lastTaskSummary || t(lang, 'channels.stNone'),
+        }) };
+      }
+      const list = Array.isArray(snap.scheduledTasks) && snap.scheduledTasks.length
+        ? snap.scheduledTasks.map((x) => `• ${x.name || x.id}`).join('\n')
+        : t(lang, 'channels.noTasks');
+      return { ok: true, reply: t(lang, 'channels.tasksReply', { list }) };
+    }
+
+    // ---- H-im: query + session-binding commands (delegated to the shell)
+    if (['status', 'tasks', 'help', 'bind', 'unbind', 'stop'].includes(command.type)) {
+      if (!d.onCommand) return { ok: false, reply: t(lang, 'channels.rx.hookFailed', { reason: 'no-command-hook' }) };
+      const r = await d.onCommand({ channelId, senderId, command: command.type, text: String(command.text || '') });
+      return { ok: true, reply: r };
+    }
+
+    // ---- free text → bound live session (L4) or sticky headless session
     if (command.type === 'text') {
       const text = String(command.text || '').trim();
       if (!text) return { ok: false, reply: t(lang, 'channels.rx.badCommand') };
+      // L4: an IM session bound to a running harness session steers into it
+      if (d.getBinding && d.onBoundPrompt && senderId) {
+        const boundId = d.getBinding(channelId, senderId);
+        if (boundId) {
+          audit({ action: 'steer', channelId, senderId, sessionId: boundId });
+          try {
+            const r = await d.onBoundPrompt({ sessionId: boundId, text });
+            return { ok: true, reply: r };
+          } catch (e) {
+            return { ok: false, reply: t(lang, 'channels.rx.steerFailed', { reason: e.message }) };
+          }
+        }
+      }
       const sessionId = d.sessions.ensure(channelId, senderId);
       audit({ action: 'prompt', channelId, senderId, sessionId });
       let result;
@@ -148,7 +192,7 @@ function createCommandDispatcher(deps) {
         result = { ok: false, output: e.message, durationMs: 0 };
       }
       d.sessions.touch(channelId, senderId);
-      const summary = String(result.output || '').slice(0, 600);
+      const summary = String(result.output || '').slice(0, 200);
       return {
         ok: result.ok,
         reply: t(lang, 'channels.rx.promptDone', {
@@ -170,6 +214,10 @@ function createCommandDispatcher(deps) {
 const COMMAND_WORDS = {
   approve: 'approve', deny: 'deny', answer: 'answer',
   批准: 'approve', 拒绝: 'deny', 回答: 'answer',
+  'status': 'status', 'tasks': 'tasks', 'help': 'help',
+  状态: 'status', 任务: 'tasks', 帮助: 'help',
+  'bind': 'bind', 'unbind': 'unbind', 'stop': 'stop',
+  绑定: 'bind', 解绑: 'unbind', 停止: 'stop',
 };
 
 /**
@@ -181,8 +229,20 @@ const COMMAND_WORDS = {
  *           {type:'text', text} | null}
  */
 function parseCommandText(text) {
-  const s = String(text || '').replace(/@[^\s@]+\s?/g, ' ').trim();
+  const s = String(text || '').replace(/@[^\s@]+\s?/g, '').trim();
   if (!s) return null;
+  // H-im: slash/zh query + binding commands (optional arg after the word)
+  const argMatch = s.match(/^\/(bind|unbind|stop|status|tasks|help)\s+([^\s].*)$/i)
+    || s.match(/^(绑定|解绑|停止|状态|任务|帮助)[\s:：]+([^\s].*)$/);
+  if (argMatch) {
+    const argCmd = COMMAND_WORDS[argMatch[1].toLowerCase()] || COMMAND_WORDS[argMatch[1]];
+    if (argCmd && ['bind', 'unbind', 'stop'].includes(argCmd)) return { type: argCmd, text: argMatch[2].trim() };
+  }
+  const bareCmd = s.toLowerCase().startsWith('/') ? s.toLowerCase().slice(1) : s.toLowerCase();
+  const bare = COMMAND_WORDS[bareCmd];
+  if (bare && ['status', 'tasks', 'help', 'bind', 'unbind', 'stop'].includes(bare)) {
+    return { type: bare };
+  }
   const m = s.match(/^(approve|deny|answer|批准|拒绝|回答)[\s:：]+([0-9a-f]{16,64})(?:[\s:：]+([\s\S]+))?$/i);
   if (!m) return { type: 'text', text: s };
   const cmd = COMMAND_WORDS[m[1].toLowerCase()] || COMMAND_WORDS[m[1]];
