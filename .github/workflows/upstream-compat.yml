@@ -156,7 +156,12 @@ jobs:
         run: |
           node -e '
             const s = require("./docs/compat/compat-status.json");
-            const run = s.runs[s.runs.length - 1];
+            // the report script prepends: runs[0] is the run just produced
+            const run = s.runs[0];
+            if (run.version !== s.latestVerified) {
+              console.error("[verdict] ledger inconsistent: runs[0]=" + run.version + " latestVerified=" + s.latestVerified);
+              process.exit(1);
+            }
             const want = ["darwin-arm64", "win32-x64"];
             const missing = want.filter((p) => !(p in (run.platforms || {})));
             const failed = Object.entries(run.platforms || {}).filter(([, v]) => v !== "pass").map(([p]) => p);
