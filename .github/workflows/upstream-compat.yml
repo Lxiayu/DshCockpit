@@ -101,6 +101,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+
+      # the report script requires prod deps (semver); this job never
+      # installed them before 2026-09-16 — hidden because the daily runs
+      # died earlier at smoke resolution for 24 days
+      - run: npm install
 
       - uses: actions/download-artifact@v4
         with:
