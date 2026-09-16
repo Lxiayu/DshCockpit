@@ -19,8 +19,26 @@ permissions:
   contents: write
 
 jobs:
+  # Gate every release on a green unit-test run, on the same OS as the build
+  # so platform-specific assertions are exercised where they matter.
+  test:
+    name: unit tests (mac)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm install
+
+      - run: npm test
+
   build-arm64:
     name: build arm64 mac
+    needs: test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4

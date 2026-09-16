@@ -29,6 +29,28 @@ permissions:
   pull-requests: write
 
 jobs:
+  # Daily green/red signal for the unit suite on both platforms. Deliberately
+  # NOT a dependency of `report`: a red test run must not stop the compat
+  # ledger from being recorded.
+  test:
+    name: unit tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm install
+
+      - run: npm test
+
   smoke:
     name: smoke ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
