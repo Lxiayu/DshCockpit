@@ -121,32 +121,6 @@ jobs:
       - name: Build compat artifacts
         run: node scripts/upstream-compat-report.js --in .compat-flat --out docs/compat
 
-      - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v6
-        with:
-          branch: compat/auto-report
-          delete-branch: true
-          title: 'chore(compat): upstream verification report'
-          body-path: docs/compat/discussion-body.md
-          commit-message: 'chore(compat): record upstream compatibility run'
-
-      # Optional announcement: set the repo variable COMPAT_DISCUSSION_CATEGORY_ID
-      # to enable; the body template is generated next to the report.
-      - name: Publish Discussion
-        if: ${{ vars.COMPAT_DISCUSSION_CATEGORY_ID != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          COMPAT_DISCUSSION_CATEGORY_ID: ${{ vars.COMPAT_DISCUSSION_CATEGORY_ID }}
-        run: |
-          gh api graphql -f query='mutation($repo:String!,$cat:ID!,$title:String!,$body:String!){
-            createDiscussion(input:{repositoryId:$repo,categoryId:$cat,title:$title,body:$body}){
-              discussion{ url }
-            }
-          }' -f repo="${{ github.repository_id }}" -f cat="$COMPAT_DISCUSSION_CATEGORY_ID" \
-             -f title="$(head -1 docs/compat/discussion-body.md | tr -d '*')" \
-             -f body="$(cat docs/compat/discussion-body.md)" || \
-          echo "::warning::discussion publish failed (check category id)"
-
       # The aggregate verdict must be HONEST: the workflow goes red when the
       # run found upstream incompatibility OR when a platform's verdict is
       # missing (a swallowed smoke crash). Judges the RAW result JSONs from
@@ -174,3 +148,33 @@ jobs:
             }
             console.log("[verdict] " + version + " pass on " + want.join(","));
           '
+
+      # !cancelled(): the ledger PR must be recorded even when the verdict
+      # above went red (incompatibility IS the data we want on record).
+      - name: Create Pull Request
+        if: ${{ !cancelled() }}
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: compat/auto-report
+          delete-branch: true
+          title: 'chore(compat): upstream verification report'
+          body-path: docs/compat/discussion-body.md
+          commit-message: 'chore(compat): record upstream compatibility run'
+
+      # Optional announcement: set the repo variable COMPAT_DISCUSSION_CATEGORY_ID
+      # to enable; the body template is generated next to the report.
+      - name: Publish Discussion
+        if: ${{ !cancelled() && vars.COMPAT_DISCUSSION_CATEGORY_ID != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPAT_DISCUSSION_CATEGORY_ID: ${{ vars.COMPAT_DISCUSSION_CATEGORY_ID }}
+        run: |
+          gh api graphql -f query='mutation($repo:String!,$cat:ID!,$title:String!,$body:String!){
+            createDiscussion(input:{repositoryId:$repo,categoryId:$cat,title:$title,body:$body}){
+              discussion{ url }
+            }
+          }' -f repo="${{ github.repository_id }}" -f cat="$COMPAT_DISCUSSION_CATEGORY_ID" \
+             -f title="$(head -1 docs/compat/discussion-body.md | tr -d '*')" \
+             -f body="$(cat docs/compat/discussion-body.md)" || \
+          echo "::warning::discussion publish failed (check category id)"
+
