@@ -20,7 +20,7 @@ on:
       resolve_tag:
         description: 'Dist-tag to resolve when no explicit version is given'
         required: false
-        default: 'rc'
+        default: 'next'
   schedule:
     - cron: '0 3 * * *' # daily drill: catch upstream rc releases within hours
 
@@ -66,15 +66,18 @@ jobs:
           node-version: 22
 
       # arborist reify of the dsh runtime can exceed Node's default heap on CI
+      # NOTE (2026-09-16): no continue-on-error here anymore. The smoke script
+      # writes its result JSON before EVERY exit path (emit() precedes exit 1/2),
+      # so letting the step fail red is safe: the report job below runs on
+      # !cancelled() and still records the verdict into the ledger + PR.
       - name: Run compat smoke
         id: smoke
-        continue-on-error: true
         env:
           NODE_OPTIONS: --max-old-space-size=4096
         run: >-
           node scripts/upstream-compat-smoke.js
           ${{ github.event.inputs.upstream_version && format('--version {0}', github.event.inputs.upstream_version) || '' }}
-          --resolve-tag ${{ github.event.inputs.resolve_tag || 'rc' }}
+          --resolve-tag ${{ github.event.inputs.resolve_tag || 'next' }}
           --out compat-result-${{ matrix.os }}.json
 
       - uses: actions/upload-artifact@v4
@@ -87,6 +90,10 @@ jobs:
   report:
     name: aggregate & open PR
     needs: smoke
+    # !cancelled(): even when a smoke leg failed red, the ledger must record
+    # whatever verdicts WERE produced — a missing artifact becomes visible in
+    # the verdict step below instead of silently skipping the report.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -133,3 +140,23 @@ jobs:
              -f title="$(head -1 docs/compat/discussion-body.md | tr -d '*')" \
              -f body="$(cat docs/compat/discussion-body.md)" || \
           echo "::warning::discussion publish failed (check category id)"
+
+      # The aggregate verdict must be HONEST: the workflow goes red when the
+      # run found upstream incompatibility OR when a platform's verdict is
+      # missing (a swallowed smoke crash). Runs last so the ledger PR is
+      # already created either way — the record survives, the signal doesn't.
+      - name: Verdict (red on incompatible or incomplete run)
+        if: ${{ !cancelled() }}
+        run: |
+          node -e '
+            const s = require("./docs/compat/compat-status.json");
+            const run = s.runs[s.runs.length - 1];
+            const want = ["darwin-arm64", "win32-x64"];
+            const missing = want.filter((p) => !(p in (run.platforms || {})));
+            const failed = Object.entries(run.platforms || {}).filter(([, v]) => v !== "pass").map(([p]) => p);
+            if (!run.ok || missing.length || failed.length) {
+              console.error("[verdict] FAILED ok=" + run.ok + " missing=[" + missing.join(",") + "] failed=[" + failed.join(",") + "] for " + run.version);
+              process.exit(1);
+            }
+            console.log("[verdict] " + run.version + " pass on " + Object.keys(run.platforms).join(","));
+          '
