@@ -149,25 +149,28 @@ jobs:
 
       # The aggregate verdict must be HONEST: the workflow goes red when the
       # run found upstream incompatibility OR when a platform's verdict is
-      # missing (a swallowed smoke crash). Runs last so the ledger PR is
-      # already created either way — the record survives, the signal doesn't.
+      # missing (a swallowed smoke crash). Judges the RAW result JSONs from
+      # .compat-flat — create-pull-request resets the working tree after
+      # committing, so the ledger file is NOT a reliable source post-PR.
       - name: Verdict (red on incompatible or incomplete run)
         if: ${{ !cancelled() }}
         run: |
           node -e '
-            const s = require("./docs/compat/compat-status.json");
-            // the report script prepends: runs[0] is the run just produced
-            const run = s.runs[0];
-            if (run.version !== s.latestVerified) {
-              console.error("[verdict] ledger inconsistent: runs[0]=" + run.version + " latestVerified=" + s.latestVerified);
-              process.exit(1);
+            const fs = require("fs");
+            const names = fs.readdirSync(".compat-flat").filter((n) => n.endsWith(".json"));
+            const byPlatform = {};
+            for (const n of names) {
+              const r = JSON.parse(fs.readFileSync(".compat-flat/" + n, "utf8"));
+              if (r && r.schema === 1) byPlatform[r.platform || "unknown"] = !!r.ok;
             }
             const want = ["darwin-arm64", "win32-x64"];
-            const missing = want.filter((p) => !(p in (run.platforms || {})));
-            const failed = Object.entries(run.platforms || {}).filter(([, v]) => v !== "pass").map(([p]) => p);
-            if (!run.ok || missing.length || failed.length) {
-              console.error("[verdict] FAILED ok=" + run.ok + " missing=[" + missing.join(",") + "] failed=[" + failed.join(",") + "] for " + run.version);
+            const missing = want.filter((p) => !(p in byPlatform));
+            const failed = Object.entries(byPlatform).filter(([, ok]) => !ok).map(([p]) => p);
+            const first = names.length ? JSON.parse(fs.readFileSync(".compat-flat/" + names[0], "utf8")) : null;
+            const version = first && first.version ? first.version : "?";
+            if (missing.length || failed.length) {
+              console.error("[verdict] FAILED missing=[" + missing.join(",") + "] failed=[" + failed.join(",") + "] for " + version);
               process.exit(1);
             }
-            console.log("[verdict] " + run.version + " pass on " + Object.keys(run.platforms).join(","));
+            console.log("[verdict] " + version + " pass on " + want.join(","));
           '
