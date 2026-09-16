@@ -8,7 +8,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)](#)
-[![Tests](https://img.shields.io/badge/tests-469%20passing-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-471%20passing-brightgreen)](#)
 [![upstream](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Lxiayu/DshCockpit/master/docs/compat/badge.json)](docs/compat/)
 [![Powered by](https://img.shields.io/badge/powered%20by-DeepSeek%20Harness-4D6BFE)](https://github.com/deepseek-ai/deepseek-harness)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
@@ -87,7 +87,7 @@ DshCockpit 把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harnes
 
 **Windows**：从 [Releases](https://github.com/Lxiayu/DshCockpit/releases) 下载 `DshCockpit-<version>-win-x64.zip` → 用 7-Zip/WinRAR 解压 → 双击根目录 `DshCockpit.exe`。约 9 秒开窗，后续版本自动更新。
 
-**macOS**：下载对应架构的 `.dmg`（Apple Silicon / Intel）→ 拖入「应用程序」→ 启动。
+**macOS**：下载 `.dmg`（Apple Silicon）→ 拖入「应用程序」→ 启动。
 
 > ⚠️ 尚未签名公证——Gatekeeper 会拦截一次，终端执行一次即可永久放行：
 > ```bash
@@ -119,11 +119,11 @@ npm install && npm start
 
 - macOS 包尚未签名公证（需要上面那行 `xattr`）；Windows 可能因同样原因触发 SmartScreen
 - 单人维护的项目；主要在作者自己的机器上实战验证
-- Windows 是主要开发目标；macOS arm64/x64 由 CI 构建并冒烟测试，但真实环境里程较少
+- Windows 是主要开发目标；macOS arm64 由 CI 构建并冒烟测试（Intel 包暂停发布，可在 Apple Silicon 上自行交叉构建），但真实环境里程较少
 
 ## 🤝 贡献
 
-欢迎 PR！请先跑 `npm test`（469 项测试）。架构见 [`DESIGN.md`](DESIGN.md)，产品理念见 [`PHILOSOPHY.md`](PHILOSOPHY.md)，功能清单见 [`FEATURES.md`](FEATURES.md)，竞争路线图见 [`ROADMAP.md`](ROADMAP.md)。
+欢迎 PR！请先跑 `npm test`（471 项测试）。架构见 [`DESIGN.md`](DESIGN.md)，产品理念见 [`PHILOSOPHY.md`](PHILOSOPHY.md)，功能清单见 [`FEATURES.md`](FEATURES.md)，竞争路线图见 [`ROADMAP.md`](ROADMAP.md)。
 
 <details>
 <summary><b>操作层原则（产品理念）</b></summary>

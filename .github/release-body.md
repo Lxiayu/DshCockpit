@@ -1,3 +1,8 @@
+<!-- NOTE: this body is attached to EVERY tag release (body_path in
+     release-win/release-mac workflows). Refresh the prose per version and
+     keep the download table version-agnostic — pinned filenames become dead
+     links the moment a new version ships. -->
+
 # DshCockpit v0.3.2 — 计费对齐 V4.1、上下文 1M、测试全绿
 
 > **Harness owns the workspace. DshCockpit owns the operating layer.**
@@ -8,14 +13,15 @@ v0.3.2 是一个**准确性与可靠性**版本：成本中心对齐 DeepSeek �
 
 ## 下载（应该下载哪个？）
 
-| 你想要 | 下载文件 |
+| 你想要 | 下载文件（`<版本>` 以本 Release 资产列表为准） |
 |---|---|
-| **Windows · 推荐安装**（应用内自动更新、开始菜单/桌面快捷方式） | `DshCockpit-0.3.2-win-x64.exe` |
-| Windows · 绿色便携（免安装，解压即用） | `DshCockpit-0.3.2-win-x64.zip` |
-| **macOS Apple Silicon · 推荐安装** | `DshCockpit-0.3.2-mac-arm64.dmg` |
-| macOS Apple Silicon · 完整便携 zip | `DshCockpit-0.3.2-mac-arm64.zip` |
-| macOS Apple Silicon · 精简包（不含内置运行时） | `DshCockpit-0.3.2-slim-mac-arm64.zip` |
-| macOS Intel | `DshCockpit-0.3.2-mac-x64.dmg` |
+| **Windows · 推荐安装**（应用内自动更新、开始菜单/桌面快捷方式） | `DshCockpit-<版本>-win-x64.exe` |
+| Windows · 绿色便携（免安装，解压即用） | `DshCockpit-<版本>-win-x64.zip` |
+| **macOS Apple Silicon · 推荐安装** | `DshCockpit-<版本>-mac-arm64.dmg` |
+| macOS Apple Silicon · 完整便携 zip | `DshCockpit-<版本>-mac-arm64.zip` |
+| macOS Apple Silicon · 精简包（不含内置运行时） | `DshCockpit-<版本>-slim-mac-arm64.zip` |
+
+> Intel Mac：v0.3.3 起 CI 不再发布 x64 包（可在 Apple Silicon Mac 上用 electron-builder 自行交叉构建）。
 
 > 从 v0.3.1 升级：Windows 安装版会收到应用内更新提示；其他渠道手动下载覆盖，数据原样保留。
 
