@@ -4,23 +4,23 @@
   "version": "0.1.5-rc.2",
   "platform": "darwin-arm64",
   "ok": true,
-  "startedAt": "2026-09-16T13:43:28.828Z",
-  "finishedAt": "2026-09-16T13:44:06.482Z",
+  "startedAt": "2026-09-19T07:39:39.071Z",
+  "finishedAt": "2026-09-19T07:40:13.691Z",
   "gates": {
     "install": {
       "ok": true,
-      "ms": 31378,
+      "ms": 29218,
       "reason": ""
     },
     "dumpConfig": {
       "ok": true,
-      "ms": 166,
+      "ms": 113,
       "reason": ""
     },
     "healthCheck": {
       "ok": true,
       "reason": "",
-      "ms": 5432
+      "ms": 4541
     }
   },
   "reason": ""

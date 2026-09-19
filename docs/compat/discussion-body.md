@@ -3,4 +3,4 @@
 - darwin-arm64: ✅ pass
 - win32-x64: ✅ pass
 
-完整报告见仓库 docs/compat/2026-09-16-0.1.5-rc.2.md 。
+完整报告见仓库 docs/compat/2026-09-19-0.1.5-rc.2.md 。
