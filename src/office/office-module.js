@@ -56,6 +56,11 @@ const PUSH_INTERVAL_MS = TICK_MS;
 // Task 7A: a task route can be TRANSIENTLY blocked by another employee's
 // crossing path reservation. The move phase retries the route plan before the
 // permanent in-place degradation, so one crossing never loses a whole task.
+// M4.1g: how long a resident WALKING TO ITS DESK to nap waits for a blocked
+// corridor before giving the nap up. The walk is a mission (the seat is
+// reserved), so it is not abandoned on the first block — but it is bounded, so
+// no walker stands still with a live route indefinitely (M4.1e stall bound).
+const NAP_WALK_WAIT_MAX_MS = 6000;
 const ROUTE_RETRY_DELAY_MS = 250;
 const ROUTE_RETRY_BUDGET_MS = 10000;
 const ACTIVITY_LOG_LIMIT = 200;
@@ -241,6 +246,12 @@ function createOfficeModule(options = {}) {
     config: {
       sleepAfterMs: cfg.sleepAfterMs,
       chatCooldownMs: Math.max(500, Math.round(cfg.chatDurationMs / 3)),
+      // M4.1g: the nap cap/duration/refractory are behavior constants with
+      // module-creation overrides (same shape as sleepAfterMs) so the frozen
+      // office can be tuned without touching the scheduler source.
+      ...(Number.isInteger(cfg.maxSleepers) && cfg.maxSleepers > 0 ? { maxSleepers: cfg.maxSleepers } : {}),
+      ...(Number.isFinite(cfg.sleepDurationMs) && cfg.sleepDurationMs > 0 ? { sleepDurationMs: cfg.sleepDurationMs } : {}),
+      ...(Number.isFinite(cfg.sleepRefractoryMs) && cfg.sleepRefractoryMs >= 0 ? { sleepRefractoryMs: cfg.sleepRefractoryMs } : {}),
     },
     employeeIds: [...EMPLOYEE_IDS],
   });
@@ -361,6 +372,12 @@ function createOfficeModule(options = {}) {
       reachedSeat: false,
       routeRetryAt: null,
       routeRetryDeadline: null,
+      // SPEC-04 decision points: the node a finished local walk arrived at
+      // (reported to the scheduler on the next tick, then cleared).
+      arrivedNodeId: null,
+      // M4.1g: when the current nap-to-desk walk started waiting for a
+      // blocked corridor (bounded by NAP_WALK_WAIT_MAX_MS).
+      napWalkWaitSinceMs: null,
     });
   }
 
@@ -393,8 +410,10 @@ function createOfficeModule(options = {}) {
   // proxied subagent runId -> { childSessionId, parentSessionId }
   const runsByProxy = new Map();
 
-  function noteLog(kind, employeeId) {
-    activityLog.push({ atMs: logicalMs, employeeId, kind });
+  function noteLog(kind, employeeId, detail) {
+    activityLog.push(detail
+      ? { atMs: logicalMs, employeeId, kind, ...detail }
+      : { atMs: logicalMs, employeeId, kind });
     if (activityLog.length > ACTIVITY_LOG_LIMIT) activityLog.splice(0, activityLog.length - ACTIVITY_LOG_LIMIT);
   }
 
@@ -744,8 +763,11 @@ function createOfficeModule(options = {}) {
   function onBindingCreated(binding, effects) {
     const rec = employees.get(binding.employeeId);
     if (!rec) return;
+    // M4.1g: a trusted task also ends a nap — the log keeps the readable fact.
+    const wasNapping = rec.state.activity === 'sleeping';
     reduce(rec, { type: 'control/dispatch' });
     scheduler.interruptForTask({ employeeId: rec.employeeId, reason: 'runtime-task', nowMs: logicalMs });
+    if (wasNapping) noteLog('sleep-ended', rec.employeeId, { reason: 'task' });
     rec.marker = null;
     beginTaskTransition(rec);
     scheduler.markTaskStarted({ employeeId: rec.employeeId, nowMs: logicalMs });
@@ -1160,6 +1182,29 @@ function createOfficeModule(options = {}) {
     return freeEmployees().map((rec) => ({ employeeId: rec.employeeId, nodeId: rec.currentNodeId }));
   }
 
+  // M4.1g: the OTHER employees' live path/workstation reservations, for the
+  // scheduler's target selection. Without them the scheduler's BFS planned
+  // straight through a task walker's leg, and the M4.1a priority release
+  // below turned into a ping-pong: the task walker released the roamer's leg,
+  // the roamer re-acquired the same leg on its next tick, forever.
+  function externalReservationsFor(excludeId) {
+    const out = [];
+    for (const other of employees.values()) {
+      if (other.employeeId === excludeId) continue;
+      if (other.workstationReservation) out.push(other.workstationReservation);
+      if (other.pathReservation) out.push(other.pathReservation);
+    }
+    return out;
+  }
+
+  // M4.1g: a nap can also end outside the scheduler's wake (a corridor yield or
+  // a route re-plan evicts the napper). The log keeps the readable fact so the
+  // "开始小憩" lines always pair up with a "醒来" fact.
+  function noteNapPreempted(employeeId, reason) {
+    const rec = employees.get(employeeId);
+    if (rec && rec.state.activity === 'sleeping') noteLog('sleep-ended', employeeId, { reason });
+  }
+
   // M4.1e: current positions of everyone else, for the scheduler's personal-
   // space preference (parked bodies must not be stacked on top of each other).
   function peerPositions(excludeId) {
@@ -1202,16 +1247,30 @@ function createOfficeModule(options = {}) {
       rec.facing = (decision.chat.facing || {})[rec.employeeId] || rec.facing;
       const pairNow = scheduler.activeChatPair();
       if (pairNow && pairNow.startedAt === decision.chat.startedAt) noteLog('chat-started', rec.employeeId);
+      // M4.1g: the pair's reducer state must cover BOTH members. The partner's
+      // own decision returns 'continue' (pair member) and never re-reduces, so
+      // without this the partner kept a stale activity (roaming/resting) while
+      // walking to the water-cooler seats — the details view, the animation
+      // state and every "is this employee chatting?" check disagreed with the
+      // marker (and the partner lost the chat-walk protections keyed on it).
+      if (partnerRec) {
+        reduce(partnerRec, { type: 'local/activity', activity: 'chatting', reason: decision.reason || null });
+      }
       return;
     }
     if (decision.target && Array.isArray(decision.target.route)) {
       planRoute(rec, decision.target.route, decision.target.nodeId, logicalMs);
     }
-    if (decision.activity === 'sleeping' && rec.state.activity === 'sleeping' && rec.state.lastActivityReason !== decision.reason) {
-      // log only the transition into sleeping, not every dwell re-decision
-    }
-    if (decision.activity === 'sleeping' && !activityLog.some((entry) => entry.kind === 'sleep-started' && entry.employeeId === rec.employeeId && logicalMs - entry.atMs < 1000)) {
+    // M4.1g: one "开始小憩" line per NAP CYCLE. The scheduler marks the single
+    // decision that enters the cycle (an unfinished nap returns 'continue' and
+    // never re-enters), so the dwell re-decisions that used to re-log every
+    // second are structurally gone — no time-window dedup needed.
+    if (decision.activity === 'sleeping' && decision.sleepEvent && decision.sleepEvent.phase === 'started') {
       noteLog('sleep-started', rec.employeeId);
+    }
+    // M4.1g: the wake is the readable counterpart — how long the nap lasted.
+    if (decision.wokeFromSleep) {
+      noteLog('sleep-ended', rec.employeeId, { sleptMs: decision.wokeFromSleep.sleptMs });
     }
   }
 
@@ -1221,6 +1280,9 @@ function createOfficeModule(options = {}) {
     rec.currentNodeId = nodeId;
     rec.targetNodeId = null;
     rec.route = null;
+    // SPEC-04: arriving at the target is a decision point — the scheduler
+    // restarts the dwell there on the next tick.
+    rec.arrivedNodeId = nodeId;
 
     const workstation = rec.workstation;
     if (workstation && rec.transition && rec.transition.kind === 'task-start'
@@ -1334,6 +1396,7 @@ function createOfficeModule(options = {}) {
         && blockerRec.state.movement === 'stationary'
         && at - rec.blockedSinceMs >= patienceMs && at - (rec.yieldAskedAt || 0) >= 3000) {
       rec.yieldAskedAt = at;
+      noteNapPreempted(blockerRec.employeeId, isTaskBound(rec) ? 'task-priority' : 'corridor-congestion');
       try {
         scheduler.preemptLocal({ employeeId: blockerRec.employeeId, reason: isTaskBound(rec) ? 'task-priority' : 'corridor-congestion', nowMs: at, nodeId: blockerRec.currentNodeId });
         // apply the yield on the module side: the peer stops where it stands;
@@ -1350,6 +1413,15 @@ function createOfficeModule(options = {}) {
     if (!isTaskBound(rec) && at - rec.blockedSinceMs >= patienceMs
         && at - (rec.replanAskedAt || 0) >= replanMs) {
       rec.replanAskedAt = at;
+      if (rec.state.activity === 'sleeping' && rec.route) {
+        // M4.1g: a resident walking to its own desk to nap waits (bounded) for
+        // the corridor to clear instead of abandoning the nap on the first
+        // block — a 1-second "nap" read as the office stuttering.
+        if (rec.napWalkWaitSinceMs === null) rec.napWalkWaitSinceMs = at;
+        if (at - rec.napWalkWaitSinceMs <= NAP_WALK_WAIT_MAX_MS) return;
+        rec.napWalkWaitSinceMs = null;
+      }
+      noteNapPreempted(rec.employeeId, 'route-replan');
       rec.route = null;
       rec.routeIndex = 0;
       rec.targetNodeId = null;
@@ -1404,6 +1476,7 @@ function createOfficeModule(options = {}) {
       handleBlocked(rec, at, step.blockedBy ? step.blockedBy.owner : null);
     } else if (step.moved) {
       rec.blockedSinceMs = null;
+      rec.napWalkWaitSinceMs = null;
       releaseParkClaim(rec);
     }
     if (step.code !== 'OK' || (step.position && !step.arrived)) {
@@ -1452,7 +1525,18 @@ function createOfficeModule(options = {}) {
     for (const rec of employees.values()) {
       if (rec.routeRetryAt === null || at < rec.routeRetryAt) continue;
       if (!rec.transition || rec.transition.kind !== 'task-start'
-          || rec.transition.phase !== 'move' || rec.route) {
+          || rec.transition.phase !== 'move') {
+        rec.routeRetryAt = null;
+        continue;
+      }
+      // M4.1g: the retry must also cover a STALE route. An employee whose local
+      // walk was still in flight when the task arrived kept walking toward the
+      // old target, and the old "a route exists" check abandoned the retry —
+      // the task-start move phase then froze forever (observed: a subagent
+      // task landing on a collaborator mid-roam never reached its seat). The
+      // retry is abandoned only once the live route already targets the
+      // workstation approach.
+      if (rec.route && rec.workstation && rec.targetNodeId === rec.workstation.approachNodeId) {
         rec.routeRetryAt = null;
         continue;
       }
@@ -1485,6 +1569,10 @@ function createOfficeModule(options = {}) {
     // local behavior decisions (scheduler owns dwell/cooldown/sleep gates)
     for (const rec of freeEmployees()) {
       if (settings.reducedMotion && rec.route) continue; // reduced motion resolves below
+      // SPEC-04 decision points: the walk that finished last tick is reported
+      // so the dwell restarts at the arrived target.
+      const arrivedNodeId = rec.arrivedNodeId || null;
+      rec.arrivedNodeId = null;
       const decision = scheduler.decide({
         employeeId: rec.employeeId,
         nowMs: at,
@@ -1493,9 +1581,10 @@ function createOfficeModule(options = {}) {
         sync: globalSync,
         chatCandidates: chatCandidates(),
         peers: peerPositions(rec.employeeId),
-        externalReservations: [],
+        externalReservations: externalReservationsFor(rec.employeeId),
         // M4.1b: a walker still on its route keeps its target until arrival
         enRoute: !!(rec.route && rec.route.length > 0),
+        arrivedNodeId,
       });
       applyDecision(rec, decision);
     }
@@ -1637,27 +1726,32 @@ function createOfficeModule(options = {}) {
         userFrameDurationOverrideMs: settings.userFrameDurationOverrideMs,
       });
       // Task E5a-R2: the composed back-facing pose replaces the STEADY states
-      // (idle / working / sleeping). Transient result expressions
-      // (finished/error/warning) and the directional walk cycles stay
-      // untouched. Task E6d: when the pack carries the dedicated
-      // working-back loop, the WORKING state plays it (frame indices advance
-      // with the animation clock through a full resolveAnimation pass); the
-      // other steady states keep the static side-back frame.
+      // (idle / working). Transient result expressions (finished/error/warning)
+      // and the directional walk cycles stay untouched. Task E6d: when the pack
+      // carries the dedicated working-back loop, the WORKING state plays it
+      // (frame indices advance with the animation clock through a full
+      // resolveAnimation pass); the other steady states keep the static
+      // side-back frame.
       const backState = animationStateFor(rec);
       // D1 (2026-09-18, user-reported): the back view belongs to being SEATED
-      // at the workstation — the task phases sit/work — to sleeping (which only
-      // ever happens at the own desk) and to the walk-up cycle; never to plain
-      // standing around. The old check asked only the composed presentation,
-      // so any character that stopped walking fell back to idle and kept
-      // showing her back. Result expressions (finished/error/warning) stay
-      // untouched on purpose: they are transient and meant to be seen.
+      // at the workstation — the task phases sit/work — and to the walk-up
+      // cycle; never to plain standing around. The old check asked only the
+      // composed presentation, so any character that stopped walking fell back
+      // to idle and kept showing her back. Result expressions
+      // (finished/error/warning) stay untouched on purpose: they are transient
+      // and meant to be seen.
+      // M4.1g (2026-09-22, user-reported): sleeping was ALSO replaced here,
+      // so the dedicated nap art (expressions/sleeping.png, a back-facing
+      // sleeping pose) never played. It is removed from this set: the nap
+      // state plays the pack's 'sleeping' resource (the art is already
+      // back-facing, so the D1 intent is preserved).
       // "Seated at the workstation" means physically AT the own desk seat node
       // (that includes the startup pose and resting at the desk) or inside the
       // task's sit/work phases.
       const seatedAtWorkstation = (!!rec.transition && rec.transition.kind === 'task-start'
           && (rec.transition.phase === 'sit' || rec.transition.phase === 'work'))
         || (!!rec.seatNodeId && rec.currentNodeId === rec.seatNodeId);
-      const backEligibleState = backState === 'working' || backState === 'sleeping'
+      const backEligibleState = backState === 'working'
         || (backState === 'idle' && seatedAtWorkstation);
       if (
         rec.presentation && rec.presentation.facing === 'back' && composedBackResource

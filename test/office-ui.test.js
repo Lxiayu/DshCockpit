@@ -50,6 +50,18 @@ const PACK = assetPack.createAssetPack({
 
 const EMPLOYEE_IDS = ['orchestrator', 'researcher', 'coder', 'reviewer', 'collaborator'];
 
+// M4.1g: the production character pack and the compiled bundled-flat layout —
+// the nap art test must run against the art and layout the product ships.
+const PROD_PACK_ROOT = path.join(ROOT, 'resources', 'characters', 'deepseek-default');
+const PROD_PACK = assetPack.createAssetPack({
+  manifest: JSON.parse(fs.readFileSync(path.join(PROD_PACK_ROOT, 'manifest.json'), 'utf8')),
+  anchors: JSON.parse(fs.readFileSync(path.join(PROD_PACK_ROOT, 'animation', 'anchors.json'), 'utf8')),
+  animations: JSON.parse(fs.readFileSync(path.join(PROD_PACK_ROOT, 'animation', 'animations.json'), 'utf8')),
+}).pack;
+const FLAT_LAYOUT_FIXTURE = JSON.parse(
+  fs.readFileSync(path.join(ROOT, 'src', 'office', 'fixtures', 'office-layout-flat.json'), 'utf8')
+);
+
 function makeModule(overrides = {}) {
   return officeModule.createOfficeModule({
     pack: PACK,
@@ -332,6 +344,118 @@ test('long idle residents reach sleeping at their own desk, still present', () =
   const sleeper = module.state().employees.find((e) => e.activity === 'sleeping');
   assert.equal(sleeper.presence, 'present');
   assert.equal(sleeper.position.x, module.state().employees.find((e) => e.employeeId === sleeper.employeeId).position.x);
+});
+
+// ---------------------------------------------------------------------------
+// M4.1g — the frozen-office fix: nap cap, finite naps, one log line per nap,
+// left rest-area roaming, and the dedicated nap art.
+// ---------------------------------------------------------------------------
+
+// Harvests every activity-log entry the module ever produced (the snapshot only
+// carries the tail, so entries are accumulated once across samples).
+function makeLogHarvester(module) {
+  const seen = new Set();
+  const entries = [];
+  return {
+    entries,
+    harvest() {
+      for (const entry of module.state().activityLog) {
+        const key = `${entry.atMs}:${entry.employeeId}:${entry.kind}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        entries.push(entry);
+      }
+    },
+  };
+}
+
+test('M4.1g: at most two residents nap at once and every nap is finite', () => {
+  const module = makeModule({
+    config: { sleepAfterMs: 4000, sleepDurationMs: 8000, sleepRefractoryMs: 0 },
+  });
+  const harvester = makeLogHarvester(module);
+  let peakSleeping = 0;
+  const nappers = new Set();
+  let woken = 0;
+  for (let i = 0; i < 60000 / officeModule.TICK_MS; i += 1) {
+    module.tickOnce();
+    if (i % 6 !== 0) continue; // ~100 ms sampling cadence
+    harvester.harvest();
+    const state = module.state();
+    const sleeping = state.employees.filter((e) => e.activity === 'sleeping');
+    peakSleeping = Math.max(peakSleeping, sleeping.length);
+    for (const employee of sleeping) nappers.add(employee.employeeId);
+    woken = harvester.entries.filter((entry) => entry.kind === 'sleep-ended').length;
+  }
+  assert.ok(peakSleeping >= 1, `somebody napped (peak ${peakSleeping})`);
+  assert.ok(peakSleeping <= 2, `never more than two naps at once (peak ${peakSleeping})`);
+  assert.ok(nappers.size >= 2, `several residents nap over a minute (${nappers.size})`);
+  assert.ok(woken >= 1, `naps end on their own (${woken} sleep-ended entries)`);
+  const started = harvester.entries.filter((entry) => entry.kind === 'sleep-started');
+  assert.ok(started.length >= woken, 'every finished nap also has its entry');
+});
+
+test('M4.1g: one sleep-started log per nap — five seconds of dwell never re-log', () => {
+  const module = makeModule({ config: { sleepAfterMs: 4000, sleepDurationMs: 60000 } });
+  const harvester = makeLogHarvester(module);
+  let napperId = null;
+  for (let i = 0; i < 30000 / officeModule.TICK_MS && !napperId; i += 1) {
+    module.tickOnce();
+    harvester.harvest();
+    const napper = module.state().employees.find((e) => e.activity === 'sleeping');
+    if (napper) napperId = napper.employeeId;
+  }
+  assert.ok(napperId, 'a resident reaches the nap state');
+  const startedFor = (employeeId) => harvester.entries.filter(
+    (entry) => entry.kind === 'sleep-started' && entry.employeeId === employeeId
+  ).length;
+  assert.equal(startedFor(napperId), 1, 'entering the nap logs exactly once');
+  for (let i = 0; i < 5000 / officeModule.TICK_MS; i += 1) {
+    module.tickOnce();
+    harvester.harvest();
+  }
+  assert.equal(startedFor(napperId), 1, 'five seconds inside the nap never re-log sleep-started');
+  const stillNapping = module.state().employees.find((e) => e.employeeId === napperId);
+  assert.equal(stillNapping.activity, 'sleeping', 'the resident is still inside the same nap');
+});
+
+test('M4.1g: residents roam into the left rest area (x left of the work columns)', () => {
+  const module = makeModule();
+  const desks = module.layout.nodes().filter((node) => node.tags.includes('desk'));
+  const boundary = Math.min(...desks.map((node) => node.position.x));
+  const leftVisitors = new Set();
+  let minX = 1;
+  for (let i = 0; i < 120000 / officeModule.TICK_MS; i += 1) {
+    module.tickOnce();
+    if (i % 6 !== 0) continue; // ~100 ms sampling cadence
+    for (const employee of module.state().employees) {
+      if (employee.position.x < boundary) leftVisitors.add(employee.employeeId);
+      minX = Math.min(minX, employee.position.x);
+    }
+  }
+  assert.ok(leftVisitors.size >= 1,
+    `residents reach the left rest area (visitors: ${[...leftVisitors].join(',')}, minX ${minX.toFixed(3)})`);
+});
+
+test('M4.1g: the nap state plays the dedicated sleeping art, not the side-back pose', () => {
+  const module = officeModule.createOfficeModule({
+    pack: PROD_PACK,
+    layout: FLAT_LAYOUT_FIXTURE,
+    seed: 'm4-1g-sleep-art',
+    config: { sleepAfterMs: 4000, sleepDurationMs: 60000 },
+  });
+  tickFor(module, 300);
+  const reached = tickUntil(
+    module,
+    (state) => state.employees.some((e) => e.activity === 'sleeping' && e.movement === 'stationary'),
+    30000
+  );
+  assert.equal(reached, true, 'a resident naps at the desk');
+  const napper = module.state().employees.find((e) => e.activity === 'sleeping' && e.movement === 'stationary');
+  assert.equal(napper.animation.resource, 'sleeping',
+    `the nap art plays (got ${napper.animation.resource}, fallback ${napper.animation.fallbackReason})`);
+  assert.notEqual(napper.animation.resource, 'side-back', 'the composed back pose must not replace the nap');
+  assert.equal(napper.marker, 'sleep-zzz');
 });
 
 // ---------------------------------------------------------------------------

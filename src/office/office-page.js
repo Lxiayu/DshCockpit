@@ -64,6 +64,7 @@ const ACTIVITY_LOG_LABELS = Object.freeze({
   'result-cancelled': '任务已取消',
   queued: '任务排队',
   'sleep-started': '开始小憩',
+  'sleep-ended': '小憩结束',
   'control-cancel': '请求取消',
   'control-interrupt': '请求中断',
   'dispatch-followup': '追加任务请求',

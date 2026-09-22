@@ -12,7 +12,9 @@
 //   failed/tool facts and never writes a runtime transcript — chat is exposed
 //   as a non-text icon/ellipsis marker with an accessibility label only
 // - the office starts local behavior without waiting for Harness events
-// - default decision probabilities: roaming 60% / resting 25% / chatting 15%
+// - default decision probabilities: roaming 60% / resting 25% / chatting 15%,
+//   rolled through the idle director (same base weights, plus per-activity
+//   cooldowns so nobody repeats one behavior back to back)
 // - minimum dwell time and chat cooldowns are honored
 // - target selection goes through the injected movement controller's
 //   waypoint/reservation contract (findRoute + acquireReservation): never a
@@ -22,12 +24,19 @@
 // - sleeping unlocks after the configured idle threshold (default 300000 ms),
 //   defaults to the personal desk, and is blocked by unfinished bindings or
 //   sync != healthy
+// - M4.1g: sleeping is a FINITE, CAPPED nap — at most `maxSleepers` residents
+//   nap at once (default 2), one nap lasts a random 60–180s (configurable),
+//   the sleeper then wakes into a local activity (once), and a post-nap
+//   refractory keeps the office from instantly re-napping. An unfinished nap
+//   CONTINUES: it never restarts a fresh cycle per dwell window (the old
+//   re-entry every minDwellMs is what froze the whole office asleep).
 // - trusted running/attention facts or explicit commands interrupt any local
 //   activity immediately (releasing both chat reservations); sync=stale/
 //   resyncing NEVER ends local behavior and never triggers sleeping
 // - identical seed + identical call sequence => identical decisions
 
 const profiles = require('./employee-profile.js');
+const idleDirector = require('./idle-director.js');
 
 const DEFAULT_PROBABILITIES = Object.freeze({ roaming: 0.6, resting: 0.25, chatting: 0.15 });
 
@@ -43,11 +52,23 @@ const PERSONAL_SPACE_RATIO = 0.055;
 // above kicks in (ms of simulated time).
 const CHAT_CRAVE_AFTER_MS = 45000;
 const DEFAULT_SLEEP_AFTER_MS = 300000;
+// M4.1g: how many residents may nap SIMULTANEOUSLY (the frozen office was five
+// sleepers at once) and how long one nap lasts (random draw inside the range,
+// or the fixed override). `sleepRefractoryMs` is the awake time a resident
+// spends after a nap before the idle threshold may start the next one.
+const DEFAULT_MAX_SLEEPERS = 2;
+const DEFAULT_SLEEP_DURATION_RANGE_MS = Object.freeze({ minMs: 60000, maxMs: 180000 });
+const DEFAULT_SLEEP_REFRACTORY_MS = 120000;
 const DEFAULT_CONFIG = Object.freeze({
   probabilities: DEFAULT_PROBABILITIES,
   minDwellMs: 4000,
   chatCooldownMs: 20000,
   sleepAfterMs: DEFAULT_SLEEP_AFTER_MS,
+  maxSleepers: DEFAULT_MAX_SLEEPERS,
+  sleepDurationMs: null,
+  sleepDurationRangeMs: DEFAULT_SLEEP_DURATION_RANGE_MS,
+  sleepRefractoryMs: DEFAULT_SLEEP_REFRACTORY_MS,
+  leftRoamBias: idleDirector.DEFAULT_LEFT_ROAM_BIAS,
   waitMs: 800,
   reservationTtlMs: 60000,
   chatSeatTtlMs: 120000,
@@ -107,6 +128,21 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
   const ids = employeeIds || [...profiles.RESIDENT_EMPLOYEE_IDS, profiles.COLLABORATOR_ID];
   const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
 
+  // M4.1g: the livelier idle decision maker (roaming/resting/chatting with
+  // per-activity cooldowns) and the left rest-area roaming pool. Both are
+  // deterministic: the seeded rng streams key off the scheduler seed.
+  const director = idleDirector.createIdleDirector({
+    seed,
+    probabilities,
+    leftRoamBias: mergedConfig.leftRoamBias,
+  });
+  const leftAreaNodeIds = idleDirector.resolveLeftAreaNodeIds(graph);
+  // M4.1g: the target preference is only switched on for graphs whose left
+  // rest area is a MINORITY of the roaming pool (the compiled flat layout's
+  // left wing). A geometric left that already holds most of the ring needs no
+  // pull — see idle-director.leftPreferenceActive.
+  const leftPreferenceOn = idleDirector.leftPreferenceActive(graph);
+
   const employees = new Map();
   for (const employeeId of ids) {
     const profile = profiles.getResidentProfile(employeeId) || (employeeId === profiles.COLLABORATOR_ID ? profiles.getCollaboratorProfile() : null);
@@ -116,6 +152,9 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
       defaultSeat: profile ? profile.defaultSeat : null,
       cooldownUntil: 0,
       idleSince: now(),
+      // M4.1g: no new nap before this logical time (post-nap refractory; set
+      // whenever a nap ends, task-interrupt included).
+      napRefractoryUntil: 0,
       current: null,
     });
   }
@@ -195,6 +234,11 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
       if (typeof candidate.nodeId !== 'string' || !nodesById.has(candidate.nodeId)) continue;
       const other = employees.get(candidate.employeeId);
       if (!other) continue;
+      // M4.1g: a resident inside a nap is NOT a chat candidate. Recruiting one
+      // overwrote its active nap cycle (no wake, no sleep-ended log), and the
+      // pair died on the next tick — the nap looked like it re-formed within
+      // seconds, which is exactly the "开始小憩" spam this milestone fixes.
+      if (other.current && other.current.activity === 'sleeping') continue;
       if (other.cooldownUntil > at) continue;
       if (activeChatPair && (activeChatPair.a === candidate.employeeId || activeChatPair.b === candidate.employeeId)) continue;
       eligible.push(candidate);
@@ -226,6 +270,13 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
     if (activeChatPair) return fail('CHAT_PAIR_EXISTS');
     if (!employees.has(employeeId) || !employees.has(partnerId) || employeeId === partnerId) {
       return fail('CHAT_PARTNERS_INVALID');
+    }
+    // M4.1g: a napping resident never joins a conversation — the pair would
+    // overwrite the nap cycle (no wake, no sleep-ended log) and die on the next
+    // tick. The guard also covers direct beginChat calls outside the director.
+    for (const id of [employeeId, partnerId]) {
+      const current = employees.get(id).current;
+      if (current && current.activity === 'sleeping') return fail('CHAT_PARTNERS_UNAVAILABLE', { employeeId: id });
     }
     const seats = chatSeatNodes();
     if (seats.length < 2) return fail('CHAT_SEATS_UNAVAILABLE');
@@ -297,6 +348,9 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
     activeChatPair = { a: employeeId, b: partnerId, startedAt: at, seatA: seats[0].id, seatB: seats[1].id };
     employees.get(employeeId).current = { activity: 'chatting', startedAt: at, nodeId: seats[0].id };
     employees.get(partnerId).current = { activity: 'chatting', startedAt: at, nodeId: seats[1].id };
+    // M4.1g: the director's cooldowns must see BOTH pair members.
+    director.note({ employeeId, activity: 'chatting', atMs: at });
+    director.note({ employeeId: partnerId, activity: 'chatting', atMs: at });
     const facing = {
       [employeeId]: facingBetween(seats[0].position, seats[1].position),
       [partnerId]: facingBetween(seats[1].position, seats[0].position),
@@ -355,6 +409,9 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
     if (employee.idleSince === null || idleMs < threshold) blockers.push('below-threshold');
     if (bindingActive) blockers.push('binding-active');
     if (sync !== 'healthy') blockers.push('sync');
+    // M4.1g: a resident who just finished a nap stays awake for the refractory
+    // window — otherwise the office reads as a nap carousel.
+    if (employee.napRefractoryUntil > at) blockers.push('nap-refractory');
     return Object.freeze({
       employeeId,
       eligible: blockers.length === 0,
@@ -362,6 +419,32 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
       thresholdMs: threshold,
       blockers: Object.freeze(blockers),
     });
+  }
+
+  // M4.1g: the residents currently inside a nap (optionally excluding one).
+  function sleepingEmployeeIds(exceptEmployeeId = null) {
+    const out = [];
+    for (const [employeeId, employee] of employees) {
+      if (employeeId === exceptEmployeeId) continue;
+      if (employee.current && employee.current.activity === 'sleeping') out.push(employeeId);
+    }
+    return out.sort();
+  }
+
+  // M4.1g: one nap lasts a fixed configured duration, or a seeded random draw
+  // inside the configured range (default 60–180s). Deterministic per employee.
+  function drawSleepDurationMs(employeeId) {
+    const fixed = effectiveConfig.sleepDurationMs;
+    if (typeof fixed === 'number' && Number.isFinite(fixed) && fixed > 0) return Math.round(fixed);
+    const range = effectiveConfig.sleepDurationRangeMs || DEFAULT_SLEEP_DURATION_RANGE_MS;
+    let minMs = Number.isFinite(range.minMs) ? range.minMs : DEFAULT_SLEEP_DURATION_RANGE_MS.minMs;
+    let maxMs = Number.isFinite(range.maxMs) ? range.maxMs : DEFAULT_SLEEP_DURATION_RANGE_MS.maxMs;
+    if (maxMs < minMs) {
+      const swap = minMs;
+      minMs = maxMs;
+      maxMs = swap;
+    }
+    return Math.round(minMs + rngFor(employeeId)() * (maxMs - minMs));
   }
 
   function markTaskStarted({ employeeId, nowMs } = {}) {
@@ -432,7 +515,29 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
         // "串工位"); every other roaming-tagged spot stays eligible.
         .filter((node) => (behavior === 'roaming' ? !node.id.startsWith('desk-') : true))
         .map((node) => node.id);
+      // M4.1g: the left rest area joins the roaming pool. Layouts that declare
+      // it (rest-area/lounge/left-wing tags) contribute those nodes even
+      // without the roaming tag; otherwise the geometric left of the corridor
+      // ring is used (see idle-director.resolveLeftAreaNodeIds).
+      if (behavior === 'roaming' && leftAreaNodeIds.length > 0) {
+        for (const nodeId of leftAreaNodeIds) {
+          if (!candidates.includes(nodeId) && nodesById.has(nodeId) && nodeId !== fromNodeId) {
+            candidates.push(nodeId);
+          }
+        }
+      }
       candidates = shuffled(candidates, rngFor(employeeId));
+      // M4.1g: a seeded share of roaming picks PREFERS the left rest area — the
+      // whale-girls used to never walk there. A preference, never a hard rule:
+      // the stable reorder keeps the shuffled order inside each group, and the
+      // keep-away split below still demotes crowded nodes. Only for graphs
+      // whose left area is under-used (leftPreferenceOn).
+      if (behavior === 'roaming' && leftPreferenceOn && leftAreaNodeIds.length > 0) {
+        const leftSet = new Set(leftAreaNodeIds);
+        const preferLeft = director.prefersLeftArea({ employeeId });
+        const rank = (nodeId) => (leftSet.has(nodeId) === preferLeft ? 0 : 1);
+        candidates = [...candidates].sort((a, b) => rank(a) - rank(b));
+      }
       // Keep-away: spacious candidates first (same seeded order inside each
       // group), crowded ones kept as the liveness fallback.
       if (behavior !== 'sleeping') {
@@ -485,11 +590,13 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
       chatCandidates = [],
       externalReservations = [],
       peers = [],
+      enRoute = false,
+      arrivedNodeId = null,
     } = request || {};
     const employee = employees.get(employeeId);
     if (!employee) return fail('UNKNOWN_EMPLOYEE', { employeeId: employeeId ?? null });
     const at = atOrDefault(nowMs);
-    const current = employee.current;
+    let current = employee.current;
 
     // Members of the active chat pair stay inside it until endChat or
     // interruptForTask: re-deciding must never replace reservations, wander
@@ -510,6 +617,37 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
       });
     }
 
+    // M4.1g: a FINISHED nap wakes the sleeper — no local state is permanent.
+    // The wake happens exactly once (the nap cycle's startedAt is consumed
+    // here) and the resident falls through to the normal activity roll below.
+    let wokeFromSleep = null;
+    if (current && current.activity === 'sleeping') {
+      const wakeAtMs = Number.isFinite(current.wakeAtMs) ? current.wakeAtMs : Infinity;
+      if (at >= wakeAtMs) {
+        const startedAt = current.startedAt;
+        releaseEmployeeReservations(employeeId);
+        employee.current = null;
+        employee.napRefractoryUntil = at + effectiveConfig.sleepRefractoryMs;
+        wokeFromSleep = Object.freeze({
+          startedAt,
+          endedAt: at,
+          sleptMs: Math.max(0, at - startedAt),
+          nodeId: current.nodeId ?? null,
+        });
+        current = null;
+      }
+    }
+
+    // SPEC-04 decision points: "抵达目标 ..." — arriving at the chosen target
+    // restarts the dwell there, so a completed walk parks the body at the
+    // target for the minimum dwell before the next decision. Without this the
+    // walk finished and the very next tick re-rolled, so nobody ever dwelled
+    // at a waypoint.
+    if (arrivedNodeId && current && current.nodeId === arrivedNodeId
+        && at - current.startedAt >= effectiveConfig.minDwellMs) {
+      current.startedAt = at;
+    }
+
     // Minimum dwell: an ongoing local activity is not re-decided.
     if (current && current.activity && at - current.startedAt < effectiveConfig.minDwellMs) {
       return Object.freeze({
@@ -521,9 +659,51 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
       });
     }
 
-    // Sleep gate: threshold + no unfinished binding + healthy sync only.
+    // M4.1b (documented intent, finally wired): a ROAMING walker that is still
+    // on its route keeps its target until arrival — the module reports
+    // `enRoute`. Re-deciding mid-walk every dwell window re-planned long walks
+    // before they could finish, so distant targets (the left rest area behind
+    // its corridor gateway, ~10s of walking) were never reached. A blocked
+    // walker is NOT protected: the module drops the route through the
+    // M4.1e patience ladder (yield / self-replan), which clears `enRoute` and
+    // the next decision re-plans against the current reservations.
+    if (current && current.activity === 'roaming' && enRoute === true) {
+      return Object.freeze({
+        ok: true,
+        employeeId,
+        activity: 'continue',
+        decidedAt: at,
+        current: Object.freeze({ activity: 'roaming', startedAt: current.startedAt }),
+      });
+    }
+
+    // M4.1g: an UNFINISHED nap continues — it never restarts a fresh cycle.
+    // The old code re-entered sleeping every dwell window (fresh startedAt,
+    // fresh "开始小憩" log line), which is what froze five employees at their
+    // desks forever.
+    if (current && current.activity === 'sleeping') {
+      return Object.freeze({
+        ok: true,
+        employeeId,
+        activity: 'continue',
+        decidedAt: at,
+        current: Object.freeze({ activity: 'sleeping', startedAt: current.startedAt }),
+        sleepEvent: Object.freeze({
+          phase: 'continuing',
+          startedAt: current.startedAt,
+          wakeAtMs: current.wakeAtMs ?? null,
+          remainingMs: Number.isFinite(current.wakeAtMs) ? Math.max(0, current.wakeAtMs - at) : null,
+        }),
+      });
+    }
+
+    // Sleep gate: threshold + no unfinished binding + healthy sync + the
+    // post-nap refractory + the M4.1g concurrency cap (at most maxSleepers
+    // residents nap at once; the next one keeps roaming/resting/chatting).
+    // The decision that ENDS a nap never starts the next one in the same
+    // breath: the wake is always reported as a local-activity decision.
     const sleepCheck = evaluateSleep({ employeeId, nowMs: at, bindingActive, sync });
-    if (sleepCheck.eligible) {
+    if (!wokeFromSleep && sleepCheck.eligible && sleepingEmployeeIds(employeeId).length < effectiveConfig.maxSleepers) {
       releaseEmployeeReservations(employeeId);
       const target = chooseTarget({
         employeeId,
@@ -542,7 +722,16 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
       // normal activity roll takes over.
       const atOwnDesk = typeof fromNodeId === 'string' && employee.defaultSeat === fromNodeId;
       if (target || atOwnDesk) {
-        employee.current = { activity: 'sleeping', startedAt: at, nodeId: target ? target.nodeId : fromNodeId };
+        // M4.1g: one nap = one finite cycle with its own wake deadline.
+        const durationMs = drawSleepDurationMs(employeeId);
+        const wakeAtMs = at + durationMs;
+        employee.current = {
+          activity: 'sleeping',
+          startedAt: at,
+          nodeId: target ? target.nodeId : fromNodeId,
+          wakeAtMs,
+          durationMs,
+        };
         return Object.freeze({
           ok: true,
           employeeId,
@@ -552,13 +741,44 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
           target: target ? Object.freeze({ nodeId: target.nodeId, route: Object.freeze(target.route) }) : null,
           wait: target ? null : Object.freeze({ waitMs: effectiveConfig.waitMs, reason: 'sleep-desk-unavailable' }),
           marker: Object.freeze({ kind: 'sleep-zzz', accessibleLabel: `${employee.displayName} 正在小憩` }),
+          sleepEvent: Object.freeze({ phase: 'started', startedAt: at, wakeAtMs, durationMs }),
         });
       }
       // fall through: desk unreachable and not standing at it — stay awake
     }
 
+    return rollLocalActivity({
+      employee,
+      employeeId,
+      at,
+      fromNodeId,
+      forceActivity,
+      chatCandidates,
+      externalReservations,
+      peers,
+      wokeFromSleep,
+    });
+  }
+
+  // The awake roll: idle-director pick (or a forced activity), the chat-craving
+  // override, then the chatting/resting/roaming branches. Every returned
+  // decision carries `wokeFromSleep` when this decision is the wake itself, so
+  // the module can log exactly one "醒来" fact per nap.
+  function rollLocalActivity({
+    employee,
+    employeeId,
+    at,
+    fromNodeId,
+    forceActivity,
+    chatCandidates,
+    externalReservations,
+    peers,
+    wokeFromSleep,
+  }) {
+    const wakeFact = wokeFromSleep ? Object.freeze({ wokeFromSleep }) : null;
+
     // A forced sleeping request that is blocked falls back to staying awake.
-    let roll = forceActivity && forceActivity !== 'sleeping' ? forceActivity : rollActivity(employeeId);
+    let roll = forceActivity && forceActivity !== 'sleeping' ? forceActivity : director.choose({ employeeId, atMs: at }).activity;
     // M4.1d follow-up (2026-09-18, user: "never see two residents chat"): the
     // plain 15% roll produced one pair per ~10-15 SIMULATED minutes — the
     // office reads as silent. A resident idle for a while with no pair active
@@ -602,6 +822,7 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
               accessibleLabel: pair.presentation.accessibleLabel,
             }),
             marker: pair.presentation,
+            ...(wakeFact || {}),
           });
         }
       }
@@ -649,6 +870,7 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
         if (reacquired.ok) localReservations.push(reacquired.reservation);
       }
       employee.current = { activity: 'resting', startedAt: at, nodeId: target ? target.nodeId : fromNodeId };
+      director.note({ employeeId, activity: 'resting', atMs: at });
       return Object.freeze({
         ok: true,
         employeeId,
@@ -658,12 +880,14 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
         target: target ? Object.freeze({ nodeId: target.nodeId, route: Object.freeze(target.route) }) : null,
         wait: target ? null : Object.freeze({ waitMs: effectiveConfig.waitMs, reason: 'rest-target-unavailable' }),
         marker: null,
+        ...(wakeFact || {}),
       });
     }
 
     releaseEmployeeReservations(employeeId);
     const target = chooseTarget({ employeeId, behavior: 'roaming', fromNodeId, at, externalReservations, peers });
     employee.current = { activity: 'roaming', startedAt: at, nodeId: target ? target.nodeId : fromNodeId };
+    director.note({ employeeId, activity: 'roaming', atMs: at });
     return Object.freeze({
       ok: true,
       employeeId,
@@ -673,6 +897,7 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
       target: target ? Object.freeze({ nodeId: target.nodeId, route: Object.freeze(target.route) }) : null,
       wait: target ? null : Object.freeze({ waitMs: effectiveConfig.waitMs, reason: 'roam-target-unavailable' }),
       marker: null,
+      ...(wakeFact || {}),
     });
   }
 
@@ -698,6 +923,11 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
       activeChatPair = null;
     } else {
       releaseEmployeeReservations(employeeId);
+    }
+    // M4.1g: an interrupted nap ends the nap — the post-task idle clock plus
+    // the refractory keep the resident from falling asleep on the spot again.
+    if (employee.current && employee.current.activity === 'sleeping') {
+      employee.napRefractoryUntil = at + effectiveConfig.sleepRefractoryMs;
     }
     employee.current = null;
     effects.push(Object.freeze({ type: 'begin-task-transition', employeeId, reason }));
@@ -734,6 +964,11 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
     } else {
       releaseEmployeeReservations(employeeId);
     }
+    // M4.1g: a preempted nap does not resume in place — the refractory makes
+    // the next decision walk the resident away instead of re-sleeping.
+    if (employee.current && employee.current.activity === 'sleeping') {
+      employee.napRefractoryUntil = at + effectiveConfig.sleepRefractoryMs;
+    }
     employee.current = null;
     effects.push(Object.freeze({ type: 'preempted-local', employeeId, reason }));
     return Object.freeze({ ok: true, employeeId, reason, at, effects: Object.freeze(effects) });
@@ -760,6 +995,9 @@ module.exports = {
   createBehaviorScheduler,
   DEFAULT_PROBABILITIES,
   DEFAULT_SLEEP_AFTER_MS,
+  DEFAULT_MAX_SLEEPERS,
+  DEFAULT_SLEEP_DURATION_RANGE_MS,
+  DEFAULT_SLEEP_REFRACTORY_MS,
   DEFAULT_CONFIG,
   LOCAL_ACTIVITIES,
   INTERRUPT_REASONS,

@@ -1042,6 +1042,15 @@ const FLAT_LAYOUT_FIXTURE = JSON.parse(
   fs.readFileSync(path.join(ROOT, 'src', 'office', 'fixtures', 'office-layout-flat.json'), 'utf8')
 );
 
+// M4.1g: the production pack carries the dedicated sleeping nap art that the
+// fixture pack lacks.
+const PROD_PACK_ROOT = path.join(ROOT, 'resources', 'characters', 'deepseek-default');
+const PROD_PACK = assetPack.createAssetPack({
+  manifest: JSON.parse(fs.readFileSync(path.join(PROD_PACK_ROOT, 'manifest.json'), 'utf8')),
+  anchors: JSON.parse(fs.readFileSync(path.join(PROD_PACK_ROOT, 'animation', 'anchors.json'), 'utf8')),
+  animations: JSON.parse(fs.readFileSync(path.join(PROD_PACK_ROOT, 'animation', 'animations.json'), 'utf8')),
+}).pack;
+
 test('M4.1d: a chat pair speaks, expires, ends and cools down', () => {
   // The E5c-1 chain shipped its three ends (engine, corpus, renderer bubble
   // nodes) without the middle: nothing ever set `bubble` on an employee, and
@@ -1263,7 +1272,9 @@ test('D1: the back view belongs to the desk and to walking up — a walker that 
   // rendered the back sheet. The contract now:
   //   * idle / resting / chatting  → FRONT (the standing view)
   //   * task phases sit / work     → back (the seated-at-desk view)
-  //   * sleeping (only at the own desk) → back (打盹保持背向, user decision)
+  //   * sleeping (only at the own desk) → the dedicated sleeping art, which is
+  //     itself a back-facing pose (user decision 2026-09-22; supersedes the
+  //     2026-09-17 "keep the side-back sheet" call)
   //   * walk-up keeps the up-cycle; stopping after it returns to the front
   const module = officeModule.createOfficeModule({
     pack: PACK,
@@ -1311,9 +1322,13 @@ test('D1: the back view belongs to the desk and to walking up — a walker that 
       `a walker that stopped AWAY from her desk must show her front, not the back sheet (${settled.animation.resource})`);
   }
 
-  // sleeping stays back-facing (only ever happens at the own desk)
+  // M4.1g (2026-09-22, user decision — supersedes the 2026-09-17 "打盹维持
+  // 背向"): the nap state now plays the pack's dedicated sleeping art (which
+  // is itself a back-facing sleeping pose), so the composed side-back sheet no
+  // longer replaces it. The fixture pack has no sleeping capability, so this
+  // runs against the production pack.
   const sleepy = officeModule.createOfficeModule({
-    pack: PACK,
+    pack: PROD_PACK,
     layout: FLAT_LAYOUT_FIXTURE,
     seed: 'd1-facing-sleep',
     config: { sleepAfterMs: 1000, resultPresentationMs: 300, workstationAnchorSegmentMs: 160 },
@@ -1322,7 +1337,8 @@ test('D1: the back view belongs to the desk and to walking up — a walker that 
     && employee.movement === 'stationary'), 30000);
   assert.equal(fellAsleep, true, 'with a 1s sleep threshold somebody falls asleep and settles at the own desk');
   const sleeping = sleepy.state().employees.find((employee) => employee.activity === 'sleeping');
-  assert.equal(sleeping.animation.resource, 'side-back', 'sleeping keeps the back view (user decision; mid-walk samples may still show walk-up)');
+  assert.equal(sleeping.animation.resource, 'sleeping',
+    'the nap plays the dedicated sleeping art (user decision 2026-09-22; mid-walk samples may still show walk-up)');
 });
 
 test('E5a-R2: the module serves the composed height ratio and the back-facing seated pose', () => {

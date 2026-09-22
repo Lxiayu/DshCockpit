@@ -31,6 +31,7 @@ const path = require('node:path');
 
 const movementController = require('../src/office/runtime/movement-controller.js');
 const schedulerModule = require('../src/office/runtime/behavior-scheduler.js');
+const idleDirector = require('../src/office/runtime/idle-director.js');
 
 function makeGraph() {
   return {
@@ -216,6 +217,7 @@ test('different seeds produce different decision streams', () => {
 test('the runtime source avoids Date.now and Math.random', () => {
   const files = [
     'src/office/runtime/behavior-scheduler.js',
+    'src/office/runtime/idle-director.js',
     'src/office/runtime/employee-registry.js',
     'src/office/runtime/employee-profile.js',
     'src/office/runtime/queue-controller.js',
@@ -934,4 +936,247 @@ test('E4: resting in place keeps the current node reserved against other parkers
   });
   assert.equal(roamer.target, null, 'the roamer must not park on the rested-in-place cell');
   assert.equal(roamer.wait.reason, 'roam-target-unavailable');
+});
+
+// ---------------------------------------------------------------------------
+// M4.1g — the frozen-office fix: nap concurrency cap, finite naps, no log spam,
+// and a livelier idle director that uses the left rest area.
+// ---------------------------------------------------------------------------
+
+const OFFICE_IDS = ['orchestrator', 'researcher', 'coder', 'reviewer', 'collaborator'];
+
+// Five desks so all five residents (including the collaborator) CAN nap.
+function makeFiveDeskGraph() {
+  const nodes = [{ id: 'hall', position: { x: 0.5, y: 0.55 }, tags: ['roaming'], capacity: 8, safeRadius: 0.02 }];
+  const edges = [];
+  for (let i = 1; i <= 5; i += 1) {
+    const x = 0.12 + (i - 1) * 0.18;
+    nodes.push({ id: `desk-${i}`, position: { x, y: 0.2 }, tags: ['desk', 'sleeping'], capacity: 1, safeRadius: 0.04 });
+    nodes.push({ id: `roam-${i}`, position: { x, y: 0.8 }, tags: ['roaming'], capacity: 1, safeRadius: 0.02 });
+    edges.push({ from: 'hall', to: `desk-${i}`, behaviors: ['roaming', 'sleeping'], bidirectional: true });
+    edges.push({ from: 'hall', to: `roam-${i}`, behaviors: ['roaming'], bidirectional: true });
+  }
+  return { version: 1, nodes, edges };
+}
+
+// The compiled bundled-flat layout (what the real product runs on).
+function flatLayoutGraph() {
+  const fixture = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', 'src', 'office', 'fixtures', 'office-layout-flat.json'), 'utf8')
+  );
+  return { version: 1, nodes: fixture.nodes, edges: fixture.edges };
+}
+
+test('M4.1g: at most two residents nap at once (configurable cap, default 2)', () => {
+  const graph = makeFiveDeskGraph();
+  const scheduler = makeScheduler({ graph, config: { sleepAfterMs: 1000 } });
+  assert.equal(scheduler.config.maxSleepers, 2, 'the cap defaults to 2');
+  assert.equal(schedulerModule.DEFAULT_CONFIG.maxSleepers, 2);
+
+  for (const employeeId of OFFICE_IDS) scheduler.markTaskReleased({ employeeId, nowMs: 0 });
+  const picks = {};
+  let sleeping = 0;
+  for (const employeeId of OFFICE_IDS) {
+    const decision = scheduler.decide({ employeeId, nowMs: 5000, fromNodeId: 'hall' });
+    picks[employeeId] = decision.activity;
+    if (decision.activity === 'sleeping') sleeping += 1;
+  }
+  assert.ok(sleeping >= 1 && sleeping <= 2, `at most two residents nap, got ${sleeping}`);
+  for (const employeeId of OFFICE_IDS) {
+    if (picks[employeeId] === 'sleeping') continue;
+    assert.ok(['roaming', 'resting', 'chatting'].includes(picks[employeeId]),
+      `${employeeId} stays awake in a local activity, got ${picks[employeeId]}`);
+  }
+});
+
+test('M4.1g: the nap cap is configurable (maxSleepers 1 allows a single nap)', () => {
+  const scheduler = makeScheduler({
+    graph: makeFiveDeskGraph(),
+    config: { sleepAfterMs: 1000, maxSleepers: 1 },
+  });
+  for (const employeeId of OFFICE_IDS) scheduler.markTaskReleased({ employeeId, nowMs: 0 });
+  let sleeping = 0;
+  for (const employeeId of OFFICE_IDS) {
+    const decision = scheduler.decide({ employeeId, nowMs: 5000, fromNodeId: 'hall' });
+    if (decision.activity === 'sleeping') sleeping += 1;
+  }
+  assert.equal(sleeping, 1, 'a cap of one allows exactly one nap');
+});
+
+test('M4.1g: a nap is finite — the sleeper wakes after the duration and can nap again later', () => {
+  const scheduler = makeScheduler({
+    graph: makeFiveDeskGraph(),
+    config: { sleepAfterMs: 1000, sleepDurationMs: 10000, sleepRefractoryMs: 60000 },
+  });
+  scheduler.markTaskReleased({ employeeId: 'coder', nowMs: 0 });
+  const nap = scheduler.decide({ employeeId: 'coder', nowMs: 5000, fromNodeId: 'hall' });
+  assert.equal(nap.activity, 'sleeping');
+  assert.equal(nap.sleepEvent.phase, 'started');
+  assert.equal(nap.sleepEvent.startedAt, 5000);
+  assert.equal(nap.sleepEvent.wakeAtMs, 15000);
+  assert.equal(nap.sleepEvent.durationMs, 10000);
+
+  // An unfinished nap CONTINUES — never a fresh cycle (the old code restarted
+  // the sleep every dwell window, which is what froze the office).
+  for (const at of [6000, 10000, 14999]) {
+    const mid = scheduler.decide({ employeeId: 'coder', nowMs: at, fromNodeId: 'desk-3' });
+    assert.equal(mid.activity, 'continue', `nap continues at ${at}`);
+    assert.equal(mid.current.activity, 'sleeping');
+  }
+
+  // Past the duration the resident WAKES exactly once, into a local activity.
+  const woke = scheduler.decide({ employeeId: 'coder', nowMs: 15000, fromNodeId: 'desk-3' });
+  assert.notEqual(woke.activity, 'sleeping');
+  assert.ok(['roaming', 'resting', 'chatting'].includes(woke.activity), `awake activity ${woke.activity}`);
+  assert.equal(woke.wokeFromSleep.sleptMs, 10000);
+  assert.equal(woke.wokeFromSleep.startedAt, 5000);
+  assert.equal(woke.wokeFromSleep.endedAt, 15000);
+  assert.equal(scheduler.decide({ employeeId: 'coder', nowMs: 15001, fromNodeId: 'desk-3' }).activity, 'continue');
+
+  // A fresh nap needs the idle threshold AND the post-nap refractory to pass.
+  const refractory = scheduler.evaluateSleep({ employeeId: 'coder', nowMs: 20000 });
+  assert.equal(refractory.eligible, false);
+  assert.ok(refractory.blockers.includes('nap-refractory'));
+  const later = scheduler.evaluateSleep({ employeeId: 'coder', nowMs: 15000 + 60000 });
+  assert.equal(later.eligible, true, 'the resident may nap again after the refractory');
+});
+
+test('M4.1g: nap durations are random inside the configured range', () => {
+  const durations = new Set();
+  for (let i = 0; i < 24; i += 1) {
+    const scheduler = makeScheduler({ graph: makeFiveDeskGraph(), seed: `nap-range-${i}`, config: { sleepAfterMs: 1000 } });
+    scheduler.markTaskReleased({ employeeId: 'coder', nowMs: 0 });
+    const nap = scheduler.decide({ employeeId: 'coder', nowMs: 5000, fromNodeId: 'hall' });
+    assert.equal(nap.activity, 'sleeping');
+    durations.add(nap.sleepEvent.durationMs);
+  }
+  for (const duration of durations) {
+    assert.ok(duration >= 60000 && duration <= 180000, `nap duration ${duration} stays inside 60-180s`);
+  }
+  assert.ok(durations.size >= 5, `the duration is a random draw (${durations.size} distinct values)`);
+
+  // The range is configurable: a fixed duration wins over the random draw.
+  const fixed = makeScheduler({ graph: makeFiveDeskGraph(), config: { sleepAfterMs: 1000, sleepDurationMs: 7000 } });
+  fixed.markTaskReleased({ employeeId: 'coder', nowMs: 0 });
+  assert.equal(fixed.decide({ employeeId: 'coder', nowMs: 5000, fromNodeId: 'hall' }).sleepEvent.durationMs, 7000);
+});
+
+test('M4.1g: a woken sleeper frees the nap slot for the next resident', () => {
+  const scheduler = makeScheduler({
+    graph: makeFiveDeskGraph(),
+    config: { sleepAfterMs: 1000, sleepDurationMs: 10000, sleepRefractoryMs: 0 },
+  });
+  for (const employeeId of OFFICE_IDS) scheduler.markTaskReleased({ employeeId, nowMs: 0 });
+  assert.equal(scheduler.decide({ employeeId: 'orchestrator', nowMs: 5000, fromNodeId: 'hall' }).activity, 'sleeping');
+  assert.equal(scheduler.decide({ employeeId: 'researcher', nowMs: 5000, fromNodeId: 'hall' }).activity, 'sleeping');
+  const blocked = scheduler.decide({ employeeId: 'coder', nowMs: 5000, fromNodeId: 'hall' });
+  assert.notEqual(blocked.activity, 'sleeping', 'the third idle resident stays awake');
+
+  const woke = scheduler.decide({ employeeId: 'orchestrator', nowMs: 15000, fromNodeId: 'desk-1' });
+  assert.notEqual(woke.activity, 'sleeping');
+  const promoted = scheduler.decide({ employeeId: 'coder', nowMs: 15000, fromNodeId: 'hall' });
+  assert.equal(promoted.activity, 'sleeping', 'the freed slot goes to a waiting resident');
+});
+
+test('M4.1g: a trusted task interrupts a nap and frees its slot immediately', () => {
+  const scheduler = makeScheduler({ graph: makeFiveDeskGraph(), config: { sleepAfterMs: 1000 } });
+  scheduler.markTaskReleased({ employeeId: 'coder', nowMs: 0 });
+  scheduler.decide({ employeeId: 'coder', nowMs: 5000, fromNodeId: 'hall' });
+  scheduler.decide({ employeeId: 'researcher', nowMs: 5000, fromNodeId: 'hall' });
+  const interrupted = scheduler.interruptForTask({ employeeId: 'coder', reason: 'runtime-task', nowMs: 6000 });
+  assert.equal(interrupted.ok, true);
+  const third = scheduler.decide({ employeeId: 'reviewer', nowMs: 6000, fromNodeId: 'hall' });
+  assert.equal(third.activity, 'sleeping', 'the interrupted nap slot is reusable');
+});
+
+test('M4.1g: roaming targets can land in the left rest area (x below the corridor mid)', () => {
+  const graph = flatLayoutGraph();
+  const left = new Set(idleDirector.resolveLeftAreaNodeIds(graph));
+  assert.deepEqual([...left].sort(), ['roam-6', 'roam-7', 'roam-8', 'roam-9'],
+    'the compiled flat layout left area (wing + corridor-left) is the rest area');
+  const boundary = idleDirector.corridorBoundaryX(graph);
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+
+  // A roaming-only director (no napping, no resting/chatting) over the real
+  // graph: the left wing must be reachable, and non-left nodes must stay
+  // reachable too (the preference is seeded, never a hard rule).
+  const scheduler = makeScheduler({
+    graph,
+    config: {
+      sleepAfterMs: 24 * 60 * 60 * 1000,
+      probabilities: { roaming: 1, resting: 0, chatting: 0 },
+    },
+  });
+  const targets = new Set();
+  for (let i = 0; i < 40; i += 1) {
+    const decision = scheduler.decide({
+      employeeId: OFFICE_IDS[i % OFFICE_IDS.length],
+      nowMs: i * 6000,
+      fromNodeId: 'roam-6',
+    });
+    if (decision.activity !== 'roaming' || !decision.target) continue;
+    targets.add(decision.target.nodeId);
+  }
+  const leftTargets = [...targets].filter((id) => left.has(id));
+  assert.ok(leftTargets.length >= 1,
+    `roaming reaches the left rest area (targets: ${[...targets].sort().join(',')})`);
+  for (const id of leftTargets) {
+    assert.ok(nodeById.get(id).position.x < boundary, `${id} sits left of the corridor mid`);
+  }
+  assert.ok([...targets].some((id) => !left.has(id) && nodeById.get(id).position.x > boundary),
+    'right-side roaming nodes stay reachable — the left bias is a preference');
+  // the wing itself (x far left) is reachable through the corridor gateway
+  assert.ok([...targets].some((id) => nodeById.get(id).position.x < 0.45),
+    'the far-left wing nodes are reachable targets');
+});
+
+test('M4.1g: the idle director is wired into the scheduler decisions', () => {
+  const scheduler = makeScheduler({ graph: makeFiveDeskGraph(), config: { sleepAfterMs: 24 * 60 * 60 * 1000 } });
+  const picks = [];
+  for (let i = 0; i < 60; i += 1) {
+    // 6s cadence: inside every cooldown, so resting cannot repeat back to back
+    const decision = scheduler.decide({ employeeId: 'coder', nowMs: i * 6000, fromNodeId: 'hall' });
+    if (decision.activity === 'continue') continue;
+    picks.push(decision.activity);
+  }
+  assert.ok(picks.length > 10, `decisions are produced (${picks.length})`);
+  for (let i = 1; i < picks.length; i += 1) {
+    assert.ok(!(picks[i] === 'resting' && picks[i - 1] === 'resting'), 'no resting twice in a row');
+  }
+  assert.ok(picks.some((activity) => activity === 'roaming'), 'roaming stays in the mix');
+});
+
+test('M4.1g: a napping resident is never recruited into a chat pair', () => {
+  const scheduler = makeScheduler({ config: { sleepAfterMs: 1000, sleepDurationMs: 60000 } });
+  scheduler.markTaskReleased({ employeeId: 'coder', nowMs: 0 });
+  const nap = scheduler.decide({ employeeId: 'coder', nowMs: 5000, fromNodeId: 'desk-3' });
+  assert.equal(nap.activity, 'sleeping', 'the coder naps at its own desk');
+
+  // the napper is not an eligible chat partner (an awake one still is)
+  const choice = scheduler.chooseChatPartner({
+    employeeId: 'researcher',
+    fromNodeId: 'hall',
+    nowMs: 5000,
+    candidates: [
+      { employeeId: 'coder', nodeId: 'desk-3' },
+      { employeeId: 'reviewer', nodeId: 'desk-4' },
+    ],
+  });
+  assert.ok(choice, 'an awake candidate is still eligible');
+  assert.notEqual(choice.employeeId, 'coder', 'the napper is not a chat candidate');
+
+  // a direct beginChat with a napping partner fails cleanly (no silent nap
+  // destruction — the old code overwrote the nap cycle and the pair died)
+  const pair = scheduler.beginChat({
+    employeeId: 'researcher',
+    partnerId: 'coder',
+    fromNodeId: 'hall',
+    partnerNodeId: 'desk-3',
+    nowMs: 5000,
+  });
+  assert.equal(pair.ok, false);
+  assert.equal(pair.code, 'CHAT_PARTNERS_UNAVAILABLE');
+  assert.equal(scheduler.activeChatPair(), null, 'no pair was created');
+  const stillNapping = scheduler.decide({ employeeId: 'coder', nowMs: 6000, fromNodeId: 'desk-3' });
+  assert.equal(stillNapping.activity, 'continue', 'the nap survives untouched');
 });
