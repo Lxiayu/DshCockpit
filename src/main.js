@@ -63,7 +63,7 @@ const { createMcpRegistry } = require('./mcp-registry');
 const { createMcpConnect } = require('./mcp-connect');
 const { createMcpImport } = require('./mcp-import');
 const compact = require('./compact');
-const { createHarnessRpcClient, createHarnessRpcWire } = require('./harness-rpc');
+const { createHarnessRpcClient, createHarnessRpcWire, agentPresetOf } = require('./harness-rpc');
 const { createQuickAskShortcutManager } = require('./quickask-shortcut');
 const { createMemoryFiles } = require('./memory-files');
 const { createPluginOpGuard, failureCode, shouldCleanupAfterFailure, summarizeOutput, inferStage, parsePnpmBlockedPackage, upsertOnlyBuiltDependencies, pickSubpackage, resolveDepKey, pruneBundles, sanitizeProfile } = require('./plugin-flow');
@@ -734,6 +734,20 @@ const { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeAuth
  * /api + WS consumers keep using getRuntimeUrl() — a query token there would
  * corrupt path concatenation. */
 const runtimeAuthUrlOf = () => getRuntimeAuthUrl() || getRuntimeUrl();
+
+/** Protocol pick for the harness RPC layer (plan §4.2 dual stack), using the
+ * same probe as startEventsFeed: a token-carrying auth URL means the runtime
+ * is 0.1.5+ and every /api route (including the old dot methods) is gone —
+ * RPC then speaks slash endpoints through the mux when it is live, else over
+ * cookie-gated fetch. A bare URL is 0.1.1: the legacy dot methods stay. */
+const harnessRpcProtocol = () => {
+  if (runtimeMux) return 'slash';
+  const authUrl = runtimeAuthUrlOf();
+  return typeof authUrl === 'string' && authUrl.includes('token=') ? 'slash' : 'legacy';
+};
+/** Harness RPC deps shared by the IM bind/stop/steer paths and the compact
+ * trigger: protocol + mux (unary transport) + auth (cookie source). */
+const harnessRpcDeps = () => ({ protocol: harnessRpcProtocol(), mux: runtimeMux, auth: runtimeAuth });
 
 // ---------------------------------------------------------------------------
 // binary resolution
@@ -2864,7 +2878,10 @@ async function compactNow() {
   }
   if (!getRuntimeUrl()) return { ok: false, code: 'runtime-offline', reason: t(lang(), 'compact.noWindow') };
   const info = manager.getInfo();
-  const client = createHarnessRpcClient({ baseUrl: getRuntimeUrl(), version: info.activeVersion || '' });
+  // 0.1.5: slash endpoints (session/list _request + commands/execute
+  // submittedAttachments) through the mux unary channel when the event feed is
+  // live; 0.1.1: the original dot-method paths (rollback safety).
+  const client = createHarnessRpcClient({ baseUrl: getRuntimeUrl(), version: info.activeVersion || '', ...harnessRpcDeps() });
   const r = await client.compactLatestSession();
   if (!r.ok) {
     const reason = t(lang(), 'compact.failedBody', { code: r.code });
@@ -3810,7 +3827,7 @@ async function handleImCommand({ command, senderId, text }) {
     if (command === 'bind') {
       const ru = getRuntimeUrl();
       if (!ru) return t(L, 'im.bind.offline');
-      const rpc = createHarnessRpcWire(ru);
+      const rpc = createHarnessRpcWire(ru, harnessRpcDeps());
       const sessions = await rpc.listSessions();
       const running = sessions.filter((s) => s.running);
       if (!arg) {
@@ -3826,7 +3843,7 @@ async function handleImCommand({ command, senderId, text }) {
         }
         if (!sessions.length) return t(L, 'im.bind.noRunning');
         const lines = sessions.slice(0, 8).map((s, i) =>
-          '\n' + (i + 1) + '. `' + String(s.sessionId).slice(0, 8) + '` ' + (s.agentPreset || 'standard') + (s.running ? ' ●' : '')).join('');
+          '\n' + (i + 1) + '. `' + String(s.sessionId).slice(0, 8) + '` ' + (agentPresetOf(s) || 'standard') + (s.running ? ' ●' : '')).join('');
         return t(L, 'im.bind.choose') + lines;
       }
       // /bind <prefix>: match the nearest session by short id (running preferred)
@@ -3845,7 +3862,7 @@ async function handleImCommand({ command, senderId, text }) {
     if (command === 'stop') {
       const ru = getRuntimeUrl();
       if (!ru) return t(L, 'im.bind.offline');
-      const rpc = createHarnessRpcWire(ru);
+      const rpc = createHarnessRpcWire(ru, harnessRpcDeps());
       const list = await rpc.listSessions();
       const running = list.find((s) => s.running);
       if (!running) return t(L, 'im.stop.noneRunning');
@@ -4135,7 +4152,7 @@ if (!gotLock) {
         const ru = getRuntimeUrl();
         if (!ru) return t(lang(), 'im.bind.offline');
         try {
-          await createHarnessRpcWire(ru).prompt(sessionId, text, 'steer');
+          await createHarnessRpcWire(ru, harnessRpcDeps()).prompt(sessionId, text, 'steer');
           return t(lang(), 'im.steer.accepted', { id: String(sessionId).slice(0, 8) });
         } catch (e) {
           log(`[channels] steer failed: ${e.message}`);
