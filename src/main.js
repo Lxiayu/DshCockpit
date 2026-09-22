@@ -49,6 +49,9 @@ const windowState = require('./window-state');
 const { connectEvents } = require('./runtime-events');
 const { createRuntimeAuth } = require('./runtime-auth');
 const { createRuntimeMux, EVENTS_STREAM_ID } = require('./runtime-mux');
+// 容器加固（2026-09-23）：事件面/鉴权降级的单一真相源。纯状态机——main.js
+// 只负责观察（note*）与呈现（tray / 设置页 / 诊断），策略本身可单测。
+const { createRuntimeHealthMonitor } = require('./runtime-health');
 const cost = require('./cost');
 const balance = require('./balance');
 const { runHeadless } = require('./headless');
@@ -371,6 +374,13 @@ let eventsFeedFailStreak = 0;
 let eventsFeedProtocol = 'legacy';
 let runtimeMux = null;
 let eventsFeedSessionErrorCount = 0;
+// 容器加固（2026-09-23）：降级姿态（feed 连续失败 / mux 非 live / cookie 交换
+// 失败）。5s tick 里观察 mux 状态、比较降级集合变化，变化时刷新托盘、推送
+// 设置页、写 knownIssues 诊断。snapshot 也经 shell:runtime-info 下发。
+const runtimeHealth = createRuntimeHealthMonitor({ log });
+let runtimeHealthTimer = null;
+let runtimeHealthKey = ''; // last broadcast degraded-reasons key ('' = healthy)
+let autoRollbackInFlight = false;
 // Office M5: per-session journal follow streams (see startOfficeFollowSync).
 let officeFollowTimer = null;
 const officeFollowStreams = new Map(); // raw sessionId -> { streamId, misses }
@@ -714,7 +724,12 @@ const supervisor = createRuntimeSupervisor({
   startEventsFeed,
   stopEventsFeed,
   resetEventsFeedLiveFlag: () => { eventsFeedLiveLogged = false; },
-  onHealthy: (bootUrl) => onRuntimeHealthy(bootUrl),
+  onHealthy: (bootUrl) => {
+    onRuntimeHealthy(bootUrl);
+    // 容器加固（2026-09-23）：一次真正健康的启动清零"连续启动失败"持久计数
+    // （手动重启成功同样算——用户已经在自愈了）。
+    manager.recordStartupSuccess();
+  },
   hasMainWindow: () => !!pickDialogParent(),
   isQuitting: () => quitting,
   recordCrash,
@@ -726,6 +741,11 @@ const supervisor = createRuntimeSupervisor({
   upgradeNow: () => runUpdateCheck(true),
   envExtras: () => (mcpMgr ? mcpMgr.runtimeSecretEnv() : null),
   applyPendingUpdate,
+  // 容器加固（2026-09-23）：supervisor 观察到"本世代从未 healthy 就结束"（进程
+  // 提前退出，或健康探测失败）时回调这里。计数进 runtime-state.json，达阈值
+  // 自动回滚 previousVersion。返回 {rollbackScheduled:true} 让 supervisor
+  // 不要叠加自己的自动重启——一个故障一条恢复路径。
+  onStartupFailure: (reason) => handleRuntimeStartupFailure(reason),
 });
 const { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeAuthUrl, getRuntimeLogPath, getRuntimeChild } = supervisor;
 
@@ -1121,6 +1141,11 @@ const trayMenu = createTrayMenu({
   lang,
   t,
   runtimeInfo: () => manager.getInfo(),
+  // 容器加固：降级姿态快照（托盘菜单项 + tooltip + 设置页警示条同源）
+  runtimeHealth: () => runtimeHealth.snapshot(),
+  // tooltip 基线：与 window-manager 创建主窗口时设置的 `AppName — <url>` 同格式，
+  // 降级标记只追加不覆盖（见 tray-menu.updateTray）。
+  baseTooltip: () => `${APP_NAME} — ${getRuntimeUrl() || 'starting…'}`,
   settingsGet: () => settings.get(),
   peakWindowsOf,
   costPeakStatus: cost.peakStatus,
@@ -1339,6 +1364,109 @@ async function doRollback() {
 }
 
 // ---------------------------------------------------------------------------
+// 容器加固（2026-09-23）：连续启动失败 → 自动回滚上一版本
+//
+// supervisor 的 crashing 世代（进程在 healthy 前退出 / 健康探测失败）经
+// onStartupFailure 进来：RuntimeManager 持久计数，同一版本连续 N 次（默认 3）
+// 未启动/未健康即 rollback() 到 previousVersion 并重启运行时。没有
+// previousVersion 时只记录不动作（绝不抛错、绝不切换指针）。用户可见性：
+// 通知一条（含"已回退到 X"）+ tray/设置页的版本行 + knownIssues 诊断。
+// ---------------------------------------------------------------------------
+function handleRuntimeStartupFailure(reason) {
+  if (quitting) return null;
+  const verdict = manager.recordStartupFailure(reason);
+  log(`[shell] startup failure #${verdict.streak}/${verdict.threshold} for ${verdict.version || '?'}: ${reason}`);
+  if (!verdict.tripped || !verdict.canRollback || autoRollbackInFlight) {
+    if (verdict.tripped && !verdict.canRollback) {
+      log(`[shell] ${verdict.version} failed ${verdict.streak} consecutive startups — no previous version to roll back to`);
+    }
+    return { ...verdict, rollbackScheduled: false };
+  }
+  autoRollbackInFlight = true;
+  // 与 supervisor 自身的 1.5s 自动重启同一节奏：先让本世代彻底退出再动作。
+  setTimeout(() => {
+    autoRollbackRuntime().finally(() => { autoRollbackInFlight = false; });
+  }, 1_500);
+  return { ...verdict, rollbackScheduled: true };
+}
+
+async function autoRollbackRuntime() {
+  try {
+    const res = await manager.maybeAutoRollback(manager.state.lastStartupFailReason);
+    if (!res) return;
+    log(`[shell] auto-rolled back runtime: ${res.from} -> ${res.to} (consecutive startup failures)`);
+    notify(
+      t(lang(), 'notify.autoRollback'),
+      t(lang(), 'notify.autoRollbackBody', { v: res.from, n: manager.startupFailureThreshold, to: res.to })
+    );
+    updateTray();
+    restartRuntime();
+  } catch (err) {
+    log(`[shell] auto-rollback failed: ${err.message}`);
+    notify(t(lang(), 'notify.rollbackFailed'), err.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 容器加固（2026-09-23）：降级姿态可见化（托盘 / 设置页 / 诊断）
+//
+// "harness 可以坏、壳不能坏"的另一半：坏了要让人看见。feed 连续失败、mux 长期
+// 非 live、cookie 交换持续失败——三者任一持续即降级。降级只做被动呈现（托盘
+// 菜单项 + tooltip、设置页运行时区警示条、knownIssues 诊断、一条通知），绝不
+// 弹阻塞窗、绝不影响 harness 页面继续可用。恢复自动清除。
+// ---------------------------------------------------------------------------
+const RUNTIME_DEGRADED_REASON_KEYS = Object.freeze({
+  'feed-fail-streak': 'runtime.degradedFeed',
+  'auth-fail-streak': 'runtime.degradedAuth',
+  'feed-disconnected': 'runtime.degradedDisconnected',
+});
+
+/** 用户可读的降级原因（i18n；托盘与设置页共用同一份措辞）。 */
+function runtimeDegradedReasonsText(health, L = lang()) {
+  const reasons = Array.isArray(health && health.reasons) ? health.reasons : [];
+  return reasons.map((r) => t(L, RUNTIME_DEGRADED_REASON_KEYS[r] || 'runtime.degradedTitle')).join('；');
+}
+
+function broadcastRuntimeHealth(health) {
+  for (const w of BrowserWindow.getAllWindows()) {
+    try { if (!w.isDestroyed()) w.webContents.send('runtime:health', health); } catch { /* ignore */ }
+  }
+}
+
+/** 5s 观察 tick：喂 mux 状态、比较降级集合，变化时刷新托盘/设置页/诊断。 */
+function runtimeHealthTick() {
+  if (quitting) return;
+  if (runtimeMux) runtimeHealth.noteMuxState(runtimeMux.state);
+  const health = runtimeHealth.snapshot();
+  const key = health.degraded ? health.reasons.join(',') : '';
+  if (key === runtimeHealthKey) return;
+  const previous = runtimeHealthKey;
+  runtimeHealthKey = key;
+  if (key) {
+    const version = manager.getInfo().activeVersion;
+    log(`[shell] runtime degraded: ${key} (feedFail=${health.feedFailStreak} authFail=${health.authFailStreak} lostFor=${Math.round(health.feedLostForMs / 1000)}s, mux=${health.muxState})`);
+    // 诊断：写进 runtime-state 的 knownIssues（设置页/回滚归因可见）
+    if (version) {
+      manager.state.knownIssues[version] = `event surface degraded: ${key}`;
+      manager.saveState();
+    }
+    notify(t(lang(), 'notify.runtimeDegraded'), t(lang(), 'notify.runtimeDegradedBody', {
+      reason: runtimeDegradedReasonsText(health),
+      v: version || '—',
+    }));
+  } else if (previous) {
+    log('[shell] runtime health recovered (event surface live again)');
+    const version = manager.getInfo().activeVersion;
+    if (version && /^event surface degraded/.test(manager.state.knownIssues[version] || '')) {
+      delete manager.state.knownIssues[version];
+      manager.saveState();
+    }
+  }
+  updateTray();
+  broadcastRuntimeHealth(health);
+}
+
+// ---------------------------------------------------------------------------
 // IPC (settings window)
 // ---------------------------------------------------------------------------
 /** Restart/stop the phone gateway after its settings changed. */
@@ -1508,7 +1636,7 @@ function registerIpc() {
     });
     return res.canceled ? null : { path: res.filePaths[0] };
   });
-  ipcMain.handle('shell:runtime-info', () => ({ ...manager.getInfo(), state: cockpitRuntimeState }));
+  ipcMain.handle('shell:runtime-info', () => ({ ...manager.getInfo(), state: cockpitRuntimeState, health: runtimeHealth.snapshot() }));
   ipcMain.handle('shell:check-update', () => runUpdateCheck(true));
   ipcMain.handle('shell:apply-update', () => applyPendingUpdate());
   ipcMain.handle('shell:rollback', () => doRollback());
@@ -3418,10 +3546,12 @@ function startEventsFeed() {
 
 function startLegacyEventsFeed(ru) {
   eventsFeedProtocol = 'legacy';
+  runtimeHealth.noteFeedStart({ protocol: 'legacy' });
   const base = ru.endsWith('/') ? ru : `${ru}/`;
   const onFeedError = (err) => {
     if (quitting) return;
     eventsFeedFailStreak += 1;
+    runtimeHealth.noteFeedFailure(err); // 降级计数（容器加固）
     log(`[shell] events feed error: ${err.message} (attempt ${eventsFeedFailStreak})`);
     if (eventsFeedFailStreak === 3) {
       // Neither protocol connected after three tries: say so once and stop the
@@ -3441,6 +3571,7 @@ function startLegacyEventsFeed(ru) {
       if (!eventsFeedLiveLogged) {
         eventsFeedLiveLogged = true;
         eventsFeedFailStreak = 0; // a live frame proves the feed is healthy again
+        runtimeHealth.noteFeedLive();
         log(`[shell] events feed live (session ${frame.sessionId}, running=${frame.running})`);
       }
       // H-im L2: rising edge → taskStarted push; falling edge → taskDone (existing)
@@ -3474,10 +3605,12 @@ function startLegacyEventsFeed(ru) {
  * feed went blind (no full-feed restart storm). */
 function startMuxEventsFeed(ru) {
   eventsFeedProtocol = 'mux';
+  runtimeHealth.noteFeedStart({ protocol: 'mux' });
   const base = ru.endsWith('/') ? ru : `${ru}/`;
   const onFeedError = (err) => {
     if (quitting) return;
     eventsFeedFailStreak += 1;
+    runtimeHealth.noteFeedFailure(err); // 降级计数（容器加固；cookie 失败归因 auth）
     log(`[shell] events feed error: ${err && err.message || err} (attempt ${eventsFeedFailStreak})`);
     if (eventsFeedFailStreak === 3) {
       log('[shell] events feed still unavailable after 3 attempts — the mux keeps retrying in the background');
@@ -3493,6 +3626,7 @@ function startMuxEventsFeed(ru) {
   });
   runtimeMux.onReady(() => {
     eventsFeedFailStreak = 0; // a ready frame proves the feed is healthy again
+    runtimeHealth.noteFeedLive();
     if (!eventsFeedLiveLogged) {
       eventsFeedLiveLogged = true;
       log('[shell] events feed live (mux ready)');
@@ -3582,6 +3716,9 @@ function stopEventsFeed() {
     runtimeMux = null;
   }
   eventsFeedProtocol = 'legacy';
+  // 容器加固：feed 停了（运行时重启/退出）就不该继续显示降级——新一轮 feed
+  // 起来时 noteFeedStart 重新开始计数。
+  runtimeHealth.reset();
   // no live frames until the feed reconnects: drop the busy flag and any
   // compaction start orphaned by a runtime crash/restart (C3)
   sessionRunning = false;
@@ -4250,6 +4387,10 @@ if (!gotLock) {
       if (quitting || !trayMenu.hasTray()) return;
       if (settings.get().costPeakEnabled) updateTray();
     }, 60_000);
+    // 容器加固（2026-09-23）：降级姿态观察 tick。mux 状态从客户端读、降级集合
+    // 变化时刷新托盘 + 推送设置页 + 写 knownIssues + 一条通知；恢复自动清除。
+    runtimeHealthTimer = setInterval(runtimeHealthTick, 5_000);
+    if (typeof runtimeHealthTimer.unref === 'function') runtimeHealthTimer.unref();
     // Splash on EVERY boot, not just guided first-run: without it Windows
     // users stare at a blank screen for the whole runtime boot (AV scans the
     // runtime's thousands of files). It closes in createWindow().
@@ -4391,6 +4532,7 @@ if (!gotLock) {
 
   app.on('will-quit', () => {
     if (trayPeakTimer) { clearInterval(trayPeakTimer); trayPeakTimer = null; }
+    if (runtimeHealthTimer) { clearInterval(runtimeHealthTimer); runtimeHealthTimer = null; }
     if (balanceTimer) { clearInterval(balanceTimer); balanceTimer = null; }
     if (compactTimer) { clearInterval(compactTimer); compactTimer = null; }
     quickAskShortcut.shutdown();

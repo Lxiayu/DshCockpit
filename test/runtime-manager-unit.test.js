@@ -575,3 +575,103 @@ test('the rc channel picks the newest non-alpha release (alpha is opt-in via pin
   assert.strictEqual(pinnedManager.resolveTarget(packument), '0.1.6-alpha.2',
     'pinned stays the explicit opt-in path for alpha builds');
 });
+
+// ---- consecutive startup failure → automatic rollback (2026-09-23 容器加固) --
+// The counter lives in runtime-state.json so a streak survives an app restart:
+// a version that cannot boot must not get a free pass just because the user
+// relaunched the shell. The rollback target is the persisted previousVersion.
+
+test('recordStartupFailure accumulates toward the threshold and persists across reloads', () => {
+  const { ud, settings } = makeManager();
+  const build = () => new RuntimeManager({
+    userDataDir: ud, settings, log: () => {}, resolveNodeBin: () => ({ bin: process.execPath, runAsNode: false }),
+  });
+  const first = build();
+  first.state.activeVersion = '0.2.0';
+  first.state.previousVersion = '0.1.9';
+  fakeInstall(path.join(ud, 'runtime', '0.1.9'), '0.1.9'); // a live rollback target
+  first.state.installed.push({ version: '0.1.9', path: path.join(ud, 'runtime', '0.1.9'), source: 'managed' });
+  const a = first.recordStartupFailure('runtime exited before healthy (code=1)');
+  const b = first.recordStartupFailure('runtime exited before healthy (code=1)');
+  assert.deepStrictEqual([a.streak, b.streak, a.tripped, b.tripped], [1, 2, false, false]);
+  assert.strictEqual(a.threshold, 3);
+  // a fresh manager reads the SAME streak back from disk (no reset on relaunch)
+  const reloaded = build();
+  assert.strictEqual(reloaded.state.startupFailStreak, 2);
+  assert.strictEqual(reloaded.state.startupFailStreakVersion, '0.2.0');
+  const c = reloaded.recordStartupFailure('runtime exited before healthy (code=1)');
+  assert.strictEqual(c.tripped, true, 'the third consecutive failure trips the rollback');
+  assert.strictEqual(c.canRollback, true);
+  fs.rmSync(ud, { recursive: true, force: true });
+});
+
+test('recordStartupSuccess clears the streak', () => {
+  const { manager } = makeManager();
+  manager.state.activeVersion = '0.2.0';
+  manager.recordStartupFailure('boom');
+  manager.recordStartupFailure('boom');
+  assert.strictEqual(manager.startupFailureInfo().streak, 2);
+  assert.strictEqual(manager.recordStartupSuccess(), true);
+  const info = manager.startupFailureInfo();
+  assert.strictEqual(info.streak, 0);
+  assert.strictEqual(info.tripped, false);
+  assert.strictEqual(info.version, null);
+  assert.strictEqual(manager.recordStartupSuccess(), false, 'clearing twice is a no-op');
+});
+
+test('a different active version restarts the count (per-version accounting)', () => {
+  const { manager } = makeManager();
+  manager.state.activeVersion = '0.2.0';
+  manager.recordStartupFailure('boom');
+  manager.recordStartupFailure('boom');
+  manager.state.activeVersion = '0.3.0'; // a new version took over
+  const fresh = manager.recordStartupFailure('boom');
+  assert.strictEqual(fresh.streak, 1);
+  assert.strictEqual(fresh.version, '0.3.0');
+  assert.strictEqual(fresh.tripped, false);
+});
+
+test('maybeAutoRollback returns null (no throw) when there is no previous version', async () => {
+  const { manager } = makeManager();
+  manager.state.activeVersion = '0.2.0';
+  manager.state.previousVersion = null;
+  for (let i = 0; i < 3; i += 1) manager.recordStartupFailure('boom');
+  assert.strictEqual(manager.startupFailureInfo().tripped, true);
+  const result = await manager.maybeAutoRollback('boom');
+  assert.strictEqual(result, null, 'nothing to roll back to — never throw, never switch');
+  assert.strictEqual(manager.state.activeVersion, '0.2.0', 'the pointer stays put');
+});
+
+test('maybeAutoRollback switches to previousVersion once and clears the streak', async () => {
+  const { ud, manager } = makeManager();
+  const prev = path.join(ud, 'runtime', '0.1.9');
+  const cur = path.join(ud, 'runtime', '0.2.0');
+  fakeInstall(prev, '0.1.9');
+  fakeInstall(cur, '0.2.0');
+  manager.state.installed.push({ version: '0.1.9', path: prev, source: 'managed' });
+  manager.state.installed.push({ version: '0.2.0', path: cur, source: 'managed' });
+  manager.state.activeVersion = '0.2.0';
+  manager.state.previousVersion = '0.1.9';
+  for (let i = 0; i < 3; i += 1) manager.recordStartupFailure('runtime exited before healthy');
+  const result = await manager.maybeAutoRollback('runtime exited before healthy');
+  assert.deepStrictEqual(result, { from: '0.2.0', to: '0.1.9' });
+  assert.strictEqual(manager.state.activeVersion, '0.1.9');
+  assert.strictEqual(manager.state.startupFailStreak, 0, 'the rolled-back version gets a fresh streak');
+  // a second call without a new failure is a no-op (no rollback ping-pong)
+  assert.strictEqual(await manager.maybeAutoRollback('runtime exited before healthy'), null);
+  // and the reason is visible in the state diagnostics
+  assert.match(manager.state.knownIssues['0.2.0'], /rolled back/i);
+});
+
+test('loadState normalizes a malformed startup-failure streak field', () => {
+  const { ud, settings } = makeManager();
+  fs.writeFileSync(path.join(ud, 'runtime-state.json'), JSON.stringify({
+    installed: [], startupFailStreak: 'many', startupFailStreakVersion: 42,
+  }));
+  const manager = new RuntimeManager({
+    userDataDir: ud, settings, log: () => {}, resolveNodeBin: () => ({ bin: process.execPath, runAsNode: false }),
+  });
+  assert.strictEqual(manager.state.startupFailStreak, 0);
+  assert.strictEqual(manager.state.startupFailStreakVersion, null);
+  fs.rmSync(ud, { recursive: true, force: true });
+});

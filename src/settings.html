@@ -697,6 +697,8 @@
             <h3 data-i18n="nav.runtime">运行时</h3>
             <div class="kv"><span data-i18n="runtime.liveState">当前状态</span><b id="runtime-live-state">--</b></div>
             <div class="kv"><span data-i18n="about.runtime">当前运行时</span><b id="runtime-live-version">--</b></div>
+            <div class="kv"><span data-i18n="runtime.healthState">事件流</span><b id="runtime-health-state">--</b></div>
+            <div class="warn" id="runtime-degraded" style="display:none"></div>
             <div class="btnrow">
               <button class="secondary" id="btn-runtime-restart" data-i18n="plugins.restartNow">立即重启</button>
             </div>
@@ -1507,6 +1509,13 @@
       runtime_hint: '工作区 / DSH_HOME / 端口 / Node / dsh 路径的修改将在下次重启运行时后生效（托盘 → 重启运行时）。',
       runtime_liveState: '当前状态', runtime_stateStarting: '正在启动…', runtime_stateHealthy: '运行正常', runtime_stateOffline: '不可用',
       runtime_stateRestarting: '正在重启…', runtime_restarted: '运行时重启已启动。',
+      // 容器加固（2026-09-23）：事件流健康行 + 降级警示条（与 src/i18n.js 的 runtime.degraded* 同源措辞）
+      runtime_healthState: '事件流', runtime_healthLive: '正常', runtime_healthDown: '已断开', runtime_healthUnknown: '未连接',
+      runtime_degradedTitle: '⚠ 运行时降级',
+      runtime_degradedFeed: '实时事件面多次连接失败',
+      runtime_degradedAuth: '运行时会话（Cookie）交换持续失败',
+      runtime_degradedDisconnected: '实时事件流已断开',
+      runtime_degradedHint: '壳与 Harness 页面仍可正常使用；通知、IM 推送与办公室状态可能滞后。',
       control_operationFailed: '操作失败：{reason}',
       trayOnClose: '关闭窗口时最小化到托盘', autoStart: '开机自启',
       quickAskHotkey: 'Quick Ask 全局快捷键', quickAskHotkey_hint: '在 Harness 之外快速唤起，不影响当前工作区。',
@@ -1975,6 +1984,13 @@ nav_office: '虚拟办公室',
       runtime_hint: 'Workspace / DSH_HOME / port / Node / dsh path changes take effect after "Restart runtime" in the tray.',
       runtime_liveState: 'Current state', runtime_stateStarting: 'Starting…', runtime_stateHealthy: 'Healthy', runtime_stateOffline: 'Unavailable',
       runtime_stateRestarting: 'Restarting…', runtime_restarted: 'Runtime restart started.',
+      // container hardening (2026-09-23): event-stream health row + degraded warning (same wording as src/i18n.js runtime.degraded*)
+      runtime_healthState: 'Event stream', runtime_healthLive: 'Live', runtime_healthDown: 'Disconnected', runtime_healthUnknown: 'Not connected',
+      runtime_degradedTitle: '⚠ Runtime degraded',
+      runtime_degradedFeed: 'The live event surface failed to connect repeatedly',
+      runtime_degradedAuth: 'The runtime session (cookie) exchange keeps failing',
+      runtime_degradedDisconnected: 'The live event stream is disconnected',
+      runtime_degradedHint: 'The shell and Harness page keep working; notifications, IM pushes and office state may lag.',
       control_operationFailed: 'Operation failed: {reason}',
       trayOnClose: 'Minimize to tray on close', autoStart: 'Start at login',
       quickAskHotkey: 'Quick Ask global shortcut', quickAskHotkey_hint: 'Open Quick Ask outside Harness without disturbing the current workspace.',
@@ -2805,6 +2821,7 @@ nav_office: 'Virtual Office',
       const info = await window.dshShell.runtimeInfo();
       $('runtime-live-version').textContent = info.activeVersion || '--';
       $('runtime-live-state').textContent = tr(RUNTIME_STATE_KEYS[info.state] || 'runtime.stateOffline');
+      renderRuntimeHealth(info.health);
       return info;
     } catch {
       $('runtime-live-version').textContent = '--';
@@ -2812,6 +2829,32 @@ nav_office: 'Virtual Office',
       return null;
     }
   }
+
+  // 容器加固（2026-09-23）：降级姿态在设置页运行时区可见化。恢复自动清除：
+  // 主进程 5s tick 在降级集合变化时经 runtime:health 推送，这里只负责渲染。
+  const RUNTIME_DEGRADED_REASON_KEYS = Object.freeze({
+    'feed-fail-streak': 'runtime_degradedFeed',
+    'auth-fail-streak': 'runtime_degradedAuth',
+    'feed-disconnected': 'runtime_degradedDisconnected',
+  });
+  function renderRuntimeHealth(health) {
+    const state = $('runtime-health-state');
+    const box = $('runtime-degraded');
+    if (!state || !box) return;
+    if (health && health.degraded) {
+      const reasons = (health.reasons || []).map((r) => tr(RUNTIME_DEGRADED_REASON_KEYS[r] || 'runtime_degradedTitle'));
+      state.textContent = tr('runtime_healthDown');
+      box.textContent = tr('runtime_degradedTitle')
+        + (reasons.length ? '：' + reasons.join('；') : '')
+        + ' ' + tr('runtime_degradedHint');
+      box.style.display = '';
+    } else {
+      state.textContent = health && health.feedLive ? tr('runtime_healthLive') : tr('runtime_healthUnknown');
+      box.style.display = 'none';
+      box.textContent = '';
+    }
+  }
+  window.dshShell.onRuntimeHealth((health) => renderRuntimeHealth(health));
 
   $('btn-runtime-restart').addEventListener('click', async () => {
     const button = $('btn-runtime-restart');

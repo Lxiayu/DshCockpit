@@ -3,6 +3,14 @@
 // Tray instance and rebuilds the menu on every updateTray() call.
 'use strict';
 
+// 容器加固（2026-09-23）：降级原因码 → i18n 键（main.js 的
+// RUNTIME_DEGRADED_REASON_KEYS 同款；托盘与设置页共用一份措辞）。
+const RUNTIME_DEGRADED_REASON_KEYS = Object.freeze({
+  'feed-fail-streak': 'runtime.degradedFeed',
+  'auth-fail-streak': 'runtime.degradedAuth',
+  'feed-disconnected': 'runtime.degradedDisconnected',
+});
+
 function createTrayMenu(deps) {
   const {
     Tray, Menu, nativeImage, app,
@@ -12,6 +20,10 @@ function createTrayMenu(deps) {
     lang,
     t,
     runtimeInfo,              // () => manager.getInfo()
+    runtimeHealth = () => null, // () => runtime-health snapshot (容器加固)
+    // () => base tooltip (window-manager's `AppName — <runtime url>`); the
+    // degraded marker is APPENDED so an existing tooltip is never clobbered.
+    baseTooltip = null,
     settingsGet,              // () => settings snapshot
     peakWindowsOf,            // (cfg) => windows|null
     costPeakStatus,           // cost.peakStatus
@@ -39,12 +51,33 @@ function createTrayMenu(deps) {
 
   let tray = null;
 
+  /** 用户可读的降级原因（i18n，与设置页同源）。 */
+  function degradedReasonsText(health, L) {
+    const reasons = (health && Array.isArray(health.reasons)) ? health.reasons : [];
+    return reasons.map((r) => t(L, RUNTIME_DEGRADED_REASON_KEYS[r] || 'runtime.degradedTitle')).join('；');
+  }
+
   function updateTray() {
     if (!tray) return;
     const L = lang();
     const info = runtimeInfo();
     const pending = info.pendingVersion;
     const canRollback = info.installed && info.installed.length > 1;
+    // 容器加固（2026-09-23）：事件面/鉴权降级时，托盘 tooltip 与菜单都要显式
+    // 标注（"看着正常其实没数据"是这次要消灭的形态）。非阻塞、只读呈现；降级
+    // 标记追加在既有 tooltip（运行时 URL）之后，不覆盖已有信息。
+    const health = runtimeHealth();
+    const degraded = !!(health && health.degraded);
+    const base = typeof baseTooltip === 'function' ? (baseTooltip() || appName) : appName;
+    tray.setToolTip(degraded ? `${base} — ${t(L, 'runtime.degradedTitle')}` : base);
+    const degradedItems = degraded ? [
+      {
+        label: `${t(L, 'runtime.degradedTitle')}：${degradedReasonsText(health, L)}`,
+        enabled: false,
+      },
+      { label: t(L, 'runtime.degradedHint'), enabled: false },
+      { type: 'separator' },
+    ] : [];
     // peak/off-peak status line (only when split pricing is enabled)
     const cfg = settingsGet();
     const windows = peakWindowsOf(cfg);
@@ -70,6 +103,7 @@ function createTrayMenu(deps) {
       { label: t(L, 'tray.settings'), click: () => openSettingsWindow() },
       { label: t(L, 'tray.quickAsk'), accelerator: quickAskAccelerator(), click: () => openQuickAsk() },
       { type: 'separator' },
+      ...degradedItems,
       {
         label: t(L, 'tray.checkUpdates'),
         click: async () => { await runUpdateCheck(true); },
@@ -112,7 +146,11 @@ function createTrayMenu(deps) {
       },
       { label: t(L, 'tray.devtools'), click: () => { if (isMainWindowAlive()) toggleDevTools(); } },
       { type: 'separator' },
-      { label: t(L, 'tray.runtime', { v: info.activeVersion || '—' }), enabled: false },
+      {
+        label: t(L, 'tray.runtime', { v: info.activeVersion || '—' })
+          + (degraded ? ` · ${t(L, 'runtime.degradedTitle')}` : ''),
+        enabled: false,
+      },
       { label: t(L, 'tray.quit'), click: () => { setQuitting(true); app.quit(); } },
     ]));
   }

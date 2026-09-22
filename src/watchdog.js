@@ -22,6 +22,15 @@ function shellAlive() {
   }
 }
 
+function runtimeAlive() {
+  try {
+    process.kill(runtimePid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 setInterval(() => {
   if (shellAlive()) return;
   // shell is gone: terminate the runtime process tree
@@ -32,3 +41,10 @@ setInterval(() => {
   }
   process.exit(0);
 }, 2_000);
+
+// The runtime already exited (crash / restart supersede): there is nothing to
+// reap, so leave instead of polling a dead shell for the rest of its life
+// (this also keeps the supervisor's unit tests free of zombie reapers).
+setTimeout(() => {
+  if (!runtimeAlive()) process.exit(0);
+}, 1_000);

@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('dshShell', {
   onTheme: (cb) => ipcRenderer.on('shell:theme', (_e, t) => cb(t)),
   pickFolder: (kind) => ipcRenderer.invoke('shell:pick-folder', kind),
   runtimeInfo: () => ipcRenderer.invoke('shell:runtime-info'),
+  // 容器加固（2026-09-23）：运行时降级姿态推送（主进程 5s tick，降级集合变化时）
+  onRuntimeHealth: (cb) => ipcRenderer.on('runtime:health', (_e, h) => cb(h)),
   checkUpdate: () => ipcRenderer.invoke('shell:check-update'),
   applyUpdate: () => ipcRenderer.invoke('shell:apply-update'),
   rollback: () => ipcRenderer.invoke('shell:rollback'),

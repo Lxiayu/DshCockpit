@@ -339,7 +339,13 @@ gateTest('per-file test ledger covers every repo test file to isolate office reg
     }
     assert.equal(typeof entry.exitCode, 'number', `per-file ledger has no exit code for test/${file}`);
   }
-  assert.equal(recorded.size >= repoTests.length, true);
+  // The aggregate check must account for the pending files exempted above
+  // (added after the evidence round). Before that exemption existed, any new
+  // test file made recorded.size < repoTests.length and failed the gate for a
+  // reason the per-file loop had already cleared. Stale ledger entries (tests
+  // deleted since the round) only ever inflate recorded.size, so the corrected
+  // predicate is: every repo file is either recorded or pending.
+  assert.equal(recorded.size + pending.length >= repoTests.length, true);
   const officeFailures = ledger.files.filter(
     (entry) => entry.exitCode !== 0 && entry.file.startsWith('test/office-') && entry.status !== 'pending-self',
   );

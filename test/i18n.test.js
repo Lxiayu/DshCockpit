@@ -52,3 +52,21 @@ test('plugin.* market strings exist in both languages', () => {
   assert.strictEqual(t('zh', 'plugin.failedBody', { name: 'a/b', reason: 'x' }), 'a/b：x');
   assert.strictEqual(t('en', 'plugin.failedBody', { name: 'a/b', reason: 'x' }), 'a/b: x');
 });
+
+test('container hardening strings exist in both languages (2026-09-23)', () => {
+  // 降级可见化 + 自动回滚的用户可见文案（托盘 tooltip/菜单、设置页、通知）
+  const keys = [
+    'runtime.degradedTitle', 'runtime.degradedFeed', 'runtime.degradedAuth',
+    'runtime.degradedDisconnected', 'runtime.degradedHint',
+    'notify.runtimeDegraded', 'notify.runtimeDegradedBody',
+    'notify.autoRollback', 'notify.autoRollbackBody',
+  ];
+  for (const k of keys) {
+    assert.ok(t('zh', k), `zh missing ${k}`);
+    assert.ok(t('en', k), `en missing ${k}`);
+  }
+  // the rollback notice must name the version the user fell back TO
+  const body = t('zh', 'notify.autoRollbackBody', { v: '0.1.5-rc.2', n: 3, to: '0.1.1-rc.2' });
+  assert.match(body, /0\.1\.5-rc\.2/);
+  assert.match(body, /0\.1\.1-rc\.2/);
+});

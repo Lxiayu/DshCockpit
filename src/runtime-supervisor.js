@@ -152,6 +152,13 @@ function createRuntimeSupervisor(deps) {
     bootTimingFile = null, // () => path — A3 boot baselines land here
     notify,
     envExtras = () => null, // () => object — v0.3.1: MCP secret env vars ride the runtime child env
+    healthTimeoutMs = HEALTH_TIMEOUT_MS, // injectable for tests
+    // 2026-09-23 容器加固: every "never became healthy" generation reports here.
+    // main.js persists the streak (runtime-state.json) and, at the threshold,
+    // rolls back to previousVersion. The handler answers {rollbackScheduled}
+    // so the supervisor can stand down instead of scheduling BOTH a rollback
+    // and its own auto-restart.
+    onStartupFailure = () => null,
   } = deps;
 
   const { spawn } = require('node:child_process');
@@ -199,6 +206,10 @@ function createRuntimeSupervisor(deps) {
 
   function spawnRuntime() {
     const generation = stateController.begin('starting');
+    // 2026-09-23 容器加固: did THIS generation reach the healthy state? A
+    // generation that ends without it counts as one consecutive startup
+    // failure (persisted in runtime-state.json by main.js).
+    let generationHealthy = false;
     // A3: boot timing baselines (spawn -> URL -> healthy) persisted to
     // userData/diagnostics/boot-timing.json so regressions have numbers.
     const bootTiming = { spawnAt: new Date().toISOString(), urlMs: null, healthyMs: null, url: null };
@@ -239,6 +250,23 @@ function createRuntimeSupervisor(deps) {
     log(`[shell] cwd:      ${cwd}`);
     log(`[shell] runtime log: ${runtimeLogPath}`);
 
+    // Boot watchdog: if the URL line never appears (slow machine, unexpected
+    // runtime output format, …) the boot window must not spin silently forever
+    // — surface a one-shot pointer to the log so the user can act. Cleared as
+    // soon as the URL is found, the generation fails, or this spawn generation
+    // ends (a pending 8-minute timer must never outlive its generation).
+    const BOOT_URL_WATCHDOG_MS = 8 * 60_000;
+    let urlWatchdogTimer = setTimeout(() => {
+      if (runtimeUrl || isQuitting() || !stateController.isCurrent(generation)) return;
+      log('[shell] boot watchdog: no URL line after ' + Math.round(BOOT_URL_WATCHDOG_MS / 1000) + 's');
+      notify(
+        t(lang(), 'notify.bootUrlTimeout'),
+        t(lang(), 'notify.bootUrlTimeoutBody', { min: Math.round(BOOT_URL_WATCHDOG_MS / 60_000), log: runtimeLogPath })
+      );
+    }, BOOT_URL_WATCHDOG_MS);
+    if (typeof urlWatchdogTimer.unref === 'function') urlWatchdogTimer.unref();
+    const clearBootWatchdog = () => { clearTimeout(urlWatchdogTimer); urlWatchdogTimer = null; };
+
     // Tail the runtime log for the URL line (started once; survives retries).
     // Byte-offset bookkeeping lives in runtime-log-tail.js (unit tested).
     if (urlPollTimer) clearInterval(urlPollTimer);
@@ -256,19 +284,27 @@ function createRuntimeSupervisor(deps) {
         if (!parsed) return; // unexpected line shape: keep tailing
         runtimeUrl = parsed.origin;
         runtimeAuthUrl = parsed.authUrl;
-        clearTimeout(urlWatchdogTimer);
+        clearBootWatchdog();
         crashGuard.reset(); // a healthy boot resets the auto-restart counter
         bootTiming.urlMs = Date.now() - spawnT0;
         bootTiming.url = runtimeUrl;
         log(`[shell] runtime URL: ${runtimeUrl}${runtimeAuthUrl === runtimeUrl ? '' : ' (authenticated)'}`);
         onRemoteUrl(runtimeAuthUrl); // gateway exchanges the token for the runtime cookie
         const bootUrl = runtimeAuthUrl;
-        waitForHealth(bootUrl).then((ok) => {
+        waitForHealth(bootUrl, healthTimeoutMs).then((ok) => {
           if (!stateController.isCurrent(generation) || runtimeAuthUrl !== bootUrl) return;
           if (!ok) {
             stateController.transition('offline', generation);
+            // 2026-09-23 容器加固: a runtime that is up but never answers the
+            // health probe is a startup failure like any other — main.js
+            // persists the streak and rolls back at the threshold.
+            const verdict = onStartupFailure('runtime health probe failed (no 200/3xx in the boot window)');
+            if (verdict && verdict.rollbackScheduled) {
+              log('[shell] consecutive startup failures tripped — auto-rollback scheduled instead of resuming');
+            }
             return;
           }
+          generationHealthy = true;
           stateController.transition('healthy', generation);
           bootTiming.healthyMs = Date.now() - spawnT0;
           if (bootTimingFile) {
@@ -311,7 +347,7 @@ function createRuntimeSupervisor(deps) {
     const fail = (message) => {
       stateController.transition('offline', generation);
       if (urlPollTimer) { clearInterval(urlPollTimer); urlPollTimer = null; }
-      clearTimeout(urlWatchdogTimer);
+      clearBootWatchdog();
       if (outFd !== -1) { try { fs.closeSync(outFd); } catch { /* ignore */ } outFd = -1; }
       // pure display-layer enhancement: no signature → behave exactly as before
       if (isCredentialFormatIssue(runtimeLogPath)) {
@@ -328,20 +364,6 @@ function createRuntimeSupervisor(deps) {
         notify(t(lang(), 'notify.runtimeExited'), message);
       }
     };
-
-    // Boot watchdog: if the URL line never appears (slow machine, unexpected
-    // runtime output format, …) the boot window must not spin silently forever
-    // — surface a one-shot pointer to the log so the user can act. Cleared as
-    // soon as the URL is found or this spawn generation ends.
-    const BOOT_URL_WATCHDOG_MS = 8 * 60_000;
-    let urlWatchdogTimer = setTimeout(() => {
-      if (runtimeUrl || isQuitting() || !stateController.isCurrent(generation)) return;
-      log('[shell] boot watchdog: no URL line after ' + Math.round(BOOT_URL_WATCHDOG_MS / 1000) + 's');
-      notify(
-        t(lang(), 'notify.bootUrlTimeout'),
-        t(lang(), 'notify.bootUrlTimeoutBody', { min: Math.round(BOOT_URL_WATCHDOG_MS / 60_000), log: runtimeLogPath })
-      );
-    }, BOOT_URL_WATCHDOG_MS);
 
     let attempt = 0;
     let retrying = false;
@@ -395,6 +417,18 @@ function createRuntimeSupervisor(deps) {
         onRemoteUrl(null);
         stateController.transition('offline', generation);
         if (urlPollTimer) { clearInterval(urlPollTimer); urlPollTimer = null; }
+        clearBootWatchdog();
+        // 容器加固（2026-09-23）：本世代从未 healthy 就结束 = 一次"启动/健康
+        // 失败"。计数由 main.js 持久化（runtime-state.json），达阈值自动回滚
+        // previousVersion。回滚路径会自己重启运行时，所以这里不再叠加自身的
+        // 自动重启——一个故障只允许一条恢复路径。
+        const startupVerdict = generationHealthy
+          ? null
+          : onStartupFailure(`runtime exited before healthy (code=${code} signal=${signal})`);
+        if (startupVerdict && startupVerdict.rollbackScheduled) {
+          log('[shell] consecutive startup failures tripped — auto-rollback scheduled instead of an auto-restart');
+          return;
+        }
         if (!hasMainWindow()) {
           fail(t(lang(), 'dialog.runtimeDied', { code, signal, path: runtimeLogPath }));
           return;
