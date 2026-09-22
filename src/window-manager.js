@@ -56,22 +56,28 @@ function createWindowManager(deps) {
   // it KEEPS the page alive (the main-process simulation keeps pushing), so
   // switching back is instant and the office keeps living in the background.
   let officeShellOnVisibility = null;
-  let officeShellVisibleFlag = false;
+  let officeShellVisibleFlag = 'false|false';
 
   function officeShellViewId() {
     return officeShellView ? 'office-shell-1' : null;
   }
 
   function notifyOfficeShellVisibility() {
-    const visible = !!(officeShellView && activeMainView === 'office'
-      && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized());
-    if (visible === officeShellVisibleFlag) return;
-    officeShellVisibleFlag = visible;
+    // 2026-09-22 修正（用户实测：永远看不到对话气泡）：办公室在 M4.2 就是"后台活着"的
+    // 设计——切到 harness 页不该冻结它的仿真，否则闲聊/走位永远积累不到（无头模拟里首聊
+    // 约需 2 分钟）。因此：**只有窗口隐藏/最小化才暂停仿真**；`active`（办公室是否为当前
+    // 主视图）随载荷下发，供页面做"仅在用户注视时"的节流/提示用。
+    const windowVisible = !!(mainWindow && !mainWindow.isDestroyed()
+      && mainWindow.isVisible() && !mainWindow.isMinimized());
+    const active = !!(officeShellView && activeMainView === 'office');
+    const signature = `${windowVisible}|${active}`;
+    if (signature === officeShellVisibleFlag) return;
+    officeShellVisibleFlag = signature;
     if (typeof officeShellOnVisibility === 'function') {
-      try { officeShellOnVisibility(officeShellViewId(), visible); } catch { /* module errors never break the view */ }
+      try { officeShellOnVisibility(officeShellViewId(), windowVisible); } catch { /* module errors never break the view */ }
     }
     if (officeShellView) {
-      try { officeShellView.webContents.send('office:visibility', { viewId: officeShellViewId(), visible }); } catch { /* closing */ }
+      try { officeShellView.webContents.send('office:visibility', { viewId: officeShellViewId(), visible: windowVisible, active }); } catch { /* closing */ }
     }
   }
 

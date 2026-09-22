@@ -869,7 +869,15 @@ test('window manager: M4.2 shell — rail + harness views compose, the office sw
   assert.ok(win.contentView.children.includes(harness) && !win.contentView.children.includes(office),
     'the harness view is back in the main area');
   assert.equal(wm.isOfficeViewActive(), false);
-  assert.deepEqual(visibility.at(-1), ['office-shell-1', false], 'the module is told the office became hidden');
+  // 2026-09-22 语义修正：办公室是"后台活着"的（M4.2）；切回 harness 只让它不再是
+  // 当前主视图，**仿真的暂停只看窗口是否可见/最小化**（否则闲聊/走位永远积累不到，
+  // 用户实测看不到气泡）。因此这里模块仍被告知 visible=true，而"是否为当前视图"
+  // 通过页面载荷里的 active 字段下发。
+  assert.deepEqual(visibility.at(-1), ['office-shell-1', true],
+    'the simulation keeps running while the office is inactive (window still visible)');
+  assert.equal(office.sent.at(-1)[0], 'office:visibility');
+  assert.equal(office.sent.at(-1)[1].active, false, 'the page is told the office is no longer the active view');
+  assert.equal(office.sent.at(-1)[1].visible, true, 'window-level visibility still true');
   wm.broadcastToOfficeViews('office:state', { tick: 2 });
   assert.deepEqual(office.sent.at(-1), ['office:state', { tick: 2 }], 'a backgrounded office page still receives pushes');
 
