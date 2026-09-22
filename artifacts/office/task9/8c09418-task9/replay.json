@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "8c09418-task9",
+  "thresholdPercent": 5,
+  "fakeClockTickMs": 4000,
+  "excludedAnimationFrames": true,
+  "capturedFrames": [
+    "replay-a-t4000ms.png",
+    "replay-b-t4000ms.png"
+  ],
+  "pixelDiffPercent": 0,
+  "channelTolerance": 8,
+  "pass": true,
+  "stateHashA": "d4aace56a1b938f4048556929f1a48628ce6a7baf0c36c1e169122a4fb8c6ba8",
+  "stateHashB": "d4aace56a1b938f4048556929f1a48628ce6a7baf0c36c1e169122a4fb8c6ba8",
+  "error": null,
+  "note": "both captures drive a fresh office module to the same logical tick; identical animation frames so only layout differences count"
+}

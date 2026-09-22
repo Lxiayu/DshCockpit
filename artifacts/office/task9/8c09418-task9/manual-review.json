@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "task": "Task 9 / SPEC-09 release gate",
+  "recordType": "manual-visual-review",
+  "status": "PENDING_HUMAN_REVIEW",
+  "userVerbalConfirmation": {
+    "date": "2026-09-06",
+    "scope": "core interaction flow: office opens, residents roam, trusted task walks the right employee to the seat, result shown, returns to local behavior",
+    "result": "confirmed-working",
+    "note": "verbal confirmation only; it does not clear the open asset defects below and is not a substitute for the PNG review listed in requiredUserReview"
+  },
+  "knownDefects": [
+    {
+      "id": "walk-right-single-frame-left-jump",
+      "layer": "asset",
+      "status": "open",
+      "symptom": "one-frame visual jump to the left during the walk-right cycle",
+      "disposition": "replace the walk-right frame art; programmatic offset compensation is forbidden",
+      "codeOffsetCompensation": false,
+      "references": [
+        "artifacts/office-playground/57ea74c-task4-wip/moving.png"
+      ]
+    },
+    {
+      "id": "walk-leg-continuity-unnatural",
+      "layer": "asset",
+      "status": "open",
+      "symptom": "leg motion does not continue naturally across walk-left and walk-right frames",
+      "disposition": "replace the walk cycle frames; programmatic offset compensation is forbidden",
+      "codeOffsetCompensation": false,
+      "references": [
+        "artifacts/office-playground/57ea74c-task4-wip/moving.png"
+      ]
+    }
+  ],
+  "openDefectCount": 2,
+  "carriedForwardFrom": "artifacts/office-playground/57ea74c-task4-wip/manual-review.json",
+  "carriedForwardNote": "that record stays PENDING_HUMAN_REVIEW; Task 9 does not overwrite it",
+  "requiredUserReview": [
+    "s1-local-roam-1280x840.png",
+    "s2-walk-to-seat.png",
+    "s2-working-at-seat.png",
+    "s6-resize-narrow-720x620.png",
+    "perf-five-active-1280x840.png",
+    "replay-a-t4000ms.png",
+    "replay-b-t4000ms.png",
+    "hidpi-default-1280x840-dpr2.png",
+    "Electron scenario: watch a walk cycle in motion (S1/S2 live view) to re-judge the walk-right frame jump and leg continuity after art replacement"
+  ]
+}
