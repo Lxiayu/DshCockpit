@@ -527,19 +527,51 @@ test('rollback throws when there is no previous version to return to', async () 
 
 // ---- shell ↔ runtime compatibility matrix (DESIGN.md §6.4) ------------------
 
-test('compat matrix gates 0.1.2+ runtimes (Remote API rework) but not older ones', () => {
+test('compat matrix covers the whole 0.1.x line (0.1.2+ no longer gated)', () => {
   const { isRuntimeSupported, SUPPORTED_RUNTIME_RANGE } = require('../src/runtime-manager');
-  assert.strictEqual(SUPPORTED_RUNTIME_RANGE, '<0.1.2-0');
-  // what we bundle + what users run today
-  for (const v of ['0.1.1-rc.2', '0.1.0-rc.8', '0.1.0-rc.6', '0.1.1']) {
-    assert.strictEqual(isRuntimeSupported(v), true, `${v} must stay installable`);
+  // 2026-09-22 用户拍板"放开更新挡板"：0.1.2+ 的 Remote API 改造已由兼容层覆盖，
+  // 矩阵放宽到整个 0.1.x；常量语义改为"已测试矩阵"，不再作为安装禁止条件
+  // （矩阵外版本照装 + 记 knownIssue + 降级提示 + 一键回滚，见 container 姿态）。
+  assert.strictEqual(SUPPORTED_RUNTIME_RANGE, '<0.2.0-0');
+  for (const v of ['0.1.0-rc.8', '0.1.1-rc.2', '0.1.1', '0.1.2-rc.1', '0.1.5-rc.2', '0.1.6-alpha.2']) {
+    assert.strictEqual(isRuntimeSupported(v), true, `${v} is inside the tested matrix`);
   }
-  // 0.1.2 replaced the whole Remote API (cookie auth, /api/remote.mux, no /api/respond)
-  for (const v of ['0.1.2-rc.1', '0.1.2-alpha.5', '0.1.3-alpha.1', '0.1.5-rc.1', '0.1.5-rc.2']) {
-    assert.strictEqual(isRuntimeSupported(v), false, `${v} must be gated until v0.4.0`);
+  // 0.2.0 起属于矩阵外（可安装但会提示降级）
+  for (const v of ['0.2.0-0', '0.2.0', '0.3.1-rc.1']) {
+    assert.strictEqual(isRuntimeSupported(v), false, `${v} is outside the tested matrix`);
   }
   // never block on a version string we cannot parse (local dev installs)
   assert.strictEqual(isRuntimeSupported(''), true);
   assert.strictEqual(isRuntimeSupported(null), true);
   assert.strictEqual(isRuntimeSupported('not-a-version'), true);
+});
+
+test('the rc channel picks the newest non-alpha release (alpha is opt-in via pinned)', () => {
+  const { RuntimeManager } = require('../src/runtime-manager');
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const settings = {
+    effective: () => ({ channel: 'rc', pinnedVersion: '', registry: 'https://registry.example/' }),
+    get: () => ({}), set: () => {},
+  };
+  const manager = new RuntimeManager({
+    userDataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'rm-channel-')),
+    settings, log: () => {}, resolveNodeBin: () => ({ bin: process.execPath, runAsNode: false }),
+  });
+  const packument = {
+    'dist-tags': { latest: '0.1.5-rc.2', alpha: '0.1.6-alpha.2' },
+    versions: {
+      '0.1.1-rc.2': {}, '0.1.5-rc.2': {}, '0.1.6-alpha.2': {}, '0.1.6-alpha.3': {},
+    },
+  };
+  assert.strictEqual(manager.resolveTarget(packument), '0.1.5-rc.2',
+    'alpha builds never win the rc channel');
+  const pinned = { ...settings, effective: () => ({ channel: 'pinned', pinnedVersion: '0.1.6-alpha.2', registry: 'https://registry.example/' }) };
+  const pinnedManager = new RuntimeManager({
+    userDataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'rm-channel2-')),
+    settings: pinned, log: () => {}, resolveNodeBin: () => ({ bin: process.execPath, runAsNode: false }),
+  });
+  assert.strictEqual(pinnedManager.resolveTarget(packument), '0.1.6-alpha.2',
+    'pinned stays the explicit opt-in path for alpha builds');
 });

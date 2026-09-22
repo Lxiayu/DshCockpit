@@ -27,15 +27,13 @@ const SMOKE_TIMEOUT_MS = 60_000;
 // replaced it wholesale — verified by probe on 2026-09-12:
 //   · every /api call and WS upgrade now needs the browser-session cookie (401 otherwise)
 //   · /api/events.host|mux moved to the /api/remote.mux `$events` stream mux
-//   · /api/session.list and /api/respond were removed
-//   · commands/execute gained required args (submittedAttachments)
-// A runtime outside this range keeps working for chat, but the shell's
-// feed-derived features (notifications, IM pushes, per-turn cost) degrade.
-// The migration ships with v0.4.0 — until then the updater refuses to install
-// a gated version instead of silently losing those features.
-// `-0` + includePrerelease: prereleases of 0.1.0/0.1.1 stay supported
-// (0.1.1-rc.2 is what we bundle) while every 0.1.2 prerelease/alpha is gated.
-const SUPPORTED_RUNTIME_RANGE = '<0.1.2-0';
+// 2026-09-22（用户拍板"放开更新挡板"）：0.1.2+ 的 Remote API 改造（Cookie 鉴权、
+// /api/remote.mux 事件面、无 /api/respond）已由兼容层覆盖，因此矩阵放宽到整个 0.1.x。
+// 该常量的语义也随之改变：它是"已测试矩阵"，**不再作为安装挡板**——矩阵外的版本
+// 仍可安装，壳会记录 knownIssue、提示降级并保留一键回滚（容器优先：harness 可以坏，
+// 壳不能坏）。真正的崩溃保护由 watchdog + 回滚 + 降级态承担（见 docs/strategy/
+// 2026-09-22-harness-upgrade-compat-plan.md）。
+const SUPPORTED_RUNTIME_RANGE = '<0.2.0-0';
 
 /** Is one runtime version inside the shell's supported range?
  * Unparseable/empty versions answer true: a local dev install must never be
@@ -265,10 +263,13 @@ class RuntimeManager {
     if (cfg.channel === 'latest') {
       return packument['dist-tags'] && packument['dist-tags'].latest || null;
     }
-    // rc: highest version (prereleases included). Versions that semver cannot
-    // parse are skipped — a single malformed entry must not throw the sort and
-    // take down the whole check.
-    const versions = Object.keys(packument.versions || {}).filter((v) => semver.valid(v));
+    // rc: highest version, prereleases included, **alpha excluded**（渠道语义：
+    // alpha 属于 opt-in 通道，用 `pinned` 指定；rc 渠道不该把用户直接推到 alpha）。
+    // Versions that semver cannot parse are skipped — a single malformed entry
+    // must not throw the sort and take down the whole check.
+    const versions = Object.keys(packument.versions || {})
+      .filter((v) => semver.valid(v))
+      .filter((v) => !/-alpha\./.test(v));
     if (!versions.length) return null;
     versions.sort(semver.rcompare);
     return versions[0];

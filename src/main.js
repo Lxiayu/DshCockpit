@@ -1230,12 +1230,14 @@ async function runUpdateCheck(notifyUser, { install = notifyUser } = {}) {
     // range loads and chats fine, but the operating layer's feed-derived
     // features degrade — refuse to install it silently. v0.4.0 lifts this.
     if (!isRuntimeSupported(report.target)) {
-      manager.state.knownIssues[report.target] = 'outside the shell compat matrix (<0.1.2 Remote API)';
+      // 容器姿态（2026-09-22 用户拍板）：矩阵外版本**不再阻断安装**——壳会先记录
+      // knownIssue、提示"未在测试矩阵内，feed 派生的功能可能降级"，安装后由 watchdog
+      // 守护、异常时一键回滚。挡板只保留"把风险说清楚"的职责。
+      manager.state.knownIssues[report.target] = `outside the tested compat matrix (${SUPPORTED_RUNTIME_RANGE})`;
       manager.saveState();
-      log(`[update] ${report.target} is outside the shell compat matrix — install deferred to v0.4.0`);
+      log(`[update] ${report.target} is outside the tested compat matrix (${SUPPORTED_RUNTIME_RANGE}) — installing with degraded-feature warning`);
       notify(t(lang(), 'notify.updateGated'), t(lang(), 'notify.updateGatedBody', { v: report.target }));
       updateTray();
-      return { ...report, available: true, gated: true, installed: false };
     }
     notify(t(lang(), 'notify.newVersion'), t(lang(), 'notify.downloading', { a: report.current, b: report.target }));
     // Live progress → every window's update console (a long rc install must
@@ -1279,8 +1281,8 @@ async function applyPendingUpdate() {
   const pending = manager.state.pendingVersion;
   if (!pending) throw new Error(t(lang(), 'update.noPending'));
   if (!isRuntimeSupported(pending)) {
-    // defense in depth: a pending version recorded by an older shell build
-    throw new Error(t(lang(), 'update.gated', { v: pending }));
+    // 矩阵外版本允许安装（容器姿态）；这里只留一条诊断，便于事后归因。
+    log(`[update] applying ${pending} outside the tested compat matrix (${SUPPORTED_RUNTIME_RANGE})`);
   }
   const { previous } = await manager.activate(pending);
   log(`[shell] applied update: ${previous} -> ${pending}`);
