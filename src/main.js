@@ -47,6 +47,8 @@ const tokenStats = require('./token-stats');
 const { createSessionWorkerClient } = require('./session-worker-client');
 const windowState = require('./window-state');
 const { connectEvents } = require('./runtime-events');
+const { createRuntimeAuth } = require('./runtime-auth');
+const { createRuntimeMux, EVENTS_STREAM_ID } = require('./runtime-mux');
 const cost = require('./cost');
 const balance = require('./balance');
 const { runHeadless } = require('./headless');
@@ -363,6 +365,18 @@ let eventsRetryTimer = null;
 let lastTaskNotifyAt = 0;
 let eventsFeedLiveLogged = false;
 let eventsFeedFailStreak = 0;
+// 0.1.5 event surface: the mux client + its protocol tag. 'legacy' keeps the
+// 0.1.1 events.{host,mux} + /api/respond path; 'mux' routes through
+// /api/remote.mux + $events/result (docs/strategy/2026-09-22 plan §4.2).
+let eventsFeedProtocol = 'legacy';
+let runtimeMux = null;
+let eventsFeedSessionErrorCount = 0;
+// Office M5: per-session journal follow streams (see startOfficeFollowSync).
+let officeFollowTimer = null;
+const officeFollowStreams = new Map(); // raw sessionId -> { streamId, misses }
+const officeFollowRunning = new Map(); // sessionId -> running (api-session/status edges)
+const officeFollowKnown = new Set(); // sessionIds seen via api-session/added
+const officeFollowRemoved = new Set(); // sessionIds seen via api-session/removed
 let lastCostUpdateAt = 0;
 let latestCostSnapshot = { stats: null, key: '', data: null };
 let quickAskRunning = false;
@@ -667,6 +681,11 @@ const {
   onRuntimeHealthy,
 } = windowManager;
 
+// Shared runtime browser session (token URL → dsh-auth-* Cookie): the mux
+// event client and the approval/question answer channel read the same cookie
+// source (plan §4.2). setAuthUrl rides the supervisor's URL discovery.
+const runtimeAuth = createRuntimeAuth({ log });
+
 // A1 step 3: full runtime lifecycle supervision extracted from main.js.
 // The deps object is the explicit coupling surface between the shell and the
 // supervisor domain (was ~40 scattered free-variable references).
@@ -685,7 +704,13 @@ const supervisor = createRuntimeSupervisor({
   selfHealProfile,
   ensureLogDir,
   resolveNodeBin: bestNodeBin,
-  onRemoteUrl: (url) => { if (remote) remote.setRuntimeUrl(url); },
+  onRemoteUrl: (url) => {
+    // The auth URL is the token exchange source for the mux cookie; the phone
+    // gateway keeps its own exchange. On 0.1.1 (no token) the URL is stored
+    // but never exchanged — the legacy feed path does not need a cookie.
+    runtimeAuth.setAuthUrl(url);
+    if (remote) remote.setRuntimeUrl(url);
+  },
   startEventsFeed,
   stopEventsFeed,
   resetEventsFeedLiveFlag: () => { eventsFeedLiveLogged = false; },
@@ -3354,22 +3379,38 @@ function startScheduler() {
 
 // ---------------------------------------------------------------------------
 // task-completion + approval/question notifications (runtime event streams)
+//
+// Two protocols, one entry point (plan §4.2, dual stack until 0.1.1 retires):
+//   - 0.1.2+ prints a token-carrying URL → the event surface is the cookie-
+//     gated /api/remote.mux (mux client below).
+//   - 0.1.1 prints a bare URL → the legacy /api/events.{host,mux} pair stays
+//     exactly as it was, so a rolled-back runtime keeps every feed-derived
+//     feature (notifications, IM pushes, per-turn cost).
 // ---------------------------------------------------------------------------
 function startEventsFeed() {
   stopEventsFeed();
   const ru = getRuntimeUrl();
   if (!ru || quitting) return;
+  // The auth URL carries the launch token only on 0.1.2+; its presence is the
+  // protocol probe (the clean origin would 401 on every /api + WS route).
+  const authUrl = runtimeAuthUrlOf();
+  const tokenized = typeof authUrl === 'string' && authUrl.includes('token=');
+  if (tokenized) startMuxEventsFeed(ru);
+  else startLegacyEventsFeed(ru);
+}
+
+function startLegacyEventsFeed(ru) {
+  eventsFeedProtocol = 'legacy';
   const base = ru.endsWith('/') ? ru : `${ru}/`;
   const onFeedError = (err) => {
     if (quitting) return;
     eventsFeedFailStreak += 1;
     log(`[shell] events feed error: ${err.message} (attempt ${eventsFeedFailStreak})`);
     if (eventsFeedFailStreak === 3) {
-      // dsh 0.1.2 replaced /api/events.{host,mux} with the /api/remote.mux stream
-      // mux, gated on the browser-session cookie. Until the operating layer speaks
-      // that protocol the feed stays down: say so once and stop the 3s storm —
-      // the runtime itself keeps working, only the feed-derived extras pause.
-      log('[shell] events feed unavailable — the runtime may be 0.1.2+ (feed moved to /api/remote.mux);'
+      // Neither protocol connected after three tries: say so once and stop the
+      // 3s storm — the runtime itself keeps working, only the feed-derived
+      // extras pause.
+      log('[shell] events feed unavailable — the runtime event surface could not be reached;'
         + ' notifications, IM pushes and per-turn cost are paused for this runtime');
     }
     clearTimeout(eventsRetryTimer);
@@ -3409,12 +3450,121 @@ function startEventsFeed() {
   log(`[shell] events feed -> ${base}api/events.{host,mux}`);
 }
 
+/** 0.1.2+ event surface: one /api/remote.mux connection carrying the global
+ * `$events` stream (status / error / waterfall) plus per-session
+ * `session/follow` journal streams for the virtual office (M5). The mux client
+ * owns reconnect + stream re-opening, so onFeedError only records that the
+ * feed went blind (no full-feed restart storm). */
+function startMuxEventsFeed(ru) {
+  eventsFeedProtocol = 'mux';
+  const base = ru.endsWith('/') ? ru : `${ru}/`;
+  const onFeedError = (err) => {
+    if (quitting) return;
+    eventsFeedFailStreak += 1;
+    log(`[shell] events feed error: ${err && err.message || err} (attempt ${eventsFeedFailStreak})`);
+    if (eventsFeedFailStreak === 3) {
+      log('[shell] events feed still unavailable after 3 attempts — the mux keeps retrying in the background');
+    }
+  };
+  runtimeMux = createRuntimeMux({
+    baseUrl: base,
+    auth: runtimeAuth,
+    log,
+    onError: onFeedError,
+    reconnectMs: 3_000,
+    maxBackoffMs: 60_000,
+  });
+  runtimeMux.onReady(() => {
+    eventsFeedFailStreak = 0; // a ready frame proves the feed is healthy again
+    if (!eventsFeedLiveLogged) {
+      eventsFeedLiveLogged = true;
+      log('[shell] events feed live (mux ready)');
+    }
+  });
+  runtimeMux.onItem(EVENTS_STREAM_ID, onMuxEventValue);
+  runtimeMux.connect();
+  startOfficeFollowSync();
+  log(`[shell] events feed -> ${base}api/remote.mux ($events + session/follow)`);
+}
+
+/** `$events` stream frames: {type:'emit'|'waterfall'|'cancel', …}. Emit args
+ * are the Cordis event's positional arguments (spike-verified shapes). */
+function onMuxEventValue(value) {
+  if (!value || typeof value !== 'object') return;
+  if (value.type === 'emit') {
+    const args = Array.isArray(value.args) ? value.args : [];
+    switch (value.event) {
+      case 'api-session/status': {
+        // (sessionId, running) — the 0.1.5 replacement for host/session-status
+        const sessionId = typeof args[0] === 'string' ? args[0] : '';
+        const running = args[1] === true;
+        noteOfficeSessionStatus(sessionId, running);
+        const wasRunning = sessionRunning;
+        sessionRunning = running; // busy check for the manual /compact entry (C3)
+        if (!eventsFeedLiveLogged) {
+          eventsFeedLiveLogged = true;
+          eventsFeedFailStreak = 0;
+          log(`[shell] events feed live (session ${sessionId}, running=${running})`);
+        }
+        // H-im L2: rising edge → taskStarted push; falling edge → taskDone (existing)
+        if (running === true && !wasRunning && channelsMgr) {
+          channelsMgr.broadcast({ kind: 'taskStarted' });
+        }
+        if (running === false) {
+          onTaskDone();
+          onTurnEnd(); // per-turn official cost + balance refresh (C1)
+        }
+        break;
+      }
+      case 'api-session/error': {
+        // (sessionId, message) — host-level failure signal, new in 0.1.5.
+        // No dedicated failure channel exists in the notification hub or the
+        // IM formatter (taskDone/taskStarted are the only task kinds), so this
+        // stays log + counter per the "no new machinery" rule.
+        const sessionId = typeof args[0] === 'string' ? args[0] : '';
+        const message = typeof args[1] === 'string' ? args[1] : 'unknown runtime error';
+        eventsFeedSessionErrorCount += 1;
+        log(`[shell] session error (${sessionId || '?'}): ${message} [#${eventsFeedSessionErrorCount}]`);
+        break;
+      }
+      case 'api-session/added':
+        noteOfficeSessionAdded(args[0]);
+        break;
+      case 'api-session/removed':
+        noteOfficeSessionRemoved(args[0]);
+        break;
+      default:
+        break; // forwarded events the shell does not consume (activity, presets, …)
+    }
+    return;
+  }
+  if (value.type === 'waterfall') {
+    // approval / user-question requests; the request payload carries the
+    // 0.1.5 field names (toolName/callId/reason, questions) — the consumers
+    // also accept the legacy names.
+    const request = value.request && typeof value.request === 'object' ? value.request : {};
+    if (value.event === 'approval/request') onApprovalRequested(request, value.eventId);
+    else if (value.event === 'user-questions/request') onQuestionRequested(request, value.eventId);
+    return;
+  }
+  if (value.type === 'cancel') {
+    // Host revoked a pending waterfall; nothing is pending on our side.
+    log(`[shell] runtime cancelled a pending request (${value.eventId || '?'})`);
+  }
+}
+
 function stopEventsFeed() {
   for (const feed of eventsFeed) {
     try { feed.close(); } catch { /* ignore */ }
   }
   eventsFeed = [];
   if (eventsRetryTimer) { clearTimeout(eventsRetryTimer); eventsRetryTimer = null; }
+  stopOfficeFollowSync();
+  if (runtimeMux) {
+    try { runtimeMux.close(); } catch { /* ignore */ }
+    runtimeMux = null;
+  }
+  eventsFeedProtocol = 'legacy';
   // no live frames until the feed reconnects: drop the busy flag and any
   // compaction start orphaned by a runtime crash/restart (C3)
   sessionRunning = false;
@@ -3423,6 +3573,202 @@ function stopEventsFeed() {
 
 function windowHidden() {
   return !hasVisibleMainWindow();
+}
+
+// ---------------------------------------------------------------------------
+// Office M5: real harness sessions → virtual office (plan §4.2/§5).
+//
+// Each session the office cares about gets ONE `session/follow` journal stream
+// on the mux; every {type:'event', event} record is expanded into the exact
+// envelope office-module.ingestHarnessEvent expects ({sessionId, type, seq,
+// time, data}). The desired set is reconciled every 5s against the office's
+// own binding ledger (employee cards): new bound sessions open a stream,
+// released ones close it after a one-tick grace so the terminal turn/end
+// always lands first. Nothing here changes the office module's contract.
+// ---------------------------------------------------------------------------
+const OFFICE_FOLLOW_INTERVAL_MS = 5_000;
+const OFFICE_FOLLOW_GRACE_TICKS = 2; // close a stream only after 2 idle ticks
+const OFFICE_FOLLOW_KNOWN_CAP = 32; // bound the added-session memory
+const officeFollowKnownOrder = [];
+
+function noteOfficeSessionStatus(sessionId, running) {
+  if (typeof sessionId !== 'string' || !sessionId) return;
+  officeFollowRunning.set(sessionId, running === true);
+}
+
+function noteOfficeSessionAdded(summary) {
+  const sessionId = summary && typeof summary.sessionId === 'string' ? summary.sessionId : '';
+  if (!sessionId) return;
+  officeFollowRemoved.delete(sessionId);
+  if (!officeFollowKnown.has(sessionId)) {
+    officeFollowKnown.add(sessionId);
+    officeFollowKnownOrder.push(sessionId);
+    while (officeFollowKnownOrder.length > OFFICE_FOLLOW_KNOWN_CAP) {
+      const evicted = officeFollowKnownOrder.shift();
+      officeFollowKnown.delete(evicted);
+    }
+  }
+}
+
+function noteOfficeSessionRemoved(sessionId) {
+  if (typeof sessionId !== 'string' || !sessionId) return;
+  officeFollowRemoved.add(sessionId);
+  officeFollowRunning.delete(sessionId);
+}
+
+/** Raw root sessionIds the office currently has an ACTIVE binding for.
+ * Released bindings keep their audit record (single-use session ids), and a
+ * re-bound turn lives under a derived `raw#tN` handle — both cases reduce to
+ * the raw id the follow stream must address. */
+function officeBoundSessionIds() {
+  const mod = officeModuleInstance;
+  if (!mod || typeof mod.debugRegistrySnapshot !== 'function') return [];
+  let snapshot;
+  try { snapshot = mod.debugRegistrySnapshot(); } catch { return []; }
+  const out = [];
+  for (const binding of (snapshot && snapshot.bindings) || []) {
+    if (!binding || binding.releasedAt !== null) continue;
+    const raw = typeof binding.sessionId === 'string' ? binding.sessionId.split('#')[0] : '';
+    if (raw) out.push(raw);
+  }
+  return out;
+}
+
+function officeDesiredFollowIds() {
+  const desired = new Set(officeBoundSessionIds());
+  for (const [sessionId, running] of officeFollowRunning) {
+    if (running) desired.add(sessionId); // a live turn must be journalled
+  }
+  for (const sessionId of officeFollowKnown) {
+    if (!officeFollowRemoved.has(sessionId)) desired.add(sessionId);
+  }
+  return desired;
+}
+
+function startOfficeFollowSync() {
+  stopOfficeFollowSync();
+  // The journal follow streams exist for the office's benefit; with the office
+  // runtime explicitly disabled there is no consumer, so do not open them.
+  if (!officeRuntimeEnabled()) return;
+  // Bootstrap: sessions already running when the feed comes up never emit a
+  // status edge, so seed the running set from the session list once.
+  seedOfficeFollowFromSessionList();
+  officeFollowTimer = setInterval(officeFollowSyncTick, OFFICE_FOLLOW_INTERVAL_MS);
+  if (typeof officeFollowTimer.unref === 'function') officeFollowTimer.unref();
+}
+
+function stopOfficeFollowSync() {
+  if (officeFollowTimer) { clearInterval(officeFollowTimer); officeFollowTimer = null; }
+  const mux = runtimeMux;
+  for (const [, entry] of officeFollowStreams) {
+    try { if (mux) mux.closeStream(entry.streamId); } catch { /* ignore */ }
+  }
+  officeFollowStreams.clear();
+  officeFollowRunning.clear();
+  officeFollowKnown.clear();
+  officeFollowRemoved.clear();
+  officeFollowKnownOrder.length = 0;
+}
+
+async function seedOfficeFollowFromSessionList() {
+  const mux = runtimeMux;
+  if (!mux) return;
+  try {
+    const res = await mux.call('session/list', { _request: {} });
+    const items = (res && res.ok && res.value && Array.isArray(res.value.items)) ? res.value.items : [];
+    let running = 0;
+    for (const item of items) {
+      const sessionId = item && typeof item.sessionId === 'string' ? item.sessionId : '';
+      if (sessionId && item.running === true) { noteOfficeSessionStatus(sessionId, true); running += 1; }
+    }
+    log(`[office] follow seed: ${items.length} session(s) listed, ${running} running`);
+  } catch (e) {
+    log(`[office] follow seed skipped: ${e && e.message || e}`);
+  }
+}
+
+function officeFollowSyncTick() {
+  const mux = runtimeMux;
+  // Mux down (cookie failing, runtime restarting): the office keeps its local
+  // behavior — this is a container posture, the shell must not wobble.
+  if (!mux || mux.state !== 'live') return;
+  const desired = officeDesiredFollowIds();
+  for (const sessionId of desired) {
+    const streamId = `session-follow-${sessionId}`;
+    if (!officeFollowStreams.has(sessionId)) {
+      mux.onItem(streamId, (value) => ingestOfficeFollowFrame(sessionId, value));
+      officeFollowStreams.set(sessionId, { streamId, misses: 0 });
+      log(`[office] follow open (${sessionId.slice(0, 8)})`);
+    } else {
+      officeFollowStreams.get(sessionId).misses = 0;
+    }
+    // (Re-)open every tick: openStream is a no-op while the stream is open on
+    // this generation, and it also heals a stream the host errored or ended
+    // (the follow-stream error frame only logs — see runtime-mux).
+    // Spike-verified wire shape: a flat SessionFollowRequest. `assistantStream`
+    // is z.literal(true).optional() on 0.1.5 — it must be OMITTED, not false.
+    mux.openStream(streamId, 'session/follow', { request: { address: { kind: 'session', sessionId } } });
+  }
+  for (const [sessionId, entry] of [...officeFollowStreams]) {
+    if (desired.has(sessionId)) continue;
+    entry.misses += 1;
+    if (entry.misses < OFFICE_FOLLOW_GRACE_TICKS) continue;
+    mux.closeStream(entry.streamId);
+    officeFollowStreams.delete(sessionId);
+    log(`[office] follow closed (${sessionId.slice(0, 8)})`);
+  }
+}
+
+/** session/follow frames: the opening {type:'snapshot', records:[…]} window
+ * plus incremental {type:'event', event} records — same entry shape. */
+function ingestOfficeFollowFrame(sessionId, value) {
+  if (!value || typeof value !== 'object') return;
+  if (value.type === 'event') {
+    ingestOfficeJournalEvent(sessionId, value.event);
+    return;
+  }
+  if (value.type === 'snapshot') {
+    for (const record of Array.isArray(value.records) ? value.records : []) {
+      if (record && record.type === 'event') ingestOfficeJournalEvent(sessionId, record.event);
+    }
+  }
+  // assistant-stream frames never arrive (assistantStream omitted).
+}
+
+function ingestOfficeJournalEvent(sessionId, event) {
+  const mod = officeModuleInstance;
+  if (!mod || !event || typeof event !== 'object' || typeof event.type !== 'string') return;
+  const data = event.data && typeof event.data === 'object' ? event.data : {};
+  // 0.1.5 journal → office envelope translation (plan §5). The adapter's
+  // vocabulary still speaks the 0.1.x wire: turn/start carries the running
+  // fact (the old agent/status runtime event no longer exists), turn/end's
+  // reason is a {kind} object on the 0.1.5 wire (adapter reads a string), and
+  // tool/call names the tool under data.name (was data.tool). Feeding the raw
+  // 0.1.5 shapes would degrade every turn to a generic "attention" fact.
+  if (event.type === 'turn/start') {
+    mod.ingestHarnessEvent({ sessionId, type: 'agent/status', seq: event.seq, time: event.time, data: { status: 'running' } });
+    return;
+  }
+  if (event.type === 'turn/end') {
+    const reason = data.reason && typeof data.reason === 'object' && typeof data.reason.kind === 'string'
+      ? data.reason.kind
+      : (typeof data.reason === 'string' && data.reason ? data.reason : null);
+    mod.ingestHarnessEvent({
+      sessionId, type: 'turn/end', seq: event.seq, time: event.time,
+      data: reason ? { turn: data.turn, reason } : { turn: data.turn },
+    });
+    return;
+  }
+  if (event.type === 'tool/call') {
+    // Only the tool name is a fact; the raw arguments JSON never reaches the
+    // office (privacy boundary + the adapter's 64KB payload cap).
+    mod.ingestHarnessEvent({
+      sessionId, type: 'tool/call', seq: event.seq, time: event.time,
+      data: { tool: typeof data.name === 'string' ? data.name : (typeof data.tool === 'string' ? data.tool : null) },
+    });
+    return;
+  }
+  mod.ingestHarnessEvent({ sessionId, type: event.type, seq: event.seq, time: event.time, data });
 }
 
 function onTaskDone() {
@@ -3517,17 +3863,20 @@ function imGetBinding(channelId, senderId) {
   return imCommandBindings.get(`im:${senderId}`) || null;
 }
 function onApprovalRequested(frame, rpcId) {
-  const tool = frame.toolName || '';
+  const tool = frame.toolName || frame.tool || '';
   // IM push (C5/C6): approval cards carry a one-shot token (120s TTL) whose
-  // payload keeps the runtime routing fields (rpcId/sessionId/approvalId) —
-  // the token redemption hook answers POST /api/respond with them.
+  // payload keeps the runtime routing fields — the 0.1.5 mux carries the
+  // waterfall eventId here (clientId lives in the mux client), 0.1.1 carried
+  // the server-request rpcId; both are echoed back through respondToRuntime.
+  // `protocol` selects the answer value shape (mux: the bare outcome string).
   if (channelsMgr) {
     channelsMgr.broadcast({
       kind: 'approval',
       tool,
       rpcId: rpcId || '',
       sessionId: frame.sessionId || '',
-      approvalId: frame.approvalId || '',
+      approvalId: frame.approvalId || frame.callId || '',
+      protocol: eventsFeedProtocol,
     });
   }
   if (!windowHidden()) return;
@@ -3536,7 +3885,7 @@ function onApprovalRequested(frame, rpcId) {
 
 function onQuestionRequested(frame, rpcId) {
   // IM push (C5/C6): question cards carry a one-shot reply token (120s TTL)
-  // keeping the rpcId/sessionId/question shape for the /api/respond answer.
+  // keeping the routing id + question shape for the answer channel.
   if (channelsMgr) {
     channelsMgr.broadcast({
       kind: 'question',
@@ -3544,6 +3893,7 @@ function onQuestionRequested(frame, rpcId) {
       rpcId: rpcId || '',
       sessionId: (frame && frame.sessionId) || '',
       questions: (frame && frame.questions) || [],
+      protocol: eventsFeedProtocol,
     });
   }
   if (!windowHidden()) return;
@@ -3551,10 +3901,15 @@ function onQuestionRequested(frame, rpcId) {
 }
 
 /**
- * Answer a pending runtime server-request (approval / question) through
- * POST /api/respond with a client-response echoing the mux rpcId. Runtime
- * business errors come back 200 + {accepted:false}; both shapes map to the
- * {ok, reason} the channel dispatcher replies with over IM.
+ * Answer a pending runtime request (approval / question).
+ *
+ * 0.1.5 (mux protocol): POST /api/$events/result with the ready-frame
+ * clientId + the waterfall eventId; the value is the bare outcome
+ * ('allowed-once'|'rejected') or the AskUserQuestionAnswer {answers} batch
+ * (spike-verified envelope, invalid shapes are rejected by the gateway).
+ * 0.1.1 (legacy): POST /api/respond with a client-response echoing the mux
+ * rpcId. Runtime business errors come back 200 + {accepted:false}; both
+ * shapes map to the {ok, reason} the channel dispatcher replies with over IM.
  */
 async function respondToRuntime({ rpcId, value, what }) {
   const ru = getRuntimeUrl();
@@ -3562,6 +3917,23 @@ async function respondToRuntime({ rpcId, value, what }) {
   if (!rpcId || !value) {
     log(`[channels] ${what || 'respond'} dropped: missing runtime routing id`);
     return { ok: false, reason: 'no rpc id' };
+  }
+  const mux = runtimeMux;
+  if (mux && mux.clientId) {
+    // New protocol: rpcId carries the waterfall eventId.
+    const res = await mux.sendResult({ eventId: rpcId, outcome: { kind: 'result', value } });
+    if (res.ok) {
+      log(`[channels] ${what || 'respond'} accepted by runtime`);
+      return { ok: true };
+    }
+    log(`[channels] ${what || 'respond'} refused: ${res.reason}`);
+    return { ok: false, reason: res.reason };
+  }
+  if (eventsFeedProtocol === 'mux') {
+    // The answer was minted for the mux channel but the stream is down: the
+    // legacy /api/respond route does not exist on 0.1.5+ (would 404).
+    log(`[channels] ${what || 'respond'} dropped: mux event feed offline`);
+    return { ok: false, reason: 'runtime event feed offline' };
   }
   try {
     const base = ru.endsWith('/') ? ru : `${ru}/`;
@@ -3787,16 +4159,20 @@ if (!gotLock) {
         prompt: text,
       }),
       // Approval/question decisions verified via one-shot token land here and
-      // are answered through the runtime's POST /api/respond (client-response
-      // echoing the mux server-request rpcId — same wire the web UI uses).
+      // are answered through the runtime: 0.1.5+ mux $events/result (bare
+      // outcome / answer batch), 0.1.1 POST /api/respond (the legacy
+      // client-response envelope). The protocol marker rides the token
+      // payload; the transport is picked by respondToRuntime.
       onApprovalDecision: ({ decision, tool, payload }) =>
         respondToRuntime({
           rpcId: payload && payload.rpcId,
-          value: payload && payload.sessionId && payload.approvalId ? {
-            sessionId: payload.sessionId,
-            approvalId: payload.approvalId,
-            outcome: decision === 'approve' ? 'allowed-once' : 'rejected',
-          } : null,
+          value: payload && payload.protocol === 'mux'
+            ? (decision === 'approve' ? 'allowed-once' : 'rejected')
+            : (payload && payload.sessionId && payload.approvalId ? {
+              sessionId: payload.sessionId,
+              approvalId: payload.approvalId,
+              outcome: decision === 'approve' ? 'allowed-once' : 'rejected',
+            } : null),
           what: `approval ${decision} for "${tool || '(unknown tool)'}"`,
         }),
       onQuestionAnswer: ({ text: answer, payload }) => {
@@ -3812,7 +4188,9 @@ if (!gotLock) {
         }];
         return respondToRuntime({
           rpcId: payload && payload.rpcId,
-          value: payload && payload.sessionId ? { sessionId: payload.sessionId, answer: { answers } } : null,
+          value: payload && payload.protocol === 'mux'
+            ? { answers }
+            : (payload && payload.sessionId ? { sessionId: payload.sessionId, answer: { answers } } : null),
           what: 'question answer',
         });
       },
