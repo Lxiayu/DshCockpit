@@ -1,0 +1,7 @@
+Character pack: whale-girl (normalized output pack)
+Author: DshCockpit (官方占位, 约稿买断后替换)
+License: DshCockpit 官方占位资产（Layer 2, 版权独立声明不随 MIT; 正式稿约稿买断后替换本占位资产）
+This pack was produced by scripts/office-assets/normalize-character.py from the
+source pack named in validation-report.json. PNG frames are geometry-aligned
+copies (translation only: never cropped, trimmed or rotated). No pixel content
+was retouched; see validation-report.json for anchors, translations and warnings.

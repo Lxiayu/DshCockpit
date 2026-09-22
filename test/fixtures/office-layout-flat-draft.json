@@ -1,0 +1,623 @@
+{
+  "schemaVersion": 1,
+  "scene": {
+    "width": 1280,
+    "height": 840
+  },
+  "items": [
+    {
+      "id": "draft-27",
+      "kind": "desk",
+      "asset": "flat-desk",
+      "position": {
+        "x": 0.544413,
+        "y": 0.809252
+      },
+      "scale": 0.7798760790144942,
+      "direction": "front",
+      "layer": 10,
+      "groupId": "draft-27",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-28",
+      "kind": "desk",
+      "asset": "flat-desk",
+      "position": {
+        "x": 0.539386,
+        "y": 0.514842
+      },
+      "scale": 0.7774748030772828,
+      "direction": "front",
+      "layer": 10,
+      "groupId": "draft-28",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-29",
+      "kind": "desk",
+      "asset": "flat-desk",
+      "position": {
+        "x": 0.541248,
+        "y": 0.233696
+      },
+      "scale": 0.8207080097797645,
+      "direction": "front",
+      "layer": 10,
+      "groupId": "draft-29",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-30",
+      "kind": "desk",
+      "asset": "flat-desk",
+      "position": {
+        "x": 0.805939,
+        "y": 0.235804
+      },
+      "scale": 0.8023485409273897,
+      "direction": "front",
+      "layer": 10,
+      "groupId": "draft-30",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-42",
+      "kind": "monitor",
+      "asset": "flat-monitor",
+      "position": {
+        "x": 0.538032,
+        "y": 0.432613
+      },
+      "scale": 1,
+      "direction": "front",
+      "layer": 10,
+      "groupId": "group-8",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-31",
+      "kind": "desk",
+      "asset": "flat-desk",
+      "position": {
+        "x": 0.80504,
+        "y": 0.526838
+      },
+      "scale": 0.8131456853752709,
+      "direction": "front",
+      "layer": 10,
+      "groupId": "draft-31",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-32",
+      "kind": "desk",
+      "asset": "flat-desk",
+      "position": {
+        "x": 0.811558,
+        "y": 0.810723
+      },
+      "scale": 0.8452552692470834,
+      "direction": "front",
+      "layer": 20,
+      "groupId": "draft-32",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-40",
+      "kind": "monitor",
+      "asset": "flat-monitor",
+      "position": {
+        "x": 0.539386,
+        "y": 0.13844
+      },
+      "scale": 1,
+      "direction": "front",
+      "layer": 20,
+      "groupId": "group-1",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-39",
+      "kind": "character",
+      "asset": "whale-girl-back",
+      "position": {
+        "x": 0.54269,
+        "y": 0.218636
+      },
+      "scale": 1.981668243649236,
+      "direction": "back",
+      "layer": 20,
+      "groupId": "group-1",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-48",
+      "kind": "character",
+      "asset": "whale-girl-back",
+      "position": {
+        "x": 0.539426,
+        "y": 0.493665
+      },
+      "scale": 2.114518579883817,
+      "direction": "back",
+      "layer": 20,
+      "groupId": "group-8",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-44",
+      "kind": "monitor",
+      "asset": "flat-monitor",
+      "position": {
+        "x": 0.539737,
+        "y": 0.720523
+      },
+      "scale": 1,
+      "direction": "front",
+      "layer": 30,
+      "groupId": "group-11",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-41",
+      "kind": "monitor",
+      "asset": "flat-monitor",
+      "position": {
+        "x": 0.803206,
+        "y": 0.141501
+      },
+      "scale": 1,
+      "direction": "front",
+      "layer": 30,
+      "groupId": "group-7",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-43",
+      "kind": "monitor",
+      "asset": "flat-monitor",
+      "position": {
+        "x": 0.80485,
+        "y": 0.443097
+      },
+      "scale": 1,
+      "direction": "front",
+      "layer": 40,
+      "groupId": "group-10",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-47",
+      "kind": "character",
+      "asset": "whale-girl-back",
+      "position": {
+        "x": 0.802317,
+        "y": 0.223637
+      },
+      "scale": 2.048833970000181,
+      "direction": "back",
+      "layer": 30,
+      "groupId": "group-7",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-49",
+      "kind": "character",
+      "asset": "whale-girl-back",
+      "position": {
+        "x": 0.805,
+        "y": 0.496011
+      },
+      "scale": 2.1315412153375797,
+      "direction": "back",
+      "layer": 40,
+      "groupId": "group-10",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-34",
+      "kind": "chair",
+      "asset": "flat-chair",
+      "position": {
+        "x": 0.805192,
+        "y": 0.301736
+      },
+      "scale": 0.5894913518040839,
+      "direction": "back",
+      "layer": 30,
+      "groupId": "group-7",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-33",
+      "kind": "chair",
+      "asset": "flat-chair",
+      "position": {
+        "x": 0.539538,
+        "y": 0.301736
+      },
+      "scale": 0.6031072890471036,
+      "direction": "back",
+      "layer": 30,
+      "groupId": "group-1",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-45",
+      "kind": "monitor",
+      "asset": "flat-monitor",
+      "position": {
+        "x": 0.803074,
+        "y": 0.72296
+      },
+      "scale": 1,
+      "direction": "front",
+      "layer": 40,
+      "groupId": "group-12",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-35",
+      "kind": "chair",
+      "asset": "flat-chair",
+      "position": {
+        "x": 0.537601,
+        "y": 0.58198
+      },
+      "scale": 0.613007199158756,
+      "direction": "back",
+      "layer": 41,
+      "groupId": "group-8",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-36",
+      "kind": "chair",
+      "asset": "flat-chair",
+      "position": {
+        "x": 0.802044,
+        "y": 0.588153
+      },
+      "scale": 0.5812305978222081,
+      "direction": "back",
+      "layer": 42,
+      "groupId": "group-10",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-50",
+      "kind": "character",
+      "asset": "whale-girl-back",
+      "position": {
+        "x": 0.543693,
+        "y": 0.787548
+      },
+      "scale": 2.1554825459882787,
+      "direction": "back",
+      "layer": 30,
+      "groupId": "group-11",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-37",
+      "kind": "chair",
+      "asset": "flat-chair",
+      "position": {
+        "x": 0.538872,
+        "y": 0.875
+      },
+      "scale": 0.5777207826816373,
+      "direction": "back",
+      "layer": 43,
+      "groupId": "group-11",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-52",
+      "kind": "character",
+      "asset": "whale-girl-back",
+      "position": {
+        "x": 0.804444,
+        "y": 0.793244
+      },
+      "scale": 2.0287693245965133,
+      "direction": "back",
+      "layer": 45,
+      "groupId": "group-12",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-38",
+      "kind": "chair",
+      "asset": "flat-chair",
+      "position": {
+        "x": 0.802044,
+        "y": 0.877284
+      },
+      "scale": 0.5816851538481929,
+      "direction": "back",
+      "layer": 46,
+      "groupId": "group-12",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-53",
+      "kind": "prop",
+      "asset": "flat-island",
+      "position": {
+        "x": 0.128761,
+        "y": 0.217087
+      },
+      "scale": 2.3102249656832123,
+      "direction": "front",
+      "layer": 25,
+      "groupId": "group-13",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-55",
+      "kind": "prop",
+      "asset": "flat-water-bar",
+      "position": {
+        "x": 0.3147140355069691,
+        "y": 0.22465149989998473
+      },
+      "scale": 1.5373261707651102,
+      "direction": "front",
+      "layer": 25,
+      "groupId": "group-13",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-56",
+      "kind": "prop",
+      "asset": "flat-coffee-machine",
+      "position": {
+        "x": 0.354812,
+        "y": 0.087631
+      },
+      "scale": 0.5692324069227471,
+      "direction": "front",
+      "layer": 25,
+      "groupId": "group-13",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-57",
+      "kind": "prop",
+      "asset": "flat-rice-cooker",
+      "position": {
+        "x": 0.277613,
+        "y": 0.108039
+      },
+      "scale": 0.7692975735614991,
+      "direction": "front",
+      "layer": 25,
+      "groupId": "group-13",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-58",
+      "kind": "prop",
+      "asset": "flat-rice-bowl",
+      "position": {
+        "x": 0.208964,
+        "y": 0.131484
+      },
+      "scale": 0.5044974909079837,
+      "direction": "front",
+      "layer": 25,
+      "groupId": "group-13",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-59",
+      "kind": "prop",
+      "asset": "flat-rice-bowl",
+      "position": {
+        "x": 0.15604448794258793,
+        "y": 0.13200590914959912
+      },
+      "scale": 0.48802084798999984,
+      "direction": "front",
+      "layer": 25,
+      "groupId": "group-13",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-60",
+      "kind": "prop",
+      "asset": "flat-rice-bowl",
+      "position": {
+        "x": 0.1004,
+        "y": 0.129383
+      },
+      "scale": 0.5106782671710981,
+      "direction": "front",
+      "layer": 25,
+      "groupId": "group-13",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-62",
+      "kind": "prop",
+      "asset": "flat-plant-b",
+      "position": {
+        "x": 0.945474,
+        "y": 0.106837
+      },
+      "scale": 0.5829682935153956,
+      "direction": "front",
+      "layer": 25,
+      "groupId": null,
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-64",
+      "kind": "prop",
+      "asset": "flat-coffee-table",
+      "position": {
+        "x": 0.09675475463658681,
+        "y": 0.5628843724913751
+      },
+      "scale": 1.6714458249017226,
+      "direction": "front",
+      "layer": 25,
+      "groupId": null,
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-63",
+      "kind": "prop",
+      "asset": "flat-desk-phone",
+      "position": {
+        "x": 0.07903,
+        "y": 0.491262
+      },
+      "scale": 1,
+      "direction": "front",
+      "layer": 25,
+      "groupId": null,
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-65",
+      "kind": "prop",
+      "asset": "flat-plant-monstera",
+      "position": {
+        "x": 0.04628613643074321,
+        "y": 0.09179850647717977
+      },
+      "scale": 0.5910743162012683,
+      "direction": "front",
+      "layer": 25,
+      "groupId": "group-13",
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-67",
+      "kind": "prop",
+      "asset": "flat-plant-succulent",
+      "position": {
+        "x": 0.668769,
+        "y": 0.096779
+      },
+      "scale": 0.701454243791013,
+      "direction": "front",
+      "layer": 25,
+      "groupId": null,
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-70",
+      "kind": "prop",
+      "asset": "flat-water-cooler",
+      "position": {
+        "x": 0.078397,
+        "y": 0.79237
+      },
+      "scale": 0.6092417497170456,
+      "direction": "front",
+      "layer": 25,
+      "groupId": null,
+      "locked": false,
+      "hidden": false,
+      "name": null
+    },
+    {
+      "id": "draft-71",
+      "kind": "prop",
+      "asset": "prop-plant",
+      "position": {
+        "x": 0.14,
+        "y": 0.915
+      },
+      "scale": 1,
+      "direction": "none",
+      "layer": 25,
+      "groupId": null,
+      "locked": false,
+      "hidden": false,
+      "name": null
+    }
+  ],
+  "selectedId": null,
+  "selectedIds": [],
+  "groupNames": {},
+  "rigidGroups": {
+    "draft-21": true
+  }
+}

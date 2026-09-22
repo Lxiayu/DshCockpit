@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Office Workbench</title>
+  <link rel="stylesheet" href="./workbench.css" />
+</head>
+<body>
+  <header id="wb-topbar">
+    <strong>Office Workbench</strong>
+    <span class="wb-note">M1 · 只写 content/** · 「发布」同步 resources/**（先备份+provenance）· 预览加载 flat 基线</span>
+    <span id="wb-status" aria-live="polite"></span>
+  </header>
+  <main id="wb-columns">
+    <aside id="wb-left" aria-label="内容资源树">
+      <h3>content/ 资源树</h3>
+      <div id="tree-root" role="tree"><p class="wb-hint">载入中…</p></div>
+    </aside>
+    <section id="wb-center" aria-label="预览场">
+      <div id="preview-slot">
+        <!-- Same-origin tool-served copy of the product office page
+             (workbench://local/preview/office.html?editor=1): the protocol
+             handler answers its saved-layout route with the read-only
+             content/scenes/flat/layout.json baseline, and the subframe
+             receives the REAL office bridge through the window preload. -->
+        <iframe id="preview-frame" src="./preview/office.html?pack=deepseek-default&editor=1" title="办公室预览场（office 页 · flat 场景 · 编辑器自动打开）"></iframe>
+      </div>
+    </section>
+    <aside id="wb-right" aria-label="检查器与校验">
+      <nav id="wb-tabs">
+        <button type="button" id="tab-geometry" class="wb-tab" aria-pressed="true">几何报表</button>
+        <button type="button" id="tab-actions" class="wb-tab" aria-pressed="false">动作</button>
+        <button type="button" id="tab-assets" class="wb-tab" aria-pressed="false">素材校验</button>
+        <button type="button" id="tab-gallery" class="wb-tab" aria-pressed="false">金样图库</button>
+      </nav>
+
+      <section id="panel-geometry" class="wb-panel" aria-label="几何报表">
+        <div class="wb-panel-head">
+          <h3>行走帧几何</h3>
+          <button type="button" id="btn-refresh-geometry">重新测量</button>
+        </div>
+        <p id="geometry-summary" class="wb-summary"></p>
+        <div class="wb-table-wrap">
+          <table id="geometry-table">
+            <thead>
+              <tr><th>帧</th><th>锚点</th><th>鞋线</th><th>可见高</th><th>可见宽</th><th>宽高比</th><th>Δ鞋线</th><th>Δ高</th><th>状态</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="entry-geometry" class="wb-entry" aria-label="选中条目几何">
+          <h4>选中条目</h4>
+          <p class="wb-hint">在预览场点选素材，或在左侧资源树选择文件</p>
+          <div id="entry-geometry-body"></div>
+        </div>
+      </section>
+
+      <section id="panel-actions" class="wb-panel" hidden aria-label="动作编辑器">
+        <div class="wb-panel-head">
+          <h3>动作编辑器（帧序 = 数组序，文件名不参与排序）</h3>
+          <select id="action-select" aria-label="选择动作"></select>
+          <button type="button" id="btn-action-new">新建动作…</button>
+        </div>
+        <div id="action-new-form" hidden>
+          <input type="text" id="action-new-id" placeholder="动作 id（kebab-case，如 walk-dance）" />
+          <select id="action-new-direction" aria-label="朝向">
+            <option value="left">left</option>
+            <option value="right">right</option>
+            <option value="up">up</option>
+            <option value="down">down</option>
+            <option value="none">none</option>
+          </select>
+          <button type="button" id="btn-action-create">创建</button>
+          <button type="button" id="btn-action-cancel-new">取消</button>
+        </div>
+        <p id="action-summary" class="wb-summary"></p>
+        <div id="action-toolbar">
+          <button type="button" id="btn-action-play" title="在预览场用真实渲染路径播放草稿序列">▶ 播放</button>
+          <button type="button" id="btn-action-step" title="逐帧推进预览">⏭ 逐帧</button>
+          <button type="button" id="btn-action-stop">⏹ 停止</button>
+          <label class="action-loop-label">循环 <input type="checkbox" id="action-loop" /></label>
+          <span id="action-playback" class="wb-note"></span>
+          <button type="button" id="btn-action-publish" title="校验全绿才写 resources/**；先备份，失败不落盘">发布到 resources/**</button>
+        </div>
+        <div id="action-timeline" aria-label="时间轴（拖拽或 ←/→ 调序）"></div>
+        <div class="wb-panel-head">
+          <h4>导入帧（自动归一化：等比缩放 + 鞋线对齐，不改美术内容）</h4>
+        </div>
+        <div id="action-import">
+          <input type="text" id="action-import-path" placeholder="源 PNG 路径（只读源，如 photo/…）" />
+          <input type="text" id="action-import-name" placeholder="目标文件名（默认自动编号）" />
+          <button type="button" id="btn-action-import-preview">归一化预览</button>
+          <button type="button" id="btn-action-import-insert" disabled>插入到时间轴</button>
+        </div>
+        <div id="action-import-result"></div>
+        <div class="wb-panel-head">
+          <h4>发布校验（帧几何 · 鞋线 ±1px / 可见高 ±2px）</h4>
+          <button type="button" id="btn-action-validate">重新校验</button>
+        </div>
+        <div class="wb-table-wrap">
+          <table id="action-validation-table">
+            <thead>
+              <tr><th>#</th><th>帧</th><th>鞋线</th><th>Δ鞋线</th><th>可见高</th><th>Δ高</th><th>时长</th><th>状态</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <pre id="action-publish-result" class="wb-pre">尚未发布（发布 = 校验全绿 → 备份 → 写 resources/** → 记 provenance）</pre>
+      </section>
+
+      <section id="panel-assets" class="wb-panel" hidden aria-label="素材校验器">
+        <div class="wb-panel-head">
+          <h3>素材校验器（catalog 逐条）</h3>
+          <button type="button" id="btn-refresh-assets">重新校验</button>
+        </div>
+        <p id="asset-summary" class="wb-summary"></p>
+        <div class="wb-table-wrap">
+          <table id="asset-table">
+            <thead>
+              <tr><th>条目</th><th>存在</th><th>解码</th><th>alpha</th><th>路径</th><th>bbox 漂移</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="wb-panel-head">
+          <h3>发布校验（content/**）</h3>
+          <button type="button" id="btn-publish">运行发布校验</button>
+        </div>
+        <pre id="publish-result" class="wb-pre">尚未运行</pre>
+      </section>
+
+      <section id="panel-gallery" class="wb-panel" hidden aria-label="金样图库">
+        <div class="wb-panel-head">
+          <h3>金样图库</h3>
+          <button type="button" id="btn-generate-gallery">生成金样并对比上一轮</button>
+        </div>
+        <p class="wb-hint">产出 content/build/gallery/：flat 布局 ×3 档窗口（1582×955 / 1280×840 / 1100×760）
+          + walk-left/right 各 5 帧拼条 ×2 档缩放（1×/2×），并与上一轮运行做像素差 / 几何 diff。</p>
+        <p id="gallery-progress" class="wb-summary"></p>
+        <div id="gallery-diff"></div>
+        <div id="gallery-files"></div>
+      </section>
+    </aside>
+  </main>
+  <script src="./workbench.js"></script>
+</body>
+</html>

@@ -5,6 +5,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('dshShell', {
   getSettings: () => ipcRenderer.invoke('shell:get-settings'),
+  // Task 8 / SPEC-08: additive Office settings bridge (office-state.v1.json
+  // only; never touches the legacy settings.json).
+  getOfficeSettings: () => ipcRenderer.invoke('shell:office-settings-get'),
+  saveOfficeSettings: (partial) => ipcRenderer.invoke('shell:office-settings-set', partial),
   saveSettings: (partial) => ipcRenderer.invoke('shell:save-settings', partial),
   getQuickAskShortcut: () => ipcRenderer.invoke('shell:quickask-shortcut-get'),
   setQuickAskShortcut: (value) => ipcRenderer.invoke('shell:quickask-shortcut-set', value),

@@ -1,0 +1,974 @@
+{
+  "anchor": {
+    "x": 178,
+    "y": 296
+  },
+  "frames": {
+    "assets/animations/side/none/side-back.png": {
+      "detection": {
+        "anchorDeltaPx": 6,
+        "candidates": [
+          {
+            "componentSize": 23282,
+            "lowestRowY": 247,
+            "medianX": 136
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -6,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 136,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 42,
+        "y": 49
+      }
+    },
+    "assets/animations/side/none/side-left.png": {
+      "detection": {
+        "anchorDeltaPx": 18,
+        "candidates": [
+          {
+            "componentSize": 18723,
+            "lowestRowY": 248,
+            "medianX": 112
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 18,
+          "dy": 0
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 112,
+        "y": 248
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 66,
+        "y": 48
+      }
+    },
+    "assets/animations/side/none/side-right.png": {
+      "detection": {
+        "anchorDeltaPx": 12,
+        "candidates": [
+          {
+            "componentSize": 17575,
+            "lowestRowY": 248,
+            "medianX": 142
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -12,
+          "dy": 0
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 142,
+        "y": 248
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 36,
+        "y": 48
+      }
+    },
+    "assets/animations/walk/down/walk-down-01.png": {
+      "detection": {
+        "anchorDeltaPx": 1,
+        "candidates": [
+          {
+            "componentSize": 23485,
+            "lowestRowY": 249,
+            "medianX": 130
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 0,
+          "dy": -1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 130,
+        "y": 249
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 48,
+        "y": 47
+      }
+    },
+    "assets/animations/walk/down/walk-down-02.png": {
+      "detection": {
+        "anchorDeltaPx": 14,
+        "candidates": [
+          {
+            "componentSize": 23325,
+            "lowestRowY": 248,
+            "medianX": 116
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 14,
+          "dy": 0
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 116,
+        "y": 248
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 62,
+        "y": 48
+      }
+    },
+    "assets/animations/walk/down/walk-down-03.png": {
+      "detection": {
+        "anchorDeltaPx": 1,
+        "candidates": [
+          {
+            "componentSize": 23380,
+            "lowestRowY": 249,
+            "medianX": 130
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 0,
+          "dy": -1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 130,
+        "y": 249
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 48,
+        "y": 47
+      }
+    },
+    "assets/animations/walk/down/walk-down-04.png": {
+      "detection": {
+        "anchorDeltaPx": 2,
+        "candidates": [
+          {
+            "componentSize": 23592,
+            "lowestRowY": 250,
+            "medianX": 128
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 2,
+          "dy": -2
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 128,
+        "y": 250
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 50,
+        "y": 46
+      }
+    },
+    "assets/animations/walk/left/walk-left-01.png": {
+      "detection": {
+        "anchorDeltaPx": 11,
+        "candidates": [
+          {
+            "componentSize": 20799,
+            "lowestRowY": 247,
+            "medianX": 141
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -11,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 141,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 37,
+        "y": 49
+      }
+    },
+    "assets/animations/walk/left/walk-left-02.png": {
+      "detection": {
+        "anchorDeltaPx": 2,
+        "candidates": [
+          {
+            "componentSize": 20166,
+            "lowestRowY": 247,
+            "medianX": 132
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -2,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 132,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 46,
+        "y": 49
+      }
+    },
+    "assets/animations/walk/left/walk-left-03.png": {
+      "detection": {
+        "anchorDeltaPx": 3,
+        "candidates": [
+          {
+            "componentSize": 20247,
+            "lowestRowY": 247,
+            "medianX": 133
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -3,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 133,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 45,
+        "y": 49
+      }
+    },
+    "assets/animations/walk/left/walk-left-04.png": {
+      "detection": {
+        "anchorDeltaPx": 10,
+        "candidates": [
+          {
+            "componentSize": 21415,
+            "lowestRowY": 246,
+            "medianX": 140
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -10,
+          "dy": 2
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 140,
+        "y": 246
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 38,
+        "y": 50
+      }
+    },
+    "assets/animations/walk/right/walk-right-01.png": {
+      "detection": {
+        "anchorDeltaPx": 12,
+        "candidates": [
+          {
+            "componentSize": 19782,
+            "lowestRowY": 247,
+            "medianX": 118
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 12,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 118,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 60,
+        "y": 49
+      }
+    },
+    "assets/animations/walk/right/walk-right-02.png": {
+      "detection": {
+        "anchorDeltaPx": 21,
+        "candidates": [
+          {
+            "componentSize": 18948,
+            "lowestRowY": 247,
+            "medianX": 109
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 21,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 109,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 69,
+        "y": 49
+      }
+    },
+    "assets/animations/walk/right/walk-right-03.png": {
+      "detection": {
+        "anchorDeltaPx": 21,
+        "candidates": [
+          {
+            "componentSize": 19777,
+            "lowestRowY": 249,
+            "medianX": 109
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 21,
+          "dy": -1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 109,
+        "y": 249
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 69,
+        "y": 47
+      }
+    },
+    "assets/animations/walk/right/walk-right-04.png": {
+      "detection": {
+        "anchorDeltaPx": 42,
+        "candidates": [
+          {
+            "componentSize": 21287,
+            "lowestRowY": 250,
+            "medianX": 172
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -42,
+          "dy": -2
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 172,
+        "y": 250
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 6,
+        "y": 46
+      }
+    },
+    "assets/animations/walk/up/walk-up-01.png": {
+      "detection": {
+        "anchorDeltaPx": 10,
+        "candidates": [
+          {
+            "componentSize": 23373,
+            "lowestRowY": 249,
+            "medianX": 120
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 10,
+          "dy": -1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 120,
+        "y": 249
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 58,
+        "y": 47
+      }
+    },
+    "assets/animations/walk/up/walk-up-02.png": {
+      "detection": {
+        "anchorDeltaPx": 8,
+        "candidates": [
+          {
+            "componentSize": 23150,
+            "lowestRowY": 248,
+            "medianX": 138
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -8,
+          "dy": 0
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 138,
+        "y": 248
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 40,
+        "y": 48
+      }
+    },
+    "assets/animations/walk/up/walk-up-03.png": {
+      "detection": {
+        "anchorDeltaPx": 10,
+        "candidates": [
+          {
+            "componentSize": 21843,
+            "lowestRowY": 249,
+            "medianX": 120
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 10,
+          "dy": -1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 120,
+        "y": 249
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 58,
+        "y": 47
+      }
+    },
+    "assets/animations/walk/up/walk-up-04.png": {
+      "detection": {
+        "anchorDeltaPx": 4,
+        "candidates": [
+          {
+            "componentSize": 22572,
+            "lowestRowY": 248,
+            "medianX": 134
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -4,
+          "dy": 0
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 134,
+        "y": 248
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 44,
+        "y": 48
+      }
+    },
+    "assets/expressions/error.png": {
+      "detection": {
+        "anchorDeltaPx": 6,
+        "candidates": [
+          {
+            "componentSize": 23415,
+            "lowestRowY": 247,
+            "medianX": 136
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -6,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 136,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 42,
+        "y": 49
+      }
+    },
+    "assets/expressions/finished.png": {
+      "detection": {
+        "anchorDeltaPx": 1,
+        "candidates": [
+          {
+            "componentSize": 23782,
+            "lowestRowY": 247,
+            "medianX": 130
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 0,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 130,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 48,
+        "y": 49
+      }
+    },
+    "assets/expressions/idle.png": {
+      "detection": {
+        "anchorDeltaPx": 3,
+        "candidates": [
+          {
+            "componentSize": 23756,
+            "lowestRowY": 248,
+            "medianX": 133
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -3,
+          "dy": 0
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 133,
+        "y": 248
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 45,
+        "y": 48
+      }
+    },
+    "assets/expressions/offline.png": {
+      "detection": {
+        "anchorDeltaPx": 16,
+        "candidates": [
+          {
+            "componentSize": 28120,
+            "lowestRowY": 234,
+            "medianX": 114
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 16,
+          "dy": 14
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 114,
+        "y": 234
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 64,
+        "y": 62
+      }
+    },
+    "assets/expressions/warning.png": {
+      "detection": {
+        "anchorDeltaPx": 1,
+        "candidates": [
+          {
+            "componentSize": 23724,
+            "lowestRowY": 247,
+            "medianX": 130
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 0,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 130,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 48,
+        "y": 49
+      }
+    },
+    "assets/expressions/working.png": {
+      "detection": {
+        "anchorDeltaPx": 20,
+        "candidates": [
+          {
+            "componentSize": 39919,
+            "lowestRowY": 255,
+            "medianX": 110
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 20,
+          "dy": -7
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 110,
+        "y": 255
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 68,
+        "y": 41
+      }
+    }
+  },
+  "outputCanvas": {
+    "height": 352,
+    "width": 352
+  },
+  "outputScale": 1.375,
+  "schemaVersion": 1,
+  "sourceCanvas": {
+    "height": 256,
+    "width": 256
+  },
+  "visibleBounds": {
+    "height": 277,
+    "width": 319,
+    "x": 6,
+    "y": 41
+  }
+}

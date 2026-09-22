@@ -13,7 +13,9 @@
     "build:mac": "node scripts/build.js --mac --publish never",
     "publish:win": "node scripts/build.js --win --publish always",
     "publish:mac": "node scripts/build.js --mac --publish always",
-    "test": "node --test"
+    "test": "node --test \"test/*.test.js\"",
+    "office:editor": "electron scripts/office-editor.js",
+    "office:workbench": "electron scripts/office-workbench.js"
   },
   "author": "Lxiayu",
   "license": "MIT",
@@ -28,6 +30,7 @@
     "fzstd": "^0.1.1",
     "node-forge": "^1.4.0",
     "pacote": "^21.5.1",
+    "pixi.js": "8.5.2",
     "pnpm": "^10.34.5",
     "semver": "^7.8.5"
   }

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "task": "Task 4 / SPEC-06 Animation Playground",
+  "recordType": "manual-visual-review",
+  "status": "PENDING_HUMAN_REVIEW",
+  "note": "Automated thresholds all passed (see result.json). The items below require HUMAN observation of the PNG files in this directory; the capture agent cannot render images and records no fabricated judgements. SPEC-06: naturalness issues belong to the asset/transition layer; UI-layer masking is forbidden.",
+  "reviewFiles": [
+    "initial.png", "moving.png", "turning.png", "arriving.png", "working.png",
+    "result.png", "resize.png", "reduced-motion.png", "missing-texture-fallback.png"
+  ],
+  "checklist": {
+    "contactClarity": { "item": "Contact 帧是否清晰（脚触地帧可读）", "result": null, "reference": "moving.png / turning.png / arriving.png" },
+    "passingClarity": { "item": "Passing 帧是否清晰（中间过渡帧可读）", "result": null, "reference": "moving.png / turning.png" },
+    "bodyBounce": { "item": "身体起伏是否自然", "result": null, "reference": "moving.png 连帧" },
+    "fourDirectionPerspective": { "item": "四方向透视/朝向是否一致", "result": null, "reference": "moving.png / turning.png / turning 前后对比" },
+    "stopNaturalness": { "item": "停下是否自然（无跳帧/瞬移）", "result": null, "reference": "arriving.png -> working.png" },
+    "turnNaturalness": { "item": "转向是否自然", "result": null, "reference": "turning.png" },
+    "walkToWorkJump": { "item": "Walk -> Work 是否有突变", "result": null, "reference": "arriving.png / working.png" },
+    "workToWalkJump": { "item": "Work -> Walk 是否有突变", "result": null, "reference": "reduced-motion.png / moving.png" },
+    "speedStability": { "item": "不同速度下是否稳定（frame-duration/speed 滑杆）", "result": null, "reference": "evidence.json thresholds + 人工滑杆观察" },
+    "nonSquareDrift": { "item": "非方形窗口是否出现漂移", "result": null, "reference": "resize.png (960x640)" }
+  },
+  "knownAssetFacts": [
+    "whale-girl 源帧含半透明背景残留（Task 2 已知，validation-report 已记录 art rework 建议）",
+    "completed/failed/thinking/sleeping 等状态按 fallback chain 显示（finished/error/side-back/idle），非专用素材"
+  ]
+}

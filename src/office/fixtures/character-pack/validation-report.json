@@ -1,0 +1,1346 @@
+{
+  "capabilitiesMissing": [
+    "sleeping",
+    "completed",
+    "failed",
+    "attention",
+    "thinking",
+    "waiting",
+    "celebrating",
+    "chatting"
+  ],
+  "characterId": "whale-girl",
+  "failures": [],
+  "frames": {
+    "assets/animations/side/none/side-back.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 6,
+      "animation": "side-back",
+      "candidates": [
+        {
+          "componentSize": 23282,
+          "lowestRowY": 247,
+          "medianX": 136
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "none",
+      "originalTranslation": {
+        "dx": -6,
+        "dy": 1
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/side/none/side-back.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 136,
+        "y": 247
+      },
+      "sourceFile": "assets/animations/side-back.png",
+      "state": "side",
+      "status": "passed",
+      "translation": {
+        "dx": -6,
+        "dy": 1
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 42,
+        "y": 49
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/side/none/side-left.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 18,
+      "animation": "side-left",
+      "candidates": [
+        {
+          "componentSize": 18723,
+          "lowestRowY": 248,
+          "medianX": 112
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "none",
+      "originalTranslation": {
+        "dx": 18,
+        "dy": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/side/none/side-left.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 112,
+        "y": 248
+      },
+      "sourceFile": "assets/animations/side-left.png",
+      "state": "side",
+      "status": "passed",
+      "translation": {
+        "dx": 18,
+        "dy": 0
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 66,
+        "y": 48
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/side/none/side-right.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 12,
+      "animation": "side-right",
+      "candidates": [
+        {
+          "componentSize": 17575,
+          "lowestRowY": 248,
+          "medianX": 142
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "none",
+      "originalTranslation": {
+        "dx": -12,
+        "dy": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/side/none/side-right.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 142,
+        "y": 248
+      },
+      "sourceFile": "assets/animations/side-right.png",
+      "state": "side",
+      "status": "passed",
+      "translation": {
+        "dx": -12,
+        "dy": 0
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 36,
+        "y": 48
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/walk/down/walk-down-01.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 1,
+      "animation": "walk-down",
+      "candidates": [
+        {
+          "componentSize": 23485,
+          "lowestRowY": 249,
+          "medianX": 130
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "down",
+      "originalTranslation": {
+        "dx": 0,
+        "dy": -1
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/walk/down/walk-down-01.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 130,
+        "y": 249
+      },
+      "sourceFile": "assets/animations/walk-down-01.png",
+      "state": "walk",
+      "status": "passed",
+      "translation": {
+        "dx": 0,
+        "dy": -1
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 48,
+        "y": 47
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/walk/down/walk-down-02.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 14,
+      "animation": "walk-down",
+      "candidates": [
+        {
+          "componentSize": 23325,
+          "lowestRowY": 248,
+          "medianX": 116
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "down",
+      "originalTranslation": {
+        "dx": 14,
+        "dy": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/walk/down/walk-down-02.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 116,
+        "y": 248
+      },
+      "sourceFile": "assets/animations/walk-down-02.png",
+      "state": "walk",
+      "status": "passed",
+      "translation": {
+        "dx": 14,
+        "dy": 0
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 62,
+        "y": 48
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/walk/down/walk-down-03.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 1,
+      "animation": "walk-down",
+      "candidates": [
+        {
+          "componentSize": 23380,
+          "lowestRowY": 249,
+          "medianX": 130
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "down",
+      "originalTranslation": {
+        "dx": 0,
+        "dy": -1
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/walk/down/walk-down-03.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 130,
+        "y": 249
+      },
+      "sourceFile": "assets/animations/walk-down-03.png",
+      "state": "walk",
+      "status": "passed",
+      "translation": {
+        "dx": 0,
+        "dy": -1
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 48,
+        "y": 47
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/walk/down/walk-down-04.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 2,
+      "animation": "walk-down",
+      "candidates": [
+        {
+          "componentSize": 23592,
+          "lowestRowY": 250,
+          "medianX": 128
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "down",
+      "originalTranslation": {
+        "dx": 2,
+        "dy": -2
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/walk/down/walk-down-04.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 128,
+        "y": 250
+      },
+      "sourceFile": "assets/animations/walk-down-04.png",
+      "state": "walk",
+      "status": "passed",
+      "translation": {
+        "dx": 2,
+        "dy": -2
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 50,
+        "y": 46
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/walk/left/walk-left-01.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 11,
+      "animation": "walk-left",
+      "candidates": [
+        {
+          "componentSize": 20799,
+          "lowestRowY": 247,
+          "medianX": 141
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "left",
+      "originalTranslation": {
+        "dx": -11,
+        "dy": 1
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/walk/left/walk-left-01.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 141,
+        "y": 247
+      },
+      "sourceFile": "assets/animations/walk-left-01.png",
+      "state": "walk",
+      "status": "passed",
+      "translation": {
+        "dx": -11,
+        "dy": 1
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 37,
+        "y": 49
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/walk/left/walk-left-02.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 2,
+      "animation": "walk-left",
+      "candidates": [
+        {
+          "componentSize": 20166,
+          "lowestRowY": 247,
+          "medianX": 132
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "left",
+      "originalTranslation": {
+        "dx": -2,
+        "dy": 1
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/walk/left/walk-left-02.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 132,
+        "y": 247
+      },
+      "sourceFile": "assets/animations/walk-left-02.png",
+      "state": "walk",
+      "status": "passed",
+      "translation": {
+        "dx": -2,
+        "dy": 1
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 46,
+        "y": 49
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/walk/left/walk-left-03.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 3,
+      "animation": "walk-left",
+      "candidates": [
+        {
+          "componentSize": 20247,
+          "lowestRowY": 247,
+          "medianX": 133
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "left",
+      "originalTranslation": {
+        "dx": -3,
+        "dy": 1
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/walk/left/walk-left-03.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 133,
+        "y": 247
+      },
+      "sourceFile": "assets/animations/walk-left-03.png",
+      "state": "walk",
+      "status": "passed",
+      "translation": {
+        "dx": -3,
+        "dy": 1
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 45,
+        "y": 49
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/walk/left/walk-left-04.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 10,
+      "animation": "walk-left",
+      "candidates": [
+        {
+          "componentSize": 21415,
+          "lowestRowY": 246,
+          "medianX": 140
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "left",
+      "originalTranslation": {
+        "dx": -10,
+        "dy": 2
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/walk/left/walk-left-04.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 140,
+        "y": 246
+      },
+      "sourceFile": "assets/animations/walk-left-04.png",
+      "state": "walk",
+      "status": "passed",
+      "translation": {
+        "dx": -10,
+        "dy": 2
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 38,
+        "y": 50
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/walk/right/walk-right-01.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 12,
+      "animation": "walk-right",
+      "candidates": [
+        {
+          "componentSize": 19782,
+          "lowestRowY": 247,
+          "medianX": 118
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "right",
+      "originalTranslation": {
+        "dx": 12,
+        "dy": 1
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/walk/right/walk-right-01.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 118,
+        "y": 247
+      },
+      "sourceFile": "assets/animations/walk-right-01.png",
+      "state": "walk",
+      "status": "passed",
+      "translation": {
+        "dx": 12,
+        "dy": 1
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 60,
+        "y": 49
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/walk/right/walk-right-02.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 21,
+      "animation": "walk-right",
+      "candidates": [
+        {
+          "componentSize": 18948,
+          "lowestRowY": 247,
+          "medianX": 109
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "right",
+      "originalTranslation": {
+        "dx": 21,
+        "dy": 1
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/walk/right/walk-right-02.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 109,
+        "y": 247
+      },
+      "sourceFile": "assets/animations/walk-right-02.png",
+      "state": "walk",
+      "status": "passed",
+      "translation": {
+        "dx": 21,
+        "dy": 1
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 69,
+        "y": 49
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/walk/right/walk-right-03.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 21,
+      "animation": "walk-right",
+      "candidates": [
+        {
+          "componentSize": 19777,
+          "lowestRowY": 249,
+          "medianX": 109
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "right",
+      "originalTranslation": {
+        "dx": 21,
+        "dy": -1
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/walk/right/walk-right-03.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 109,
+        "y": 249
+      },
+      "sourceFile": "assets/animations/walk-right-03.png",
+      "state": "walk",
+      "status": "passed",
+      "translation": {
+        "dx": 21,
+        "dy": -1
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 69,
+        "y": 47
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/walk/right/walk-right-04.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 42,
+      "animation": "walk-right",
+      "candidates": [
+        {
+          "componentSize": 21287,
+          "lowestRowY": 250,
+          "medianX": 172
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "right",
+      "originalTranslation": {
+        "dx": -42,
+        "dy": -2
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/walk/right/walk-right-04.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 172,
+        "y": 250
+      },
+      "sourceFile": "assets/animations/walk-right-04.png",
+      "state": "walk",
+      "status": "passed",
+      "translation": {
+        "dx": -42,
+        "dy": -2
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 6,
+        "y": 46
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/walk/up/walk-up-01.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 10,
+      "animation": "walk-up",
+      "candidates": [
+        {
+          "componentSize": 23373,
+          "lowestRowY": 249,
+          "medianX": 120
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "up",
+      "originalTranslation": {
+        "dx": 10,
+        "dy": -1
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/walk/up/walk-up-01.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 120,
+        "y": 249
+      },
+      "sourceFile": "assets/animations/walk-up-01.png",
+      "state": "walk",
+      "status": "passed",
+      "translation": {
+        "dx": 10,
+        "dy": -1
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 58,
+        "y": 47
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/walk/up/walk-up-02.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 8,
+      "animation": "walk-up",
+      "candidates": [
+        {
+          "componentSize": 23150,
+          "lowestRowY": 248,
+          "medianX": 138
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "up",
+      "originalTranslation": {
+        "dx": -8,
+        "dy": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/walk/up/walk-up-02.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 138,
+        "y": 248
+      },
+      "sourceFile": "assets/animations/walk-up-02.png",
+      "state": "walk",
+      "status": "passed",
+      "translation": {
+        "dx": -8,
+        "dy": 0
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 40,
+        "y": 48
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/walk/up/walk-up-03.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 10,
+      "animation": "walk-up",
+      "candidates": [
+        {
+          "componentSize": 21843,
+          "lowestRowY": 249,
+          "medianX": 120
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "up",
+      "originalTranslation": {
+        "dx": 10,
+        "dy": -1
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/walk/up/walk-up-03.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 120,
+        "y": 249
+      },
+      "sourceFile": "assets/animations/walk-up-03.png",
+      "state": "walk",
+      "status": "passed",
+      "translation": {
+        "dx": 10,
+        "dy": -1
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 58,
+        "y": 47
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/animations/walk/up/walk-up-04.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 4,
+      "animation": "walk-up",
+      "candidates": [
+        {
+          "componentSize": 22572,
+          "lowestRowY": 248,
+          "medianX": 134
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "up",
+      "originalTranslation": {
+        "dx": -4,
+        "dy": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/animations/walk/up/walk-up-04.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 134,
+        "y": 248
+      },
+      "sourceFile": "assets/animations/walk-up-04.png",
+      "state": "walk",
+      "status": "passed",
+      "translation": {
+        "dx": -4,
+        "dy": 0
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 44,
+        "y": 48
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/expressions/error.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 6,
+      "animation": "error",
+      "candidates": [
+        {
+          "componentSize": 23415,
+          "lowestRowY": 247,
+          "medianX": 136
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "none",
+      "originalTranslation": {
+        "dx": -6,
+        "dy": 1
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/expressions/error.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 136,
+        "y": 247
+      },
+      "sourceFile": "assets/expressions/blue/error.png",
+      "state": "error",
+      "status": "passed",
+      "translation": {
+        "dx": -6,
+        "dy": 1
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 42,
+        "y": 49
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/expressions/finished.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 1,
+      "animation": "finished",
+      "candidates": [
+        {
+          "componentSize": 23782,
+          "lowestRowY": 247,
+          "medianX": 130
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "none",
+      "originalTranslation": {
+        "dx": 0,
+        "dy": 1
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/expressions/finished.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 130,
+        "y": 247
+      },
+      "sourceFile": "assets/expressions/blue/finished.png",
+      "state": "finished",
+      "status": "passed",
+      "translation": {
+        "dx": 0,
+        "dy": 1
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 48,
+        "y": 49
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/expressions/idle.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 3,
+      "animation": "idle",
+      "candidates": [
+        {
+          "componentSize": 23756,
+          "lowestRowY": 248,
+          "medianX": 133
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "none",
+      "originalTranslation": {
+        "dx": -3,
+        "dy": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/expressions/idle.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 133,
+        "y": 248
+      },
+      "sourceFile": "assets/expressions/blue/idle.png",
+      "state": "idle",
+      "status": "passed",
+      "translation": {
+        "dx": -3,
+        "dy": 0
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 45,
+        "y": 48
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/expressions/offline.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 16,
+      "animation": "offline",
+      "candidates": [
+        {
+          "componentSize": 28120,
+          "lowestRowY": 234,
+          "medianX": 114
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "none",
+      "originalTranslation": {
+        "dx": 16,
+        "dy": 14
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/expressions/offline.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 114,
+        "y": 234
+      },
+      "sourceFile": "assets/expressions/blue/offline.png",
+      "state": "offline",
+      "status": "passed",
+      "translation": {
+        "dx": 16,
+        "dy": 14
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 64,
+        "y": 62
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/expressions/warning.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 1,
+      "animation": "warning",
+      "candidates": [
+        {
+          "componentSize": 23724,
+          "lowestRowY": 247,
+          "medianX": 130
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "none",
+      "originalTranslation": {
+        "dx": 0,
+        "dy": 1
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/expressions/warning.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 130,
+        "y": 247
+      },
+      "sourceFile": "assets/expressions/blue/warning.png",
+      "state": "warning",
+      "status": "passed",
+      "translation": {
+        "dx": 0,
+        "dy": 1
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 48,
+        "y": 49
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    },
+    "assets/expressions/working.png": {
+      "alpha16Bounds": {
+        "height": 256,
+        "width": 256,
+        "x": 0,
+        "y": 0
+      },
+      "anchorDeltaPx": 20,
+      "animation": "working",
+      "candidates": [
+        {
+          "componentSize": 39919,
+          "lowestRowY": 255,
+          "medianX": 110
+        }
+      ],
+      "contactRule": "single-lowest-row-median",
+      "direction": "none",
+      "originalTranslation": {
+        "dx": 20,
+        "dy": -7
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "outputFile": "assets/expressions/working.png",
+      "selectedRule": "alpha128-body-bounds",
+      "sourceAnchor": {
+        "x": 110,
+        "y": 255
+      },
+      "sourceFile": "assets/expressions/blue/working.png",
+      "state": "working",
+      "status": "passed",
+      "translation": {
+        "dx": 20,
+        "dy": -7
+      },
+      "verifiedDeltaPx": 0,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 68,
+        "y": 41
+      },
+      "warnings": [
+        "background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+      ]
+    }
+  },
+  "outputCanvas": {
+    "height": 352,
+    "width": 352
+  },
+  "outputScale": 1.375,
+  "packAnchor": {
+    "output": {
+      "x": 178,
+      "y": 296
+    },
+    "source": {
+      "x": 130,
+      "y": 248
+    }
+  },
+  "result": "passed",
+  "schemaVersion": 1,
+  "skipped": {
+    "orphanSourceFiles": [
+      "assets/animations/action-eat.png",
+      "assets/animations/action-jump.png",
+      "assets/animations/action-shake.png",
+      "assets/animations/action-wave.png"
+    ],
+    "vectorSourcesNotNormalized": [
+      "assets/expressions/black/error.svg",
+      "assets/expressions/black/finished.svg",
+      "assets/expressions/black/idle.svg",
+      "assets/expressions/black/offline.svg",
+      "assets/expressions/black/warning.svg",
+      "assets/expressions/black/working.svg",
+      "assets/expressions/blue/error.svg",
+      "assets/expressions/blue/finished.svg",
+      "assets/expressions/blue/idle.svg",
+      "assets/expressions/blue/offline.svg",
+      "assets/expressions/blue/warning.svg",
+      "assets/expressions/blue/working.svg"
+    ]
+  },
+  "sourceCanvas": {
+    "height": 256,
+    "width": 256
+  },
+  "sourceManifestVersion": "0.2.0",
+  "sourcePack": "whale-girl",
+  "threshold": {
+    "alphaBody": 128,
+    "alphaBounds": 16,
+    "bandRatio": 0.15,
+    "maxContactComponents": 2,
+    "minComponentPx": 32,
+    "tolerancePx": 1
+  },
+  "warnings": [
+    "assets/animations/side-back.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/side-left.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/side-right.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/walk-down-01.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/walk-down-02.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/walk-down-03.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/walk-down-04.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/walk-left-01.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/walk-left-02.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/walk-left-03.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/walk-left-04.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/walk-right-01.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/walk-right-02.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/walk-right-03.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/walk-right-04.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/walk-up-01.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/walk-up-02.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/walk-up-03.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/animations/walk-up-04.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/expressions/blue/error.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/expressions/blue/finished.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/expressions/blue/idle.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/expressions/blue/offline.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/expressions/blue/warning.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer).",
+    "assets/expressions/blue/working.png: background-wash-present: alpha16 bounds saturate the canvas; visible bounds derived from the alpha>=128 main-body mask. Art rework recommended (remove the semi-opaque background layer)."
+  ]
+}

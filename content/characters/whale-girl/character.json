@@ -1,0 +1,781 @@
+{
+  "schemaVersion": 1,
+  "id": "whale-girl",
+  "label": "鲸鱼娘",
+  "pack": {
+    "canvas": 352,
+    "anchor": {
+      "x": 178,
+      "y": 296
+    },
+    "footLine": 296,
+    "unionVisibleBounds": {
+      "x": 36,
+      "y": 40,
+      "w": 289,
+      "h": 278
+    }
+  },
+  "facing": [
+    "front",
+    "back",
+    "left",
+    "right"
+  ],
+  "defaults": {
+    "frameDurationMs": 1000,
+    "scale": 1
+  },
+  "actions": [
+    {
+      "id": "error",
+      "loop": false,
+      "direction": "front",
+      "frames": [
+        {
+          "file": "assets/expressions/error.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 256,
+            "visibleHeight": 256
+          }
+        }
+      ]
+    },
+    {
+      "id": "finished",
+      "loop": false,
+      "direction": "front",
+      "frames": [
+        {
+          "file": "assets/expressions/finished.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 256,
+            "visibleHeight": 256
+          }
+        }
+      ]
+    },
+    {
+      "id": "idle",
+      "loop": false,
+      "direction": "front",
+      "frames": [
+        {
+          "file": "assets/expressions/idle.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 256,
+            "visibleHeight": 256
+          }
+        }
+      ]
+    },
+    {
+      "id": "idle-blink",
+      "loop": false,
+      "direction": "none",
+      "frames": [
+        {
+          "file": "assets/expressions/idle-blink.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 195,
+            "visibleHeight": 257
+          }
+        }
+      ],
+      "geometry": {
+        "footLine": 296
+      }
+    },
+    {
+      "id": "idle-lunch",
+      "loop": false,
+      "direction": "none",
+      "frames": [
+        {
+          "file": "assets/expressions/idle-lunch.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 248,
+            "visibleHeight": 256
+          }
+        }
+      ],
+      "geometry": {
+        "footLine": 296
+      }
+    },
+    {
+      "id": "offline",
+      "loop": false,
+      "direction": "front",
+      "frames": [
+        {
+          "file": "assets/expressions/offline.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 256,
+            "visibleHeight": 256
+          }
+        }
+      ]
+    },
+    {
+      "id": "side-back",
+      "loop": false,
+      "direction": "back",
+      "frames": [
+        {
+          "file": "assets/animations/side/none/side-back.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 256,
+            "visibleHeight": 256
+          }
+        }
+      ]
+    },
+    {
+      "id": "side-left",
+      "loop": false,
+      "direction": "left",
+      "frames": [
+        {
+          "file": "assets/animations/side/none/side-left.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 256,
+            "visibleHeight": 256
+          }
+        }
+      ]
+    },
+    {
+      "id": "side-right",
+      "loop": false,
+      "direction": "right",
+      "frames": [
+        {
+          "file": "assets/animations/side/none/side-right.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 256,
+            "visibleHeight": 256
+          }
+        }
+      ]
+    },
+    {
+      "id": "sleeping",
+      "loop": false,
+      "direction": "none",
+      "frames": [
+        {
+          "file": "assets/expressions/sleeping.png",
+          "geometry": {
+            "footLine": 295,
+            "visibleWidth": 216,
+            "visibleHeight": 257
+          }
+        }
+      ],
+      "geometry": {
+        "footLine": 295
+      }
+    },
+    {
+      "id": "walk-down",
+      "loop": true,
+      "direction": "down",
+      "frames": [
+        {
+          "file": "assets/animations/walk/down/walk-down-b01.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 179,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/down/walk-down-b02.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 183,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/down/walk-down-b03.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 191,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/down/walk-down-b04.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 200,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/down/walk-down-b05.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 205,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/down/walk-down-b06.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 202,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/down/walk-down-b07.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 192,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/down/walk-down-b08.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 185,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/down/walk-down-b09.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 182,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/down/walk-down-b10.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 182,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/down/walk-down-b11.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 184,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/down/walk-down-b12.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 188,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/down/walk-down-b13.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 188,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/down/walk-down-b14.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 185,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/down/walk-down-b15.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 180,
+            "visibleHeight": 256
+          }
+        }
+      ],
+      "geometry": {
+        "footLine": 296
+      }
+    },
+    {
+      "id": "walk-left",
+      "loop": true,
+      "direction": "left",
+      "frames": [
+        {
+          "file": "assets/animations/walk/left/walk-left-b01.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 167,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/left/walk-left-b02.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 173,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/left/walk-left-b03.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 174,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/left/walk-left-b04.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 172,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/left/walk-left-b05.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 165,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/left/walk-left-b06.png",
+          "geometry": {
+            "footLine": 295,
+            "visibleWidth": 163,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/left/walk-left-b07.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 167,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/left/walk-left-b08.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 170,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/left/walk-left-b09.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 175,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/left/walk-left-b10.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 177,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/left/walk-left-b11.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 175,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/left/walk-left-b12.png",
+          "geometry": {
+            "footLine": 295,
+            "visibleWidth": 168,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/left/walk-left-b13.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 161,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/left/walk-left-b14.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 161,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/left/walk-left-b15.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 165,
+            "visibleHeight": 256
+          }
+        }
+      ],
+      "geometry": {
+        "footLine": 296,
+        "tolerancePx": 1,
+        "heightTolerancePx": 2
+      }
+    },
+    {
+      "id": "walk-right",
+      "loop": true,
+      "direction": "right",
+      "frames": [
+        {
+          "file": "assets/animations/walk/right/walk-right-b01.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 172,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/right/walk-right-b02.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 171,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/right/walk-right-b03.png",
+          "geometry": {
+            "footLine": 295,
+            "visibleWidth": 165,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/right/walk-right-b04.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 162,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/right/walk-right-b05.png",
+          "geometry": {
+            "footLine": 295,
+            "visibleWidth": 164,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/right/walk-right-b06.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 168,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/right/walk-right-b07.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 172,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/right/walk-right-b08.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 175,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/right/walk-right-b09.png",
+          "geometry": {
+            "footLine": 295,
+            "visibleWidth": 175,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/right/walk-right-b10.png",
+          "geometry": {
+            "footLine": 295,
+            "visibleWidth": 169,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/right/walk-right-b11.png",
+          "geometry": {
+            "footLine": 295,
+            "visibleWidth": 161,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/right/walk-right-b12.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 161,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/right/walk-right-b13.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 162,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/right/walk-right-b14.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 166,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/right/walk-right-b15.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 171,
+            "visibleHeight": 256
+          }
+        }
+      ],
+      "geometry": {
+        "footLine": 296,
+        "tolerancePx": 1,
+        "heightTolerancePx": 2
+      }
+    },
+    {
+      "id": "walk-up",
+      "loop": true,
+      "direction": "up",
+      "frames": [
+        {
+          "file": "assets/animations/walk/up/walk-up-b01.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 198,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/up/walk-up-b02.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 201,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/up/walk-up-b03.png",
+          "geometry": {
+            "footLine": 295,
+            "visibleWidth": 207,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/up/walk-up-b04.png",
+          "geometry": {
+            "footLine": 295,
+            "visibleWidth": 206,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/up/walk-up-b05.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 200,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/up/walk-up-b06.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 198,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/up/walk-up-b07.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 197,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/up/walk-up-b08.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 195,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/up/walk-up-b09.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 196,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/up/walk-up-b10.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 201,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/up/walk-up-b11.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 203,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/walk/up/walk-up-b12.png",
+          "geometry": {
+            "footLine": 295,
+            "visibleWidth": 199,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/up/walk-up-b13.png",
+          "geometry": {
+            "footLine": 295,
+            "visibleWidth": 199,
+            "visibleHeight": 257
+          }
+        },
+        {
+          "file": "assets/animations/walk/up/walk-up-b14.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 198,
+            "visibleHeight": 257
+          }
+        }
+      ],
+      "geometry": {
+        "footLine": 296
+      }
+    },
+    {
+      "id": "warning",
+      "loop": false,
+      "direction": "front",
+      "frames": [
+        {
+          "file": "assets/expressions/warning.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 256,
+            "visibleHeight": 256
+          }
+        }
+      ]
+    },
+    {
+      "id": "working",
+      "loop": false,
+      "direction": "front",
+      "frames": [
+        {
+          "file": "assets/expressions/working.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 256,
+            "visibleHeight": 256
+          }
+        }
+      ]
+    },
+    {
+      "id": "working-back",
+      "loop": true,
+      "direction": "none",
+      "frames": [
+        {
+          "file": "assets/animations/working/back/working-back-04.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 210,
+            "visibleHeight": 255
+          }
+        },
+        {
+          "file": "assets/animations/working/back/working-back-05.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 209,
+            "visibleHeight": 256
+          }
+        },
+        {
+          "file": "assets/animations/working/back/working-back-06.png",
+          "geometry": {
+            "footLine": 296,
+            "visibleWidth": 210,
+            "visibleHeight": 256
+          }
+        }
+      ],
+      "geometry": {
+        "footLine": 296
+      }
+    }
+  ],
+  "provenance": {
+    "generatedBy": "scripts/workbench-export-character.js",
+    "sourcePack": "resources/characters/deepseek-default",
+    "sourcePackVersion": "1.1.0",
+    "sourcePackId": "deepseek-default",
+    "frameRoot": "sourcePack",
+    "measurement": {
+      "shoeAlphaThreshold": 128,
+      "boundsAlphaThreshold": 8
+    }
+  }
+}

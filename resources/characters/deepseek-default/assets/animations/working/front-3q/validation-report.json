@@ -1,0 +1,128 @@
+{
+  "criteria": {
+    "alphaChannelPresent": true,
+    "canvasMatchesProductionConvention": "source must normalize into the pack's declared outputCanvas (64x64); the requested 352x352 convention belongs to the test fixture pack and cannot coexist with the pack-level outputCanvas",
+    "frameToFrameStabilityMaxRatio": 0.1,
+    "fullBodyFootAnchorCompatible": "content must reference the pack's full-body foot anchor (32,60); half-body compositions have no foot reference and break inter-state scale consistency"
+  },
+  "derivedFiles": [],
+  "frameToFrame": {
+    "maxHeightDeltaRatio": 0.0144,
+    "maxLeftEdgeDeltaPx": 102,
+    "maxWidthDeltaRatio": 0.0459
+  },
+  "frames": [
+    {
+      "alpha": true,
+      "composition": "half-body front 3/4 working pose (head, torso and typing hands at the bottom edge); no baked chair or desk",
+      "file": "working-front-3q-01.png",
+      "height": 1254,
+      "opaqueRatio": 0.5308,
+      "reasons": [
+        "canvas-convention: the production pack (deepseek-default) declares a pack-level 64x64 outputCanvas with full-body foot anchor (32,60); outputCanvas cannot be overridden per frame, so the requested 352x352 normalization target cannot coexist with the pack's existing idle/walk/completed/failed/sleeping frames",
+        "anchor-compatibility: all four sources are half-body (bust) working poses without a foot reference; normalized into the pack's 21x49 standalone-character visible box they would break inter-state scale consistency (head width roughly 2x the idle head at equal visible height) and render hands floating above the workstation desk surface"
+      ],
+      "sha256": "adaf627ca812f7f0e25611e13878b6af0542cb2b9b10895274957cc8f0294280",
+      "verdict": "geometry-rejected",
+      "visibleBounds": {
+        "height": 1254,
+        "width": 1142,
+        "x": 102,
+        "y": 0
+      },
+      "width": 1254
+    },
+    {
+      "alpha": true,
+      "composition": "half-body front 3/4 working pose (head, torso and typing hands at the bottom edge); no baked chair or desk",
+      "file": "working-front-3q-02.png",
+      "height": 1254,
+      "opaqueRatio": 0.5763,
+      "reasons": [
+        "canvas-convention: the production pack (deepseek-default) declares a pack-level 64x64 outputCanvas with full-body foot anchor (32,60); outputCanvas cannot be overridden per frame, so the requested 352x352 normalization target cannot coexist with the pack's existing idle/walk/completed/failed/sleeping frames",
+        "anchor-compatibility: all four sources are half-body (bust) working poses without a foot reference; normalized into the pack's 21x49 standalone-character visible box they would break inter-state scale consistency (head width roughly 2x the idle head at equal visible height) and render hands floating above the workstation desk surface"
+      ],
+      "sha256": "9e0178b7d5c3523895701a2ffc4e614b7089fc4c24ef4870b9ab3704a9bc057f",
+      "verdict": "geometry-rejected",
+      "visibleBounds": {
+        "height": 1254,
+        "width": 1147,
+        "x": 87,
+        "y": 0
+      },
+      "width": 1254
+    },
+    {
+      "alpha": true,
+      "composition": "half-body front 3/4 working pose (head, torso and typing hands at the bottom edge); no baked chair or desk",
+      "file": "working-front-3q-03.png",
+      "height": 1254,
+      "opaqueRatio": 0.5712,
+      "reasons": [
+        "canvas-convention: the production pack (deepseek-default) declares a pack-level 64x64 outputCanvas with full-body foot anchor (32,60); outputCanvas cannot be overridden per frame, so the requested 352x352 normalization target cannot coexist with the pack's existing idle/walk/completed/failed/sleeping frames",
+        "anchor-compatibility: all four sources are half-body (bust) working poses without a foot reference; normalized into the pack's 21x49 standalone-character visible box they would break inter-state scale consistency (head width roughly 2x the idle head at equal visible height) and render hands floating above the workstation desk surface"
+      ],
+      "sha256": "ea4b1d6ec3a6955cffc04546597663e2b8e58fd6482ca049e385170c93f57f1d",
+      "verdict": "geometry-rejected",
+      "visibleBounds": {
+        "height": 1236,
+        "width": 1169,
+        "x": 0,
+        "y": 15
+      },
+      "width": 1254
+    },
+    {
+      "alpha": true,
+      "composition": "half-body front 3/4 working pose (head, torso and typing hands at the bottom edge); no baked chair or desk",
+      "file": "working-front-3q-04.png",
+      "height": 1254,
+      "opaqueRatio": 0.5613,
+      "reasons": [
+        "canvas-convention: the production pack (deepseek-default) declares a pack-level 64x64 outputCanvas with full-body foot anchor (32,60); outputCanvas cannot be overridden per frame, so the requested 352x352 normalization target cannot coexist with the pack's existing idle/walk/completed/failed/sleeping frames",
+        "anchor-compatibility: all four sources are half-body (bust) working poses without a foot reference; normalized into the pack's 21x49 standalone-character visible box they would break inter-state scale consistency (head width roughly 2x the idle head at equal visible height) and render hands floating above the workstation desk surface"
+      ],
+      "sha256": "7128d19fbc9f6d681979e6dff875a2c0d7492ccf0f35599de1c6e4866d297817",
+      "verdict": "geometry-rejected",
+      "visibleBounds": {
+        "height": 1238,
+        "width": 1197,
+        "x": 34,
+        "y": 7
+      },
+      "width": 1254
+    }
+  ],
+  "generatedBy": "scripts/office-assets/inventory-working-frames.py --report",
+  "immutable": true,
+  "license": "production pack MIT (resources/characters/deepseek-default/LICENSE and NOTICE); source frames are DshCockpit-generated assets tracked under photo/output_nobg/",
+  "reasons": [
+    "canvas-convention: the production pack (deepseek-default) declares a pack-level 64x64 outputCanvas with full-body foot anchor (32,60); outputCanvas cannot be overridden per frame, so the requested 352x352 normalization target cannot coexist with the pack's existing idle/walk/completed/failed/sleeping frames",
+    "anchor-compatibility: all four sources are half-body (bust) working poses without a foot reference; normalized into the pack's 21x49 standalone-character visible box they would break inter-state scale consistency (head width roughly 2x the idle head at equal visible height) and render hands floating above the workstation desk surface"
+  ],
+  "runtimeVisibility": "authoring-only; runtime asset-pack.js never reads this report and production pack metadata never references it",
+  "schemaVersion": 1,
+  "source": {
+    "dir": "photo/output_nobg",
+    "role": "source-of-record (tracked, never modified by this script)"
+  },
+  "target": {
+    "anchor": {
+      "x": 32,
+      "y": 60
+    },
+    "derivedDir": "resources/characters/deepseek-default/assets/animations/working/front-3q",
+    "outputCanvas": {
+      "height": 64,
+      "width": 64
+    },
+    "pack": "deepseek-default",
+    "visibleBounds": {
+      "height": 49,
+      "width": 21,
+      "x": 22,
+      "y": 12
+    }
+  },
+  "verdict": "geometry-rejected"
+}

@@ -15,7 +15,7 @@
 //   DSH_DESKTOP_USER_DATA
 'use strict';
 
-const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut, safeStorage, nativeTheme, clipboard } = require('electron');
+const { app, BrowserWindow, WebContentsView, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut, safeStorage, nativeTheme, clipboard, protocol } = require('electron');
 
 // H-test: DSH_DESKTOP_NO_KEYCHAIN=1 keeps unattended runs unattended. Ad-hoc
 // rebuilds change the code signature on every build, and macOS Keychain ACLs
@@ -65,6 +65,7 @@ const { createHarnessRpcClient, createHarnessRpcWire } = require('./harness-rpc'
 const { createQuickAskShortcutManager } = require('./quickask-shortcut');
 const { createMemoryFiles } = require('./memory-files');
 const { createPluginOpGuard, failureCode, shouldCleanupAfterFailure, summarizeOutput, inferStage, parsePnpmBlockedPackage, upsertOnlyBuiltDependencies, pickSubpackage, resolveDepKey, pruneBundles, sanitizeProfile } = require('./plugin-flow');
+const { resolveOfficeCharacterPack } = require('./office/office-pack-resolver.js');
 const { createSkillsManager, buildSkillsMarketPayload } = require('./skills');
 const { createChannelManager } = require('./channels/channel-manager');
 const { computeCockpitBounds } = require('./cockpit-bounds');
@@ -93,6 +94,263 @@ if (process.env.DSH_DESKTOP_USER_DATA) {
   // must happen before app is ready; keeps logs/state inside the workspace
   try { app.setPath('userData', process.env.DSH_DESKTOP_USER_DATA); } catch { /* ignore */ }
 }
+
+// ---------------------------------------------------------------------------
+// Office Animation Playground (Task 4 / SPEC-06) — development-only.
+// Frozen default is OFF (`officePlaygroundEnabled=false`); the only way to run
+// it is the explicit dev/evidence override below. No Harness, no IPC business
+// events, no office-state persistence: the page is fully self-contained.
+// ---------------------------------------------------------------------------
+const OFFICE_PLAYGROUND_ENABLED = false;
+const OFFICE_PLAYGROUND_SCHEME = 'office-playground';
+function officePlaygroundEnabled() {
+  return OFFICE_PLAYGROUND_ENABLED || process.env.DSH_DESKTOP_OFFICE_PLAYGROUND === '1';
+}
+function registerOfficePlaygroundScheme() {
+  // Must be called before app ready; serving is registered in openOfficePlayground.
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: OFFICE_PLAYGROUND_SCHEME,
+      privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+    },
+  ]);
+}
+function openOfficePlayground() {
+  if (!officePlaygroundEnabled()) {
+    log('[office] playground disabled (officePlaygroundEnabled=false)');
+    return { ok: false, code: 'OFFICE_PLAYGROUND_DISABLED' };
+  }
+  const officeRoot = path.join(__dirname, 'office');
+  const packRoot = path.join(officeRoot, 'fixtures', 'character-pack');
+  const builtinPackRoot = path.join(officeCharactersRoot(), 'deepseek-default');
+  const nodeModulesRoot = path.join(__dirname, '..', 'node_modules');
+  const serveFile = (abs, type) => new Response(fs.readFileSync(abs), {
+    headers: { 'content-type': type, 'access-control-allow-origin': `${OFFICE_PLAYGROUND_SCHEME}://local` },
+  });
+  const contentTypeFor = (abs) => {
+    if (abs.endsWith('.html')) return 'text/html; charset=utf-8';
+    if (abs.endsWith('.css')) return 'text/css; charset=utf-8';
+    if (abs.endsWith('.js')) return 'text/javascript; charset=utf-8';
+    if (abs.endsWith('.json')) return 'application/json; charset=utf-8';
+    if (abs.endsWith('.png')) return 'image/png';
+    return 'application/octet-stream';
+  };
+  protocol.handle(OFFICE_PLAYGROUND_SCHEME, (request) => {
+    const url = new URL(request.url);
+    if (url.hostname !== 'local') return new Response('not found', { status: 404 });
+    const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+    const routes = [
+      { prefix: 'node_modules/', root: nodeModulesRoot },
+      { prefix: 'pack/', root: packRoot },
+      { prefix: 'builtin/', root: builtinPackRoot },
+      { prefix: '', root: officeRoot },
+    ];
+    for (const route of routes) {
+      if (!rel.startsWith(route.prefix)) continue;
+      const relPath = rel.slice(route.prefix.length);
+      const abs = path.resolve(route.root, relPath);
+      if (!abs.startsWith(path.resolve(route.root) + path.sep) || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+        return new Response('not found', { status: 404 });
+      }
+      return serveFile(abs, contentTypeFor(abs));
+    }
+    return new Response('not found', { status: 404 });
+  });
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 840,
+    useContentSize: true,
+    title: 'Office Animation Playground (dev)',
+    backgroundColor: '#1c2430',
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
+  });
+  win.webContents.setBackgroundThrottling(false); // no throttled wall-clock drift
+  win.loadURL(`${OFFICE_PLAYGROUND_SCHEME}://local/playground.html`);
+  log('[office] playground window opened (development-only)');
+  return { ok: true };
+}
+registerOfficePlaygroundScheme(); // privileged scheme declaration must precede app ready
+
+// ---------------------------------------------------------------------------
+// Office runtime view (Task 7 / SPEC-07) — feature-flagged, default OFF.
+// Frozen default is OFF (`officeRuntimeEnabled=false`, plan stage gate 5); the
+// env override exists only for development/evidence runs. One office module
+// (src/office/office-module.js) owns the single simulation clock and serves
+// up to two office views over the seven `office:*` IPC channels; the views
+// consume snapshots only and never touch Harness.
+// ---------------------------------------------------------------------------
+// M4 直启动 (2026-09-17, user decision D1): the office ships ON by default —
+// the left rail (office-rail.html) is the entry, one click away. Set
+// DSH_DESKTOP_OFFICE_RUNTIME=0 to force it off for debugging.
+const OFFICE_RUNTIME_ENABLED = true;
+const OFFICE_RUNTIME_SCHEME = 'office-runtime';
+let officeModuleInstance = null;
+let officeWindowManager = null; // late-bound: set right after createWindowManager()
+function getWindowManager() { return officeWindowManager; }
+
+// Task 8 / SPEC-08: the independent Office state store. The main process is
+// the ONLY writer of `userData/office-state.v1.json`; legacy settings.json /
+// runtime-state.json / sessions are never touched by it. The epoch identifies
+// this launch: bindings persisted under an older epoch load as stale history
+// and are never restored as running.
+const OFFICE_STATE_EPOCH = Date.now();
+let officeStateStore = null;
+// Task 4: production character pack resolution — the user's selected
+// installed pack wins, the built-in deepseek-default pack is the fallback,
+// and the test fixture pack is never a production candidate.
+function selectedOfficeCharacterPackId() {
+  try {
+    const settings = ensureOfficeStateStore().get().settings;
+    return settings && typeof settings.characterPackId === 'string' ? settings.characterPackId : null;
+  } catch (error) {
+    return null;
+  }
+}
+let productionPackCache = null; // M4 prewarm: parse once per process
+function loadProductionCharacterPack() {
+  if (productionPackCache) return productionPackCache;
+  const packsRoot = officeCharactersRoot();
+  const resolution = resolveOfficeCharacterPack({ packsRoot, selectedPackId: selectedOfficeCharacterPackId(), existsSync: fs.existsSync });
+  if (resolution.code) log(`[office] character pack fallback: ${resolution.code}; using ${resolution.packId}`);
+  try {
+    const root = path.join(packsRoot, resolution.packId);
+    const { createAssetPack } = require('./office/runtime/asset-pack.js');
+    const result = createAssetPack({
+      manifest: JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8')),
+      anchors: JSON.parse(fs.readFileSync(path.join(root, 'animation', 'anchors.json'), 'utf8')),
+      animations: JSON.parse(fs.readFileSync(path.join(root, 'animation', 'animations.json'), 'utf8')),
+    });
+    if (!result.ok) {
+      log(`[office] production pack invalid: ${result.code}`);
+      return null; // no negative cache: a fixed pack must recover on the next call
+    }
+    productionPackCache = result.pack;
+    return result.pack;
+  } catch (error) {
+    log(`[office] production pack load failed: ${error && error.message}`);
+    return null;
+  }
+}
+// Packaged apps keep resources outside app.asar (extraResources): resolve the
+// roots the same way the office protocol handler does, so the pack, the
+// furniture and the dialogue corpus all load in dev AND in a build.
+function officeCharactersRoot() {
+  return app.isPackaged ? path.join(process.resourcesPath, 'characters') : path.join(__dirname, '..', 'resources', 'characters');
+}
+function officeDialogueRoot() {
+  return app.isPackaged ? path.join(process.resourcesPath, 'dialogue') : path.join(__dirname, '..', 'resources', 'dialogue');
+}
+function officeCharacterPackId() {
+  return resolveOfficeCharacterPack({ packsRoot: officeCharactersRoot(), selectedPackId: selectedOfficeCharacterPackId(), existsSync: fs.existsSync }).packId;
+}
+function ensureOfficeStateStore() {
+  if (!officeStateStore) {
+    const { createOfficeStateStore } = require('./office/runtime/office-persistence.js');
+    officeStateStore = createOfficeStateStore({ userDataDir: app.getPath('userData'), epoch: OFFICE_STATE_EPOCH, log });
+    for (const diag of officeStateStore.diagnostics()) log(`[office] state: ${diag.code}`);
+  }
+  return officeStateStore;
+}
+function officeStateSettingsOrNull() {
+  try { return ensureOfficeStateStore().get().settings; } catch { return null; }
+}
+function officeRuntimeEnabled() {
+  return (OFFICE_RUNTIME_ENABLED || process.env.DSH_DESKTOP_OFFICE_RUNTIME === '1')
+    && process.env.DSH_DESKTOP_OFFICE_RUNTIME !== '0';
+}
+function registerOfficeRuntimeScheme() {
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: OFFICE_RUNTIME_SCHEME,
+      privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+    },
+  ]);
+}
+// M4.1d: the dialogue corpus ships in resources/dialogue/** (content/** stays
+// the authoring area — the product dependency graph never touches it). The
+// character overlay is selected by the ACTIVE pack id; a missing corpus is
+// fail-open: no bubbles, everything else unchanged.
+function loadOfficeDialogueCorpus() {
+  try {
+    const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
+    const base = readJson(path.join(officeDialogueRoot(), 'base.json'));
+    // The overlay is keyed by the ACTIVE PACK id — the builtin pack plays the
+    // whale-girl character (see resources/dialogue/README.md), so her authored
+    // overlay ships as characters/deepseek-default.json.
+    const overlayPath = path.join(officeDialogueRoot(), 'characters', `${officeCharacterPackId()}.json`);
+    const characterOverrides = fs.existsSync(overlayPath) ? readJson(overlayPath) : {};
+    return { base, characterOverrides };
+  } catch (error) {
+    log(`[office] dialogue corpus unavailable: ${error && error.code ? error.code : 'unknown'}`);
+    return null;
+  }
+}
+
+function ensureOfficeModule() {
+  if (!officeModuleInstance) {
+    const { createOfficeModule, registerOfficeIpc, persistOfficeSettings, loadRuntimeLayoutFixture } = require('./office/office-module.js');
+    // Task E4: the simulation resolves its layout through the SAME source
+    // chain as the office view (saved flat draft, compiled → bundled flat
+    // fixture → isometric fallback), so the walk graph, the furniture and
+    // the rendered scene can never diverge. Never throws.
+    const runtimeLayout = loadRuntimeLayoutFixture({ userDataDir: app.getPath('userData'), log });
+    officeModuleInstance = createOfficeModule({
+      pack: loadProductionCharacterPack(),
+      layout: runtimeLayout ? runtimeLayout.fixture : undefined,
+      dialogue: loadOfficeDialogueCorpus() || undefined,
+      log,
+      config: officeStateSettingsOrNull(),
+    });
+    // SPEC-08 persist-first facade: a settings change is written to
+    // office-state.v1.json BEFORE it is applied to the live module; a failed
+    // write returns { ok:false, code:'OFFICE_STATE_WRITE_FAILED' } and never
+    // leaves memory/disk divergent.
+    const officeFacade = {
+      ...officeModuleInstance,
+      updateSettings: (partial) => persistOfficeSettings(officeModuleInstance, ensureOfficeStateStore(), partial),
+    };
+    registerOfficeIpc({ ipcMain, module: officeFacade, log, enabled: true });
+    officeModuleInstance.subscribe((snapshot) => {
+      try { getWindowManager().broadcastToOfficeViews('office:state', snapshot); } catch { /* no views yet */ }
+    });
+    officeModuleInstance.start();
+  }
+  return officeModuleInstance;
+}
+function openOfficeView() {
+  if (!officeRuntimeEnabled()) {
+    log('[office] runtime disabled (officeRuntimeEnabled=false)');
+    return { ok: false, code: 'OFFICE_RUNTIME_DISABLED' };
+  }
+  ensureOfficeModule();
+  // M4.2: the office is a main-area view INSIDE the main window (not an
+  // independent window anymore). Switching back keeps the page alive.
+  const view = getWindowManager().showOfficeShellView({
+    url: `${OFFICE_RUNTIME_SCHEME}://local/office.html?pack=${officeCharacterPackId()}`,
+    onVisibility: (viewId, visible) => officeModuleInstance.noteVisibility({ viewId, visible }),
+  });
+  return view ? { ok: true, viewId: 'office-shell-1' } : { ok: false, code: 'OFFICE_VIEW_LIMIT' };
+}
+function registerOfficeRuntimeProtocolHandler() {
+  const officeRoot = path.join(__dirname, 'office');
+  const nodeModulesRoot = path.join(__dirname, '..', 'node_modules');
+  const officeAssetsRoot = app.isPackaged
+    ? path.join(process.resourcesPath, 'office')
+    : path.join(__dirname, '..', 'resources', 'office');
+  const charactersRoot = app.isPackaged
+    ? path.join(process.resourcesPath, 'characters')
+    : path.join(__dirname, '..', 'resources', 'characters');
+  // Task E2d: the routing table, content types and dynamic layout route live
+  // in the shared module (also used by the standalone editor launcher). The
+  // state store stays LAZY: ensureOfficeStateStore is passed as a factory
+  // and resolved on the first layout request, never at handler registration.
+  // Kept on ONE line on purpose: test/tdz-guard.js scans multi-line factory
+  // blocks for bare shorthand identifiers, and these locals are function-
+  // scoped (a false "has no top-level declaration" would be a misfire).
+  const { createOfficeProtocolHandler } = require('./office/office-protocol.js');
+  protocol.handle(OFFICE_RUNTIME_SCHEME, createOfficeProtocolHandler({ officeRoot, nodeModulesRoot, officeAssetsRoot, charactersRoot, layoutStore: ensureOfficeStateStore }));
+}
+registerOfficeRuntimeScheme(); // privileged scheme declaration must precede app ready
 
 const APP_NAME = 'DshCockpit';
 const APP_VERSION = require('../package.json').version;
@@ -362,11 +620,12 @@ const {
 // coupling surface (was ~35 free-variable references).
 const COCKPIT_SNAPSHOT_TTL_MS = 250; // cockpit snapshot cache TTL (consumed by window-manager)
 const windowManager = createWindowManager({
-  BrowserWindow, screen,
+  BrowserWindow, WebContentsView, screen,
   appName: APP_NAME,
   iconPath,
   themeBackground, resolvedTheme,
   windowState, windowStateFile: () => windowStateFile(),
+  officeRailStateFile: () => path.join(app.getPath('userData'), 'office-rail-state.json'),
   log, t, lang,
   settingsGet: () => settings.get(),
   noTray,
@@ -393,6 +652,9 @@ const windowManager = createWindowManager({
   buildSnapshot,
   runtimeInfo: () => manager.getInfo(),
 });
+officeWindowManager = windowManager; // late-bound office accessor (openOfficeView)
+// M4.2: the rail's accent is remembered in office-rail-state.json. The rail
+// page pulls it through office-rail:get-state; nothing else needs it here.
 const {
   createWindow, showMain, createCockpitWindow, showCockpitInactive, hideCockpit,
   prepareCockpitForAuxWindow, restoreCockpitRail, syncCockpitBounds, scheduleCockpitSync,
@@ -732,6 +994,20 @@ function selfHealProfile() {
 function startDeferredServices() {
   if (deferredServicesStarted || quitting) return;
   deferredServicesStarted = true;
+  // M4 启动预热: parse the production pack + runtime layout early so the
+  // first rail click opens the office without a visible load stall. This
+  // deliberately does NOT create the office module (its simulation clock
+  // must not tick with no views); both loaders are memoized for reuse.
+  if (officeRuntimeEnabled()) {
+    setTimeout(() => {
+      try {
+        const { loadRuntimeLayoutFixture } = require('./office/office-module.js');
+        loadProductionCharacterPack();
+        loadRuntimeLayoutFixture({ userDataDir: app.getPath('userData'), log });
+        log('[office] prewarmed pack + layout');
+      } catch (error) { log(`[office] prewarm skipped: ${error && error.message}`); }
+    }, 2500);
+  }
   if (channelsMgr) channelsMgr.startEnabled();
   registerQuickAskHotkey();
   startScheduler();
@@ -785,6 +1061,10 @@ function broadcastTheme() {
     w.setBackgroundColor(bg);
     w.webContents.send('shell:theme', t);
   }
+  // M4.2: the shell views (left rail, office) are WebContentsViews and never
+  // appear in getAllWindows() — without this push the rail ignored the
+  // light/dark/system setting entirely.
+  try { windowManager.broadcastToShellViews('shell:theme', t); } catch { /* not created yet */ }
 }
 
 nativeTheme.on('theme-changed', () => broadcastTheme());
@@ -1150,6 +1430,26 @@ function registerIpc() {
     }
     return saved;
   });
+  // Task 8 / SPEC-08: additive Office settings IPC. Reads/writes go to the
+  // independent office-state.v1.json store ONLY; the legacy settings.json
+  // schema is unchanged. Flags are reported but never settable from here.
+  ipcMain.handle('shell:office-settings-get', () => {
+    try {
+      const state = ensureOfficeStateStore().get();
+      return { ok: true, settings: state.settings, flags: state.flags };
+    } catch (error) {
+      return { ok: false, code: 'OFFICE_STATE_READ_FAILED', message: error && error.message };
+    }
+  });
+  ipcMain.handle('shell:office-settings-set', async (_e, partial) => {
+    try {
+      const result = await ensureOfficeStateStore().updateSettings(partial);
+      if (result.ok && officeModuleInstance) officeModuleInstance.updateSettings(result.settings);
+      return result;
+    } catch (error) {
+      return { ok: false, code: 'OFFICE_STATE_WRITE_FAILED', message: error && error.message };
+    }
+  });
   ipcMain.handle('shell:quickask-shortcut-get', () => ({ active: quickAskShortcut.current(), configured: settings.get().quickAskHotkey }));
   ipcMain.handle('shell:quickask-shortcut-set', (_e, value) => {
     const result = quickAskShortcut.set(value, (next) => settings.patch({ quickAskHotkey: next }));
@@ -1470,6 +1770,47 @@ function registerIpc() {
     }
     return r;
   });
+  // ---- left office rail (M4 直启动) --------------------------------------
+  ipcMain.handle('office-rail:toggle-office', () => {
+    if (!officeRuntimeEnabled()) return { ok: false, open: false, code: 'OFFICE_RUNTIME_DISABLED' };
+    if (windowManager.isOfficeViewActive()) {
+      windowManager.hideOfficeShellView();
+      return { ok: true, open: false };
+    }
+    const result = openOfficeView();
+    return { ok: !!result.ok, open: !!result.ok, active: result.ok ? 'office' : 'harness', code: result.code || null };
+  });
+  ipcMain.handle('office-rail:switch-view', (_e, view) => {
+    if (view === 'office') {
+      if (!officeRuntimeEnabled()) return { ok: false, active: 'harness', code: 'OFFICE_RUNTIME_DISABLED' };
+      const result = openOfficeView();
+      return { ok: !!result.ok, active: result.ok ? 'office' : 'harness', code: result.code || null };
+    }
+    windowManager.hideOfficeShellView();
+    return { ok: true, active: 'harness' };
+  });
+  ipcMain.handle('office-rail:set-accent', (_e, accent) => {
+    const allowed = ['indigo', 'sky', 'teal', 'amber', 'rose', 'slate'];
+    const next = allowed.includes(accent) ? accent : 'indigo';
+    try { windowState.save(path.join(app.getPath('userData'), 'office-rail-state.json'), { accent: next }); } catch { /* cosmetic */ }
+    windowManager.broadcastToOfficeRail('office-rail:accent', { accent: next });
+    return { ok: true, accent: next };
+  });
+  ipcMain.handle('office-rail:get-state', () => {
+    let accent = 'indigo';
+    try {
+      const saved = windowState.load(path.join(app.getPath('userData'), 'office-rail-state.json'));
+      if (saved && typeof saved.accent === 'string') accent = saved.accent;
+    } catch { /* cosmetic */ }
+    return {
+      ok: true,
+      officeOpen: windowManager.isOfficeViewActive(),
+      activeView: windowManager.isOfficeViewActive() ? 'office' : 'harness',
+      accent,
+      officeEnabled: officeRuntimeEnabled(),
+    };
+  });
+
   // Copy for the settings window (file:// pages have no navigator.clipboard).
   ipcMain.handle('shell:copy-text', (_e, text) => {
     if (typeof text === 'string' && text.length > 0 && text.length <= 4096) clipboard.writeText(text);
@@ -3344,6 +3685,7 @@ if (!gotLock) {
   app.on('second-instance', () => showMain());
 
   app.whenReady().then(async () => {
+    registerOfficeRuntimeProtocolHandler();
     if (process.platform === 'win32') app.setAppUserModelId('com.dshcockpit.app');
     // No visible File/Edit menu bar (autoHideMenuBar hides it), but the menu
     // keeps keyboard accelerators alive (Ctrl+R / Ctrl+Shift+I / Ctrl+, …).
@@ -3528,6 +3870,13 @@ if (!gotLock) {
       spawnRuntime();
     }
     if (process.env.DSH_DESKTOP_OPEN_SETTINGS === '1') createSettingsWindow();
+    // Dev-only Office Animation Playground (SPEC-06): opt-in via env; the
+    // playground stays off by default (officePlaygroundEnabled=false).
+    if (process.env.DSH_DESKTOP_OPEN_PLAYGROUND === '1') openOfficePlayground();
+    // Office runtime view (SPEC-07): M4 直启动 keeps it ON by default and the
+    // left rail is the normal entry; this env opens a view at launch for
+    // development/evidence runs.
+    if (process.env.DSH_DESKTOP_OPEN_OFFICE === '1') openOfficeView();
 
     // token widget: one collect per tick shared by the widget and the cost
     // center (M7: avoid double full scans every 5s).

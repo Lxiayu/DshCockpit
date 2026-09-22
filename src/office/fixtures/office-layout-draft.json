@@ -1,0 +1,274 @@
+{
+  "schemaVersion": 1,
+  "scene": {
+    "width": 1280,
+    "height": 840
+  },
+  "items": [
+    {
+      "id": "draft-1",
+      "kind": "chair",
+      "asset": "prop-chair-front-left-top",
+      "position": {
+        "x": 0.591823,
+        "y": 0.195122
+      },
+      "scale": 1,
+      "direction": "front-left-top"
+    },
+    {
+      "id": "draft-2",
+      "kind": "chair",
+      "asset": "prop-chair-front-left-top",
+      "position": {
+        "x": 0.797583,
+        "y": 0.181476
+      },
+      "scale": 1,
+      "direction": "front-left-top"
+    },
+    {
+      "id": "draft-3",
+      "kind": "character",
+      "asset": "whale-girl-front",
+      "position": {
+        "x": 0.576036,
+        "y": 0.130116
+      },
+      "scale": 1,
+      "direction": "front"
+    },
+    {
+      "id": "draft-4",
+      "kind": "desk",
+      "asset": "prop-desk-back-right-top",
+      "position": {
+        "x": 0.525342,
+        "y": 0.22824
+      },
+      "scale": 1,
+      "direction": "back-right-top"
+    },
+    {
+      "id": "draft-5",
+      "kind": "monitor",
+      "asset": "prop-monitor-back-right-top",
+      "position": {
+        "x": 0.528958,
+        "y": 0.132832
+      },
+      "scale": 1,
+      "direction": "back-right-top"
+    },
+    {
+      "id": "draft-6",
+      "kind": "desk",
+      "asset": "prop-desk-back-right-top",
+      "position": {
+        "x": 0.724977,
+        "y": 0.21912
+      },
+      "scale": 1,
+      "direction": "back-right-top"
+    },
+    {
+      "id": "draft-7",
+      "kind": "monitor",
+      "asset": "prop-monitor-back-right-top",
+      "position": {
+        "x": 0.726246,
+        "y": 0.123806
+      },
+      "scale": 1,
+      "direction": "back-right-top"
+    },
+    {
+      "id": "draft-8",
+      "kind": "character",
+      "asset": "whale-girl-front",
+      "position": {
+        "x": 0.775,
+        "y": 0.127631
+      },
+      "scale": 1,
+      "direction": "front"
+    },
+    {
+      "id": "draft-9",
+      "kind": "desk",
+      "asset": "prop-desk-back-right-top",
+      "position": {
+        "x": 0.517953,
+        "y": 0.538004
+      },
+      "scale": 1,
+      "direction": "back-right-top"
+    },
+    {
+      "id": "draft-10",
+      "kind": "chair",
+      "asset": "prop-chair-front-left-top",
+      "position": {
+        "x": 0.59368,
+        "y": 0.505386
+      },
+      "scale": 1,
+      "direction": "front-left-top"
+    },
+    {
+      "id": "draft-11",
+      "kind": "character",
+      "asset": "whale-girl-front",
+      "position": {
+        "x": 0.577349,
+        "y": 0.428075
+      },
+      "scale": 1,
+      "direction": "front"
+    },
+    {
+      "id": "draft-12",
+      "kind": "monitor",
+      "asset": "prop-monitor-back-right-top",
+      "position": {
+        "x": 0.524145,
+        "y": 0.443732
+      },
+      "scale": 1,
+      "direction": "back-right-top"
+    },
+    {
+      "id": "draft-13",
+      "kind": "desk",
+      "asset": "prop-desk-back-right-top",
+      "position": {
+        "x": 0.719966,
+        "y": 0.529816
+      },
+      "scale": 1,
+      "direction": "back-right-top"
+    },
+    {
+      "id": "draft-14",
+      "kind": "monitor",
+      "asset": "prop-monitor-back-right-top",
+      "position": {
+        "x": 0.724544,
+        "y": 0.438157
+      },
+      "scale": 1,
+      "direction": "back-right-top"
+    },
+    {
+      "id": "draft-15",
+      "kind": "character",
+      "asset": "whale-girl-front",
+      "position": {
+        "x": 0.772347,
+        "y": 0.412704
+      },
+      "scale": 1,
+      "direction": "front"
+    },
+    {
+      "id": "draft-16",
+      "kind": "chair",
+      "asset": "prop-chair-front-left-top",
+      "position": {
+        "x": 0.791424,
+        "y": 0.486174
+      },
+      "scale": 1,
+      "direction": "front-left-top"
+    },
+    {
+      "id": "draft-17",
+      "kind": "desk",
+      "asset": "prop-desk-back-right-top",
+      "position": {
+        "x": 0.512399,
+        "y": 0.815917
+      },
+      "scale": 1,
+      "direction": "back-right-top"
+    },
+    {
+      "id": "draft-18",
+      "kind": "character",
+      "asset": "whale-girl-front",
+      "position": {
+        "x": 0.571004,
+        "y": 0.719168
+      },
+      "scale": 1,
+      "direction": "front"
+    },
+    {
+      "id": "draft-19",
+      "kind": "chair",
+      "asset": "prop-chair-front-left-top",
+      "position": {
+        "x": 0.595293,
+        "y": 0.777454
+      },
+      "scale": 1,
+      "direction": "front-left-top"
+    },
+    {
+      "id": "draft-20",
+      "kind": "monitor",
+      "asset": "prop-monitor-back-right-top",
+      "position": {
+        "x": 0.513558,
+        "y": 0.725676
+      },
+      "scale": 1,
+      "direction": "back-right-top"
+    },
+    {
+      "id": "draft-21",
+      "kind": "desk",
+      "asset": "prop-desk-back-right-top",
+      "position": {
+        "x": 0.710907,
+        "y": 0.808513
+      },
+      "scale": 1,
+      "direction": "back-right-top"
+    },
+    {
+      "id": "draft-22",
+      "kind": "monitor",
+      "asset": "prop-monitor-back-right-top",
+      "position": {
+        "x": 0.71033,
+        "y": 0.719591
+      },
+      "scale": 1,
+      "direction": "back-right-top"
+    },
+    {
+      "id": "draft-23",
+      "kind": "chair",
+      "asset": "prop-chair-front-left-top",
+      "position": {
+        "x": 0.787764,
+        "y": 0.760322
+      },
+      "scale": 1,
+      "direction": "front-left-top"
+    },
+    {
+      "id": "draft-24",
+      "kind": "character",
+      "asset": "whale-girl-front",
+      "position": {
+        "x": 0.768121,
+        "y": 0.702408
+      },
+      "scale": 1,
+      "direction": "front"
+    }
+  ],
+  "selectedId": "draft-24"
+}

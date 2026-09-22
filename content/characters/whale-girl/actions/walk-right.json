@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "id": "walk-right",
+  "loop": true,
+  "direction": "right",
+  "frames": [
+    {
+      "file": "assets/animations/walk/right/walk-right-b01.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/right/walk-right-b02.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/right/walk-right-b03.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/right/walk-right-b04.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/right/walk-right-b05.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/right/walk-right-b06.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/right/walk-right-b07.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/right/walk-right-b08.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/right/walk-right-b09.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/right/walk-right-b10.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/right/walk-right-b11.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/right/walk-right-b12.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/right/walk-right-b13.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/right/walk-right-b14.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/right/walk-right-b15.png",
+      "durationMs": 83
+    }
+  ],
+  "geometry": {
+    "footLine": 296,
+    "tolerancePx": 1
+  }
+}

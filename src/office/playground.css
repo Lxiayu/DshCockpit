@@ -1,0 +1,96 @@
+/* src/office/playground.css — Task 4 / SPEC-06 Animation Playground.
+   Dev-only styling: dark stage, fixed right panel. No production Office UI. */
+
+:root {
+  --bg: #1c2430;
+  --panel: #121821;
+  --text: #d7e0ea;
+  --muted: #7d8b9b;
+  --accent: #4fc3f7;
+  --border: #2a3542;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+body { display: flex; }
+
+#stage-host {
+  flex: 1 1 auto;
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+}
+
+#stage-host canvas { display: block; }
+
+#panel {
+  flex: 0 0 340px;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  padding: 12px 14px;
+  overflow-y: auto;
+  max-height: 100vh;
+}
+
+#panel h1 {
+  margin: 0 0 2px;
+  font-size: 14px;
+  color: var(--accent);
+}
+
+.hint { color: var(--muted); margin: 2px 0 10px; }
+
+.controls { display: flex; flex-direction: column; gap: 6px; }
+
+.controls label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.controls label.checkbox { justify-content: flex-start; }
+
+.controls input[type="range"] { flex: 1; }
+
+.controls select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 2px 4px;
+}
+
+.row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+
+button {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  cursor: pointer;
+  font: inherit;
+}
+
+button:hover { border-color: var(--accent); color: var(--accent); }
+
+#diagnostics { margin-top: 12px; }
+
+#diag-text {
+  margin: 0;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 46vh;
+  overflow-y: auto;
+  font-size: 11px;
+}

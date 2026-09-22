@@ -1,0 +1,7 @@
+{
+  "id": "whale-girl",
+  "disposition": "staff",
+  "traits": ["conscientious", "mild", "diligent"],
+  "idleLoop": ["nap", "blink", "lunch"],
+  "note": "官方占位 personality 描述；正式设定稿到位后随角色包一起替换（§7.4）。"
+}

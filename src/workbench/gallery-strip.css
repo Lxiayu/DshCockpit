@@ -1,0 +1,45 @@
+/* src/workbench/gallery-strip.css — the golden-gallery frame strip page. */
+
+html, body {
+  margin: 0;
+  background: #ffffff;
+}
+
+#strip {
+  position: relative;
+  padding: 16px;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.frame { position: relative; }
+
+.frame img {
+  display: block;
+  image-rendering: pixelated;
+}
+
+.frame .caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin-top: 2px;
+  font: 11px/1.2 -apple-system, "PingFang SC", sans-serif;
+  color: #444;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* the calibrated foot line (character.json pack.footLine) drawn across the
+   whole strip — shoe-line deviations between frames become visible */
+#footline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px solid rgba(194, 58, 58, 0.85);
+  z-index: 2;
+  pointer-events: none;
+}

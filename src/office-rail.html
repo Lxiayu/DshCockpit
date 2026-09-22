@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'unsafe-inline'" />
+<title>DshCockpit Rail</title>
+<link rel="stylesheet" href="theme.css" />
+<style>
+  /* M4.2 follow-up: a 44px icon strip. Two entries, no text, no dots; the
+     accent colour is user-selectable and every surface follows the shell
+     theme (light / dark / system) through the shell:theme push. */
+  * { box-sizing: border-box; }
+  :root { --rail-accent: #818CF8; --rail-tile: rgba(129,140,248,0.16); }
+  [data-theme="light"] { --rail-accent: #4F46E5; --rail-tile: rgba(79,70,229,0.13); }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg-panel); color: var(--text-2); }
+  body { font: 12px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  #rail { height: 100%; display: flex; flex-direction: column; align-items: center; gap: 4px;
+          padding: 8px 0 8px; background: var(--bg-panel); box-shadow: inset -1px 0 0 var(--border-1); }
+  button { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  .tile { position: relative; width: 32px; height: 32px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+          color: var(--text-3); transition: background-color .15s ease, color .15s ease; }
+  .tile svg { width: 19px; height: 19px; display: block; }
+  .tile:hover, .tile:focus-visible { background: var(--bg-hover); color: var(--text-1); outline: none; }
+  .tile.on { background: var(--rail-tile); color: var(--rail-accent); }
+  /* the active marker hugs the strip's left edge — no layout shift, no dots */
+  .tile.on::before { content: ''; position: absolute; left: -6px; top: 50%; transform: translateY(-50%);
+                     width: 3px; height: 16px; border-radius: 0 3px 3px 0; background: var(--rail-accent); }
+  #spacer { flex: 1 1 auto; }
+  #palette { width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--text-4); }
+  #palette:hover, #palette:focus-visible { background: var(--bg-hover); color: var(--text-2); outline: none; }
+  #palette svg { width: 16px; height: 16px; }
+  #swatches { display: none; flex-direction: column; gap: 5px; align-items: center; padding: 6px 0 2px; }
+  body.picking #swatches { display: flex; }
+  .swatch { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border-1); background: var(--sw); transition: transform .12s ease, box-shadow .12s ease; }
+  .swatch:hover { transform: scale(1.12); }
+  .swatch.on { box-shadow: 0 0 0 2px var(--bg-panel), 0 0 0 3.5px var(--sw); }
+</style>
+</head>
+<body>
+  <div id="rail">
+    <button id="harness" class="tile" title="会话工作台" aria-label="会话工作台">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.4 9 9 0 0 1-3.9-.9L3 21l1.9-5.1a8.3 8.3 0 0 1-.9-3.8A8.4 8.4 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5z"/>
+        <path d="M8.5 11.5h.01M12.5 11.5h.01M16.5 11.5h.01"/>
+      </svg>
+    </button>
+    <button id="office" class="tile" title="办公室" aria-label="办公室">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 21h18"/>
+        <path d="M5 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/>
+        <path d="M15 21V9h2a2 2 0 0 1 2 2v10"/>
+        <path d="M8.5 7h1.5M8.5 10.5h1.5M8.5 14h1.5"/>
+      </svg>
+    </button>
+    <div id="spacer"></div>
+    <div id="swatches" role="radiogroup" aria-label="栏位配色"></div>
+    <button id="palette" title="配色" aria-label="配色">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9"/>
+        <circle cx="9" cy="9.5" r="1.2" fill="currentColor" stroke="none"/>
+        <circle cx="15" cy="9.5" r="1.2" fill="currentColor" stroke="none"/>
+        <circle cx="9.5" cy="15" r="1.2" fill="currentColor" stroke="none"/>
+      </svg>
+    </button>
+  </div>
+  <script>
+    'use strict';
+    const api = window.officeRail;
+    const harnessBtn = document.getElementById('harness');
+    const officeBtn = document.getElementById('office');
+    const paletteBtn = document.getElementById('palette');
+    const swatchBox = document.getElementById('swatches');
+    let activeView = 'harness';
+
+    // accent choices: one tint per theme so it stays legible on both. The
+    // swatch dot always shows the DARK variant (it is a colour chip, not text).
+    const ACCENTS = [
+      { id: 'indigo', dark: '#818CF8', light: '#4F46E5', tileDark: 'rgba(129,140,248,0.16)', tileLight: 'rgba(79,70,229,0.13)' },
+      { id: 'sky',    dark: '#38BDF8', light: '#0284C7', tileDark: 'rgba(56,189,248,0.16)',  tileLight: 'rgba(2,132,199,0.13)' },
+      { id: 'teal',   dark: '#2DD4BF', light: '#0D9488', tileDark: 'rgba(45,212,191,0.16)',  tileLight: 'rgba(13,148,136,0.13)' },
+      { id: 'amber',  dark: '#FBBF24', light: '#B45309', tileDark: 'rgba(251,191,36,0.16)',  tileLight: 'rgba(180,83,9,0.13)' },
+      { id: 'rose',   dark: '#FB7185', light: '#E11D48', tileDark: 'rgba(251,113,133,0.16)', tileLight: 'rgba(225,29,72,0.13)' },
+      { id: 'slate',  dark: '#94A3B8', light: '#475569', tileDark: 'rgba(148,163,184,0.16)', tileLight: 'rgba(71,85,105,0.13)' },
+    ];
+    let accentId = 'indigo';
+
+    function isLight() { return document.documentElement.dataset.theme === 'light'; }
+    function applyAccent(id) {
+      const accent = ACCENTS.find((a) => a.id === id) || ACCENTS[0];
+      accentId = accent.id;
+      const root = document.documentElement.style;
+      root.setProperty('--rail-accent', isLight() ? accent.light : accent.dark);
+      root.setProperty('--rail-tile', isLight() ? accent.tileLight : accent.tileDark);
+      for (const dot of swatchBox.children) dot.classList.toggle('on', dot.dataset.accent === accentId);
+    }
+    function applyTheme(theme) {
+      document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+      applyAccent(accentId); // the tint table is per-theme
+    }
+    function render() {
+      const officeOpen = activeView === 'office';
+      harnessBtn.classList.toggle('on', activeView === 'harness');
+      officeBtn.classList.toggle('on', officeOpen);
+      officeBtn.title = officeOpen ? '办公室（点击返回会话）' : '办公室（点击进入）';
+    }
+
+    for (const accent of ACCENTS) {
+      const dot = document.createElement('button');
+      dot.className = 'swatch';
+      dot.dataset.accent = accent.id;
+      dot.style.setProperty('--sw', accent.dark);
+      dot.title = accent.id;
+      dot.setAttribute('role', 'radio');
+      dot.addEventListener('click', async () => {
+        applyAccent(accent.id);
+        await api.setAccent(accent.id).catch(() => {});
+      });
+      swatchBox.appendChild(dot);
+    }
+
+    harnessBtn.addEventListener('click', async () => {
+      const result = await api.switchView('harness').catch(() => null);
+      if (result && typeof result.active === 'string') { activeView = result.active; render(); }
+    });
+    officeBtn.addEventListener('click', async () => {
+      const result = await api.toggleOffice().catch(() => null);
+      if (result && typeof result.open === 'boolean') { activeView = result.open ? 'office' : 'harness'; render(); }
+    });
+    paletteBtn.addEventListener('click', () => document.body.classList.toggle('picking'));
+
+    document.documentElement.dataset.theme = 'dark'; // theme.css default until the theme arrives
+    api.getTheme().then((theme) => applyTheme(theme)).catch(() => {});
+    api.onTheme((theme) => applyTheme(theme));
+    api.getState().then((state) => {
+      if (!state) return;
+      activeView = state.activeView === 'office' ? 'office' : 'harness';
+      applyAccent(state.accent || 'indigo');
+      render();
+    }).catch(() => { applyAccent('indigo'); });
+    api.onViewState((state) => { if (state && typeof state.active === 'string') { activeView = state.active; render(); } });
+    api.onAccent((state) => { if (state && typeof state.accent === 'string') applyAccent(state.accent); });
+    render();
+  </script>
+</body>
+</html>

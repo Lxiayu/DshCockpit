@@ -49,6 +49,11 @@ const config = {
   extraResources: [
     ...runtimeSeed,
     { from: 'resources/icon.png', to: 'icon.png' },
+    { from: 'resources/office', to: 'office' },
+    // The office view is a first-class screen since M4 (direct start): the
+    // character pack and the dialogue corpus must ship with the artifact.
+    { from: 'resources/characters', to: 'characters' },
+    { from: 'resources/dialogue', to: 'dialogue' },
   ],
   win: {
     // D5: zip = portable/escape hatch; nsis = primary track with in-app

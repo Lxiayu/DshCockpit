@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="鲸鱼娘 黑鲸总控 working（官方占位）">
+  <rect x="6" y="6" width="84" height="84" rx="20" fill="#F8FAFC" stroke="#10B981" stroke-width="3"/>
+  <g id="body">
+  <path d="M73 47 L87 37 L82 49 L87 61 Z" fill="#1E293B" stroke="#0B1220" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M38 26 C40 18 46 14 52 12 C48 18 48 23 50 27 Z" fill="#1E293B" stroke="#0B1220" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M16 52 C16 34 32 25 48 25 C64 25 80 34 80 52 C80 66 64 75 48 75 C32 75 16 66 16 52 Z" fill="#1E293B" stroke="#0B1220" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M28 57 C32 68 44 73 48 73 C52 73 64 68 68 57 C61 61 35 61 28 57 Z" fill="#F2F5FA"/>
+  </g>
+  <g id="face">
+  <path id="browL" d="M31 35 L42 37" stroke="#0B1220" stroke-width="2.2" stroke-linecap="round"/>
+  <path id="browR" d="M54 37 L65 35" stroke="#0B1220" stroke-width="2.2" stroke-linecap="round"/>
+  <g id="eyeL">
+    <ellipse cx="37" cy="43" rx="3.6" ry="4.4" fill="#F2F5FA" stroke="#0B1220" stroke-width="1.2"/>
+    <circle cx="37.4" cy="43.6" r="1.8" fill="#0B1220"/>
+    <circle cx="36.4" cy="42.6" r="0.9" fill="#FFFFFF"/>
+  </g>
+  <g id="eyeR">
+    <ellipse cx="59" cy="43" rx="3.6" ry="4.4" fill="#F2F5FA" stroke="#0B1220" stroke-width="1.2"/>
+    <circle cx="58.6" cy="43.6" r="1.8" fill="#0B1220"/>
+    <circle cx="57.6" cy="42.6" r="0.9" fill="#FFFFFF"/>
+  </g>
+  <path id="mouth" d="M42 57 q6 2.5 12 0" fill="none" stroke="#0B1220" stroke-width="2" stroke-linecap="round"/>
+  </g>
+  <ellipse cx="30" cy="52" rx="4.2" ry="2.6" fill="#F472B6" opacity="0.45"/>
+  <ellipse cx="66" cy="52" rx="4.2" ry="2.6" fill="#F472B6" opacity="0.45"/>
+  <g id="badge">
+  <g stroke="#10B981" stroke-width="3" stroke-linecap="round" fill="none">
+    <circle cx="74" cy="25" r="6.5"/>
+    <path d="M74 16.5 V20.5"/><path d="M74 29.5 V33.5"/><path d="M65.5 25 H69.5"/><path d="M78.5 25 H82.5"/>
+  </g>
+  </g>
+</svg>

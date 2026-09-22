@@ -1,0 +1,1550 @@
+{
+  "schemaVersion": 1,
+  "description": "Canonical schema-v1 office layout: six draft-derived workstations in two columns by three rows with a reserved left-top expansion zone.",
+  "scene": {
+    "referenceWidth": 1280,
+    "referenceHeight": 840
+  },
+  "layers": [
+    "background",
+    "back-furniture",
+    "ground-entities",
+    "front-occluders",
+    "effects-labels"
+  ],
+  "layout": {
+    "grid": {
+      "columns": 2,
+      "rows": 3
+    },
+    "offset": {
+      "x": 0.05,
+      "y": 0.04
+    },
+    "reserve": {
+      "x": 0.02,
+      "y": 0.02,
+      "width": 0.26,
+      "height": 0.32
+    }
+  },
+  "nodes": [
+    {
+      "id": "desk-1",
+      "position": {
+        "x": 0.5800608333333334,
+        "y": 0.12498866666666665
+      },
+      "footprint": {
+        "width": 0.11,
+        "height": 0.07
+      },
+      "safeRadius": 0.045,
+      "tags": [
+        "desk",
+        "sleeping"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-2",
+      "position": {
+        "x": 0.7796958333333334,
+        "y": 0.11586866666666666
+      },
+      "footprint": {
+        "width": 0.11,
+        "height": 0.07
+      },
+      "safeRadius": 0.045,
+      "tags": [
+        "desk",
+        "sleeping"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-3",
+      "position": {
+        "x": 0.5726718333333334,
+        "y": 0.4347526666666667
+      },
+      "footprint": {
+        "width": 0.11,
+        "height": 0.07
+      },
+      "safeRadius": 0.045,
+      "tags": [
+        "desk",
+        "sleeping"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-4",
+      "position": {
+        "x": 0.7746848333333334,
+        "y": 0.4265646666666666
+      },
+      "footprint": {
+        "width": 0.11,
+        "height": 0.07
+      },
+      "safeRadius": 0.045,
+      "tags": [
+        "desk",
+        "sleeping"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-5",
+      "position": {
+        "x": 0.5671178333333334,
+        "y": 0.7126656666666666
+      },
+      "footprint": {
+        "width": 0.11,
+        "height": 0.07
+      },
+      "safeRadius": 0.045,
+      "tags": [
+        "desk",
+        "collaborator",
+        "sleeping"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-6",
+      "position": {
+        "x": 0.7656258333333333,
+        "y": 0.7052616666666667
+      },
+      "footprint": {
+        "width": 0.11,
+        "height": 0.07
+      },
+      "safeRadius": 0.045,
+      "tags": [
+        "desk",
+        "spare"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "roam-1",
+      "position": {
+        "x": 0.2,
+        "y": 0.62
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-2",
+      "position": {
+        "x": 0.46,
+        "y": 0.615
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-3",
+      "position": {
+        "x": 0.66,
+        "y": 0.615
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-4",
+      "position": {
+        "x": 0.87,
+        "y": 0.62
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-5",
+      "position": {
+        "x": 0.24,
+        "y": 0.85
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-6",
+      "position": {
+        "x": 0.6,
+        "y": 0.87
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-7",
+      "position": {
+        "x": 0.42,
+        "y": 0.35
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "chat-a",
+      "position": {
+        "x": 0.475,
+        "y": 0.655
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.032,
+      "tags": [
+        "chatting"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "chat-b",
+      "position": {
+        "x": 0.555,
+        "y": 0.685
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.032,
+      "tags": [
+        "chatting"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-1-approach",
+      "position": {
+        "x": 0.6150608333333334,
+        "y": 0.16998866666666665
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-approach",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-2-approach",
+      "position": {
+        "x": 0.8146958333333334,
+        "y": 0.16086866666666666
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-approach",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-3-approach",
+      "position": {
+        "x": 0.6076718333333334,
+        "y": 0.47975266666666666
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-approach",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-4-approach",
+      "position": {
+        "x": 0.8096848333333334,
+        "y": 0.4715646666666666
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-approach",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-5-approach",
+      "position": {
+        "x": 0.6021178333333335,
+        "y": 0.7576656666666667
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-approach",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-6-approach",
+      "position": {
+        "x": 0.8006258333333334,
+        "y": 0.7502616666666667
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-approach",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-1-leave",
+      "position": {
+        "x": 0.6150608333333334,
+        "y": 0.20998866666666666
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-leave",
+        "roaming",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-2-leave",
+      "position": {
+        "x": 0.8146958333333334,
+        "y": 0.20086866666666667
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-leave",
+        "roaming",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-3-leave",
+      "position": {
+        "x": 0.6076718333333334,
+        "y": 0.5197526666666666
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-leave",
+        "roaming",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-4-leave",
+      "position": {
+        "x": 0.8096848333333334,
+        "y": 0.5115646666666666
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-leave",
+        "roaming",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-5-leave",
+      "position": {
+        "x": 0.6021178333333335,
+        "y": 0.7976656666666667
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-leave",
+        "roaming",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-6-leave",
+      "position": {
+        "x": 0.8006258333333334,
+        "y": 0.7902616666666668
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-leave",
+        "roaming",
+        "task"
+      ],
+      "capacity": 1
+    }
+  ],
+  "edges": [
+    {
+      "from": "desk-1",
+      "to": "roam-1",
+      "behaviors": [
+        "roaming",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-1",
+      "to": "roam-7",
+      "behaviors": [
+        "roaming",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-2",
+      "to": "roam-2",
+      "behaviors": [
+        "roaming",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-2",
+      "to": "roam-7",
+      "behaviors": [
+        "roaming",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-3",
+      "to": "roam-3",
+      "behaviors": [
+        "roaming",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-3",
+      "to": "roam-7",
+      "behaviors": [
+        "roaming",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-4",
+      "to": "roam-5",
+      "behaviors": [
+        "roaming",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-5",
+      "to": "roam-6",
+      "behaviors": [
+        "roaming",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-5",
+      "to": "roam-2",
+      "behaviors": [
+        "roaming",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-6",
+      "to": "roam-6",
+      "behaviors": [
+        "roaming",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-6",
+      "to": "roam-4",
+      "behaviors": [
+        "roaming",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-1",
+      "to": "roam-5",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-1",
+      "to": "roam-7",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-1",
+      "to": "roam-2",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-2",
+      "to": "roam-7",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-2",
+      "to": "roam-3",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-3",
+      "to": "roam-4",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-4",
+      "to": "roam-6",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-5",
+      "to": "roam-6",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-2",
+      "to": "chat-a",
+      "behaviors": [
+        "roaming",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-3",
+      "to": "chat-b",
+      "behaviors": [
+        "roaming",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "chat-a",
+      "to": "chat-b",
+      "behaviors": [
+        "roaming",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-1",
+      "to": "desk-1-approach",
+      "behaviors": [
+        "task",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-1-leave",
+      "to": "roam-1",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-2",
+      "to": "desk-2-approach",
+      "behaviors": [
+        "task",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-2-leave",
+      "to": "roam-2",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-3",
+      "to": "desk-3-approach",
+      "behaviors": [
+        "task",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-3-leave",
+      "to": "roam-3",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-4",
+      "to": "desk-4-approach",
+      "behaviors": [
+        "task",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-4-leave",
+      "to": "roam-5",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-5",
+      "to": "desk-5-approach",
+      "behaviors": [
+        "task",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-5-leave",
+      "to": "roam-6",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-6",
+      "to": "desk-6-approach",
+      "behaviors": [
+        "task",
+        "sleeping"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-6-leave",
+      "to": "roam-4",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-1-approach",
+      "to": "desk-1-leave",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-2-approach",
+      "to": "desk-2-leave",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-3-approach",
+      "to": "desk-3-leave",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-4-approach",
+      "to": "desk-4-leave",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-5-approach",
+      "to": "desk-5-leave",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-6-approach",
+      "to": "desk-6-leave",
+      "behaviors": [
+        "roaming",
+        "task"
+      ],
+      "bidirectional": true
+    }
+  ],
+  "furniture": [
+    {
+      "id": "reserve-zone-marker",
+      "kind": "zone-marker",
+      "layer": "background",
+      "occluder": false,
+      "footprint": {
+        "width": 0.26,
+        "height": 0.32
+      },
+      "parts": {
+        "back": {
+          "x": 0.02,
+          "y": 0.02,
+          "width": 0.26,
+          "height": 0.32
+        }
+      }
+    },
+    {
+      "id": "desk-1-back",
+      "kind": "desk-back",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.11,
+        "height": 0.035
+      },
+      "parts": {
+        "back": {
+          "x": 0.520969,
+          "y": 0.10452,
+          "width": 0.119,
+          "height": 0.035
+        }
+      },
+      "assetId": "prop-desk-back-right-top"
+    },
+    {
+      "id": "desk-1-front",
+      "kind": "desk-front",
+      "layer": "front-occluders",
+      "occluder": true,
+      "footprint": {
+        "width": 0.11,
+        "height": 0.035
+      },
+      "parts": {
+        "front": {
+          "x": 0.520969,
+          "y": 0.13952,
+          "width": 0.119,
+          "height": 0.035
+        }
+      },
+      "assetId": "prop-desk-back-right-top"
+    },
+    {
+      "id": "desk-1-chair",
+      "kind": "chair",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.05,
+        "height": 0.03
+      },
+      "parts": {
+        "back": {
+          "x": 0.5534,
+          "y": 0.0588,
+          "width": 0.065,
+          "height": 0.03
+        }
+      },
+      "assetId": "prop-chair-front-left-top"
+    },
+    {
+      "id": "desk-2-back",
+      "kind": "desk-back",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.11,
+        "height": 0.035
+      },
+      "parts": {
+        "back": {
+          "x": 0.720604,
+          "y": 0.0954,
+          "width": 0.119,
+          "height": 0.035
+        }
+      },
+      "assetId": "prop-desk-back-right-top"
+    },
+    {
+      "id": "desk-2-front",
+      "kind": "desk-front",
+      "layer": "front-occluders",
+      "occluder": true,
+      "footprint": {
+        "width": 0.11,
+        "height": 0.035
+      },
+      "parts": {
+        "front": {
+          "x": 0.720604,
+          "y": 0.1304,
+          "width": 0.119,
+          "height": 0.035
+        }
+      },
+      "assetId": "prop-desk-back-right-top"
+    },
+    {
+      "id": "desk-2-chair",
+      "kind": "chair",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.05,
+        "height": 0.03
+      },
+      "parts": {
+        "back": {
+          "x": 0.753035,
+          "y": 0.04968,
+          "width": 0.065,
+          "height": 0.03
+        }
+      },
+      "assetId": "prop-chair-front-left-top"
+    },
+    {
+      "id": "desk-3-back",
+      "kind": "desk-back",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.11,
+        "height": 0.035
+      },
+      "parts": {
+        "back": {
+          "x": 0.51358,
+          "y": 0.414284,
+          "width": 0.119,
+          "height": 0.035
+        }
+      },
+      "assetId": "prop-desk-back-right-top"
+    },
+    {
+      "id": "desk-3-front",
+      "kind": "desk-front",
+      "layer": "front-occluders",
+      "occluder": true,
+      "footprint": {
+        "width": 0.11,
+        "height": 0.035
+      },
+      "parts": {
+        "front": {
+          "x": 0.51358,
+          "y": 0.449284,
+          "width": 0.119,
+          "height": 0.035
+        }
+      },
+      "assetId": "prop-desk-back-right-top"
+    },
+    {
+      "id": "desk-3-chair",
+      "kind": "chair",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.05,
+        "height": 0.03
+      },
+      "parts": {
+        "back": {
+          "x": 0.546011,
+          "y": 0.368564,
+          "width": 0.065,
+          "height": 0.03
+        }
+      },
+      "assetId": "prop-chair-front-left-top"
+    },
+    {
+      "id": "desk-4-back",
+      "kind": "desk-back",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.11,
+        "height": 0.035
+      },
+      "parts": {
+        "back": {
+          "x": 0.715593,
+          "y": 0.406096,
+          "width": 0.119,
+          "height": 0.035
+        }
+      },
+      "assetId": "prop-desk-back-right-top"
+    },
+    {
+      "id": "desk-4-front",
+      "kind": "desk-front",
+      "layer": "front-occluders",
+      "occluder": true,
+      "footprint": {
+        "width": 0.11,
+        "height": 0.035
+      },
+      "parts": {
+        "front": {
+          "x": 0.715593,
+          "y": 0.441096,
+          "width": 0.119,
+          "height": 0.035
+        }
+      },
+      "assetId": "prop-desk-back-right-top"
+    },
+    {
+      "id": "desk-4-chair",
+      "kind": "chair",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.05,
+        "height": 0.03
+      },
+      "parts": {
+        "back": {
+          "x": 0.748024,
+          "y": 0.360376,
+          "width": 0.065,
+          "height": 0.03
+        }
+      },
+      "assetId": "prop-chair-front-left-top"
+    },
+    {
+      "id": "desk-5-back",
+      "kind": "desk-back",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.11,
+        "height": 0.035
+      },
+      "parts": {
+        "back": {
+          "x": 0.508026,
+          "y": 0.692197,
+          "width": 0.119,
+          "height": 0.035
+        }
+      },
+      "assetId": "prop-desk-back-right-top"
+    },
+    {
+      "id": "desk-5-front",
+      "kind": "desk-front",
+      "layer": "front-occluders",
+      "occluder": true,
+      "footprint": {
+        "width": 0.11,
+        "height": 0.035
+      },
+      "parts": {
+        "front": {
+          "x": 0.508026,
+          "y": 0.727197,
+          "width": 0.119,
+          "height": 0.035
+        }
+      },
+      "assetId": "prop-desk-back-right-top"
+    },
+    {
+      "id": "desk-5-chair",
+      "kind": "chair",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.05,
+        "height": 0.03
+      },
+      "parts": {
+        "back": {
+          "x": 0.540457,
+          "y": 0.646477,
+          "width": 0.065,
+          "height": 0.03
+        }
+      },
+      "assetId": "prop-chair-front-left-top"
+    },
+    {
+      "id": "desk-6-back",
+      "kind": "desk-back",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.11,
+        "height": 0.035
+      },
+      "parts": {
+        "back": {
+          "x": 0.706534,
+          "y": 0.684793,
+          "width": 0.119,
+          "height": 0.035
+        }
+      },
+      "assetId": "prop-desk-back-right-top"
+    },
+    {
+      "id": "desk-6-front",
+      "kind": "desk-front",
+      "layer": "front-occluders",
+      "occluder": true,
+      "footprint": {
+        "width": 0.11,
+        "height": 0.035
+      },
+      "parts": {
+        "front": {
+          "x": 0.706534,
+          "y": 0.719793,
+          "width": 0.119,
+          "height": 0.035
+        }
+      },
+      "assetId": "prop-desk-back-right-top"
+    },
+    {
+      "id": "desk-6-chair",
+      "kind": "chair",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.05,
+        "height": 0.03
+      },
+      "parts": {
+        "back": {
+          "x": 0.738965,
+          "y": 0.639073,
+          "width": 0.065,
+          "height": 0.03
+        }
+      },
+      "assetId": "prop-chair-front-left-top"
+    },
+    {
+      "id": "desk-1-monitor",
+      "kind": "monitor",
+      "assetId": "prop-monitor-back-right-top",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.06,
+        "height": 0.035
+      },
+      "parts": {
+        "back": {
+          "x": 0.5025,
+          "y": 0.0865,
+          "width": 0.06,
+          "height": 0.035
+        }
+      }
+    },
+    {
+      "id": "desk-2-monitor",
+      "kind": "monitor",
+      "assetId": "prop-monitor-back-right-top",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.06,
+        "height": 0.035
+      },
+      "parts": {
+        "back": {
+          "x": 0.702135,
+          "y": 0.07738,
+          "width": 0.06,
+          "height": 0.035
+        }
+      }
+    },
+    {
+      "id": "desk-3-monitor",
+      "kind": "monitor",
+      "assetId": "prop-monitor-back-right-top",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.06,
+        "height": 0.035
+      },
+      "parts": {
+        "back": {
+          "x": 0.495111,
+          "y": 0.396264,
+          "width": 0.06,
+          "height": 0.035
+        }
+      }
+    },
+    {
+      "id": "desk-4-monitor",
+      "kind": "monitor",
+      "assetId": "prop-monitor-back-right-top",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.06,
+        "height": 0.035
+      },
+      "parts": {
+        "back": {
+          "x": 0.697124,
+          "y": 0.388076,
+          "width": 0.06,
+          "height": 0.035
+        }
+      }
+    },
+    {
+      "id": "desk-5-monitor",
+      "kind": "monitor",
+      "assetId": "prop-monitor-back-right-top",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.06,
+        "height": 0.035
+      },
+      "parts": {
+        "back": {
+          "x": 0.489557,
+          "y": 0.674177,
+          "width": 0.06,
+          "height": 0.035
+        }
+      }
+    },
+    {
+      "id": "desk-6-monitor",
+      "kind": "monitor",
+      "assetId": "prop-monitor-back-right-top",
+      "layer": "back-furniture",
+      "occluder": false,
+      "footprint": {
+        "width": 0.06,
+        "height": 0.035
+      },
+      "parts": {
+        "back": {
+          "x": 0.688065,
+          "y": 0.666773,
+          "width": 0.06,
+          "height": 0.035
+        }
+      }
+    }
+  ],
+  "workstations": {
+    "schemaVersion": 1,
+    "template": {
+      "desk": {
+        "assetId": "prop-desk-back-right-top",
+        "offset": {
+          "x": 0,
+          "y": 0
+        },
+        "scale": 1,
+        "layer": "back-furniture"
+      },
+      "monitor": {
+        "assetId": "prop-monitor-back-right-top",
+        "offset": {
+          "x": 0.0027061666666666575,
+          "y": -0.09263600000000001
+        },
+        "scale": 1,
+        "layer": "back-furniture"
+      },
+      "chair": {
+        "assetId": "prop-chair-front-left-top",
+        "offset": {
+          "x": 0.07433716666666668,
+          "y": -0.038946
+        },
+        "scale": 1,
+        "layer": "back-furniture"
+      },
+      "seat": {
+        "offset": {
+          "x": 0.05471883333333335,
+          "y": -0.10325133333333335
+        },
+        "scale": 1,
+        "layer": "ground-entities"
+      }
+    },
+    "instances": [
+      {
+        "deskId": "desk-1",
+        "position": {
+          "x": 0.525342,
+          "y": 0.22824
+        },
+        "seat": {
+          "id": "desk-1",
+          "position": {
+            "x": 0.5800608333333334,
+            "y": 0.12498866666666665
+          }
+        },
+        "approach": {
+          "id": "desk-1-approach",
+          "nodeId": "desk-1-approach",
+          "position": {
+            "x": 0.6150608333333334,
+            "y": 0.16998866666666665
+          }
+        },
+        "leave": {
+          "id": "desk-1-leave",
+          "nodeId": "desk-1-leave",
+          "position": {
+            "x": 0.6150608333333334,
+            "y": 0.20998866666666666
+          }
+        }
+      },
+      {
+        "deskId": "desk-2",
+        "position": {
+          "x": 0.724977,
+          "y": 0.21912
+        },
+        "seat": {
+          "id": "desk-2",
+          "position": {
+            "x": 0.7796958333333334,
+            "y": 0.11586866666666666
+          }
+        },
+        "approach": {
+          "id": "desk-2-approach",
+          "nodeId": "desk-2-approach",
+          "position": {
+            "x": 0.8146958333333334,
+            "y": 0.16086866666666666
+          }
+        },
+        "leave": {
+          "id": "desk-2-leave",
+          "nodeId": "desk-2-leave",
+          "position": {
+            "x": 0.8146958333333334,
+            "y": 0.20086866666666667
+          }
+        }
+      },
+      {
+        "deskId": "desk-3",
+        "position": {
+          "x": 0.517953,
+          "y": 0.538004
+        },
+        "seat": {
+          "id": "desk-3",
+          "position": {
+            "x": 0.5726718333333334,
+            "y": 0.4347526666666667
+          }
+        },
+        "approach": {
+          "id": "desk-3-approach",
+          "nodeId": "desk-3-approach",
+          "position": {
+            "x": 0.6076718333333334,
+            "y": 0.47975266666666666
+          }
+        },
+        "leave": {
+          "id": "desk-3-leave",
+          "nodeId": "desk-3-leave",
+          "position": {
+            "x": 0.6076718333333334,
+            "y": 0.5197526666666666
+          }
+        }
+      },
+      {
+        "deskId": "desk-4",
+        "position": {
+          "x": 0.719966,
+          "y": 0.529816
+        },
+        "seat": {
+          "id": "desk-4",
+          "position": {
+            "x": 0.7746848333333334,
+            "y": 0.4265646666666666
+          }
+        },
+        "approach": {
+          "id": "desk-4-approach",
+          "nodeId": "desk-4-approach",
+          "position": {
+            "x": 0.8096848333333334,
+            "y": 0.4715646666666666
+          }
+        },
+        "leave": {
+          "id": "desk-4-leave",
+          "nodeId": "desk-4-leave",
+          "position": {
+            "x": 0.8096848333333334,
+            "y": 0.5115646666666666
+          }
+        }
+      },
+      {
+        "deskId": "desk-5",
+        "position": {
+          "x": 0.512399,
+          "y": 0.815917
+        },
+        "seat": {
+          "id": "desk-5",
+          "position": {
+            "x": 0.5671178333333334,
+            "y": 0.7126656666666666
+          }
+        },
+        "approach": {
+          "id": "desk-5-approach",
+          "nodeId": "desk-5-approach",
+          "position": {
+            "x": 0.6021178333333335,
+            "y": 0.7576656666666667
+          }
+        },
+        "leave": {
+          "id": "desk-5-leave",
+          "nodeId": "desk-5-leave",
+          "position": {
+            "x": 0.6021178333333335,
+            "y": 0.7976656666666667
+          }
+        }
+      },
+      {
+        "deskId": "desk-6",
+        "position": {
+          "x": 0.710907,
+          "y": 0.808513
+        },
+        "seat": {
+          "id": "desk-6",
+          "position": {
+            "x": 0.7656258333333333,
+            "y": 0.7052616666666667
+          }
+        },
+        "approach": {
+          "id": "desk-6-approach",
+          "nodeId": "desk-6-approach",
+          "position": {
+            "x": 0.8006258333333334,
+            "y": 0.7502616666666667
+          }
+        },
+        "leave": {
+          "id": "desk-6-leave",
+          "nodeId": "desk-6-leave",
+          "position": {
+            "x": 0.8006258333333334,
+            "y": 0.7902616666666668
+          }
+        }
+      }
+    ]
+  }
+}

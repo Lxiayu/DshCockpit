@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "2194abc-task9-fix1",
+  "redaction": {
+    "redactorApplied": true,
+    "mode": "redacted",
+    "policy": "runtime-derived trees passed through shared privacy redactor before assembly; assembled exports re-scanned for forbidden patterns"
+  },
+  "records": [
+    {
+      "scenario": "s8-webgl-failure",
+      "code": "WEBGL_INIT_FAILED",
+      "rendererModeAfter": "static",
+      "detailsReadable": true
+    },
+    {
+      "scenario": "s8-pack-missing",
+      "code": "TEXTURE_MISSING",
+      "rendererModeAfter": "webgl",
+      "detailsReadable": true,
+      "textureCount": 0,
+      "entityCount": 5
+    },
+    {
+      "scenario": "s8-pack-manifest-fallback",
+      "code": "PACK_MISSING",
+      "pageReady": true,
+      "detailsReadable": true,
+      "activityLogEntries": 12
+    },
+    {
+      "scenario": "s8-low-fps-fallback",
+      "code": "LOW_FPS_PERSISTENT",
+      "rendererModeAfter": "static",
+      "healthySamplesDegrade": false,
+      "injectedSamples": true,
+      "simulationClockUntouched": true
+    },
+    {
+      "scenario": "s9-corrupt-office-state",
+      "code": "OFFICE_STATE_CORRUPT",
+      "recoveredTo": "defaults",
+      "legacyFilesUnchanged": true,
+      "storeDiagnostics": [
+        {
+          "code": "OFFICE_STATE_CORRUPT"
+        }
+      ]
+    },
+    {
+      "scenario": "s9-backup-recovery",
+      "code": "OFFICE_STATE_CORRUPT",
+      "recoveredTo": "backup",
+      "legacyFilesUnchanged": true,
+      "storeDiagnostics": [
+        {
+          "code": "OFFICE_STATE_CORRUPT"
+        }
+      ]
+    },
+    {
+      "scenario": "s5-stale-resyncing",
+      "code": "SYNC_STALE_NO_OFFLINE",
+      "offlineShown": false,
+      "boundEmployeeSleeping": false,
+      "localBehaviorKept": true
+    },
+    {
+      "scenario": "s6-clock-integrity",
+      "code": "SINGLE_TICKER",
+      "hiddenClockAdvanced": false,
+      "duplicateTicker": false,
+      "resizeLogicalDrift": 0
+    },
+    {
+      "scenario": "s7-two-views-one-clock",
+      "code": "SHARED_SNAPSHOT_CLOCK",
+      "secondViewCloseReleasedOwnResources": true
+    }
+  ],
+  "findings": [
+    {
+      "id": "task7-evidence-contains-absolute-paths",
+      "responsibilitySpec": "SPEC-09",
+      "summary": "pre-existing untracked Task 7 evidence JSON records absolute output paths; left untouched (user worktree), recorded as a privacy-process finding",
+      "evidence": "artifacts/office-view/task7/evidence.json (untracked, not part of Task 9 evidence)"
+    },
+    {
+      "id": "walk-right-single-frame-left-jump",
+      "responsibilitySpec": "SPEC-02",
+      "summary": "one-frame visual jump to the left inside the walk-right cycle; asset replacement required",
+      "evidence": "manual-review.json knownDefects; artifacts/office-playground/57ea74c-task4-wip/moving.png"
+    },
+    {
+      "id": "walk-leg-continuity-unnatural",
+      "responsibilitySpec": "SPEC-02",
+      "summary": "leg motion does not continue naturally between walk-left and walk-right frames; asset replacement required",
+      "evidence": "manual-review.json knownDefects; artifacts/office-playground/57ea74c-task4-wip/moving.png"
+    }
+  ],
+  "resolvedFindings": [
+    {
+      "id": "office-page-pack-manifest-boot-failure",
+      "responsibilitySpec": "SPEC-07",
+      "fixedIn": "2194abc-task9-fix1",
+      "previousEvidence": "artifacts/office/task9/b349adf-task9 (s8-pack-manifest-boot-failure.png)",
+      "summary": "pack manifest unavailability no longer rejects the page boot: office-boot.js resolves a PACK_MISSING outcome, the page stays ready with diagnostic placeholder sprites, details/log remain usable"
+    },
+    {
+      "id": "low-fps-watchdog-absent",
+      "responsibilitySpec": "SPEC-07",
+      "fixedIn": "2194abc-task9-fix1",
+      "previousEvidence": "artifacts/office/task9/b349adf-task9 (diagnostics.json finding)",
+      "summary": "runtime FPS observer added (render/fps-monitor.js + renderer integration): sustained sub-threshold presentation degrades the view to static with LOW_FPS_PERSISTENT, distinct from WEBGL_INIT_FAILED; no simulation ticker, main-process clock untouched, no auto-recovery"
+    },
+    {
+      "id": "npm-test-full-runner-hang",
+      "responsibilitySpec": "SPEC-09",
+      "fixedIn": "2194abc-task9-fix1",
+      "previousEvidence": "artifacts/office/task9/b349adf-task9 (result.json npm gate exit 124) and docs/notes spike",
+      "summary": "root cause: node --test default discovery executes every .js file under test/ (pattern **/test/**/*.js), including the opencode-orchestrator fixture servers, whose open server handles stall the runner child forever; fixed by pinning the test script to explicit test-file globs (package.json) with a regression contract in test/test-runner-isolation.test.js"
+    }
+  ]
+}

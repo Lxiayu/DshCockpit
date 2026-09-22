@@ -1,0 +1,386 @@
+{
+  "schemaVersion": 1,
+  "files": [
+    {
+      "file": "test/backup.test.js",
+      "exitCode": 0,
+      "durationMs": 64
+    },
+    {
+      "file": "test/balance.test.js",
+      "exitCode": 0,
+      "durationMs": 63
+    },
+    {
+      "file": "test/boot-check.test.js",
+      "exitCode": 0,
+      "durationMs": 486
+    },
+    {
+      "file": "test/cache-economics.test.js",
+      "exitCode": 0,
+      "durationMs": 65
+    },
+    {
+      "file": "test/channels-c6.test.js",
+      "exitCode": 0,
+      "durationMs": 79
+    },
+    {
+      "file": "test/channels-timeout-failure.test.js",
+      "exitCode": 0,
+      "durationMs": 162
+    },
+    {
+      "file": "test/channels.test.js",
+      "exitCode": 0,
+      "durationMs": 74
+    },
+    {
+      "file": "test/cockpit-bounds.test.js",
+      "exitCode": 0,
+      "durationMs": 59
+    },
+    {
+      "file": "test/cockpit-snapshot.test.js",
+      "exitCode": 0,
+      "durationMs": 60
+    },
+    {
+      "file": "test/cockpit-ui.test.js",
+      "exitCode": 0,
+      "durationMs": 107
+    },
+    {
+      "file": "test/compact.test.js",
+      "exitCode": 0,
+      "durationMs": 89
+    },
+    {
+      "file": "test/compat-status.test.js",
+      "exitCode": 0,
+      "durationMs": 121
+    },
+    {
+      "file": "test/cost.test.js",
+      "exitCode": 0,
+      "durationMs": 64
+    },
+    {
+      "file": "test/crash-reason.test.js",
+      "exitCode": 0,
+      "durationMs": 58
+    },
+    {
+      "file": "test/dependency-guard.test.js",
+      "exitCode": 0,
+      "durationMs": 73
+    },
+    {
+      "file": "test/harness-rpc.test.js",
+      "exitCode": 0,
+      "durationMs": 59
+    },
+    {
+      "file": "test/i18n.test.js",
+      "exitCode": 0,
+      "durationMs": 60
+    },
+    {
+      "file": "test/market.test.js",
+      "exitCode": 0,
+      "durationMs": 55
+    },
+    {
+      "file": "test/mcp-connect.test.js",
+      "exitCode": 0,
+      "durationMs": 120083
+    },
+    {
+      "file": "test/mcp-import.test.js",
+      "exitCode": 0,
+      "durationMs": 64
+    },
+    {
+      "file": "test/mcp-manager.test.js",
+      "exitCode": 0,
+      "durationMs": 76
+    },
+    {
+      "file": "test/mcp-registry.test.js",
+      "exitCode": 0,
+      "durationMs": 58
+    },
+    {
+      "file": "test/mcp-usage.test.js",
+      "exitCode": 0,
+      "durationMs": 63
+    },
+    {
+      "file": "test/models-manager.test.js",
+      "exitCode": 0,
+      "durationMs": 68
+    },
+    {
+      "file": "test/notification-center.test.js",
+      "exitCode": 0,
+      "durationMs": 192
+    },
+    {
+      "file": "test/office-animation-controller.test.js",
+      "exitCode": 0,
+      "durationMs": 64
+    },
+    {
+      "file": "test/office-asset-gap-report.test.js",
+      "exitCode": 0,
+      "durationMs": 85
+    },
+    {
+      "file": "test/office-asset-pack.test.js",
+      "exitCode": 0,
+      "durationMs": 109
+    },
+    {
+      "file": "test/office-asset-runtime.test.js",
+      "exitCode": 0,
+      "durationMs": 3000
+    },
+    {
+      "file": "test/office-behavior-scheduler.test.js",
+      "exitCode": 0,
+      "durationMs": 71
+    },
+    {
+      "file": "test/office-boot.test.js",
+      "exitCode": 0,
+      "durationMs": 59
+    },
+    {
+      "file": "test/office-character-pack-installer.test.js",
+      "exitCode": 0,
+      "durationMs": 261
+    },
+    {
+      "file": "test/office-compatibility.test.js",
+      "exitCode": 0,
+      "durationMs": 196
+    },
+    {
+      "file": "test/office-dialogue-engine.test.js",
+      "exitCode": 0,
+      "durationMs": 78
+    },
+    {
+      "file": "test/office-doc-contract.test.js",
+      "exitCode": 0,
+      "durationMs": 58
+    },
+    {
+      "file": "test/office-employee-profile.test.js",
+      "exitCode": 0,
+      "durationMs": 59
+    },
+    {
+      "file": "test/office-employee-registry.test.js",
+      "exitCode": 0,
+      "durationMs": 65
+    },
+    {
+      "file": "test/office-fps-monitor.test.js",
+      "exitCode": 0,
+      "durationMs": 61
+    },
+    {
+      "file": "test/office-gen-frames.test.js",
+      "exitCode": 0,
+      "durationMs": 61
+    },
+    {
+      "file": "test/office-movement-controller.test.js",
+      "exitCode": 0,
+      "durationMs": 63
+    },
+    {
+      "file": "test/office-persistence.test.js",
+      "exitCode": 0,
+      "durationMs": 264
+    },
+    {
+      "file": "test/office-playground.test.js",
+      "exitCode": 0,
+      "durationMs": 73
+    },
+    {
+      "file": "test/office-privacy-redactor.test.js",
+      "exitCode": 0,
+      "durationMs": 57
+    },
+    {
+      "file": "test/office-privacy.test.js",
+      "exitCode": 0,
+      "durationMs": 94
+    },
+    {
+      "file": "test/office-queue-controller.test.js",
+      "exitCode": 0,
+      "durationMs": 56
+    },
+    {
+      "file": "test/office-rail.test.js",
+      "exitCode": 0,
+      "durationMs": 56
+    },
+    {
+      "file": "test/office-release-gate.test.js",
+      "exitCode": 0,
+      "durationMs": 62,
+      "status": "passed"
+    },
+    {
+      "file": "test/office-renderer.test.js",
+      "exitCode": 0,
+      "durationMs": 66
+    },
+    {
+      "file": "test/office-runtime-adapter.test.js",
+      "exitCode": 0,
+      "durationMs": 85
+    },
+    {
+      "file": "test/office-runtime-snapshot.test.js",
+      "exitCode": 0,
+      "durationMs": 65
+    },
+    {
+      "file": "test/office-state-reducer.test.js",
+      "exitCode": 0,
+      "durationMs": 60
+    },
+    {
+      "file": "test/office-transition-controller.test.js",
+      "exitCode": 0,
+      "durationMs": 59
+    },
+    {
+      "file": "test/office-transition-loop.test.js",
+      "exitCode": 0,
+      "durationMs": 1214
+    },
+    {
+      "file": "test/office-ui.test.js",
+      "exitCode": 0,
+      "durationMs": 208
+    },
+    {
+      "file": "test/plugin-flow.test.js",
+      "exitCode": 0,
+      "durationMs": 59
+    },
+    {
+      "file": "test/pnpm-profile.test.js",
+      "exitCode": 0,
+      "durationMs": 79
+    },
+    {
+      "file": "test/pnpm-shim.test.js",
+      "exitCode": 0,
+      "durationMs": 657
+    },
+    {
+      "file": "test/public-remote.test.js",
+      "exitCode": 0,
+      "durationMs": 136
+    },
+    {
+      "file": "test/quickask-shortcut.test.js",
+      "exitCode": 0,
+      "durationMs": 55
+    },
+    {
+      "file": "test/remote-control.test.js",
+      "exitCode": 0,
+      "durationMs": 253
+    },
+    {
+      "file": "test/runtime-log-tail.test.js",
+      "exitCode": 0,
+      "durationMs": 58
+    },
+    {
+      "file": "test/runtime-manager-unit.test.js",
+      "exitCode": 0,
+      "durationMs": 1000
+    },
+    {
+      "file": "test/runtime-pick.test.js",
+      "exitCode": 0,
+      "durationMs": 64
+    },
+    {
+      "file": "test/runtime-state.test.js",
+      "exitCode": 0,
+      "durationMs": 56
+    },
+    {
+      "file": "test/runtime-supervisor.test.js",
+      "exitCode": 0,
+      "durationMs": 55
+    },
+    {
+      "file": "test/scheduler.test.js",
+      "exitCode": 0,
+      "durationMs": 57
+    },
+    {
+      "file": "test/session-files.test.js",
+      "exitCode": 0,
+      "durationMs": 57
+    },
+    {
+      "file": "test/session-search.test.js",
+      "exitCode": 0,
+      "durationMs": 465
+    },
+    {
+      "file": "test/session-worker.test.js",
+      "exitCode": 0,
+      "durationMs": 100
+    },
+    {
+      "file": "test/settings-store.test.js",
+      "exitCode": 0,
+      "durationMs": 59
+    },
+    {
+      "file": "test/settings-ui.test.js",
+      "exitCode": 0,
+      "durationMs": 72
+    },
+    {
+      "file": "test/skills.test.js",
+      "exitCode": 0,
+      "durationMs": 209
+    },
+    {
+      "file": "test/tdz-guard.test.js",
+      "exitCode": 0,
+      "durationMs": 65
+    },
+    {
+      "file": "test/test-runner-isolation.test.js",
+      "exitCode": 0,
+      "durationMs": 60
+    },
+    {
+      "file": "test/token-stats.test.js",
+      "exitCode": 0,
+      "durationMs": 541
+    },
+    {
+      "file": "test/weekly-report.test.js",
+      "exitCode": 0,
+      "durationMs": 67
+    }
+  ]
+}

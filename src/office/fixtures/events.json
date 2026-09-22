@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "description": "Task 4 / SPEC-06 deterministic replay fixture: dispatch -> walk -> work -> thinking -> completed -> result -> stand -> leave -> local behavior.",
+  "events": [
+    { "atMs": 0, "type": "dispatch", "targetNodeId": "desk-1" },
+    { "atMs": 9000, "type": "runtime/fact", "fact": "running", "reason": "tool" },
+    { "atMs": 12000, "type": "runtime/fact", "fact": "running", "reason": "thinking" },
+    { "atMs": 16000, "type": "task-terminal", "outcome": "completed", "result": { "summary": "fixture task" } },
+    { "atMs": 17500, "type": "phase-complete" },
+    { "atMs": 18500, "type": "phase-complete" },
+    { "atMs": 19500, "type": "phase-complete" }
+  ]
+}

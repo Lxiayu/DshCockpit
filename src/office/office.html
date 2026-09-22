@@ -1,0 +1,1927 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src office-runtime://local 'unsafe-inline' 'unsafe-eval'; style-src office-runtime://local 'unsafe-inline'; img-src office-runtime://local data: blob:; connect-src office-runtime://local; font-src 'none'" />
+  <title>Agent Office</title>
+  <link rel="stylesheet" href="./office.css" />
+</head>
+<body>
+  <main id="stage-host" aria-label="虚拟办公室场景：六工位与常驻员工">
+    <!-- The single Pixi canvas (or static fallback) mounts here. -->
+    <div id="layout-editor" hidden aria-label="办公室布局编辑器">
+      <div id="layout-palette">
+        <div id="layout-toolbar">
+          <strong>布局草稿</strong>
+          <button type="button" id="editor-undo" title="撤销">撤销</button>
+          <button type="button" id="editor-redo" title="重做">重做</button>
+          <button type="button" id="editor-delete">删除</button>
+          <button type="button" id="editor-select-all">全选</button>
+          <button type="button" id="editor-clear-selection">取消选择</button>
+          <button type="button" id="editor-grid-snap" aria-pressed="true" title="拖动时吸附到 0.005 网格">网格吸附</button>
+          <button type="button" id="editor-fit-view" title="缩放画布以完整显示全部条目">适配窗口</button>
+          <button type="button" id="editor-reset-view" title="缩放复位到 100%">100%</button>
+          <button type="button" id="editor-zoom-in" title="放大视图（触控板也可捏合）">＋</button>
+          <button type="button" id="editor-zoom-out" title="缩小视图（触控板也可捏合）">−</button>
+          <button type="button" id="editor-save">下载草稿</button>
+          <button type="button" id="editor-save-production" title="保存为生产布局">保存布局</button>
+          <button type="button" id="editor-restore-production" title="恢复内置默认布局">恢复默认</button>
+          <label class="editor-control">导入草稿<input id="editor-import-input" type="file" accept=".json,application/json"></label>
+          <label class="editor-control">缩放<input id="editor-scale" type="number" min="0.2" max="3" step="0.1" aria-label="选中项缩放"></label>
+          <button type="button" id="editor-forward" title="同层级内前移一位（多选按块）">前移</button>
+          <button type="button" id="editor-backward" title="同层级内后移一位（多选按块）">后移</button>
+          <button type="button" id="editor-front" title="提到全部素材最前面（跨层级生效）">置顶</button>
+          <button type="button" id="editor-back" title="压到全部素材最后面（跨层级生效）">置底</button>
+          <button type="button" id="editor-layer-up" title="与紧邻的上一个素材交换遮挡关系（跨层级生效；多选时禁用）">上移一层</button>
+          <button type="button" id="editor-layer-down" title="与紧邻的下一个素材交换遮挡关系（跨层级生效；多选时禁用）">下移一层</button>
+          <button type="button" id="editor-group" title="把选中项组成一个素材组（整组拖动/框选的单位）">编组</button>
+          <button type="button" id="editor-ungroup" title="把选中项移出所在组">解组</button>
+          <span class="editor-note">从素材栏拖图片到下方画布</span>
+        </div>
+        <p id="editor-status" aria-live="polite"></p>
+        <div id="layout-inspector" aria-label="选中项检查器">
+          <label class="editor-control">X<input id="inspector-x" type="number" step="0.001" aria-label="选中项 X"></label>
+          <label class="editor-control">Y<input id="inspector-y" type="number" step="0.001" aria-label="选中项 Y"></label>
+          <label class="editor-control">层级<input id="inspector-layer" type="number" min="0" step="1" aria-label="选中项层级"></label>
+          <label class="editor-control">尺寸<input id="inspector-scale" type="number" min="0.2" max="3" step="0.1" aria-label="选中项尺寸"></label>
+          <span id="inspector-size-px" class="editor-note" title="当前渲染像素宽高（随缩放更新）"></span>
+          <label class="editor-control">方向<select id="inspector-direction" aria-label="选中项方向"></select></label>
+          <span id="inspector-id" class="editor-note"></span>
+          <span id="inspector-group" class="editor-note"></span>
+        </div>
+        <div id="layout-align-bar" aria-label="对齐与分布">
+          <button type="button" id="align-left" disabled>左对齐</button>
+          <button type="button" id="align-right" disabled>右对齐</button>
+          <button type="button" id="align-top" disabled>上对齐</button>
+          <button type="button" id="align-bottom" disabled>下对齐</button>
+          <button type="button" id="align-center-x" disabled>水平居中</button>
+          <button type="button" id="align-center-y" disabled>垂直居中</button>
+          <button type="button" id="distribute-x" disabled>水平分布</button>
+          <button type="button" id="distribute-y" disabled>垂直分布</button>
+        </div>
+        <div id="layout-asset-shelf" aria-label="可拖动素材库"></div>
+      </div>
+      <div id="layout-canvas" aria-label="办公室布局草稿画布">
+        <div id="layout-scene-frame" aria-hidden="true"></div>
+        <p id="layout-empty-hint">将上方素材拖到这里开始摆放</p>
+        <div id="layout-draft-items"></div>
+        <div id="layout-guide-layer" aria-hidden="true"></div>
+        <div id="layout-handle-layer" aria-hidden="true"></div>
+      </div>
+      <aside id="layout-layer-panel" aria-label="图层面板">
+        <h3>图层</h3>
+        <div id="layout-layer-groups"></div>
+      </aside>
+    </div>
+  </main>
+
+  <aside id="office-panel" aria-label="办公室详情面板">
+    <header id="office-overview">
+      <h1>Agent Office</h1>
+      <p id="overview-summary" aria-live="polite">载入中…</p>
+      <p class="hint" id="sync-summary">同步：未知</p>
+    </header>
+
+    <section id="employee-list-block" aria-label="员工列表">
+      <ul id="employee-list" role="listbox" aria-label="选择员工查看详情"></ul>
+      <p class="hint">方向键移动焦点，Enter 或空格选中，Esc 取消选中</p>
+    </section>
+
+    <section id="details" aria-label="员工详情" aria-live="polite">
+      <p class="hint" id="details-placeholder">点击场景中的员工或用键盘选择查看详情</p>
+      <div id="details-body" hidden>
+        <h2 id="details-name"></h2>
+        <p id="details-role"></p>
+        <p id="details-primary"></p>
+        <ul id="details-dim"></ul>
+        <p id="details-queue" class="queue-line"></p>
+        <div id="details-actions" class="actions">
+          <button id="btn-dispatch" type="button">追加任务</button>
+          <button id="btn-cancel" type="button">请求取消</button>
+          <button id="btn-interrupt" type="button">请求中断</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="activity-block" aria-label="活动日志">
+      <h3>活动</h3>
+      <ul id="activity-log" aria-live="polite"></ul>
+    </section>
+
+    <footer id="office-footer">
+      <label class="checkbox">
+        <input id="ctl-reduced-motion" type="checkbox" />
+        减少动画
+      </label>
+      <p class="hint" id="fallback-note" hidden></p>
+    </footer>
+  </aside>
+
+  <script src="./node_modules/pixi.js/dist/pixi.min.js"></script>
+  <script>
+    // Page bootstrap: mini CommonJS loader over the local app scheme (same
+    // pattern as the playground). All URLs are office-runtime://local — no
+    // network, no CDN, no fetch of scripts. The renderer consumes ONLY the
+    // main-process snapshot pushed over the office:state channel.
+    (async () => {
+      const REGISTRY = {};
+      function loadModule(url, requireShim) {
+        return fetch(url)
+          .then((r) => { if (!r.ok) throw new Error(`${url}: ${r.status}`); return r.text(); })
+          .then((src) => {
+            const moduleObj = { exports: {} };
+            const factory = new Function('module', 'exports', 'require', src + `\n//# sourceURL=${url}`);
+            factory(moduleObj, moduleObj.exports, requireShim || (() => { throw new Error('require unsupported: ' + url); }));
+            return moduleObj.exports;
+          });
+      }
+
+      const loadJson = (url) => fetch(url).then((r) => { if (!r.ok) throw new Error(`${url}: ${r.status}`); return r.json(); });
+
+      const bridge = window.officeBridge;
+      if (!bridge) throw new Error('office bridge missing (preload not loaded?)');
+
+      // Layout fixtures are bundled local files; the RUNTIME layout resolves
+      // below through the compiled source chain (saved draft → bundled flat
+      // fixture → isometric fallback). The character pack, in contrast, MUST
+      // NOT reject the boot (Task 9 blocker A): loadOfficePack resolves a
+      // diagnostic outcome instead.
+      // Task 4: the production pack arrives as a PORTABLE descriptor id in
+      // the view URL (office.html?pack=<id>) — never an absolute path. The
+      // built-in deepseek-default pack is the safe default.
+      // Task E2d: ?editor=1 auto-opens the layout editor after boot — the
+      // standalone launcher passes it; the cockpit views never do, so the
+      // in-app behaviour is unchanged.
+      const officeSearchParams = new URLSearchParams(window.location.search);
+      const officePackParam = officeSearchParams.get('pack');
+      const officeEditorParam = officeSearchParams.get('editor');
+      const officePackId = officePackParam && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(officePackParam)
+        ? officePackParam
+        : 'deepseek-default';
+      REGISTRY['office-layout'] = await loadModule('./runtime/office-layout.js');
+      REGISTRY['office-boot'] = await loadModule('./office-boot.js');
+      REGISTRY['asset-pack'] = await loadModule('./runtime/asset-pack.js');
+      // layout-assets must load BEFORE the renderer: the renderer's flat
+      // furniture path consumes the catalog (contentBbox + depth) at module
+      // load time.
+      REGISTRY['layout-assets'] = await loadModule('./layout-assets.js');
+      // fps-monitor must load BEFORE pixi-office-renderer: the renderer
+      // requires it at module load time.
+      REGISTRY['fps-monitor'] = await loadModule('./render/fps-monitor.js');
+      REGISTRY['pixi-office-renderer'] = await loadModule('./render/pixi-office-renderer.js', (spec) => {
+        if (spec === './fps-monitor.js') return REGISTRY['fps-monitor'];
+        if (spec === '../layout-assets.js') return REGISTRY['layout-assets'];
+        throw new Error('require unsupported: ' + spec);
+      });
+      REGISTRY['office-page'] = await loadModule('./office-page.js', (spec) => REGISTRY[spec.replace('./', '').replace('.js', '')]);
+      // layout-editor requires './layout-assets.js' for schema-v1 import
+      // validation; the shim maps it to the already-loaded registry entry.
+      REGISTRY['layout-editor'] = await loadModule('./layout-editor.js', (spec) => REGISTRY[spec.replace('./', '').replace('.js', '')]);
+      // Task E4: the pure draft→runtime compiler (no requires — loads with
+      // the page's mini module loader).
+      REGISTRY['office-layout-compiler'] = await loadModule('./runtime/office-layout-compiler.js');
+
+      // Task 8 — production layout draft source priority: the user-saved
+      // layout (userData/office-layout.v1.json via the protocol layout route)
+      // wins over the bundled confirmed draft (fixtures/office-layout-draft.json);
+      // both pass the FULL schema-v1 validation before they may replace the
+      // canonical runtime layout. The canonical fixture stays the renderer
+      // fallback: an invalid draft degrades with a stable diagnostic and the
+      // existing runtime layout, never a broken page.
+      // Task 8-R1: response -> attempt classification is the pure
+      // office-boot.classifyLayoutAttempt — only 404 is `missing`; 409/422/
+      // 5xx/network failures are BROKEN attempts whose stable codes must
+      // reach the resolver (folding them into `missing` used to hide the
+      // corrupt-layout diagnostic from the page entirely).
+      const tryLoadLayoutDraft = async (url) => {
+        try {
+          const response = await fetch(url);
+          let body = null;
+          try { body = await response.json(); } catch { body = null; }
+          return REGISTRY['office-boot'].classifyLayoutAttempt({ status: response.status, body });
+        } catch {
+          return REGISTRY['office-boot'].classifyLayoutAttempt({ status: 0, body: null });
+        }
+      };
+      const [savedLayoutAttempt, bundledLayoutAttempt] = await Promise.all([
+        tryLoadLayoutDraft('./office-layout.v1.json'),
+        tryLoadLayoutDraft('./fixtures/office-layout-draft.json'),
+      ]);
+
+      // Task 8 — resolve the production layout draft with the real schema-v1
+      // validator (asset whitelist, kind/asset, position/scale/layer/groupId).
+      const layoutResolution = REGISTRY['office-boot'].resolveProductionLayoutDraft({
+        saved: savedLayoutAttempt,
+        bundled: bundledLayoutAttempt,
+        validateDraftSchema: REGISTRY['layout-editor'].createLayoutEditor({ scene: { width: 1, height: 1 } }).validateDraftSchema,
+      });
+      let layoutDiagnostic = layoutResolution.code;
+      let layoutSource = layoutResolution.source;
+
+      // Task E4 — RUNTIME layout source chain (compiled draft → bundled flat
+      // fixture → isometric fallback): runtimeLayoutSource resolves to
+      // 'saved-compiled' | 'bundled-flat' | 'isometric-fallback'. The saved
+      // user draft is COMPILED into a runtime layout with the same pure
+      // compiler that generated the committed fixture; every candidate must
+      // pass the layout validator, so a broken chain degrades with a stable
+      // diagnostic instead of blocking the boot.
+      const loadJsonOrNull = async (url) => {
+        try { return await loadJson(url); } catch { return null; }
+      };
+      const [isometricFixture, flatFixture] = await Promise.all([
+        loadJsonOrNull('./fixtures/office-layout.json'),
+        loadJsonOrNull('./fixtures/office-layout-flat.json'),
+      ]);
+      const runtimeResolution = REGISTRY['office-layout-compiler'].resolveRuntimeLayout({
+        savedDraft: savedLayoutAttempt.ok ? savedLayoutAttempt.draft : undefined,
+        flatFixture,
+        isometricFixture,
+        validateLayout: (fixture) => REGISTRY['office-layout'].validateOfficeLayout(fixture),
+        assets: REGISTRY['layout-assets'].LAYOUT_ASSETS,
+        draftWidths: REGISTRY['layout-assets'].DRAFT_WIDTHS,
+        characterFoot: REGISTRY['layout-assets'].CHARACTER_FOOT_RATIO,
+      });
+      if (!runtimeResolution.ok || !runtimeResolution.layout) {
+        throw new Error(`OFFICE_LAYOUT_UNAVAILABLE: ${runtimeResolution.code}`);
+      }
+      let runtimeLayoutSource = runtimeResolution.source;
+      let runtimeLayoutCode = runtimeResolution.code;
+      if (runtimeLayoutCode) {
+        layoutDiagnostic = runtimeLayoutCode;
+      }
+
+      const layout = REGISTRY['office-layout'].createOfficeLayout(runtimeResolution.layout);
+      const packOutcome = await REGISTRY['office-boot'].loadOfficePack({
+        packId: officePackId,
+        loadJson,
+        createAssetPack: (input) => REGISTRY['asset-pack'].createAssetPack(input),
+      });
+      const pack = packOutcome.pack;
+      // Stable diagnostic code (SPEC-02 vocabulary): null | PACK_MISSING |
+      // PACK_MANIFEST_INVALID | PACK_ASSET_MISSING | upstream validator code.
+      const packDiagnostic = packOutcome.code;
+
+      // Textures: local validated pack frames only, loaded through Image()
+      // (no fetch, no network), one map per view — never shared between views.
+      const textures = new Map();
+      if (pack) {
+        const animations = packOutcome.animations;
+        const frames = new Set();
+        for (const id of Object.keys(animations.animations)) {
+          for (const frame of animations.animations[id].frames) frames.add(frame.file);
+        }
+        await Promise.all([...frames].map((file) => new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => { textures.set(file, window.PIXI.Texture.from(img)); resolve(); };
+          img.onerror = () => resolve(); // missing frame -> renderer placeholder
+          img.src = `./characters/${officePackId}/${file}`;
+        })));
+      }
+
+      let latestSnapshot = null;
+      // M2 (2026-09-16): snapshots now arrive per tick (~60Hz) so the canvas
+      // paints smoothly; the four DOM panels keep their historical ~10Hz
+      // cadence — rebuilding them per tick buys nothing visible and would
+      // flood the aria-live activity log.
+      const PANEL_RENDER_INTERVAL_MS = 100;
+      let lastPanelRenderAtMs = null;
+      // Task 3 golden workstation: per-view office furniture textures. Every
+      // view loads its own Image objects and creates its own PIXI.Texture map
+      // — no shared global asset cache. Load failures are collected as
+      // OFFICE_TEXTURE_MISSING diagnostics and never break the character
+      // pack or the page boot.
+      const officeTextures = new Map();
+      const officeTextureErrors = [];
+      const officeAssetSrcById = new Map(REGISTRY['layout-assets'].LAYOUT_ASSETS.map((asset) => [asset.id, asset.src]));
+      const furnitureAssetIds = [...new Set(layout.furniture().map((item) => item.assetId).filter(Boolean))];
+      await Promise.all(furnitureAssetIds.map((assetId) => new Promise((resolve) => {
+        const src = officeAssetSrcById.get(assetId);
+        if (!src) {
+          officeTextureErrors.push({ assetId, code: 'OFFICE_TEXTURE_MISSING', reason: 'ASSET_UNDECLARED' });
+          resolve();
+          return;
+        }
+        const image = new Image();
+        image.onload = () => { officeTextures.set(assetId, window.PIXI.Texture.from(image)); resolve(); };
+        image.onerror = () => { officeTextureErrors.push({ assetId, src, code: 'OFFICE_TEXTURE_MISSING', reason: 'IMAGE_DECODE_FAILED' }); resolve(); };
+        image.src = src;
+      })));
+      const stage = document.getElementById('stage-host');
+      const renderer = await REGISTRY['pixi-office-renderer'].createOfficeRenderer({
+        PIXI: window.PIXI,
+        layout,
+        pack,
+        textures,
+        officeTextures,
+        officeTextureErrors,
+        // Task 7A: the approved workstation-1 calibration propagated to all
+        // six stations; every desk renders from the same managed catalog.
+        texturedWorkstations: ['desk-1', 'desk-2', 'desk-3', 'desk-4', 'desk-5', 'desk-6'],
+        scene: { width: layout.scene().referenceWidth, height: layout.scene().referenceHeight },
+        snapshot: null,
+        mount: stage,
+        devicePixelRatio: window.devicePixelRatio || 1,
+        // Runtime low-FPS degradation (SPEC-07 / Task 9 blocker B): the
+        // observer counts presented frames only; the office simulation clock
+        // stays in the main process. Threshold per SPEC-09 (30 fps).
+        fpsMonitor: { thresholdFps: 30, windowFrames: 30, lowWindowLimit: 5 },
+      });
+      if (packDiagnostic) {
+        const note = document.getElementById('fallback-note');
+        note.hidden = false;
+        note.textContent = `角色包降级：${packDiagnostic}；已切换诊断占位形象，详情与日志保持可用`;
+      }
+      // Task 8: the production layout draft resolved through saved > bundled;
+      // a failed chain degrades to an empty editor with a stable diagnostic
+      // instead of blocking the boot. Import/export/undo stay available.
+      if (layoutDiagnostic) {
+        const note = document.getElementById('fallback-note');
+        note.hidden = false;
+        note.textContent = `布局降级：${layoutDiagnostic}；编辑器以内置默认布局继续，导入导出保持可用`;
+      }
+      if (renderer.mode !== 'webgl') {
+        const note = document.getElementById('fallback-note');
+        note.hidden = false;
+        note.textContent = `渲染降级：${renderer.mode} 模式（${renderer.diagnosticCode || 'ok'}）；详情与日志保持可用`;
+      }
+
+      const page = REGISTRY['office-page'].createOfficePageController({
+        bridge,
+        reducedMotion: false,
+        onSnapshot: (snapshot) => {
+          latestSnapshot = snapshot;
+          renderer.applySnapshot(snapshot);
+          const now = Date.now();
+          if (lastPanelRenderAtMs === null || now - lastPanelRenderAtMs >= PANEL_RENDER_INTERVAL_MS) {
+            lastPanelRenderAtMs = now;
+            renderOverview(snapshot);
+            renderEmployeeList(snapshot);
+            renderDetails();
+            renderActivity(snapshot);
+          }
+        },
+      });
+
+      const editor = REGISTRY['layout-editor'].createLayoutEditor({
+        scene: { width: layout.scene().referenceWidth, height: layout.scene().referenceHeight },
+      });
+      // Task 8: boot the editor from the resolved production layout draft
+      // (saved > bundled, schema-v1 validated above). The canonical runtime
+      // layout is untouched — the editor drafts the NEXT layout. The boot
+      // import records no undo history (it is not a user edit); a failed
+      // resolution keeps the empty editor and surfaces the stable diagnostic
+      // on the fallback note (already emitted above).
+      if (layoutResolution.ok) {
+        editor.load(layoutResolution.draft, { recordHistory: false });
+      }
+      const editorRoot = document.getElementById('layout-editor');
+      const editorCanvas = document.getElementById('layout-canvas');
+      const editorItems = document.getElementById('layout-draft-items');
+      const guideLayer = document.getElementById('layout-guide-layer');
+      const handleLayer = document.getElementById('layout-handle-layer');
+      const editorShelf = document.getElementById('layout-asset-shelf');
+      // Task E2b: canvas VIEW transform (scale + pan). Draft coordinates stay
+      // normalized [0,1] — the view only re-projects the editor layers. Every
+      // pointer math goes through the view-aware conversions below.
+      const view = REGISTRY['layout-editor'].createCanvasView(layout.scene().referenceWidth, layout.scene().referenceHeight);
+      let gridSnapEnabled = true;
+      let spacePanHeld = false;
+      function applyView() {
+        let { scale, tx, ty } = view.get();
+        // Task E3c: the scene frame is GLUED to the visible canvas. Free
+        // panning used to translate the item/guide/handle layers out of the
+        // gray frame, so the editable area became an invisible rectangle
+        // (user-reported). Clamped pan instead: zoomed in, the frame always
+        // COVERS the canvas; zoomed out (or at 100%), it sits CENTERED — a
+        // trackpad swipe at 100% therefore has no effect at all.
+        const projW = sceneFrame.width * scale;
+        const projH = sceneFrame.height * scale;
+        if (projW >= sceneCanvas.width) {
+          tx = Math.min(-sceneFrame.left, Math.max(sceneCanvas.width - sceneFrame.left - projW, tx));
+        } else {
+          tx = (sceneCanvas.width - projW) / 2 - sceneFrame.left;
+        }
+        if (projH >= sceneCanvas.height) {
+          ty = Math.min(-sceneFrame.top, Math.max(sceneCanvas.height - sceneFrame.top - projH, ty));
+        } else {
+          ty = (sceneCanvas.height - projH) / 2 - sceneFrame.top;
+        }
+        view.set({ tx, ty });
+        const transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+        editorItems.style.transform = transform;
+        guideLayer.style.transform = transform;
+        handleLayer.style.transform = transform;
+        // Task E3c: the frame is the scene floor — it translates/scales WITH
+        // the items, so whatever the view does, placed items always sit on
+        // the gray canvas and never on the white outside.
+        sceneFrameElement.style.transform = transform;
+      }
+      // Task E3b: the EDITABLE area is the logical scene (1280x840) fitted
+      // and centered inside the canvas — #layout-scene-frame. Every layer
+      // (items/guides/handles) is positioned at the frame origin and the view
+      // math (view.setSize) is baselined to the FRAME size; everything
+      // outside the frame is pure white and never receives draft coordinates.
+      let sceneFrame = { left: 0, top: 0, width: 0, height: 0 };
+      let sceneCanvas = { width: 0, height: 0 };
+      function updateSceneFrame() {
+        const rect = editorCanvas.getBoundingClientRect();
+        if (!(rect.width > 0) || !(rect.height > 0)) return;
+        // Task E3b-R2: the frame NEVER fills the canvas — at least 24px of
+        // pure white on every side, so the editable boundary stays visible
+        // even when the canvas ratio is close to the scene ratio (the user
+        // could not see the boundary at all in that case).
+        const pad = 24;
+        const ratio = layout.scene().referenceWidth / layout.scene().referenceHeight;
+        let width = rect.width - pad * 2;
+        let height = width / ratio;
+        const availHeight = rect.height - pad * 2;
+        if (height > availHeight) { height = availHeight; width = height * ratio; }
+        sceneFrame = { left: pad + (rect.width - pad * 2 - width) / 2, top: pad + (availHeight - height) / 2, width, height };
+        sceneCanvas = { width: rect.width, height: rect.height };
+        sceneFrameElement.style.left = `${sceneFrame.left}px`;
+        sceneFrameElement.style.top = `${sceneFrame.top}px`;
+        sceneFrameElement.style.width = `${sceneFrame.width}px`;
+        sceneFrameElement.style.height = `${sceneFrame.height}px`;
+        for (const layer of [editorItems, guideLayer, handleLayer]) {
+          layer.style.left = `${sceneFrame.left}px`;
+          layer.style.top = `${sceneFrame.top}px`;
+          layer.style.width = `${sceneFrame.width}px`;
+          layer.style.height = `${sceneFrame.height}px`;
+        }
+        editorEmptyHint.style.left = `${sceneFrame.left + sceneFrame.width / 2}px`;
+        editorEmptyHint.style.top = `${sceneFrame.top + sceneFrame.height / 2}px`;
+        view.setSize(sceneFrame.width, sceneFrame.height);
+      }
+      function canvasPoint(clientX, clientY) {
+        const rect = editorCanvas.getBoundingClientRect();
+        return { x: clientX - rect.left - sceneFrame.left, y: clientY - rect.top - sceneFrame.top };
+      }
+      function clientToNormalized(clientX, clientY) {
+        const p = canvasPoint(clientX, clientY);
+        return view.toNormalized(p.x, p.y);
+      }
+      const editorEmptyHint = document.getElementById('layout-empty-hint');
+      const sceneFrameElement = document.getElementById('layout-scene-frame');
+      const editorAssets = REGISTRY['layout-assets'].LAYOUT_ASSETS;
+      const editorAssetById = new Map(editorAssets.map((asset) => [asset.id, asset]));
+      // Task E2c: the shelf is DATA-DRIVEN over the catalog kinds (ordered
+      // [kind, label] pairs from layout-assets) — directional furniture and
+      // single-image env props flow through the same tile builder.
+      const editorKindLabels = new Map(REGISTRY['layout-assets'].LAYOUT_KINDS);
+      // Task E3d/E4: draftWidths are SCENE-REFERENCE pixels owned by the
+      // shared catalog (the runtime compiler derives furniture footprints
+      // from the SAME numbers — the page keeps no local copy).
+      const draftWidths = REGISTRY['layout-assets'].DRAFT_WIDTHS;
+      // Task E3d (root cause 2): draftWidths are SCENE-REFERENCE pixels (the
+      // 1280-wide logical scene), NOT screen pixels — a desk is 180 scene px
+      // wide whatever the window. Every node box derives through this helper
+      // from the LIVE scene frame, so the composition only refits when the
+      // window changes and never recomposes (node width / frame width stays
+      // constant; the real-shell probe asserts 180/1280 at three windows).
+      function sceneWidthPx(referencePx) {
+        return referencePx * (sceneFrame.width / layout.scene().referenceWidth);
+      }
+      // Task E3d (root cause 3): contentBbox assets (the flat pilot art)
+      // declare the opaque-art bounds normalized inside their PNG. The node
+      // becomes a VIEWPORT for the art: the img is enlarged and shifted so
+      // the bbox lands exactly on the node box and the node height follows
+      // the bbox aspect — the large transparent margins disappear from the
+      // canvas AND from the corner-scale handles (which track the node box).
+      function applyItemGeometry(node, draft) {
+        const asset = editorAssetById.get(draft.asset);
+        const boxW = sceneWidthPx(draftWidths[draft.kind] || 100) * draft.scale;
+        node.style.width = `${boxW}px`;
+        const image = node.querySelector('img');
+        if (!asset || !asset.contentBbox || !image) return;
+        const bbox = asset.contentBbox;
+        const sync = () => {
+          const natW = image.naturalWidth;
+          const natH = image.naturalHeight;
+          if (!natW || !natH) return;
+          const artScale = boxW / (bbox.w * natW);
+          image.style.position = 'absolute';
+          image.style.left = `${-bbox.x * natW * artScale}px`;
+          image.style.top = `${-bbox.y * natH * artScale}px`;
+          image.style.width = `${natW * artScale}px`;
+          node.style.height = `${bbox.h * natH * artScale}px`;
+        };
+        if (image.complete && image.naturalWidth > 0) sync();
+        else image.addEventListener('load', sync, { once: true });
+      }
+      const layerGroupsRoot = document.getElementById('layout-layer-groups');
+
+      for (const [kind, kindLabel] of editorKindLabels) {
+        const group = document.createElement('section');
+        group.className = 'layout-asset-group';
+        const heading = document.createElement('h3');
+        heading.textContent = kindLabel;
+        group.appendChild(heading);
+        const row = document.createElement('div');
+        row.className = 'layout-asset-row';
+        for (const asset of editorAssets.filter((entry) => entry.kind === kind)) {
+          const tile = document.createElement('button');
+          tile.type = 'button';
+          tile.className = 'layout-asset-tile';
+          tile.draggable = true;
+          tile.title = `${asset.label} · ${asset.directionLabel}`;
+          tile.dataset.assetId = asset.id;
+          const image = document.createElement('img');
+          image.src = asset.src;
+          image.alt = '';
+          image.draggable = false;
+          const caption = document.createElement('span');
+          caption.textContent = asset.directionLabel;
+          tile.append(image, caption);
+          tile.addEventListener('dragstart', (event) => {
+            event.dataTransfer.effectAllowed = 'copy';
+            event.dataTransfer.setData('application/x-office-layout-asset', asset.id);
+          });
+          tile.addEventListener('click', () => addEditorAsset(asset, 0.5, 0.5));
+          row.appendChild(tile);
+        }
+        group.appendChild(row);
+        editorShelf.appendChild(group);
+      }
+
+      function addEditorAsset(asset, x, y) {
+        editor.add({ kind: asset.kind, asset: asset.id, direction: asset.direction, x, y });
+        renderEditorDraft();
+      }
+
+      editorCanvas.addEventListener('dragover', (event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+      });
+      // Task E2e: trackpad-first view controls — plain wheel/trackpad scroll
+      // (no ctrl/meta, macOS two-finger swipe) PANS the canvas and the content
+      // follows the fingers; ctrl/cmd + wheel (pinch gesture) ZOOMS anchored
+      // at the pointer. The default page scroll is always suppressed.
+      editorCanvas.addEventListener('wheel', (event) => {
+        event.preventDefault();
+        if (event.ctrlKey || event.metaKey) {
+          const point = canvasPoint(event.clientX, event.clientY);
+          view.zoomAt(point.x, point.y, event.deltaY < 0 ? 1.15 : 1 / 1.15);
+        } else {
+          view.panBy(event.deltaX, event.deltaY);
+        }
+        applyView();
+        positionHandles();
+      }, { passive: false });
+
+      editorCanvas.addEventListener('drop', (event) => {
+        event.preventDefault();
+        const asset = editorAssetById.get(event.dataTransfer.getData('application/x-office-layout-asset'));
+        if (!asset) return;
+        // Task E2b: the landing point converts through the VIEW transform.
+        // Task E3b-R2: drops outside the scene frame clamp to the edge AND
+        // say so — silent edge-snapping was the invisible-boundary trap.
+        const normalized = clientToNormalized(event.clientX, event.clientY);
+        addEditorAsset(asset, normalized.x, normalized.y);
+        if (normalized.x < 0 || normalized.x > 1 || normalized.y < 0 || normalized.y > 1) {
+          setEditorStatus('已放到场景边界内（灰色区域才是可摆放范围）');
+        }
+      });
+
+      function renderEditorDraft() {
+        const allItems = editor.toJSON().items;
+        // Task E2c: hidden items stay in the draft and the layers panel but
+        // never render, so canvas clicks/marquee can never pick them.
+        const draftItems = allItems.filter((item) => !item.hidden);
+        const selection = editor.selection();
+        const selectedIds = new Set(selection.ids);
+        const primaryId = selection.primaryId;
+        editorEmptyHint.hidden = allItems.length > 0;
+        editorItems.replaceChildren(...draftItems.map((draft) => {
+          const asset = editorAssetById.get(draft.asset);
+          const node = document.createElement('div');
+          const isSelected = selectedIds.has(draft.id);
+          node.className = `layout-draft-item layout-draft-${draft.kind}${draft.locked ? ' locked' : ''}${isSelected ? (draft.id === primaryId ? ' selected' : ' co-selected') : ''}`;
+          node.dataset.draftId = draft.id;
+          // Task E2e: PAINT ORDER = numeric layer ascending — the layer number
+          // is DEPTH (back → front, larger in front); equal layers keep the
+          // draft array order (later DOM nodes paint on top). Exported data
+          // semantics are unchanged: layer stays a plain draft number.
+          node.style.zIndex = String(Math.round(draft.layer));
+          node.style.left = `${draft.position.x * 100}%`;
+          node.style.top = `${draft.position.y * 100}%`;
+          node.title = asset ? `${asset.label} · ${asset.directionLabel}` : draft.asset;
+          const image = document.createElement('img');
+          image.src = asset ? asset.src : '';
+          image.alt = node.title;
+          image.draggable = false;
+          node.appendChild(image);
+          // Task E3d: the node box is SCENE-RELATIVE (and, for contentBbox
+          // assets, a viewport for the opaque art) — one helper keeps render,
+          // the scale gesture and resize refits consistent.
+          applyItemGeometry(node, draft);
+          node.addEventListener('pointerdown', (event) => {
+            event.preventDefault();
+            if (event.shiftKey) {
+              editor.toggleSelection(draft.id);
+              renderEditorDraft();
+              return;
+            }
+            // Task E2a: pressing a member of a LIVE multi-selection keeps the
+            // whole selection for the drag; a click that never moves collapses
+            // to that single item on pointerup.
+            const multiBefore = selectedIds.size > 1;
+            const pressWasSelected = isSelected;
+            if (pressWasSelected && multiBefore) editor.selectKeeping(draft.id);
+            else editor.select(draft.id);
+            try { node.setPointerCapture(event.pointerId); } catch { /* pointer already gone */ }
+            const start = { x: event.clientX, y: event.clientY };
+            const canvasRect = editorCanvas.getBoundingClientRect();
+            const scene = layout.scene();
+            // Task E2b: the view transform scales client deltas — convert
+            // through the live view scale, then apply the grid (when enabled)
+            // and smart guides for the duration of the drag only.
+            const clientToSceneX = scene.referenceWidth / (sceneFrame.width * view.get().scale);
+            const clientToSceneY = scene.referenceHeight / (sceneFrame.height * view.get().scale);
+            const guideExtents = {};
+            for (const item of editor.toJSON().items) {
+              const node2 = editorItems.querySelector(`[data-draft-id="${item.id}"]`);
+              if (node2) guideExtents[item.id] = { x: node2.offsetWidth / 2 / sceneFrame.width, y: node2.offsetHeight / 2 / sceneFrame.height };
+            }
+            let firstMove = true;
+            let dragged = false;
+            const groupId = draft.groupId;
+            const move = (moveEvent) => {
+              const dx = (moveEvent.clientX - start.x) * clientToSceneX;
+              const dy = (moveEvent.clientY - start.y) * clientToSceneY;
+              const moveOptions = { recordHistory: firstMove };
+              if (gridSnapEnabled) moveOptions.grid = 0.005;
+              let movedSet = null;
+              if (multiBefore && editor.selection().ids.length > 1) {
+                movedSet = editor.moveSelection(dx, dy, { ...moveOptions, guides: true, guideThreshold: 4 / sceneFrame.width, guideThresholdY: 4 / sceneFrame.height, extents: guideExtents }); // expands to whole groups
+              } else if (groupId && editor.isGroupMoveRigid(groupId)) {
+                // Task E3b: only RIGID (整组移动-locked) groups drag as one;
+                // loose groups (the default) move the pressed member alone.
+                movedSet = editor.moveGroup(groupId, dx, dy, { ...moveOptions, guides: true, guideThreshold: 4 / sceneFrame.width, guideThresholdY: 4 / sceneFrame.height, extents: guideExtents });
+              } else {
+                const moved = editor.move(draft.id, dx, dy, { ...moveOptions, guides: true, guideThreshold: 4 / sceneFrame.width, guideThresholdY: 4 / sceneFrame.height, extents: guideExtents });
+                movedSet = moved ? [moved] : null;
+              }
+              if (movedSet) dragged = true;
+              firstMove = false;
+              start.x = moveEvent.clientX;
+              start.y = moveEvent.clientY;
+              renderGuides(editor.dragGuides());
+              if (movedSet) {
+                const movedById = new Map(movedSet.map((item) => [item.id, item.position]));
+                for (const member of editorItems.children) {
+                  const position = movedById.get(member.dataset.draftId);
+                  if (position) {
+                    member.style.left = `${position.x * 100}%`;
+                    member.style.top = `${position.y * 100}%`;
+                  }
+                }
+                if (movedById.has(editor.selection().primaryId)) positionHandles();
+              }
+            };
+            node.addEventListener('pointermove', move);
+            node.addEventListener('pointerup', () => {
+              node.removeEventListener('pointermove', move);
+              renderGuides(null);
+              if (multiBefore && pressWasSelected && !dragged) editor.select(draft.id);
+              renderEditorDraft();
+            }, { once: true });
+            node.classList.add('selected');
+          });
+          return node;
+        }));
+        // Task E2a-R1: corner scale handles live in the TOP overlay layer —
+        // as item children, overlapping later-drawn items intercepted their
+        // clicks (17/24 items had at least one blocked handle). Only the
+        // primary item of a SINGLE selection gets handles; multi-select never
+        // scales (baked art contract).
+        positionHandles();
+        // Task E2c: every draft/selection change re-syncs the layers panel —
+        // canvas selection drives panel highlight AND panel actions redraw
+        // the canvas, both directions through this single render path.
+        renderLayerPanel();
+        syncEditorControls();
+      }
+
+      function positionHandles() {
+        const selection = editor.selection();
+        handleLayer.replaceChildren();
+        if (selection.ids.length !== 1) return;
+        const primaryId = selection.primaryId;
+        const node = editorItems.querySelector(`[data-draft-id="${primaryId}"]`);
+        if (!node) return;
+        // Task E2c: locked items get no scale handles — scaling is exactly
+        // what the lock freezes; the item stays selectable for panel locate.
+        const primaryItem = editor.toJSON().items.find((item) => item.id === primaryId);
+        if (primaryItem && primaryItem.locked) return;
+        // Task E2b: offset-based (PRE-transform) positioning — the handle
+        // layer carries the same view transform as the items, so the handles
+        // track the box under any zoom/pan. offset* values are layout values
+        // and stay correct through window resizes.
+        const left = node.offsetLeft;   // CSS left/top is the node CENTER
+        const top = node.offsetTop;     // (translate(-50%,-50%) centers the box)
+        const halfW = node.offsetWidth / 2;
+        const halfH = node.offsetHeight / 2;
+        for (const corner of ['nw', 'ne', 'sw', 'se']) {
+          const handle = document.createElement('div');
+          handle.className = `layout-scale-handle handle-${corner}`;
+          handle.dataset.corner = corner;
+          handle.dataset.draftId = primaryId;
+          // Task E2e: discoverability — a hover hint plus the resize cursor
+          handle.title = '拖动等比缩放（0.2–3）';
+          handle.style.left = `${left + (corner.includes('e') ? halfW : -halfW)}px`;
+          handle.style.top = `${top + (corner.includes('s') ? halfH : -halfH)}px`;
+          wireScaleHandle(handle, primaryId, corner);
+          handleLayer.appendChild(handle);
+        }
+      }
+
+      // Task E2a: corner-handle scale gesture. The OPPOSITE corner stays fixed
+      // (computed once from the rendered box), the pointer distance drives a
+      // uniform ratio, and the editor clamps to [0.2, 3] plus the canvas
+      // bounds via the caller-supplied normalized half-extent. One undo unit
+      // per gesture (recordHistory on the first move).
+      function wireScaleHandle(handle, draftId, corner) {
+        handle.addEventListener('pointerdown', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          editor.select(draftId);
+          try { handle.setPointerCapture(event.pointerId); } catch { /* pointer already gone */ }
+          const canvasRect = editorCanvas.getBoundingClientRect();
+          const node = editorItems.querySelector(`[data-draft-id="${draftId}"]`);
+          if (!node) return;
+          const draft = editor.toJSON().items.find((item) => item.id === draftId);
+          if (!draft) return;
+          const scene = layout.scene();
+          // Task E2b: fixedCorner + extent are NORMALIZED [0,1] and computed
+          // from PRE-transform box geometry (offsets), so corner scaling is
+          // correct under any view zoom/pan.
+          const left = node.offsetLeft;  // CSS left/top = the node CENTER
+          const top = node.offsetTop;
+          const width = node.offsetWidth;
+          const height = node.offsetHeight;
+          const boxCorners = {
+            nw: { x: left - width / 2, y: top - height / 2 },
+            ne: { x: left + width / 2, y: top - height / 2 },
+            sw: { x: left - width / 2, y: top + height / 2 },
+            se: { x: left + width / 2, y: top + height / 2 },
+          };
+          // fixedCorner must be NORMALIZED [0,1] (the editor clamps/moves the
+          // center against it); the on-screen fixed point converts through the
+          // view so the gesture is correct under zoom/pan.
+          const fixedCorner = {
+            x: boxCorners[{ nw: 'se', ne: 'sw', sw: 'ne', se: 'nw' }[corner]].x / sceneFrame.width,
+            y: boxCorners[{ nw: 'se', ne: 'sw', sw: 'ne', se: 'nw' }[corner]].y / sceneFrame.height,
+          };
+          const fixedCornerCanvas = view.toCanvas(fixedCorner.x, fixedCorner.y);
+          const fixedClientPx = { x: canvasRect.left + sceneFrame.left + fixedCornerCanvas.x, y: canvasRect.top + sceneFrame.top + fixedCornerCanvas.y };
+          const startDist = Math.max(1, Math.hypot(event.clientX - fixedClientPx.x, event.clientY - fixedClientPx.y));
+          const halfExtentAtScale1 = {
+            x: width / 2 / sceneFrame.width / draft.scale,
+            y: height / 2 / sceneFrame.height / draft.scale,
+          };
+          let firstMove = true;
+          const move = (moveEvent) => {
+            const dist = Math.hypot(moveEvent.clientX - fixedClientPx.x, moveEvent.clientY - fixedClientPx.y);
+            const tentative = draft.scale * (dist / startDist);
+            const scaled = editor.scaleItem(draft.id, tentative, {
+              fixedCorner,
+              extent: { x: halfExtentAtScale1.x * tentative, y: halfExtentAtScale1.y * tentative },
+              clamp: true,
+              recordHistory: firstMove,
+            });
+            firstMove = false;
+            if (scaled) {
+              node.style.left = `${scaled.position.x * 100}%`;
+              node.style.top = `${scaled.position.y * 100}%`;
+              // Task E3d: same scene-relative box (+contentBbox viewport) as
+              // the render path — the gesture can never fall back to a
+              // different size model than the rest of the editor.
+              applyItemGeometry(node, { kind: draft.kind, asset: draft.asset, scale: scaled.scale });
+              positionHandles();
+            }
+          };
+          // Task E3b fix: the gesture listeners live on WINDOW, not on the
+          // handle element. The old handle-bound version silently broke
+          // whenever setPointerCapture failed (synthetic pointer ids, some
+          // trackpad press-drag paths) or when positionHandles() rebuilt the
+          // handles mid-drag — the pointermove listener died with the old
+          // element and the drag froze on the first frame.
+          const finish = () => {
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', finish);
+            window.removeEventListener('pointercancel', finish);
+            renderEditorDraft();
+          };
+          window.addEventListener('pointermove', move);
+          window.addEventListener('pointerup', finish);
+          window.addEventListener('pointercancel', finish);
+        });
+      }
+
+      // Task E2c — layers panel: one row per draft item, grouped by groupId
+      // ('未分组' for null). Display order is REVERSED array order (the
+      // frontmost item paints last → renders at the TOP, the layers-panel
+      // convention); each row carries its CURRENT items-array index so the
+      // drop handler can feed editor.moveItemToIndex verbatim.
+      function layerDisplayName(item) {
+        if (item.name) return item.name;
+        const asset = editorAssetById.get(item.asset);
+        return asset ? asset.label : item.asset;
+      }
+
+      function renderLayerPanel() {
+        const draft = editor.toJSON();
+        const selection = editor.selection();
+        const selectedSet = new Set(selection.ids);
+        const primaryId = selection.primaryId;
+        const ordered = draft.items.map((item, index) => ({ item, index })).reverse();
+        const groups = [];
+        const byGroup = new Map();
+        for (const entry of ordered) {
+          const key = entry.item.groupId || '__ungrouped__';
+          if (!byGroup.has(key)) {
+            // Task E2e: the group display name comes from groupNames (面板组
+            // 重命名), falling back to the raw group id.
+            const label = key === '__ungrouped__'
+              ? '未分组'
+              : (draft.groupNames && draft.groupNames[key]) || `组 ${key}`;
+            const section = { id: key, label, rows: [] };
+            byGroup.set(key, section);
+            groups.push(section);
+          }
+          byGroup.get(key).rows.push(entry);
+        }
+        layerGroupsRoot.replaceChildren(...groups.map((group) => {
+          const section = document.createElement('section');
+          section.className = 'layer-group';
+          section.dataset.groupId = group.id === '__ungrouped__' ? '' : group.id;
+          const head = document.createElement('div');
+          head.className = 'layer-group-head';
+          const heading = document.createElement('h4');
+          const nameSpan = document.createElement('span');
+          nameSpan.className = 'layer-group-name';
+          nameSpan.textContent = group.label;
+          nameSpan.title = group.id === '__ungrouped__' ? '未分组' : `${group.id}（双击重命名组）`;
+          if (group.id !== '__ungrouped__') {
+            nameSpan.addEventListener('dblclick', (event) => {
+              event.stopPropagation();
+              startLayerGroupRename(head, group.id, group.label);
+            });
+          }
+          heading.appendChild(nameSpan);
+          heading.appendChild(document.createTextNode(`（${group.rows.length}）`));
+          head.appendChild(heading);
+          if (group.id !== '__ungrouped__') {
+            const groupId = group.id;
+            // Task E2e: the group header hosts the 编组/解组/重命名 entries —
+            // 加入选中 pulls the CURRENT canvas selection into this group,
+            // 解组 clears the whole group, 重命名 renames via dblclick.
+            // Task E3b: per-group "move as one" lock — ON: dragging any
+            // member drags the whole group; OFF (default): members move alone.
+            const rigidButton = document.createElement('button');
+            rigidButton.type = 'button';
+            rigidButton.className = 'layer-toggle layer-group-rigid';
+            rigidButton.textContent = '整组移动';
+            rigidButton.setAttribute('aria-pressed', String(editor.isGroupMoveRigid(groupId)));
+            rigidButton.title = '整组移动锁：开启后拖动组内任一成员 = 整组一起移动';
+            rigidButton.addEventListener('click', (event) => {
+              event.stopPropagation();
+              editor.setGroupMoveRigid(groupId, !editor.isGroupMoveRigid(groupId));
+              renderEditorDraft();
+            });
+            const addButton = document.createElement('button');
+            addButton.type = 'button';
+            addButton.className = 'layer-toggle layer-group-add';
+            addButton.textContent = '加入选中';
+            addButton.title = '把画布当前选中项加入该组';
+            addButton.disabled = selection.ids.length === 0;
+            addButton.addEventListener('click', (event) => {
+              event.stopPropagation();
+              editor.addSelectionToGroup(groupId);
+              renderEditorDraft();
+            });
+            const ungroupButton = document.createElement('button');
+            ungroupButton.type = 'button';
+            ungroupButton.className = 'layer-toggle layer-group-ungroup';
+            ungroupButton.textContent = '解组';
+            ungroupButton.title = '清除该组全部成员的组归属（选中不变）';
+            ungroupButton.addEventListener('click', (event) => {
+              event.stopPropagation();
+              editor.ungroupGroup(groupId);
+              renderEditorDraft();
+            });
+            head.append(rigidButton, addButton, ungroupButton);
+          }
+          section.appendChild(head);
+          for (const { item, index } of group.rows) {
+            section.appendChild(buildLayerRow(item, index, selectedSet, primaryId));
+          }
+          return section;
+        }));
+      }
+
+      // Task E2e: inline group rename — same Enter commits / Esc cancels
+      // contract as item rename; renameGroup writes the display-only name.
+      function startLayerGroupRename(head, groupId, currentLabel) {
+        const nameSpan = head.querySelector('.layer-group-name');
+        if (!nameSpan || head.querySelector('.layer-rename-input')) return;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'layer-rename-input';
+        input.value = currentLabel;
+        input.setAttribute('aria-label', '重命名素材组');
+        let done = false;
+        const commit = () => {
+          if (done) return;
+          done = true;
+          const value = input.value.trim();
+          editor.renameGroup(groupId, value.length > 0 ? value : null);
+          renderEditorDraft();
+        };
+        const cancel = () => {
+          if (done) return;
+          done = true;
+          renderLayerPanel();
+        };
+        input.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            commit();
+          } else if (event.key === 'Escape') {
+            event.preventDefault();
+            cancel();
+          }
+        });
+        input.addEventListener('blur', cancel);
+        nameSpan.replaceWith(input);
+        input.focus();
+        input.select();
+      }
+
+      function buildLayerRow(item, index, selectedSet, primaryId) {
+        const asset = editorAssetById.get(item.asset);
+        const row = document.createElement('div');
+        row.className = 'layer-row'
+          + (item.hidden ? ' is-hidden' : '')
+          + (item.locked ? ' is-locked' : '')
+          + (selectedSet.has(item.id) ? (item.id === primaryId ? ' selected' : ' co-selected') : '');
+        row.dataset.draftId = item.id;
+        row.dataset.draftIndex = String(index);
+        row.draggable = true;
+        // Task E3d (root cause 3): contentBbox assets crop their transparent
+        // margins in the panel too — the wrapper is the same 28×24 viewport
+        // as the bare `.layer-thumb` img and the inner img is enlarged and
+        // shifted so the opaque art fills it. Plain rows keep the bare img
+        // (`img.layer-thumb` is part of the panel test surface).
+        let thumb;
+        if (asset && asset.contentBbox) {
+          thumb = document.createElement('span');
+          thumb.className = 'layer-thumb thumb-cropped';
+          const art = document.createElement('img');
+          art.className = 'layer-thumb layer-thumb-art';
+          art.src = asset.src;
+          art.alt = '';
+          art.draggable = false;
+          thumb.appendChild(art);
+          const syncThumb = () => {
+            const natW = art.naturalWidth;
+            const natH = art.naturalHeight;
+            if (!natW || !natH) return;
+            const boxW = thumb.clientWidth || 28; // matches .layer-thumb CSS
+            const boxH = thumb.clientHeight || 24;
+            const artScale = Math.min(boxW / (asset.contentBbox.w * natW), boxH / (asset.contentBbox.h * natH));
+            art.style.width = `${natW * artScale}px`;
+            art.style.height = `${natH * artScale}px`;
+            art.style.left = `${boxW / 2 - (asset.contentBbox.x + asset.contentBbox.w / 2) * natW * artScale}px`;
+            art.style.top = `${boxH / 2 - (asset.contentBbox.y + asset.contentBbox.h / 2) * natH * artScale}px`;
+          };
+          if (art.complete && art.naturalWidth > 0) syncThumb();
+          else art.addEventListener('load', syncThumb, { once: true });
+        } else {
+          thumb = document.createElement('img');
+          thumb.className = 'layer-thumb';
+          thumb.src = asset ? asset.src : '';
+          thumb.alt = '';
+          thumb.draggable = false;
+        }
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'layer-name';
+        nameSpan.textContent = layerDisplayName(item);
+        nameSpan.title = `${item.id}（双击重命名）`;
+        nameSpan.addEventListener('dblclick', (event) => {
+          event.stopPropagation();
+          startLayerRename(row, item);
+        });
+        const meta = document.createElement('span');
+        meta.className = 'layer-meta';
+        meta.textContent = asset ? `${asset.label} · ${asset.directionLabel}` : item.asset;
+        const visibilityButton = document.createElement('button');
+        visibilityButton.type = 'button';
+        visibilityButton.className = 'layer-toggle layer-visibility';
+        visibilityButton.textContent = item.hidden ? '显示' : '隐藏';
+        visibilityButton.setAttribute('aria-pressed', String(!item.hidden));
+        visibilityButton.title = item.hidden ? '显示该条目' : '隐藏该条目（画布不渲染，仍留在草稿）';
+        visibilityButton.addEventListener('click', (event) => {
+          event.stopPropagation();
+          editor.setItemHidden(item.id, !item.hidden);
+          renderEditorDraft();
+        });
+        const lockButton = document.createElement('button');
+        lockButton.type = 'button';
+        lockButton.className = 'layer-toggle layer-lock';
+        lockButton.textContent = item.locked ? '解锁' : '锁定';
+        lockButton.setAttribute('aria-pressed', String(item.locked));
+        lockButton.title = item.locked ? '解锁（恢复拖动/缩放/删除/对齐）' : '锁定（禁止拖动/缩放/删除/对齐/微移）';
+        lockButton.addEventListener('click', (event) => {
+          event.stopPropagation();
+          editor.setItemLocked(item.id, !item.locked);
+          renderEditorDraft();
+        });
+        row.append(thumb, nameSpan, meta, visibilityButton, lockButton);
+        row.addEventListener('click', (event) => {
+          if (event.target.closest('button') || event.target.closest('input')) return;
+          // Task E2c: clicking a row selects on the canvas — the ONE way to
+          // reach hidden items, which the canvas can never hit-test.
+          if (event.shiftKey) editor.toggleSelection(item.id);
+          else editor.select(item.id);
+          renderEditorDraft();
+        });
+        row.addEventListener('dragstart', (event) => {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('application/x-office-layer-row', item.id);
+        });
+        row.addEventListener('dragover', (event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+        });
+        row.addEventListener('drop', (event) => {
+          event.preventDefault();
+          const draggedId = event.dataTransfer.getData('application/x-office-layer-row');
+          if (!draggedId) return;
+          // The row carries its CURRENT items-array index; the editor applies
+          // the removal shift and rejects out-of-range targets itself.
+          editor.moveItemToIndex(draggedId, Number(row.dataset.draftIndex));
+          renderEditorDraft();
+        });
+        return row;
+      }
+
+      // Task E2c: inline rename — Enter commits, Escape cancels, blur cancels
+      // (Enter is the documented commit gesture; an empty input clears the
+      // custom name back to null). renameItem rejects blank names, so an
+      // invalid value can never reach the draft.
+      function startLayerRename(row, item) {
+        const nameSpan = row.querySelector('.layer-name');
+        if (!nameSpan || row.querySelector('.layer-rename-input')) return;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'layer-rename-input';
+        input.value = item.name || '';
+        input.setAttribute('aria-label', '重命名图层条目');
+        let done = false;
+        const commit = () => {
+          if (done) return;
+          done = true;
+          const value = input.value.trim();
+          editor.renameItem(item.id, value.length > 0 ? value : null);
+          renderEditorDraft();
+        };
+        const cancel = () => {
+          if (done) return;
+          done = true;
+          renderLayerPanel();
+        };
+        input.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            commit();
+          } else if (event.key === 'Escape') {
+            event.preventDefault();
+            cancel();
+          }
+        });
+        input.addEventListener('blur', cancel);
+        nameSpan.replaceWith(input);
+        input.focus();
+        input.select();
+      }
+
+      // Task E2a: marquee box selection on empty canvas — plain drag replaces
+      // the selection, shift+drag adds; a bare click clears.
+      editorCanvas.addEventListener('pointerdown', (event) => {
+        // Task E2b: space-drag or middle-button pans the canvas view (the
+        // pointer never changes draft coordinates)
+        if (event.button === 1 || (spacePanHeld && event.button === 0)) {
+          event.preventDefault();
+          const last = { x: event.clientX, y: event.clientY };
+          const move = (moveEvent) => {
+            view.panBy(moveEvent.clientX - last.x, moveEvent.clientY - last.y);
+            last.x = moveEvent.clientX;
+            last.y = moveEvent.clientY;
+            applyView();
+          };
+          const finish = () => {
+            editorCanvas.removeEventListener('pointermove', move);
+            renderGuides(null);
+          };
+          try { editorCanvas.setPointerCapture(event.pointerId); } catch { /* pointer already gone */ }
+          editorCanvas.addEventListener('pointermove', move);
+          editorCanvas.addEventListener('pointerup', finish, { once: true });
+          return;
+        }
+        if (event.button !== 0) return;
+        if (event.target.closest('.layout-draft-item') || event.target.closest('.layout-scale-handle')) return;
+        event.preventDefault();
+        const canvasRect = { left: sceneFrame.left, top: sceneFrame.top };
+        const marquee = document.createElement('div');
+        marquee.className = 'layout-marquee';
+        editorCanvas.appendChild(marquee);
+        const start = { x: event.clientX, y: event.clientY };
+        const baseSelection = event.shiftKey ? editor.selection().ids : [];
+        const move = (moveEvent) => {
+          marquee.style.left = `${Math.min(start.x, moveEvent.clientX) - canvasRect.left}px`;
+          marquee.style.top = `${Math.min(start.y, moveEvent.clientY) - canvasRect.top}px`;
+          marquee.style.width = `${Math.abs(moveEvent.clientX - start.x)}px`;
+          marquee.style.height = `${Math.abs(moveEvent.clientY - start.y)}px`;
+        };
+        const finish = (moveEvent) => {
+          editorCanvas.removeEventListener('pointermove', move);
+          marquee.remove();
+          const rect = {
+            left: Math.min(start.x, moveEvent.clientX) - canvasRect.left,
+            right: Math.max(start.x, moveEvent.clientX) - canvasRect.left,
+            top: Math.min(start.y, moveEvent.clientY) - canvasRect.top,
+            bottom: Math.max(start.y, moveEvent.clientY) - canvasRect.top,
+          };
+          if (rect.right - rect.left < 4 && rect.bottom - rect.top < 4) {
+            editor.clearSelection();
+            renderEditorDraft();
+            return;
+          }
+          const picked = editor.toJSON().items.filter((item) => {
+            const node = editorItems.querySelector(`[data-draft-id="${item.id}"]`);
+            if (!node) return false;
+            const itemRect = node.getBoundingClientRect();
+            const cx = itemRect.left + itemRect.width / 2 - canvasRect.left;
+            const cy = itemRect.top + itemRect.height / 2 - canvasRect.top;
+            return cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom;
+          }).map((item) => item.id);
+          editor.setSelection([...new Set([...baseSelection, ...picked])]);
+          renderEditorDraft();
+        };
+        try { editorCanvas.setPointerCapture(event.pointerId); } catch { /* pointer already gone */ }
+        editorCanvas.addEventListener('pointermove', move);
+        editorCanvas.addEventListener('pointerup', finish, { once: true });
+      });
+      function setEditorVisible(visible) {
+        editorRoot.hidden = !visible;
+        stage.classList.toggle('layout-editing', visible);
+        if (visible) {
+          // Task E2b-R1/E3b: re-baseline the view to the LIVE SCENE FRAME
+          // every time the editor opens (the canvas box varies with the window).
+          updateSceneFrame();
+          applyView();
+          renderEditorDraft();
+          positionHandles();
+        }
+      }
+      document.getElementById('editor-undo').addEventListener('click', () => { editor.undo(); renderEditorDraft(); });
+      document.getElementById('editor-redo').addEventListener('click', () => { editor.redo(); renderEditorDraft(); });
+      // Task E2c: delete skips locked members (they survive and stay
+      // selected); an all-locked selection explains itself via the status
+      // line instead of failing silently.
+      function deleteSelectionWithStatus() {
+        const before = editor.selection().ids.length;
+        const removed = editor.removeSelection();
+        if (before > 0 && removed.length === 0) setEditorStatus('锁定的条目不可删除，请先解锁');
+        else setEditorStatus('');
+        renderEditorDraft();
+      }
+      document.getElementById('editor-delete').addEventListener('click', () => {
+        deleteSelectionWithStatus();
+      });
+      document.getElementById('editor-select-all').addEventListener('click', () => { editor.selectAll(); renderEditorDraft(); });
+      document.getElementById('editor-clear-selection').addEventListener('click', () => { editor.clearSelection(); renderEditorDraft(); });
+      document.getElementById('editor-save').addEventListener('click', () => {
+        const blob = new Blob([JSON.stringify(editor.toJSON(), null, 2)], { type: 'application/json' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'office-layout-draft.json';
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(link.href), 0);
+      });
+
+      // Task 2 round-trip controls: schema-v1 import, per-item scale and
+      // one-step layer ordering. All state lives in the pure editor; this
+      // wiring only forwards intent and re-renders from toJSON().
+      const editorImportInput = document.getElementById('editor-import-input');
+      const editorScaleInput = document.getElementById('editor-scale');
+      const editorForwardButton = document.getElementById('editor-forward');
+      const editorBackwardButton = document.getElementById('editor-backward');
+      const editorStatus = document.getElementById('editor-status');
+      const editorSaveProduction = document.getElementById('editor-save-production');
+      const editorRestoreProduction = document.getElementById('editor-restore-production');
+      const editorGridSnap = document.getElementById('editor-grid-snap');
+      const editorFitView = document.getElementById('editor-fit-view');
+      const editorResetView = document.getElementById('editor-reset-view');
+      const inspectorX = document.getElementById('inspector-x');
+      const inspectorY = document.getElementById('inspector-y');
+      const inspectorLayer = document.getElementById('inspector-layer');
+      const inspectorScale = document.getElementById('inspector-scale');
+      const inspectorSizePx = document.getElementById('inspector-size-px');
+      const inspectorDirection = document.getElementById('inspector-direction');
+      const inspectorId = document.getElementById('inspector-id');
+      const inspectorGroup = document.getElementById('inspector-group');
+
+      function setEditorStatus(message) {
+        editorStatus.textContent = message;
+      }
+
+      // Task E2a: the inspector reflects the primary selection and disables
+      // per-item fields during multi-selection (multi-select moves/copies/
+      // deletes/reorders but never scales).
+      function renderGuides(guides) {
+        guideLayer.replaceChildren();
+        if (!guides) return;
+        for (const x of guides.vertical || []) {
+          const line = document.createElement('div');
+          line.className = 'layout-guide-v';
+          line.style.left = `${x * sceneFrame.width}px`;
+          guideLayer.appendChild(line);
+        }
+        for (const y of guides.horizontal || []) {
+          const line = document.createElement('div');
+          line.className = 'layout-guide-h';
+          line.style.top = `${y * sceneFrame.height}px`;
+          guideLayer.appendChild(line);
+        }
+      }
+
+      // Task E2e: read-only pixel size of the primary selection (the rendered
+      // box already includes scale; refreshed on every render and on resize).
+      function updateInspectorSizePx() {
+        const selection = editor.selection();
+        const selected = editor.selected();
+        const multi = selection.ids.length > 1;
+        const node = selected && !multi ? editorItems.querySelector(`[data-draft-id="${selected.id}"]`) : null;
+        inspectorSizePx.textContent = node ? `${node.offsetWidth}×${node.offsetHeight} px` : '';
+      }
+
+      function syncEditorControls() {
+        const selection = editor.selection();
+        const selected = editor.selected();
+        const multi = selection.ids.length > 1;
+        editorScaleInput.value = selected ? String(selected.scale) : '';
+        editorScaleInput.disabled = !selected || multi;
+        editorForwardButton.disabled = !selected;
+        editorBackwardButton.disabled = !selected;
+        // Task E2e: depth/order + group buttons follow the selection; the
+        // same-layer-band reach of each button is documented in its title.
+        // Task E3b: visual depth ops are single-selection (they swap with the
+        // visual neighbour); 解组 stays multi-selection aware.
+        for (const id of ['editor-front', 'editor-back', 'editor-layer-up', 'editor-layer-down']) {
+          document.getElementById(id).disabled = !selected || multi;
+        }
+        document.getElementById('editor-ungroup').disabled = !selected;
+        document.getElementById('editor-group').disabled = selection.ids.length === 0;
+        const canAlign = selection.ids.length >= 2;
+        const canDistribute = selection.ids.length >= 3;
+        for (const id of ['align-left', 'align-right', 'align-top', 'align-bottom', 'align-center-x', 'align-center-y']) {
+          document.getElementById(id).disabled = !canAlign;
+        }
+        for (const id of ['distribute-x', 'distribute-y']) {
+          document.getElementById(id).disabled = !canDistribute;
+        }
+        inspectorX.value = selected ? selected.position.x.toFixed(3) : '';
+        inspectorY.value = selected ? selected.position.y.toFixed(3) : '';
+        inspectorLayer.value = selected ? String(selected.layer) : '';
+        inspectorX.disabled = !selected || multi;
+        inspectorY.disabled = !selected || multi;
+        inspectorLayer.disabled = !selected || multi;
+        // Task E2e: the inspector size field — same setScale API as the
+        // toolbar; disabled for multi-selection AND locked items (E2c froze
+        // scaling); a hidden item selected via the panel stays editable
+        // (uniform explicit-selection semantics).
+        inspectorScale.value = selected ? String(selected.scale) : '';
+        inspectorScale.disabled = !selected || multi || selected.locked;
+        updateInspectorSizePx();
+        inspectorId.textContent = selected ? `id ${selected.id}` : '';
+        inspectorGroup.textContent = selected ? `组 ${selected.groupId ?? '无'}${multi ? ` · 共 ${selection.ids.length} 项` : ''}` : (multi ? `共 ${selection.ids.length} 项` : '');
+        inspectorDirection.replaceChildren();
+        // Task E2c: direction switching is a DIRECTIONAL-family op —
+        // single-image entries declare direction 'none' verbatim and the
+        // select stays empty + disabled for them.
+        const entry = selected ? editorAssetById.get(selected.asset) : null;
+        const directional = !!(entry && entry.directional);
+        inspectorDirection.disabled = !selected || multi || !directional;
+        if (selected && !multi && directional) {
+          const prefix = selected.asset.slice(0, selected.asset.length - entry.direction.length);
+          for (const candidate of editorAssets.filter((option) => option.kind === selected.kind && option.id.startsWith(prefix))) {
+            const optionEl = document.createElement('option');
+            optionEl.value = candidate.direction;
+            optionEl.textContent = candidate.directionLabel;
+            if (candidate.direction === selected.direction) optionEl.selected = true;
+            inspectorDirection.appendChild(optionEl);
+          }
+        }
+      }
+
+      editorImportInput.addEventListener('change', async () => {
+        const file = editorImportInput.files && editorImportInput.files[0];
+        if (!file) return;
+        editorImportInput.value = '';
+        let draft = null;
+        try {
+          draft = JSON.parse(await file.text());
+        } catch {
+          setEditorStatus('导入失败：文件不是有效的 JSON');
+          return;
+        }
+        const result = editor.load(draft);
+        if (!result.ok) {
+          setEditorStatus(`导入失败：${result.code}，当前草稿保持不变`);
+          return;
+        }
+        setEditorStatus(`已导入 ${result.count} 项草稿`);
+        renderEditorDraft();
+      });
+
+      // Task 8: 保存布局 persists the CURRENT draft as the user-saved
+      // production layout (office-layout.v1.json via the managed protocol
+      // route; the main process stays the single writer). 恢复默认 clears the
+      // saved layout and re-loads the bundled confirmed draft. Both fail
+      // closed with stable status messages; the editor state never changes
+      // unless the operation succeeded.
+      const SAVED_LAYOUT_URL = './office-layout.v1.json';
+      editorSaveProduction.addEventListener('click', async () => {
+        const draft = editor.toJSON();
+        const probe = editor.validateDraftSchema(draft);
+        if (!probe.ok) {
+          setEditorStatus(`保存失败：${probe.code}，当前草稿保持不变`);
+          return;
+        }
+        try {
+          const response = await fetch(SAVED_LAYOUT_URL, {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(draft),
+          });
+          const outcome = await response.json().catch(() => ({ ok: false, code: 'OFFICE_LAYOUT_SAVED_CORRUPT' }));
+          if (!response.ok || !outcome.ok) {
+            setEditorStatus(`保存失败：${outcome.code || 'OFFICE_STATE_WRITE_FAILED'}，当前草稿保持不变`);
+            return;
+          }
+          layoutSource = 'saved';
+          layoutDiagnostic = null;
+          setEditorStatus('已保存为生产布局，下次启动自动恢复');
+        } catch {
+          setEditorStatus('保存失败：OFFICE_STATE_WRITE_FAILED，当前草稿保持不变');
+        }
+      });
+      editorRestoreProduction.addEventListener('click', async () => {
+        try {
+          const response = await fetch(SAVED_LAYOUT_URL, { method: 'DELETE' });
+          if (!response.ok) {
+            setEditorStatus('恢复失败：内置布局不可用，当前草稿保持不变');
+            return;
+          }
+          const restored = editor.load(bundledLayoutAttempt.draft, { recordHistory: false });
+          if (!restored.ok) {
+            setEditorStatus(`恢复失败：${restored.code}，当前草稿保持不变`);
+            return;
+          }
+          layoutSource = 'bundled';
+          layoutDiagnostic = null;
+          setEditorStatus('已恢复内置默认布局');
+          renderEditorDraft();
+        } catch {
+          setEditorStatus('恢复失败：内置布局不可用，当前草稿保持不变');
+        }
+      });
+
+      editorScaleInput.addEventListener('change', () => {
+        const selected = editor.selected();
+        if (!selected) return;
+        const updated = editor.setScale(selected.id, Number(editorScaleInput.value));
+        if (!updated) {
+          setEditorStatus('缩放失败：请输入 0.2–3 之间的数值');
+          return;
+        }
+        setEditorStatus('');
+        renderEditorDraft();
+      });
+
+      // Task E2a inspector: x/y/layer absolute edits and the direction family
+      // dropdown, all fail-closed with stable status messages.
+      inspectorX.addEventListener('change', () => {
+        const selected = editor.selected();
+        if (!selected) return;
+        const updated = editor.moveTo(selected.id, Number(inspectorX.value), selected.position.y);
+        if (!updated) {
+          setEditorStatus('X 坐标无效，当前值保持不变');
+          return;
+        }
+        renderEditorDraft();
+      });
+      // Task E2e: the inspector SIZE field drives the SAME editor.setScale
+      // API as the toolbar input; the px readout updates through the render.
+      inspectorScale.addEventListener('change', () => {
+        const selected = editor.selected();
+        if (!selected) return;
+        const updated = editor.setScale(selected.id, Number(inspectorScale.value));
+        if (!updated) {
+          setEditorStatus('尺寸失败：请输入 0.2–3 之间的数值');
+          return;
+        }
+        setEditorStatus('');
+        renderEditorDraft();
+      });
+      inspectorY.addEventListener('change', () => {
+        const selected = editor.selected();
+        if (!selected) return;
+        const updated = editor.moveTo(selected.id, selected.position.x, Number(inspectorY.value));
+        if (!updated) {
+          setEditorStatus('Y 坐标无效，当前值保持不变');
+          return;
+        }
+        renderEditorDraft();
+      });
+      inspectorLayer.addEventListener('change', () => {
+        const selected = editor.selected();
+        if (!selected) return;
+        const updated = editor.setItemLayer(selected.id, Number(inspectorLayer.value));
+        if (!updated) {
+          setEditorStatus('层级无效：请输入不小于 0 的数值');
+          return;
+        }
+        renderEditorDraft();
+      });
+      inspectorDirection.addEventListener('change', () => {
+        const selected = editor.selected();
+        if (!selected) return;
+        const updated = editor.setItemDirection(selected.id, inspectorDirection.value);
+        if (!updated) {
+          setEditorStatus('方向切换失败：目标方向不存在，当前值保持不变');
+          return;
+        }
+        renderEditorDraft();
+      });
+
+      // Task E2b: align/distribute — one editor call = one undo unit
+      for (const [buttonId, mode] of [['align-left', 'left'], ['align-right', 'right'], ['align-top', 'top'], ['align-bottom', 'bottom'], ['align-center-x', 'centerX'], ['align-center-y', 'centerY']]) {
+        document.getElementById(buttonId).addEventListener('click', () => {
+          editor.alignSelection(mode);
+          renderEditorDraft();
+        });
+      }
+      document.getElementById('distribute-x').addEventListener('click', () => { editor.distributeSelection('x'); renderEditorDraft(); });
+      document.getElementById('distribute-y').addEventListener('click', () => { editor.distributeSelection('y'); renderEditorDraft(); });
+
+      // Task E2b: grid snap toggle (page-local preference, not a draft field)
+      editorGridSnap.addEventListener('click', () => {
+        gridSnapEnabled = !gridSnapEnabled;
+        editorGridSnap.setAttribute('aria-pressed', String(gridSnapEnabled));
+        setEditorStatus(gridSnapEnabled ? '网格吸附已开启（0.005）' : '网格吸附已关闭');
+      });
+
+      // Task E2b: canvas view controls — fit to content, 100% reset
+      editorFitView.addEventListener('click', () => {
+        const items = editor.toJSON().items;
+        if (items.length === 0) { view.reset(); applyView(); positionHandles(); return; }
+        const canvasRect = { left: sceneFrame.left, top: sceneFrame.top, width: sceneFrame.width, height: sceneFrame.height };
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const item of items) {
+          const node = editorItems.querySelector(`[data-draft-id="${item.id}"]`);
+          // Task E3d: the fallback (hidden items have no node) uses the same
+          // scene-relative box as the render path, including the item scale.
+          const widthPx = node ? node.offsetWidth : sceneWidthPx(draftWidths[item.kind] || 100) * (item.scale || 1);
+          const heightPx = node ? node.offsetHeight : widthPx;
+          minX = Math.min(minX, item.position.x * canvasRect.width - widthPx / 2);
+          maxX = Math.max(maxX, item.position.x * canvasRect.width + widthPx / 2);
+          minY = Math.min(minY, item.position.y * canvasRect.height - heightPx / 2);
+          maxY = Math.max(maxY, item.position.y * canvasRect.height + heightPx / 2);
+        }
+        const contentW = Math.max(1, maxX - minX);
+        const contentH = Math.max(1, maxY - minY);
+        const targetScale = Math.min(8, Math.max(0.2, Math.min((canvasRect.width - 80) / contentW, (canvasRect.height - 80) / contentH)));
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+        view.set({ scale: targetScale, tx: canvasRect.width / 2 - cx * targetScale, ty: canvasRect.height / 2 - cy * targetScale });
+        applyView();
+        positionHandles();
+      });
+      editorResetView.addEventListener('click', () => {
+        view.reset();
+        applyView();
+        positionHandles();
+      });
+
+      // Task E2e: +/− zoom for mouse users (anchored at the canvas center —
+      // pointer-anchored zoom stays on ctrl/cmd + wheel)
+      const zoomStep = (factor) => {
+        const rect = editorCanvas.getBoundingClientRect();
+        view.zoomAt(rect.width / 2, rect.height / 2, factor);
+        applyView();
+        positionHandles();
+      };
+      document.getElementById('editor-zoom-in').addEventListener('click', () => zoomStep(1.25));
+      document.getElementById('editor-zoom-out').addEventListener('click', () => zoomStep(1 / 1.25));
+
+      editorForwardButton.addEventListener('click', () => {
+        const selected = editor.selected();
+        if (!selected) return;
+        editor.bringForward(selected.id);
+        renderEditorDraft();
+      });
+      editorBackwardButton.addEventListener('click', () => {
+        const selected = editor.selected();
+        if (!selected) return;
+        editor.sendBackward(selected.id);
+        renderEditorDraft();
+      });
+
+      // Task E2e — depth/order buttons. 置顶/置底 use the absolute z-order API
+      // (moveItemToIndex; multi-selection moves as a contiguous block), 上移/下移
+      // reuse the selection block layer ops. Each call is exactly ONE undo
+      // unit. Visual reach: array order is the same-layer tiebreak of the
+      // (layer, array) paint order — cross-band depth is the 层级 field.
+      // Task E3b fix: the depth buttons drive the VISUAL order now — the
+      // E2e array-order wiring could never change occlusion between items
+      // with different layers (user-reported). Cross-layer moves swap the
+      // layer VALUES so the paint order (and z-index) really flips.
+      document.getElementById('editor-front').addEventListener('click', () => {
+        const selected = editor.selected();
+        if (!selected) return;
+        editor.bringVisualToFront(selected.id);
+        renderEditorDraft();
+      });
+      document.getElementById('editor-back').addEventListener('click', () => {
+        const selected = editor.selected();
+        if (!selected) return;
+        editor.sendVisualToBack(selected.id);
+        renderEditorDraft();
+      });
+      document.getElementById('editor-layer-up').addEventListener('click', () => {
+        const selected = editor.selected();
+        if (!selected) return;
+        editor.moveVisualUp(selected.id);
+        renderEditorDraft();
+      });
+      document.getElementById('editor-layer-down').addEventListener('click', () => {
+        const selected = editor.selected();
+        if (!selected) return;
+        editor.moveVisualDown(selected.id);
+        renderEditorDraft();
+      });
+
+      // Task E2e — material groups: 编组 from the toolbar selection; 解组
+      // moves the selected items out of their groups. Group ops never touch
+      // groupId of unselected members.
+      document.getElementById('editor-group').addEventListener('click', () => { editor.groupSelection(); renderEditorDraft(); });
+      document.getElementById('editor-ungroup').addEventListener('click', () => { editor.ungroupSelection(); renderEditorDraft(); });
+      syncEditorControls();
+
+      function renderOverview(snapshot) {
+        const overview = page.overview();
+        document.getElementById('overview-summary').textContent =
+          `在岗 ${overview.presentCount} 人 · 执行任务 ${overview.runningCount} · 排队 ${overview.queuedCount}`;
+        const syncLabel = { healthy: '同步正常', stale: '同步滞后', resyncing: '正在重新同步' }[snapshot.sync] || snapshot.sync;
+        document.getElementById('sync-summary').textContent = `同步：${syncLabel}`;
+      }
+
+      const listEl = document.getElementById('employee-list');
+      const listItems = new Map();
+      function renderEmployeeList(snapshot) {
+        const order = page.focusOrder();
+        // stable element per employee: status refresh never rebuilds the list
+        for (const employee of snapshot.employees) {
+          let item = listItems.get(employee.employeeId);
+          if (!item) {
+            item = document.createElement('li');
+            item.setAttribute('role', 'option');
+            item.tabIndex = -1;
+            const label = page.accessibleLabelFor(employee.employeeId).label;
+            item.setAttribute('aria-label', label);
+            item.addEventListener('click', () => {
+              page.select(employee.employeeId);
+              renderDetails();
+              syncListSelection();
+            });
+            listEl.appendChild(item);
+            listItems.set(employee.employeeId, item);
+          }
+          const a11y = page.accessibleLabelFor(employee.employeeId).label;
+          item.setAttribute('aria-label', a11y);
+          item.setAttribute('aria-selected', page.selectedEmployeeId() === employee.employeeId ? 'true' : 'false');
+          item.textContent = `${employee.displayName} · ${employee.activity}${employee.queueCount > 0 ? `（排队 ${employee.queueCount}）` : ''}`;
+        }
+        for (const [id, item] of [...listItems]) {
+          if (!order.includes(id)) { item.remove(); listItems.delete(id); }
+        }
+        void listEl;
+      }
+
+      function syncListSelection() {
+        for (const [id, item] of listItems) {
+          item.setAttribute('aria-selected', page.selectedEmployeeId() === id ? 'true' : 'false');
+          item.classList.toggle('selected', page.selectedEmployeeId() === id);
+        }
+      }
+
+      function renderDetails() {
+        const body = document.getElementById('details-body');
+        const placeholder = document.getElementById('details-placeholder');
+        const selected = page.selectedEmployeeId();
+        const vm = selected ? page.detailsFor(selected) : null;
+        if (!vm) {
+          body.hidden = true;
+          placeholder.hidden = false;
+          return;
+        }
+        placeholder.hidden = true;
+        body.hidden = false;
+        const nameEl = document.getElementById('details-name');
+        nameEl.textContent = vm.name.text;
+        nameEl.className = 'details-name-large';
+        nameEl.setAttribute('aria-label', `${vm.name.text} 详情`);
+        const roleEl = document.getElementById('details-role');
+        roleEl.textContent = `● ${vm.roleDot.text}`;
+        roleEl.className = 'details-role-dot';
+        const primaryEl = document.getElementById('details-primary');
+        primaryEl.textContent = vm.primary.text;
+        primaryEl.className = 'details-primary';
+        primaryEl.setAttribute('aria-label', vm.primary.accessibleLabel || vm.primary.text);
+        const dimEl = document.getElementById('details-dim');
+        dimEl.replaceChildren(...vm.dimFields.map((field) => {
+          const li = document.createElement('li');
+          li.className = 'dim-field';
+          li.textContent = `${field.label}：${field.value}`;
+          return li;
+        }));
+        const queueEl = document.getElementById('details-queue');
+        queueEl.textContent = vm.queueCount > 0
+          ? `排队任务 ${vm.queueCount} 项${vm.waiting.length ? '：' + vm.waiting.map((w) => `第 ${w.position} 位`).join('、') : ''}`
+          : '';
+        const capabilities = page.capabilities() || {};
+        const bound = !!latestSnapshot && !!latestSnapshot.employees.find((e) => e.employeeId === selected && e.binding);
+        document.getElementById('btn-dispatch').disabled = !bound || !capabilities.followup;
+        document.getElementById('btn-cancel').disabled = !bound || !capabilities.cancel;
+        document.getElementById('btn-interrupt').disabled = !bound || !capabilities.interrupt;
+      }
+
+      function renderActivity(snapshot) {
+        const logEl = document.getElementById('activity-log');
+        const entries = page.activityLog().slice(-12).reverse();
+        logEl.replaceChildren(...entries.map((entry) => {
+          const li = document.createElement('li');
+          li.textContent = `${new Date(entry.atMs).toISOString().slice(11, 19)} · ${employeeName(entry.employeeId)} · ${entry.label}`;
+          return li;
+        }));
+        void snapshot;
+      }
+
+      function employeeName(employeeId) {
+        const employee = latestSnapshot && latestSnapshot.employees.find((e) => e.employeeId === employeeId);
+        return employee ? employee.displayName : employeeId;
+      }
+
+      // pointer selection on the Pixi canvas — hit-tests run against the
+      // LETTERBOXED canvas rect (scene pixels), not the whole stage
+      stage.addEventListener('click', (event) => {
+        const sceneCanvas = stage.querySelector('canvas');
+        const rect = (sceneCanvas || stage).getBoundingClientRect();
+        const hit = renderer.hitTest(event.clientX - rect.left, event.clientY - rect.top);
+        if (hit) {
+          page.select(hit);
+          renderer.setSelection(hit);
+          syncListSelection();
+          renderDetails();
+        }
+      });
+
+      // keyboard: list focus + scene selection (shared with the evidence API)
+      function handleKeyEvent(key) {
+        const result = page.handleKey({ key });
+        if (result.action === 'focus') {
+          const id = page.focusOrder()[result.index];
+          const item = listItems.get(id);
+          if (item) item.focus();
+          renderer.setSelection(null);
+        } else if (result.action === 'select') {
+          renderer.setSelection(result.employeeId);
+          syncListSelection();
+          renderDetails();
+        } else if (result.action === 'clear') {
+          renderer.setSelection(null);
+          syncListSelection();
+          renderDetails();
+        }
+        return result;
+      }
+      document.addEventListener('keyup', (event) => {
+        if (event.key === ' ') spacePanHeld = false;
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Tab') return; // native focus order handles panel traversal
+        // Task E2a: when the layout editor is open its editing shortcuts win
+        // (typing fields are excluded); unmatched keys keep the page's
+        // employee navigation behaviour.
+        const targetTag = event.target && event.target.tagName;
+        const inField = targetTag === 'INPUT' || targetTag === 'SELECT' || targetTag === 'TEXTAREA';
+        // Task E2b: holding space arms the canvas pan gesture (editor open only)
+        if (!editorRoot.hidden && !inField && event.key === ' ') {
+          spacePanHeld = true;
+          event.preventDefault();
+          return;
+        }
+        if (!editorRoot.hidden && !inField) {
+          const meta = event.metaKey || event.ctrlKey;
+          if (meta && event.key.toLowerCase() === 'd') {
+            event.preventDefault();
+            editor.duplicateSelection();
+            renderEditorDraft();
+            return;
+          }
+          if (meta && event.key.toLowerCase() === 'a') {
+            event.preventDefault();
+            editor.selectAll();
+            renderEditorDraft();
+            return;
+          }
+          if (event.key === 'Delete' || event.key === 'Backspace') {
+            event.preventDefault();
+            deleteSelectionWithStatus();
+            return;
+          }
+          if (event.key === 'Escape') {
+            editor.clearSelection();
+            renderEditorDraft();
+            return;
+          }
+          if (event.key.startsWith('Arrow')) {
+            event.preventDefault();
+            const step = event.shiftKey ? 0.01 : 0.001;
+            const dx = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0;
+            const dy = event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0;
+            editor.nudgeSelection(dx, dy, { mergeKey: `${event.key}${event.shiftKey ? '+shift' : ''}`, now: Date.now() });
+            renderEditorDraft();
+            return;
+          }
+        }
+        const result = handleKeyEvent(event.key);
+        if (result.action !== 'none') event.preventDefault();
+      });
+
+      document.getElementById('btn-dispatch').addEventListener('click', async () => {
+        const selected = page.selectedEmployeeId();
+        if (selected) await page.dispatch(selected);
+      });
+      document.getElementById('btn-cancel').addEventListener('click', async () => {
+        const selected = page.selectedEmployeeId();
+        if (selected) await page.cancel(selected);
+      });
+      document.getElementById('btn-interrupt').addEventListener('click', async () => {
+        const selected = page.selectedEmployeeId();
+        if (selected) await page.interrupt(selected);
+      });
+
+      const reducedMotionCtl = document.getElementById('ctl-reduced-motion');
+      reducedMotionCtl.addEventListener('change', async () => {
+        await page.setReducedMotion(reducedMotionCtl.checked);
+      });
+      const layoutEditorButton = document.createElement('button');
+      layoutEditorButton.id = 'btn-layout-editor';
+      layoutEditorButton.type = 'button';
+      layoutEditorButton.textContent = '布局编辑';
+      layoutEditorButton.addEventListener('click', () => setEditorVisible(editorRoot.hidden));
+      document.getElementById('office-overview').appendChild(layoutEditorButton);
+      if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        reducedMotionCtl.checked = true;
+        await page.setReducedMotion(true);
+      }
+
+      // visibility lifecycle: pause the main-process clock when hidden
+      const visibility = (visible) => page.handleVisibility(visible);
+      document.addEventListener('visibilitychange', () => visibility(document.visibilityState === 'visible'));
+      window.addEventListener('blur', () => visibility(false));
+      window.addEventListener('focus', () => visibility(true));
+      bridge.onVisibilityPush((payload) => visibility(payload && payload.visible));
+
+      function resize() {
+        const rect = stage.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          // Task E4.4: FIXED logical scene + letterbox — the canvas keeps the
+          // scene reference aspect at every window size (uniform scale, dead
+          // centered), so the composition never stretches or crops with the
+          // window ratio. The renderer reprojects the whole scene to the
+          // scaled logical size; the leftover space stays background.
+          const ref = layout.scene();
+          const letterboxScale = Math.min(rect.width / ref.referenceWidth, rect.height / ref.referenceHeight);
+          const sceneW = ref.referenceWidth * letterboxScale;
+          const sceneH = ref.referenceHeight * letterboxScale;
+          renderer.resize({ width: sceneW, height: sceneH });
+          const canvas = stage.querySelector('canvas');
+          if (canvas) {
+            canvas.style.left = `${(rect.width - sceneW) / 2}px`;
+            canvas.style.top = `${(rect.height - sceneH) / 2}px`;
+            canvas.style.width = `${sceneW}px`;
+            canvas.style.height = `${sceneH}px`;
+          }
+        }
+        // Task E2b (must-fix): the editor handles are positioned in canvas px —
+        // re-position them so they follow window resizes instead of drifting.
+        // The first pass runs synchronously; a deferred pass re-runs after the
+        // browser settles the new layout (offsets can be stale mid-resize).
+        if (!editorRoot.hidden) {
+          // Task E2b-R1/E3b: the view re-baselines to the LIVE SCENE FRAME
+          updateSceneFrame();
+          applyView();
+          // Task E3d: item boxes are scene-relative — they must re-derive
+          // from the new frame size or the composition drifts with the
+          // window (the probe asserts node width / frame width is constant).
+          resizeItemBoxes();
+          updateInspectorSizePx();
+          // Task E3d: deferred second pass — a resize event can fire BEFORE
+          // the OS settles the new window size (the real-shell probe caught
+          // a frame computed from the OLD canvas rect), so re-derive the
+          // frame, the view and every node box once the layout has settled.
+          setTimeout(() => {
+            if (editorRoot.hidden) return;
+            updateSceneFrame();
+            applyView();
+            resizeItemBoxes();
+            positionHandles();
+            updateInspectorSizePx();
+          }, 100);
+        }
+      }
+      // Task E3d: re-derive every placed node box from the CURRENT scene
+      // frame (scene-relative sizes); hidden items have no node and are
+      // simply skipped — their box matters only to fit-view's fallback.
+      function resizeItemBoxes() {
+        const items = editor.toJSON().items;
+        for (const node of editorItems.children) {
+          const draft = items.find((item) => item.id === node.dataset.draftId);
+          if (draft) applyItemGeometry(node, draft);
+        }
+        positionHandles();
+      }
+      window.addEventListener('resize', resize);
+      resize();
+
+      const stateResult = await bridge.getState();
+      page.applySnapshot(stateResult && stateResult.ok ? stateResult.snapshot : stateResult);
+      // One main-process clock: subsequent snapshots arrive as office:state
+      // pushes (throttled in the module); the page only re-renders the VM.
+      bridge.onState((snapshot) => page.applySnapshot(snapshot));
+
+      // Evidence hooks (diagnostics-only, same spirit as the playground)
+      window.__office = {
+        ready: true,
+        page,
+        renderer,
+        api: {
+          selected: () => page.selectedEmployeeId(),
+          select: (id) => { page.select(id); renderer.setSelection(id); renderDetails(); syncListSelection(); },
+          clear: () => { page.clearSelection(); renderer.setSelection(null); renderDetails(); syncListSelection(); },
+          key: (key) => handleKeyEvent(key),
+          overview: () => page.overview(),
+          snapshot: () => latestSnapshot,
+          rendererMode: () => renderer.mode,
+          diagnosticCode: () => renderer.diagnosticCode,
+          officeDiagnostics: () => renderer.officeDiagnostics(),
+          furniturePaintOrder: () => renderer.furniturePaintOrder(),
+          packDiagnostic: () => packDiagnostic,
+          packId: () => officePackId,
+          applySnapshotManually: (s) => renderer.applySnapshot(s),
+          resizeTo: (w, h) => renderer.resize({ width: w, height: h }),
+          devicePixelRatio: () => window.devicePixelRatio,
+          pixiVersion: () => window.PIXI && window.PIXI.VERSION,
+          setReducedMotion: async (v) => { reducedMotionCtl.checked = !!v; await page.setReducedMotion(!!v); },
+          layoutDraft: () => editor.toJSON(),
+          viewState: () => ({ ...view.get(), frameTransform: sceneFrameElement.style.transform, frameRect: (() => { const r = sceneFrameElement.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; })(), itemsRect: (() => { const r = editorItems.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; })() }),
+          setGroupMoveRigid: (groupId, rigid) => editor.setGroupMoveRigid(groupId, rigid),
+          layoutDiagnostic: () => layoutDiagnostic,
+          layoutSource: () => layoutSource,
+          runtimeLayoutSource: () => runtimeLayoutSource,
+          runtimeLayoutCode: () => runtimeLayoutCode,
+          toggleLayoutEditor: () => setEditorVisible(editorRoot.hidden),
+        },
+      };
+
+      // Task E2d: the standalone launcher boots with ?editor=1 — open the
+      // layout editor immediately after the boot settles (every earlier
+      // editor entry point stays available; this only AUTO-opens).
+      if (officeEditorParam === '1') setEditorVisible(true);
+    })().catch((error) => {
+      const note = document.getElementById('fallback-note');
+      if (note) {
+        note.hidden = false;
+        note.textContent = `办公室页面启动失败：${(error && error.message) || error}`;
+      }
+      window.__office = { ready: false, error: String((error && error.message) || error), stack: String((error && error.stack) || error) };
+    });
+  </script>
+</body>
+</html>

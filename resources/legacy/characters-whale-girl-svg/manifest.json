@@ -1,0 +1,68 @@
+{
+  "name": "鲸鱼娘 Whale Girl",
+  "author": "DshCockpit (官方占位, 约稿买断后替换)",
+  "license": "DshCockpit 官方占位资产（Layer 2, 版权独立声明不随 MIT; 正式稿约稿买断后替换本占位资产）",
+  "version": "0.2.0",
+  "avatar": "assets/expressions/blue/idle.png",
+  "animations": {
+    "idle": ["assets/expressions/blue/idle.png"],
+    "working": ["assets/expressions/blue/working.png"]
+  },
+  "walkAnimations": {
+    "down": [
+      "assets/animations/walk-down-01.png",
+      "assets/animations/walk-down-02.png",
+      "assets/animations/walk-down-03.png",
+      "assets/animations/walk-down-04.png"
+    ],
+    "up": [
+      "assets/animations/walk-up-01.png",
+      "assets/animations/walk-up-02.png",
+      "assets/animations/walk-up-03.png",
+      "assets/animations/walk-up-04.png"
+    ],
+    "left": [
+      "assets/animations/walk-left-01.png",
+      "assets/animations/walk-left-02.png",
+      "assets/animations/walk-left-03.png",
+      "assets/animations/walk-left-04.png"
+    ],
+    "right": [
+      "assets/animations/walk-right-01.png",
+      "assets/animations/walk-right-02.png",
+      "assets/animations/walk-right-03.png",
+      "assets/animations/walk-right-04.png"
+    ]
+  },
+  "sideFrames": {
+    "left": "assets/animations/side-left.png",
+    "right": "assets/animations/side-right.png",
+    "back": "assets/animations/side-back.png"
+  },
+  "expressions": {
+    "idle": "assets/expressions/blue/idle.png",
+    "working": "assets/expressions/blue/working.png",
+    "finished": "assets/expressions/blue/finished.png",
+    "warning": "assets/expressions/blue/warning.png",
+    "error": "assets/expressions/blue/error.png",
+    "offline": "assets/expressions/blue/offline.png"
+  },
+  "personality": "personality/behavior.json",
+  "behaviors": {
+    "idleLoop": ["nap", "blink", "lunch"]
+  },
+  "variants": {
+    "blue": {
+      "name": "鲸鱼娘 · 蓝鲸员工",
+      "avatar": "assets/expressions/blue/idle.png",
+      "expressions": {
+        "idle": "assets/expressions/blue/idle.png",
+        "working": "assets/expressions/blue/working.png",
+        "finished": "assets/expressions/blue/finished.png",
+        "warning": "assets/expressions/blue/warning.png",
+        "error": "assets/expressions/blue/error.png",
+        "offline": "assets/expressions/blue/offline.png"
+      }
+    }
+  }
+}

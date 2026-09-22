@@ -1,0 +1,379 @@
+{
+  "schemaVersion": 1,
+  "scene": "flat",
+  "walkable": [
+    {
+      "kind": "rect",
+      "rect": [
+        0.06,
+        0.06,
+        0.88,
+        0.86
+      ]
+    }
+  ],
+  "obstacles": [
+    {
+      "id": "desk-1-back",
+      "kind": "rect",
+      "rect": [
+        0.483542,
+        0.175282,
+        0.115412,
+        0.116828
+      ],
+      "workstation": "desk-1"
+    },
+    {
+      "id": "desk-1-monitor",
+      "kind": "rect",
+      "rect": [
+        0.49837,
+        0.087612,
+        0.082031,
+        0.101657
+      ],
+      "workstation": "desk-1"
+    },
+    {
+      "id": "desk-1-chair",
+      "kind": "rect",
+      "rect": [
+        0.513623,
+        0.236342,
+        0.05183,
+        0.130788
+      ],
+      "workstation": "desk-1"
+    },
+    {
+      "id": "desk-2-back",
+      "kind": "rect",
+      "rect": [
+        0.749524,
+        0.178697,
+        0.11283,
+        0.114215
+      ],
+      "workstation": "desk-2"
+    },
+    {
+      "id": "desk-2-monitor",
+      "kind": "rect",
+      "rect": [
+        0.76219,
+        0.090673,
+        0.082031,
+        0.101657
+      ],
+      "workstation": "desk-2"
+    },
+    {
+      "id": "desk-2-chair",
+      "kind": "rect",
+      "rect": [
+        0.779862,
+        0.237818,
+        0.050659,
+        0.127835
+      ],
+      "workstation": "desk-2"
+    },
+    {
+      "id": "desk-3-back",
+      "kind": "rect",
+      "rect": [
+        0.48472,
+        0.459505,
+        0.109332,
+        0.110674
+      ],
+      "workstation": "desk-3"
+    },
+    {
+      "id": "desk-3-monitor",
+      "kind": "rect",
+      "rect": [
+        0.497016,
+        0.381785,
+        0.082031,
+        0.101657
+      ],
+      "workstation": "desk-3"
+    },
+    {
+      "id": "desk-3-chair",
+      "kind": "rect",
+      "rect": [
+        0.511261,
+        0.515513,
+        0.05268,
+        0.132935
+      ],
+      "workstation": "desk-3"
+    },
+    {
+      "id": "desk-4-back",
+      "kind": "rect",
+      "rect": [
+        0.747866,
+        0.468962,
+        0.114349,
+        0.115752
+      ],
+      "workstation": "desk-4"
+    },
+    {
+      "id": "desk-4-monitor",
+      "kind": "rect",
+      "rect": [
+        0.763834,
+        0.392269,
+        0.082031,
+        0.101657
+      ],
+      "workstation": "desk-4"
+    },
+    {
+      "id": "desk-4-chair",
+      "kind": "rect",
+      "rect": [
+        0.777069,
+        0.525131,
+        0.04995,
+        0.126044
+      ],
+      "workstation": "desk-4"
+    },
+    {
+      "id": "desk-5-back",
+      "kind": "rect",
+      "rect": [
+        0.489578,
+        0.753744,
+        0.10967,
+        0.111016
+      ],
+      "workstation": "desk-5"
+    },
+    {
+      "id": "desk-5-monitor",
+      "kind": "rect",
+      "rect": [
+        0.498721,
+        0.669695,
+        0.082031,
+        0.101657
+      ],
+      "workstation": "desk-5"
+    },
+    {
+      "id": "desk-5-chair",
+      "kind": "rect",
+      "rect": [
+        0.514048,
+        0.812359,
+        0.049648,
+        0.125283
+      ],
+      "workstation": "desk-5"
+    },
+    {
+      "id": "desk-6-back",
+      "kind": "rect",
+      "rect": [
+        0.752126,
+        0.750562,
+        0.118864,
+        0.120323
+      ],
+      "workstation": "desk-6"
+    },
+    {
+      "id": "desk-6-monitor",
+      "kind": "rect",
+      "rect": [
+        0.762058,
+        0.672132,
+        0.082031,
+        0.101657
+      ],
+      "workstation": "desk-6"
+    },
+    {
+      "id": "desk-6-chair",
+      "kind": "rect",
+      "rect": [
+        0.77705,
+        0.814213,
+        0.049989,
+        0.126143
+      ],
+      "workstation": "desk-6"
+    },
+    {
+      "id": "draft-53",
+      "kind": "rect",
+      "rect": [
+        0.020469,
+        0.130191,
+        0.216584,
+        0.173791
+      ],
+      "workstation": null
+    },
+    {
+      "id": "draft-55",
+      "kind": "rect",
+      "rect": [
+        0.242652,
+        0.146911,
+        0.144124,
+        0.155482
+      ],
+      "workstation": null
+    },
+    {
+      "id": "draft-56",
+      "kind": "rect",
+      "rect": [
+        0.328129,
+        0.009721,
+        0.053366,
+        0.155821
+      ],
+      "workstation": null
+    },
+    {
+      "id": "draft-57",
+      "kind": "rect",
+      "rect": [
+        0.241552,
+        0.04837,
+        0.072122,
+        0.119338
+      ],
+      "workstation": null
+    },
+    {
+      "id": "draft-58",
+      "kind": "rect",
+      "rect": [
+        0.185316,
+        0.108342,
+        0.047297,
+        0.046283
+      ],
+      "workstation": null
+    },
+    {
+      "id": "draft-59",
+      "kind": "rect",
+      "rect": [
+        0.133169,
+        0.10962,
+        0.045752,
+        0.044772
+      ],
+      "workstation": null
+    },
+    {
+      "id": "draft-60",
+      "kind": "rect",
+      "rect": [
+        0.076462,
+        0.105958,
+        0.047876,
+        0.04685
+      ],
+      "workstation": null
+    },
+    {
+      "id": "draft-62",
+      "kind": "rect",
+      "rect": [
+        0.918147,
+        0.047232,
+        0.054653,
+        0.11921
+      ],
+      "workstation": null
+    },
+    {
+      "id": "draft-64",
+      "kind": "rect",
+      "rect": [
+        0.018406,
+        0.495237,
+        0.156698,
+        0.135295
+      ],
+      "workstation": null
+    },
+    {
+      "id": "draft-63",
+      "kind": "rect",
+      "rect": [
+        0.032155,
+        0.456646,
+        0.09375,
+        0.069232
+      ],
+      "workstation": null
+    },
+    {
+      "id": "draft-65",
+      "kind": "rect",
+      "rect": [
+        0.01858,
+        0.026256,
+        0.055413,
+        0.131086
+      ],
+      "workstation": null
+    },
+    {
+      "id": "draft-67",
+      "kind": "rect",
+      "rect": [
+        0.635888,
+        0.024121,
+        0.065761,
+        0.145316
+      ],
+      "workstation": null
+    },
+    {
+      "id": "draft-70",
+      "kind": "rect",
+      "rect": [
+        0.049839,
+        0.617599,
+        0.057116,
+        0.349542
+      ],
+      "workstation": null
+    },
+    {
+      "id": "draft-71",
+      "kind": "rect",
+      "rect": [
+        0.093125,
+        0.843571,
+        0.09375,
+        0.142857
+      ],
+      "workstation": null
+    }
+  ],
+  "graph": {
+    "derive": "auto",
+    "aisleWidth": 0.06
+  },
+  "validation": {
+    "sampleStep": 0.005,
+    "moverRadius": 0.02,
+    "exemptSameStation": true
+  },
+  "note": "M0 初值：obstacles 由 content/scenes/flat/layout.json 经 src/office/runtime/office-layout-compiler.js 的家具 footprint 推导（发布校验会重新编译比对）。walkable/采样参数为 docs/notes/office-workbench-m0.md §2 的批准值；M2 起由区域编辑器维护。"
+}

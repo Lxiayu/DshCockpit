@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "2194abc-task9-fix1",
+  "generatedAt": "2026-09-06T20:14:22Z",
+  "host": {
+    "platform": "darwin arm64",
+    "osRelease": "[REDACTED:text]",
+    "nodeVersion": "24.16.0",
+    "electronVersion": "37",
+    "pixiVersion": "8.5.2"
+  },
+  "environment": {
+    "viewport": "1280x840 logical",
+    "dprBaseline": 2,
+    "dprNote": "single-2x-display machine: force-device-scale-factor=1 tested ineffective; DPR 1 reference recorded as a limitation",
+    "extra": [
+      "narrow 720x620",
+      "high-DPR anchor capture at the display-forced DPR"
+    ],
+    "featureFlagPolicy": "officeRuntimeEnabled/officePlaygroundEnabled remain false by default; not toggled by acceptance"
+  },
+  "flags": {
+    "officeRuntimeEnabled": false,
+    "officePlaygroundEnabled": false
+  },
+  "gates": [
+    {
+      "command": "node --check src/main.js",
+      "status": "passed",
+      "exitCode": 0,
+      "durationMs": 21,
+      "summary": "ok"
+    },
+    {
+      "command": "node --check src/window-manager.js",
+      "status": "passed",
+      "exitCode": 0,
+      "durationMs": 19,
+      "summary": "ok"
+    },
+    {
+      "command": "for file in src/office/runtime/*.js; do node --check \"$file\"; done",
+      "status": "passed",
+      "exitCode": 0,
+      "durationMs": 282,
+      "summary": "ok"
+    },
+    {
+      "command": "git diff --check",
+      "status": "passed",
+      "exitCode": 0,
+      "durationMs": 11,
+      "summary": "ok"
+    },
+    {
+      "command": "npm test",
+      "status": "passed",
+      "exitCode": 0,
+      "durationMs": 2104,
+      "timeoutMs": 900000,
+      "stallPolicyMs": 300000,
+      "killReason": null,
+      "signal": null,
+      "lastVisibleProgress": "✔ auto gate: due only when enabled AND not yet generated for this week (0.12525ms)",
+      "outputBytes": 78875,
+      "perFileLedger": "npmtest-perfile.json",
+      "flagConsequence": "officeRuntimeEnabled stays false"
+    },
+    {
+      "command": "node --test test/office-*.test.js",
+      "status": "passed",
+      "exitCode": 0,
+      "durationMs": 437,
+      "summary": "node:test spec counts approximated: pass~477 fail~0",
+      "postAssemblyVerification": 0
+    }
+  ],
+  "electronPhases": [
+    {
+      "phase": "main",
+      "ok": true,
+      "exitCode": 0,
+      "failures": []
+    },
+    {
+      "phase": "low-fps",
+      "ok": true,
+      "exitCode": 0,
+      "failures": []
+    },
+    {
+      "phase": "webgl-off",
+      "ok": true,
+      "exitCode": 0,
+      "failures": []
+    },
+    {
+      "phase": "hidpi",
+      "ok": true,
+      "exitCode": 0,
+      "failures": []
+    },
+    {
+      "phase": "replay-b",
+      "ok": true,
+      "exitCode": 0,
+      "failures": []
+    }
+  ],
+  "resultComplete": true,
+  "decision": "blocked",
+  "decisionReasons": [
+    "manual visual review has 2 open walk-cycle asset defects (walk-right frame jump, leg continuity); replacement art pending",
+    "DPR 1 reference viewport could not be forced on this single-2x-display machine; baseline captured at 1280x840 logical under display-forced DPR",
+    "officeRuntimeEnabled default stays false until all gates pass and the user confirms the report"
+  ],
+  "perFileFailures": []
+}

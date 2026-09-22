@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "networkRequests": 0,
+  "failedScenarios": [],
+  "thresholds": {
+    "frameBoundaryMs": 16,
+    "oneSecondDistance": "±5%",
+    "footBaselineDriftPx": 1,
+    "resizeLogicalError": 0.005,
+    "arrivalError": 0.01
+  }
+}

@@ -251,5 +251,14 @@ function createHarnessRpcWire(baseUrl, { fetchImpl, timeoutMs = 15_000 } = {}) {
       rpc('session.prompt', { sessionId, mode, content: [{ type: 'text', text }] }),
     cancel: (sessionId) => rpc('session.cancel', { sessionId }),
     history: (sessionId) => rpc('session.history', { sessionId }).then((v) => (v && v.events) || []),
+    // SPEC-05 (Task 6): probe-proven session stream transports used only by the
+    // Office runtime adapter's snapshot/resync composition. They are additive;
+    // nothing else consumes them and the research report marks follow/page/
+    // control as the compatible stream surface (source-level proof at commit
+    // cd5ef814). No office:runtime-snapshot payload is fabricated here — the
+    // adapter composes and validates it.
+    follow: (sessionId) => rpc('session.follow', { sessionId }),
+    page: (sessionId, throughSeq) => rpc('session.page', { sessionId, throughSeq }),
+    control: (sessionId, payload) => rpc('session.control', { sessionId, payload }),
   };
 }

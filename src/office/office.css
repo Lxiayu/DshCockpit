@@ -1,0 +1,698 @@
+/* src/office/office.css — Task 7 / SPEC-07. Placeholder styling for the
+   office view: canvas on the left, details panel on the right. Hierarchy per
+   decision 35: large employee name, role dot, prominent task/result, small
+   dim diagnostics. Visual polish (final art) is a later task. */
+
+:root {
+  color-scheme: light;
+  --office-bg: #e8eaec;
+  --panel-bg: #f6f7f8;
+  --panel-edge: #cdd2d6;
+  --text: #263039;
+  --text-dim: #69757d;
+  --accent: #1677a8;
+  --accent-soft: #e1e8ec;
+  --badge: #a96e00;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--office-bg);
+  color: var(--text);
+  font: 14px/1.5 -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+  display: flex;
+}
+
+#stage-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  background: var(--office-bg);
+}
+
+#stage-host canvas {
+  display: block;
+  /* Task E4.4 letterbox: the canvas keeps the fixed 1280×840 logical scene
+     aspect at every window size. The page's resize() writes explicit
+     left/top/width/height px styles (uniform scale, dead centered) and the
+     renderer reprojects the scene to the scaled logical size — the canvas is
+     never stretched over the whole stage by CSS again. */
+  position: absolute;
+}
+
+#stage-host.layout-editing > canvas { visibility: hidden; }
+
+.office-static-fallback {
+  margin: 24px;
+  padding: 16px;
+  border: 1px dashed var(--panel-edge);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+#office-panel {
+  flex: 0 0 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 14px;
+  background: var(--panel-bg);
+  border-left: 1px solid var(--panel-edge);
+  overflow-y: auto;
+  max-height: 100vh;
+}
+
+#office-overview h1 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+#overview-summary {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hint {
+  margin: 4px 0 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+#employee-list-block { margin: 0; }
+
+#employee-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#employee-list li {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+#employee-list li:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+#employee-list li.selected {
+  outline: 2px solid var(--accent);
+  background: #33507a;
+}
+
+#details { border-top: 1px solid var(--panel-edge); padding-top: 10px; }
+
+/* decision 35: the name is the most prominent text in the panel */
+.details-name-large {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.details-role-dot {
+  margin: 2px 0 10px;
+  color: var(--accent);
+  font-size: 13px;
+}
+
+/* second visual focus: current task / last result */
+.details-primary {
+  margin: 0 0 10px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+#details-dim {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dim-field {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.queue-line {
+  margin: 10px 0 0;
+  color: var(--badge);
+  font-size: 13px;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.actions button {
+  background: var(--accent-soft);
+  border: 1px solid var(--panel-edge);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.actions button:not(:disabled):hover {
+  border-color: var(--accent);
+}
+
+#activity-block { border-top: 1px solid var(--panel-edge); padding-top: 10px; }
+
+#activity-block h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+#activity-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#activity-log li {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+#office-footer {
+  margin-top: auto;
+  border-top: 1px solid var(--panel-edge);
+  padding-top: 10px;
+}
+
+#layout-editor {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  background: var(--office-bg);
+}
+
+#layout-editor[hidden] { display: none; }
+
+#layout-palette {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 232px;
+  padding: 8px 10px 6px;
+  /* Marvis-style light grey-white: same family as the panel background. */
+  background: #f6f7f8;
+  border-bottom: 1px solid var(--panel-edge);
+  box-shadow: 0 3px 12px rgba(38, 48, 57, 0.1);
+}
+
+#layout-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 34px;
+}
+
+#layout-toolbar button,
+#btn-layout-editor {
+  border: 1px solid var(--panel-edge);
+  border-radius: 5px;
+  padding: 5px 8px;
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+#layout-toolbar button:hover,
+#btn-layout-editor:hover { border-color: var(--accent); }
+
+#layout-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+#layout-toolbar button:disabled:hover { border-color: var(--panel-edge); }
+
+.editor-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.editor-control input[type="number"] {
+  width: 64px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 5px;
+  padding: 3px 4px;
+  font-size: 12px;
+  background: #fff;
+  color: var(--text);
+}
+
+.editor-control input[type="file"] { font-size: 11px; max-width: 170px; }
+
+#editor-status {
+  margin: 2px 0 0;
+  min-height: 16px;
+  color: var(--badge);
+  font-size: 11px;
+}
+
+#layout-asset-shelf {
+  display: flex;
+  gap: 14px;
+  height: 128px;
+  padding-top: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.layout-asset-group { flex: 0 0 auto; }
+.layout-asset-group h3 { margin: 0 0 3px; color: var(--text-dim); font-size: 11px; font-weight: 600; }
+.layout-asset-row { display: flex; gap: 4px; }
+
+.layout-asset-tile {
+  width: 72px;
+  height: 98px;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: grab;
+}
+
+.layout-asset-tile:hover,
+.layout-asset-tile:focus-visible { border-color: var(--accent); background: #fff; outline: none; }
+.layout-asset-tile:active { cursor: grabbing; }
+.layout-asset-tile img { display: block; width: 64px; height: 72px; object-fit: contain; pointer-events: none; }
+.layout-asset-tile span { display: block; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+
+#layout-canvas {
+  position: absolute;
+  /* right inset reserves the Task E2c layers panel dock (240px) */
+  inset: 232px 240px 0 0;
+  overflow: hidden;
+  /* Task E3b: everything OUTSIDE the logical scene frame is pure white so
+     the editable office area (the frame) reads as its own surface */
+  background: #fff;
+}
+
+/* Task E3b: the editable logical scene (1280x840) fitted and centered by
+   updateSceneFrame(); the frame carries the office surface color and a dashed
+   boundary so the draft limits are always visible. */
+#layout-scene-frame {
+  position: absolute;
+  background: var(--office-bg);
+  /* Task E3b-R2: a boundary you can actually SEE — the old 1px pale dashed
+     line vanished whenever the frame nearly filled the canvas */
+  border: 2px dashed #7f95a3;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+#layout-empty-hint {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  color: #89939a;
+  font-size: 13px;
+  pointer-events: none;
+}
+
+#layout-draft-items { position: absolute; inset: 0; pointer-events: none; }
+
+.layout-draft-item {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+}
+
+.layout-draft-item img { display: block; width: 100%; height: auto; pointer-events: none; }
+.layout-draft-item.selected { outline: 2px solid var(--accent); outline-offset: 3px; }
+.layout-draft-item:active { cursor: grabbing; }
+
+.editor-note { margin: 0 0 0 4px; color: var(--text-dim); font-size: 11px; }
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+/* narrow windows: panel docks below the scene; the editor palette grows one
+   extra toolbar row (deterministic 320px block, scroll-guarded) so neither
+   the toolbar nor the shelf can overflow onto the canvas */
+@media (max-width: 760px) {
+  body { flex-direction: column; }
+  #stage-host { flex: 1 1 60%; min-height: 55vh; }
+  #office-panel {
+    flex: 1 1 auto;
+    max-height: none;
+    border-left: none;
+    border-top: 1px solid var(--panel-edge);
+  }
+  #layout-palette {
+    height: 320px;
+    overflow-y: auto;
+  }
+  #layout-canvas { inset: 320px 200px 0 0; }
+  #layout-layer-panel {
+    top: 320px;
+    width: 200px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+/* Task E2a — precise editing: secondary selection, corner scale handles,
+   marquee box selection and the numeric inspector */
+
+.layout-draft-item.co-selected {
+  outline: 2px dashed var(--accent);
+  outline-offset: 3px;
+  opacity: 0.95;
+}
+
+/* Task E2a-R1: handles live in the TOP overlay (#layout-handle-layer) so
+   overlapping later-drawn items can never intercept their clicks. */
+#layout-handle-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Task E2b: canvas view layers share the zoom/pan transform and are cleared
+   per gesture; guides are drag-only and never linger. */
+/* Task E3d (P0 root cause): the scene frame MUST share the same transform
+   origin (0 0) as the item/guide/handle layers — with the default 50% 50%
+   origin the frame scaled around its own CENTER while the layers scaled
+   around the layer origin, so any zoom ≠ 100% visually DETACHED the gray
+   frame from the items (real-shell rects diverged by 205px at scale 0.497;
+   the probe now asserts frame rect ≡ items rect at every scale). */
+#layout-scene-frame,
+#layout-draft-items,
+#layout-guide-layer,
+#layout-handle-layer {
+  transform-origin: 0 0;
+}
+
+#layout-guide-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.layout-guide-v {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--accent);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.layout-guide-h {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--accent);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+#layout-align-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+#layout-align-bar button {
+  border: 1px solid var(--panel-edge);
+  border-radius: 5px;
+  padding: 4px 7px;
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+#layout-align-bar button:hover:not(:disabled) { border-color: var(--accent); }
+
+#layout-align-bar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.layout-scale-handle {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  /* Task E3b fix: 14px — easier to grab on a trackpad */
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border: 2px solid var(--accent);
+  border-radius: 2px;
+  pointer-events: auto;
+  /* Task E2e: discoverability — resize cursor + a visible hover state */
+  cursor: nwse-resize;
+}
+
+.layout-scale-handle:hover {
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 3px rgba(22, 119, 168, 0.25);
+}
+
+/* Task E2b: the corner offsets are inline-computed from the item box (the
+   handles live in the view-transformed overlay), so no per-corner CSS. */
+
+.layout-marquee {
+  position: absolute;
+  border: 1px dashed var(--accent);
+  background: rgba(22, 119, 168, 0.08);
+  pointer-events: none;
+}
+
+#layout-inspector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+#layout-inspector input[type="number"] {
+  width: 68px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 5px;
+  padding: 3px 4px;
+  font-size: 12px;
+  background: #fff;
+  color: var(--text);
+}
+
+#layout-inspector select {
+  max-width: 110px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 5px;
+  padding: 3px 4px;
+  font-size: 12px;
+  background: #fff;
+  color: var(--text);
+}
+
+/* Task E2c — layers panel: right dock beside the canvas, one row per draft
+   item grouped by groupId. Rows mirror the REVERSED paint order (frontmost
+   at the top, the layers-panel convention) and stay in sync with the canvas
+   selection through renderEditorDraft(). */
+#layout-layer-panel {
+  position: absolute;
+  top: 232px;
+  right: 0;
+  bottom: 0;
+  width: 240px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #f6f7f8;
+  border-left: 1px solid var(--panel-edge);
+  overflow-y: auto;
+  z-index: 9;
+}
+
+#layout-layer-panel h3 {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+#layout-layer-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.layer-group h4 {
+  margin: 0 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Task E2e: the group header hosts 编组/解组/重命名 entries */
+.layer-group-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin-bottom: 2px;
+}
+
+.layer-group-head h4 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.layer-group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+
+.layer-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 5px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  user-select: none;
+}
+
+.layer-row:hover { border-color: var(--accent); }
+
+/* primary vs secondary selection: same visual grammar as the canvas */
+.layer-row.selected { outline: 2px solid var(--accent); outline-offset: -1px; }
+.layer-row.co-selected { outline: 2px dashed var(--accent); outline-offset: -1px; }
+
+.layer-row.is-hidden { opacity: 0.45; }
+.layer-row.is-locked .layer-name { color: var(--text-dim); }
+
+.layer-thumb {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 24px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* Task E3d (root cause 3): contentBbox thumbs — the wrapper span is the
+   same 28x24 viewport as the bare img, the inner img is enlarged and
+   shifted so the opaque art fills it (transparent margins cropped). */
+span.layer-thumb.thumb-cropped { position: relative; overflow: hidden; display: block; }
+.layer-thumb.layer-thumb-art {
+  position: absolute;
+  max-width: none;
+  object-fit: fill;
+}
+
+.layer-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-meta {
+  flex: 0 0 auto;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.layer-toggle {
+  flex: 0 0 auto;
+  border: 1px solid var(--panel-edge);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--text);
+  font-size: 10px;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.layer-toggle:hover { border-color: var(--accent); }
+
+/* Task E3b: the per-group 整组移动 lock — pressed state via aria-pressed */
+.layer-group-rigid[aria-pressed="true"] {
+  background: var(--accent);
+  color: #fff;
+}
+.layer-toggle[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.layer-rename-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 1px 3px;
+  background: #fff;
+  color: var(--text);
+}

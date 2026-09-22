@@ -1,0 +1,1756 @@
+{
+  "schemaVersion": 1,
+  "description": "Flat runtime layout compiled from the approved office editor draft by src/office/runtime/office-layout-compiler.js — generated, do not hand-edit.",
+  "provenance": {
+    "sourceDraftSha256": "cf7541608afc82aa36e211c0e8e09f49a6c87eb9c26b9de443ca154b1055f450"
+  },
+  "scene": {
+    "referenceWidth": 1280,
+    "referenceHeight": 840
+  },
+  "layers": [
+    "background",
+    "back-furniture",
+    "ground-entities",
+    "front-occluders",
+    "effects-labels"
+  ],
+  "layout": {
+    "grid": {
+      "columns": 2,
+      "rows": 3
+    },
+    "offset": {
+      "x": 0,
+      "y": 0
+    },
+    "reserve": {
+      "x": 0.02,
+      "y": 0.02,
+      "width": 0.26,
+      "height": 0.32
+    }
+  },
+  "nodes": [
+    {
+      "id": "desk-1",
+      "position": {
+        "x": 0.5435344608992824,
+        "y": 0.29584385364867155
+      },
+      "footprint": {
+        "width": 0.11,
+        "height": 0.07
+      },
+      "safeRadius": 0.045,
+      "tags": [
+        "desk",
+        "sleeping"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-2",
+      "position": {
+        "x": 0.8031900826576704,
+        "y": 0.30346170012987717
+      },
+      "footprint": {
+        "width": 0.11,
+        "height": 0.07
+      },
+      "safeRadius": 0.045,
+      "tags": [
+        "desk",
+        "sleeping"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-3",
+      "position": {
+        "x": 0.5403270732584732,
+        "y": 0.5760488407746942
+      },
+      "footprint": {
+        "width": 0.11,
+        "height": 0.07
+      },
+      "safeRadius": 0.045,
+      "tags": [
+        "desk",
+        "sleeping"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-4",
+      "position": {
+        "x": 0.8059083272224451,
+        "y": 0.5790580603378278
+      },
+      "footprint": {
+        "width": 0.11,
+        "height": 0.07
+      },
+      "safeRadius": 0.045,
+      "tags": [
+        "desk",
+        "sleeping"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-5",
+      "position": {
+        "x": 0.5446115294940291,
+        "y": 0.8715278394540888
+      },
+      "footprint": {
+        "width": 0.11,
+        "height": 0.07
+      },
+      "safeRadius": 0.045,
+      "tags": [
+        "desk",
+        "collaborator",
+        "sleeping"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-6",
+      "position": {
+        "x": 0.8053085323826407,
+        "y": 0.8722869606985654
+      },
+      "footprint": {
+        "width": 0.11,
+        "height": 0.07
+      },
+      "safeRadius": 0.045,
+      "tags": [
+        "desk",
+        "spare"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "roam-1",
+      "position": {
+        "x": 0.7161374480189631,
+        "y": 0.5600518890877073
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-2",
+      "position": {
+        "x": 0.7243311124795746,
+        "y": 0.41696214290845535
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-3",
+      "position": {
+        "x": 0.6805568654013789,
+        "y": 0.9689267162659576
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-4",
+      "position": {
+        "x": 0.8200100639955569,
+        "y": 0.9857142857142858
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-5",
+      "position": {
+        "x": 0.700556865401379,
+        "y": 0.7008683630507369
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-6",
+      "position": {
+        "x": 0.6217180306365471,
+        "y": 0.982395416859987
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-7",
+      "position": {
+        "x": 0.6645568654013789,
+        "y": 0.41331753879069255
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "chat-a",
+      "position": {
+        "x": 0.6655568654013789,
+        "y": 0.5533175387906926
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.032,
+      "tags": [
+        "chatting"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "chat-b",
+      "position": {
+        "x": 0.6655568654013789,
+        "y": 0.6233175387906925
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.032,
+      "tags": [
+        "chatting"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-1-approach",
+      "position": {
+        "x": 0.6389852819376396,
+        "y": 0.34084385364867154
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-approach",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-2-approach",
+      "position": {
+        "x": 0.709492618216043,
+        "y": 0.34846170012987715
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-approach",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-3-approach",
+      "position": {
+        "x": 0.6340834470913714,
+        "y": 0.6210488407746941
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-approach",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-4-approach",
+      "position": {
+        "x": 0.7078344439970511,
+        "y": 0.6240580603378278
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-approach",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-5-approach",
+      "position": {
+        "x": 0.6392792868057067,
+        "y": 0.9165278394540888
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-approach",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-6-approach",
+      "position": {
+        "x": 0.7120947388810644,
+        "y": 0.9172869606985653
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-approach",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-1-leave",
+      "position": {
+        "x": 0.6389852819376396,
+        "y": 0.38084385364867157
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-leave",
+        "roaming",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-2-leave",
+      "position": {
+        "x": 0.709492618216043,
+        "y": 0.3884617001298772
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-leave",
+        "roaming",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-3-leave",
+      "position": {
+        "x": 0.6340834470913714,
+        "y": 0.6610488407746942
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-leave",
+        "roaming",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-4-leave",
+      "position": {
+        "x": 0.7078344439970511,
+        "y": 0.6640580603378279
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-leave",
+        "roaming",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-5-leave",
+      "position": {
+        "x": 0.6392792868057067,
+        "y": 0.9565278394540888
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-leave",
+        "roaming",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "desk-6-leave",
+      "position": {
+        "x": 0.781385703819411,
+        "y": 0.9857142857142858
+      },
+      "footprint": {
+        "width": 0.04,
+        "height": 0.04
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "workstation-leave",
+        "roaming",
+        "task"
+      ],
+      "capacity": 1
+    },
+    {
+      "id": "roam-8",
+      "position": {
+        "x": 0.27,
+        "y": 0.8348975396583471
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-9",
+      "position": {
+        "x": 0.27,
+        "y": 0.9689267162659576
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming"
+      ],
+      "capacity": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "roam-1",
+      "to": "roam-5",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-1",
+      "to": "roam-7",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-1",
+      "to": "roam-2",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-2",
+      "to": "roam-7",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-2",
+      "to": "roam-3",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-3",
+      "to": "roam-4",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-4",
+      "to": "roam-6",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-5",
+      "to": "roam-6",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-2",
+      "to": "chat-a",
+      "behaviors": [
+        "roaming",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-3",
+      "to": "chat-b",
+      "behaviors": [
+        "roaming",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "chat-a",
+      "to": "chat-b",
+      "behaviors": [
+        "roaming",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-1",
+      "to": "desk-1-approach",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-1-leave",
+      "to": "roam-1",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-2",
+      "to": "desk-2-approach",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-2-leave",
+      "to": "roam-2",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-3",
+      "to": "desk-3-approach",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-3-leave",
+      "to": "roam-3",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-4",
+      "to": "desk-4-approach",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-4-leave",
+      "to": "roam-5",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-5",
+      "to": "desk-5-approach",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-5-leave",
+      "to": "roam-6",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-6",
+      "to": "desk-6-approach",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-6-leave",
+      "to": "roam-4",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-1-approach",
+      "to": "desk-1-leave",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-2-approach",
+      "to": "desk-2-leave",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-3-approach",
+      "to": "desk-3-leave",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-4-approach",
+      "to": "desk-4-leave",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-5-approach",
+      "to": "desk-5-leave",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "desk-6-approach",
+      "to": "desk-6-leave",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-8",
+      "to": "roam-9",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-9",
+      "to": "roam-6",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting"
+      ],
+      "bidirectional": true
+    }
+  ],
+  "furniture": [
+    {
+      "id": "desk-1-back",
+      "kind": "desk-back",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-desk",
+      "depth": 10,
+      "footprint": {
+        "width": 0.11541206387527939,
+        "height": 0.1168282336699653
+      },
+      "parts": {
+        "back": {
+          "x": 0.4835419680623603,
+          "y": 0.17528188316501733,
+          "width": 0.11541206387527939,
+          "height": 0.1168282336699653
+        }
+      }
+    },
+    {
+      "id": "desk-1-monitor",
+      "kind": "monitor",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-monitor",
+      "depth": 20,
+      "footprint": {
+        "width": 0.08203125,
+        "height": 0.10165662529830169
+      },
+      "parts": {
+        "back": {
+          "x": 0.49837037500000003,
+          "y": 0.08761168735084916,
+          "width": 0.08203125,
+          "height": 0.10165662529830169
+        }
+      }
+    },
+    {
+      "id": "desk-1-chair",
+      "kind": "chair",
+      "layer": "front-occluders",
+      "occluder": true,
+      "sortY": true,
+      "assetId": "flat-chair",
+      "depth": 30,
+      "footprint": {
+        "width": 0.051829532652485466,
+        "height": 0.13078811823375014
+      },
+      "parts": {
+        "front": {
+          "x": 0.5136232336737572,
+          "y": 0.2363419408831249,
+          "width": 0.051829532652485466,
+          "height": 0.13078811823375014
+        }
+      }
+    },
+    {
+      "id": "desk-2-back",
+      "kind": "desk-back",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-desk",
+      "depth": 10,
+      "footprint": {
+        "width": 0.11283026356791417,
+        "height": 0.11421475324625494
+      },
+      "parts": {
+        "back": {
+          "x": 0.749523868216043,
+          "y": 0.17869662337687256,
+          "width": 0.11283026356791417,
+          "height": 0.11421475324625494
+        }
+      }
+    },
+    {
+      "id": "desk-2-monitor",
+      "kind": "monitor",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-monitor",
+      "depth": 30,
+      "footprint": {
+        "width": 0.08203125,
+        "height": 0.10165662529830169
+      },
+      "parts": {
+        "back": {
+          "x": 0.762190375,
+          "y": 0.09067268735084914,
+          "width": 0.08203125,
+          "height": 0.10165662529830169
+        }
+      }
+    },
+    {
+      "id": "desk-2-chair",
+      "kind": "chair",
+      "layer": "front-occluders",
+      "occluder": true,
+      "sortY": true,
+      "assetId": "flat-chair",
+      "depth": 30,
+      "footprint": {
+        "width": 0.05065941304566346,
+        "height": 0.1278354051056813
+      },
+      "parts": {
+        "front": {
+          "x": 0.7798622934771684,
+          "y": 0.23781829744715932,
+          "width": 0.05065941304566346,
+          "height": 0.1278354051056813
+        }
+      }
+    },
+    {
+      "id": "desk-3-back",
+      "kind": "desk-back",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-desk",
+      "depth": 10,
+      "footprint": {
+        "width": 0.1093323941827429,
+        "height": 0.11067396307097987
+      },
+      "parts": {
+        "back": {
+          "x": 0.4847198029086286,
+          "y": 0.4595050184645101,
+          "width": 0.1093323941827429,
+          "height": 0.11067396307097987
+        }
+      }
+    },
+    {
+      "id": "desk-3-monitor",
+      "kind": "monitor",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-monitor",
+      "depth": 10,
+      "footprint": {
+        "width": 0.08203125,
+        "height": 0.10165662529830169
+      },
+      "parts": {
+        "back": {
+          "x": 0.49701637499999995,
+          "y": 0.3817846873508492,
+          "width": 0.08203125,
+          "height": 0.10165662529830169
+        }
+      }
+    },
+    {
+      "id": "desk-3-chair",
+      "kind": "chair",
+      "layer": "front-occluders",
+      "occluder": true,
+      "sortY": true,
+      "assetId": "flat-chair",
+      "depth": 41,
+      "footprint": {
+        "width": 0.052680306177705596,
+        "height": 0.1329349843680196
+      },
+      "parts": {
+        "front": {
+          "x": 0.5112608469111473,
+          "y": 0.5155125078159902,
+          "width": 0.052680306177705596,
+          "height": 0.1329349843680196
+        }
+      }
+    },
+    {
+      "id": "desk-4-back",
+      "kind": "desk-back",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-desk",
+      "depth": 10,
+      "footprint": {
+        "width": 0.11434861200589748,
+        "height": 0.11575173265853572
+      },
+      "parts": {
+        "back": {
+          "x": 0.7478656939970512,
+          "y": 0.46896213367073214,
+          "width": 0.11434861200589748,
+          "height": 0.11575173265853572
+        }
+      }
+    },
+    {
+      "id": "desk-4-monitor",
+      "kind": "monitor",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-monitor",
+      "depth": 40,
+      "footprint": {
+        "width": 0.08203125,
+        "height": 0.10165662529830169
+      },
+      "parts": {
+        "back": {
+          "x": 0.7638343749999998,
+          "y": 0.39226868735084913,
+          "width": 0.08203125,
+          "height": 0.10165662529830169
+        }
+      }
+    },
+    {
+      "id": "desk-4-chair",
+      "kind": "chair",
+      "layer": "front-occluders",
+      "occluder": true,
+      "sortY": true,
+      "assetId": "flat-chair",
+      "depth": 42,
+      "footprint": {
+        "width": 0.049949504500346006,
+        "height": 0.12604400167199292
+      },
+      "parts": {
+        "front": {
+          "x": 0.7770692477498271,
+          "y": 0.5251309991640036,
+          "width": 0.049949504500346006,
+          "height": 0.12604400167199292
+        }
+      }
+    },
+    {
+      "id": "desk-5-back",
+      "kind": "desk-back",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-desk",
+      "depth": 10,
+      "footprint": {
+        "width": 0.10967007361141326,
+        "height": 0.11101578601282479
+      },
+      "parts": {
+        "back": {
+          "x": 0.4895779631942935,
+          "y": 0.7537441069935875,
+          "width": 0.10967007361141326,
+          "height": 0.11101578601282479
+        }
+      }
+    },
+    {
+      "id": "desk-5-monitor",
+      "kind": "monitor",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-monitor",
+      "depth": 30,
+      "footprint": {
+        "width": 0.08203125,
+        "height": 0.10165662529830169
+      },
+      "parts": {
+        "back": {
+          "x": 0.498721375,
+          "y": 0.6696946873508491,
+          "width": 0.08203125,
+          "height": 0.10165662529830169
+        }
+      }
+    },
+    {
+      "id": "desk-5-chair",
+      "kind": "chair",
+      "layer": "front-occluders",
+      "occluder": true,
+      "sortY": true,
+      "assetId": "flat-chair",
+      "depth": 43,
+      "footprint": {
+        "width": 0.049647879761703206,
+        "height": 0.12528287321952658
+      },
+      "parts": {
+        "front": {
+          "x": 0.5140480601191484,
+          "y": 0.8123585633902367,
+          "width": 0.049647879761703206,
+          "height": 0.12528287321952658
+        }
+      }
+    },
+    {
+      "id": "desk-6-back",
+      "kind": "desk-back",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-desk",
+      "depth": 20,
+      "footprint": {
+        "width": 0.1188640222378711,
+        "height": 0.12032254946904561
+      },
+      "parts": {
+        "back": {
+          "x": 0.7521259888810644,
+          "y": 0.750561725265477,
+          "width": 0.1188640222378711,
+          "height": 0.12032254946904561
+        }
+      }
+    },
+    {
+      "id": "desk-6-monitor",
+      "kind": "monitor",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-monitor",
+      "depth": 40,
+      "footprint": {
+        "width": 0.08203125,
+        "height": 0.10165662529830169
+      },
+      "parts": {
+        "back": {
+          "x": 0.762058375,
+          "y": 0.6721316873508493,
+          "width": 0.08203125,
+          "height": 0.10165662529830169
+        }
+      }
+    },
+    {
+      "id": "desk-6-chair",
+      "kind": "chair",
+      "layer": "front-occluders",
+      "occluder": true,
+      "sortY": true,
+      "assetId": "flat-chair",
+      "depth": 46,
+      "footprint": {
+        "width": 0.04998856790882907,
+        "height": 0.12614257538905788
+      },
+      "parts": {
+        "front": {
+          "x": 0.7770497160455856,
+          "y": 0.814212712305471,
+          "width": 0.04998856790882907,
+          "height": 0.12614257538905788
+        }
+      }
+    },
+    {
+      "id": "draft-53",
+      "kind": "prop",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-island",
+      "depth": 25,
+      "footprint": {
+        "width": 0.21658359053280116,
+        "height": 0.17379125062765374
+      },
+      "parts": {
+        "main": {
+          "x": 0.02046920473359941,
+          "y": 0.13019137468617314,
+          "width": 0.21658359053280116,
+          "height": 0.17379125062765374
+        }
+      }
+    },
+    {
+      "id": "draft-55",
+      "kind": "prop",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-water-bar",
+      "depth": 25,
+      "footprint": {
+        "width": 0.1441243285092291,
+        "height": 0.15548179070473137
+      },
+      "parts": {
+        "main": {
+          "x": 0.24265187125235452,
+          "y": 0.14691060454761906,
+          "width": 0.1441243285092291,
+          "height": 0.15548179070473137
+        }
+      }
+    },
+    {
+      "id": "draft-56",
+      "kind": "prop",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-coffee-machine",
+      "depth": 25,
+      "footprint": {
+        "width": 0.05336553814900754,
+        "height": 0.15582066403229047
+      },
+      "parts": {
+        "main": {
+          "x": 0.32812923092549623,
+          "y": 0.00972066798385476,
+          "width": 0.05336553814900754,
+          "height": 0.15582066403229047
+        }
+      }
+    },
+    {
+      "id": "draft-57",
+      "kind": "prop",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-rice-cooker",
+      "depth": 25,
+      "footprint": {
+        "width": 0.07212164752139054,
+        "height": 0.11933759709021946
+      },
+      "parts": {
+        "main": {
+          "x": 0.24155217623930475,
+          "y": 0.048370201454890266,
+          "width": 0.07212164752139054,
+          "height": 0.11933759709021946
+        }
+      }
+    },
+    {
+      "id": "draft-58",
+      "kind": "prop",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-rice-bowl",
+      "depth": 25,
+      "footprint": {
+        "width": 0.047296639772623474,
+        "height": 0.0462831417903458
+      },
+      "parts": {
+        "main": {
+          "x": 0.1853156801136883,
+          "y": 0.1083424291048271,
+          "width": 0.047296639772623474,
+          "height": 0.0462831417903458
+        }
+      }
+    },
+    {
+      "id": "draft-59",
+      "kind": "prop",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-rice-bowl",
+      "depth": 25,
+      "footprint": {
+        "width": 0.04575195449906248,
+        "height": 0.044771556868427854
+      },
+      "parts": {
+        "main": {
+          "x": 0.13316851069305669,
+          "y": 0.10962013071538518,
+          "width": 0.04575195449906248,
+          "height": 0.044771556868427854
+        }
+      }
+    },
+    {
+      "id": "draft-60",
+      "kind": "prop",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-rice-bowl",
+      "depth": 25,
+      "footprint": {
+        "width": 0.04787608754729045,
+        "height": 0.04685017284464356
+      },
+      "parts": {
+        "main": {
+          "x": 0.07646195622635478,
+          "y": 0.10595791357767821,
+          "width": 0.04787608754729045,
+          "height": 0.04685017284464356
+        }
+      }
+    },
+    {
+      "id": "draft-62",
+      "kind": "prop",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-plant-b",
+      "depth": 25,
+      "footprint": {
+        "width": 0.05465327751706833,
+        "height": 0.11921046788673016
+      },
+      "parts": {
+        "main": {
+          "x": 0.918147361241466,
+          "y": 0.04723176605663493,
+          "width": 0.05465327751706833,
+          "height": 0.11921046788673016
+        }
+      }
+    },
+    {
+      "id": "draft-64",
+      "kind": "prop",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-coffee-table",
+      "depth": 25,
+      "footprint": {
+        "width": 0.15669804608453647,
+        "height": 0.135294766507925
+      },
+      "parts": {
+        "main": {
+          "x": 0.018405731594318565,
+          "y": 0.4952369892374126,
+          "width": 0.15669804608453647,
+          "height": 0.135294766507925
+        }
+      }
+    },
+    {
+      "id": "draft-63",
+      "kind": "prop",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-desk-phone",
+      "depth": 25,
+      "footprint": {
+        "width": 0.09375,
+        "height": 0.06923237954335469
+      },
+      "parts": {
+        "main": {
+          "x": 0.032155,
+          "y": 0.4566458102283226,
+          "width": 0.09375,
+          "height": 0.06923237954335469
+        }
+      }
+    },
+    {
+      "id": "draft-65",
+      "kind": "prop",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-plant-monstera",
+      "depth": 25,
+      "footprint": {
+        "width": 0.0554132171438689,
+        "height": 0.13108590517822702
+      },
+      "parts": {
+        "main": {
+          "x": 0.01857952785880876,
+          "y": 0.02625555388806626,
+          "width": 0.0554132171438689,
+          "height": 0.13108590517822702
+        }
+      }
+    },
+    {
+      "id": "draft-67",
+      "kind": "prop",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-plant-succulent",
+      "depth": 25,
+      "footprint": {
+        "width": 0.06576133535540747,
+        "height": 0.14531636771659032
+      },
+      "parts": {
+        "main": {
+          "x": 0.6358883323222962,
+          "y": 0.024120816141704842,
+          "width": 0.06576133535540747,
+          "height": 0.14531636771659032
+        }
+      }
+    },
+    {
+      "id": "draft-70",
+      "kind": "prop",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "flat-water-cooler",
+      "depth": 25,
+      "footprint": {
+        "width": 0.05711641403597303,
+        "height": 0.3495419796273811
+      },
+      "parts": {
+        "main": {
+          "x": 0.04983879298201348,
+          "y": 0.6175990101863095,
+          "width": 0.05711641403597303,
+          "height": 0.3495419796273811
+        }
+      }
+    },
+    {
+      "id": "draft-71",
+      "kind": "prop",
+      "layer": "back-furniture",
+      "sortY": true,
+      "assetId": "prop-plant",
+      "depth": 25,
+      "footprint": {
+        "width": 0.09375,
+        "height": 0.14285714285714285
+      },
+      "parts": {
+        "main": {
+          "x": 0.09312500000000001,
+          "y": 0.8435714285714286,
+          "width": 0.09375,
+          "height": 0.14285714285714285
+        }
+      }
+    }
+  ],
+  "workstations": {
+    "schemaVersion": 1,
+    "template": {
+      "desk": {
+        "assetId": "flat-desk",
+        "offset": {
+          "x": 0,
+          "y": 0
+        },
+        "scale": 1,
+        "layer": "back-furniture"
+      },
+      "monitor": {
+        "assetId": "flat-monitor",
+        "offset": {
+          "x": 0,
+          "y": 0
+        },
+        "scale": 1,
+        "layer": "back-furniture"
+      },
+      "chair": {
+        "assetId": "flat-chair",
+        "offset": {
+          "x": 0,
+          "y": 0
+        },
+        "scale": 1,
+        "layer": "front-occluders"
+      },
+      "seat": {
+        "offset": {
+          "x": 0,
+          "y": 0
+        },
+        "scale": 1,
+        "layer": "ground-entities"
+      }
+    },
+    "instances": [
+      {
+        "deskId": "desk-1",
+        "position": {
+          "x": 0.5435344608992824,
+          "y": 0.29584385364867155
+        },
+        "seat": {
+          "id": "desk-1",
+          "position": {
+            "x": 0.5435344608992824,
+            "y": 0.29584385364867155
+          }
+        },
+        "approach": {
+          "id": "desk-1-approach",
+          "nodeId": "desk-1-approach",
+          "position": {
+            "x": 0.6389852819376396,
+            "y": 0.34084385364867154
+          }
+        },
+        "leave": {
+          "id": "desk-1-leave",
+          "nodeId": "desk-1-leave",
+          "position": {
+            "x": 0.6389852819376396,
+            "y": 0.38084385364867157
+          }
+        },
+        "character": {
+          "scale": 1.981668243649236,
+          "direction": "back"
+        }
+      },
+      {
+        "deskId": "desk-2",
+        "position": {
+          "x": 0.8031900826576704,
+          "y": 0.30346170012987717
+        },
+        "seat": {
+          "id": "desk-2",
+          "position": {
+            "x": 0.8031900826576704,
+            "y": 0.30346170012987717
+          }
+        },
+        "approach": {
+          "id": "desk-2-approach",
+          "nodeId": "desk-2-approach",
+          "position": {
+            "x": 0.709492618216043,
+            "y": 0.34846170012987715
+          }
+        },
+        "leave": {
+          "id": "desk-2-leave",
+          "nodeId": "desk-2-leave",
+          "position": {
+            "x": 0.709492618216043,
+            "y": 0.3884617001298772
+          }
+        },
+        "character": {
+          "scale": 2.048833970000181,
+          "direction": "back"
+        }
+      },
+      {
+        "deskId": "desk-3",
+        "position": {
+          "x": 0.5403270732584732,
+          "y": 0.5760488407746942
+        },
+        "seat": {
+          "id": "desk-3",
+          "position": {
+            "x": 0.5403270732584732,
+            "y": 0.5760488407746942
+          }
+        },
+        "approach": {
+          "id": "desk-3-approach",
+          "nodeId": "desk-3-approach",
+          "position": {
+            "x": 0.6340834470913714,
+            "y": 0.6210488407746941
+          }
+        },
+        "leave": {
+          "id": "desk-3-leave",
+          "nodeId": "desk-3-leave",
+          "position": {
+            "x": 0.6340834470913714,
+            "y": 0.6610488407746942
+          }
+        },
+        "character": {
+          "scale": 2.114518579883817,
+          "direction": "back"
+        }
+      },
+      {
+        "deskId": "desk-4",
+        "position": {
+          "x": 0.8059083272224451,
+          "y": 0.5790580603378278
+        },
+        "seat": {
+          "id": "desk-4",
+          "position": {
+            "x": 0.8059083272224451,
+            "y": 0.5790580603378278
+          }
+        },
+        "approach": {
+          "id": "desk-4-approach",
+          "nodeId": "desk-4-approach",
+          "position": {
+            "x": 0.7078344439970511,
+            "y": 0.6240580603378278
+          }
+        },
+        "leave": {
+          "id": "desk-4-leave",
+          "nodeId": "desk-4-leave",
+          "position": {
+            "x": 0.7078344439970511,
+            "y": 0.6640580603378279
+          }
+        },
+        "character": {
+          "scale": 2.1315412153375797,
+          "direction": "back"
+        }
+      },
+      {
+        "deskId": "desk-5",
+        "position": {
+          "x": 0.5446115294940291,
+          "y": 0.8715278394540888
+        },
+        "seat": {
+          "id": "desk-5",
+          "position": {
+            "x": 0.5446115294940291,
+            "y": 0.8715278394540888
+          }
+        },
+        "approach": {
+          "id": "desk-5-approach",
+          "nodeId": "desk-5-approach",
+          "position": {
+            "x": 0.6392792868057067,
+            "y": 0.9165278394540888
+          }
+        },
+        "leave": {
+          "id": "desk-5-leave",
+          "nodeId": "desk-5-leave",
+          "position": {
+            "x": 0.6392792868057067,
+            "y": 0.9565278394540888
+          }
+        },
+        "character": {
+          "scale": 2.1554825459882787,
+          "direction": "back"
+        }
+      },
+      {
+        "deskId": "desk-6",
+        "position": {
+          "x": 0.8053085323826407,
+          "y": 0.8722869606985654
+        },
+        "seat": {
+          "id": "desk-6",
+          "position": {
+            "x": 0.8053085323826407,
+            "y": 0.8722869606985654
+          }
+        },
+        "approach": {
+          "id": "desk-6-approach",
+          "nodeId": "desk-6-approach",
+          "position": {
+            "x": 0.7120947388810644,
+            "y": 0.9172869606985653
+          }
+        },
+        "leave": {
+          "id": "desk-6-leave",
+          "nodeId": "desk-6-leave",
+          "position": {
+            "x": 0.781385703819411,
+            "y": 0.9857142857142858
+          }
+        },
+        "character": {
+          "scale": 2.0287693245965133,
+          "direction": "back"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "actionId": "working-back",
+  "packId": "deepseek-default",
+  "publishedAt": "2026-09-17T03:03:12.880Z",
+  "backupDir": "/Users/xia/program/dsh/DshCockpit-s1/content/build/backups/2026-09-17T03-03-12-878Z",
+  "backupDirRelative": "build/backups/2026-09-17T03-03-12-878Z",
+  "summary": "animations.json: the target action entry rewritten (order/durations/loop/direction); character.json: the action entry rebuilt from freshly measured geometry",
+  "frames": [
+    "assets/animations/working/back/working-back-04.png",
+    "assets/animations/working/back/working-back-05.png",
+    "assets/animations/working/back/working-back-06.png"
+  ],
+  "files": {
+    "rewritten": [
+      "animation/animations.json",
+      "character.json"
+    ],
+    "added": []
+  },
+  "changes": [
+    "animations.json: the target action entry rewritten (order/durations/loop/direction)",
+    "character.json: the action entry rebuilt from freshly measured geometry"
+  ]
+}

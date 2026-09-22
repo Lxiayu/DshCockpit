@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "sleeping",
+  "loop": false,
+  "direction": "none",
+  "frames": [
+    {
+      "file": "assets/expressions/sleeping.png",
+      "durationMs": null
+    }
+  ],
+  "geometry": {
+    "footLine": 296,
+    "tolerancePx": 1
+  }
+}

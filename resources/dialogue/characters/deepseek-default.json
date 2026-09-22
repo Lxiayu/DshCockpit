@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "characterId": "whale-girl",
+  "description": "鲸鱼娘角色专属语料覆盖层：优先于基础库；缺失的 topic 回落到基础库。",
+  "overrides": {
+    "greeting": [
+      { "id": "wg-g-01", "text": "咕噜~", "weight": 4 },
+      { "id": "wg-g-02", "text": "（甩尾问好）", "weight": 1 }
+    ],
+    "task-start": [
+      { "id": "wg-ts-01", "text": "这个我来", "weight": 3 },
+      { "id": "wg-ts-02", "text": "看我的", "weight": 2 }
+    ],
+    "task-done": [
+      { "id": "wg-td-01", "text": "搞定了！", "weight": 3 },
+      { "id": "wg-td-02", "text": "轻轻松松", "weight": 1 }
+    ],
+    "task-fail": [
+      { "id": "wg-tf-01", "text": "再来一次", "weight": 2 },
+      { "id": "wg-tf-02", "text": "哪里出了问题", "weight": 2 }
+    ],
+    "idle": [
+      { "id": "wg-i-01", "text": "今天海况不错", "weight": 2 },
+      { "id": "wg-i-02", "text": "（吐泡泡）", "weight": 1 }
+    ]
+  }
+}

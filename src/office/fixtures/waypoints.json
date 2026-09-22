@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "description": "Task 4 / SPEC-06 Animation Playground waypoint fixture. Single-character graph: one desk, four roam points, one chat pair. Ratios are normalized [0,1].",
+  "nodes": [
+    { "id": "desk-1", "position": { "x": 0.62, "y": 0.52 }, "tags": ["desk", "sleeping"], "capacity": 1, "safeRadius": 0.05 },
+    { "id": "roam-1", "position": { "x": 0.2, "y": 0.35 }, "tags": ["roaming"], "capacity": 2, "safeRadius": 0.03 },
+    { "id": "roam-2", "position": { "x": 0.75, "y": 0.3 }, "tags": ["roaming"], "capacity": 2, "safeRadius": 0.03 },
+    { "id": "roam-3", "position": { "x": 0.3, "y": 0.78 }, "tags": ["roaming"], "capacity": 2, "safeRadius": 0.03 },
+    { "id": "roam-4", "position": { "x": 0.8, "y": 0.75 }, "tags": ["roaming"], "capacity": 2, "safeRadius": 0.03 },
+    { "id": "chat-a", "position": { "x": 0.45, "y": 0.65 }, "tags": ["chatting"], "capacity": 1, "safeRadius": 0.03 },
+    { "id": "chat-b", "position": { "x": 0.55, "y": 0.68 }, "tags": ["chatting"], "capacity": 1, "safeRadius": 0.03 }
+  ],
+  "edges": [
+    { "from": "roam-1", "to": "desk-1", "behaviors": ["roaming", "task"], "bidirectional": true },
+    { "from": "roam-2", "to": "desk-1", "behaviors": ["roaming", "task"], "bidirectional": true },
+    { "from": "roam-3", "to": "desk-1", "behaviors": ["roaming", "task"], "bidirectional": true },
+    { "from": "roam-4", "to": "desk-1", "behaviors": ["roaming", "task"], "bidirectional": true },
+    { "from": "roam-1", "to": "roam-2", "behaviors": ["roaming"], "bidirectional": true },
+    { "from": "roam-2", "to": "roam-4", "behaviors": ["roaming"], "bidirectional": true },
+    { "from": "roam-3", "to": "roam-4", "behaviors": ["roaming"], "bidirectional": true },
+    { "from": "roam-1", "to": "roam-3", "behaviors": ["roaming"], "bidirectional": true },
+    { "from": "roam-1", "to": "chat-a", "behaviors": ["chatting"], "bidirectional": true },
+    { "from": "roam-4", "to": "chat-b", "behaviors": ["chatting"], "bidirectional": true },
+    { "from": "chat-a", "to": "chat-b", "behaviors": ["chatting"], "bidirectional": true }
+  ]
+}

@@ -1,0 +1,5 @@
+node --test test/office-playground.test.js
+node --test test/office-asset-runtime.test.js test/office-animation-controller.test.js test/office-movement-controller.test.js test/office-transition-controller.test.js test/office-state-reducer.test.js test/dependency-guard.test.js test/office-doc-contract.test.js
+node --check src/office/playground-page.js && node --check src/main.js
+git diff --check
+./node_modules/.bin/electron /private/var/folders/bk/b3ld_mbj0g57yy7my8wg69fc0000gn/T/opencode/office-playground-evidence.js   # this evidence run (fixed 1280x840, DPR 1)

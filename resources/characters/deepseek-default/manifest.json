@@ -1,0 +1,16 @@
+{
+  "animations": "animation/animations.json",
+  "author": "DshCockpit (官方占位, 约稿买断后替换)",
+  "fallback": {
+    "allowProgrammaticEmphasis": true,
+    "allowStaticPose": true
+  },
+  "geometry": "animation/anchors.json",
+  "id": "deepseek-default",
+  "license": "DshCockpit 官方占位资产（Layer 2, 版权独立声明不随 MIT; 正式稿约稿买断后替换本占位资产）",
+  "runtimeCompatibility": {
+    "schema": 1
+  },
+  "schemaVersion": 1,
+  "version": "1.1.0"
+}
