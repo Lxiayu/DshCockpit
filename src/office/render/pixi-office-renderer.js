@@ -615,8 +615,42 @@ async function createOfficeRenderer(options) {
         node: record.node,
         id: record.item.id,
         kind: 'furniture',
+        item: record.item,
+        rect,
       });
     }
+    // 2026-09-22 fix（用户报的图层 bug）：坐在支撑面上的物件（岛台上的电饭煲/米饭碗、
+    // 茶几上的电话机…）底边在支撑物底边**之上**，纯底边排序会让支撑物盖住它们。
+    // 做法：把这类物件重挂到"最近的下方支撑物的**实际绘制键** + 0.5"。
+    // 必须迭代到不动点：支撑物自己也可能被重挂（茶几→水吧），只跑一遍会让先处理的
+    // 子物件又落回支撑物之下。键只增不减，因此必然收敛（上限取条目数轮）。
+    for (let round = 0; round < furnitureEntries.length; round += 1) {
+      let changed = false;
+      const rekeyOrder = [...furnitureEntries].sort((a, b) => (a.key - b.key) || String(a.id).localeCompare(String(b.id)));
+      for (const entry of rekeyOrder) {
+        // 只对"道具"（kind:'prop'）做重挂：桌子本体/显示器/椅子不与支撑物叠加，
+        // 把它们也纳入会破坏"走廊行人压在工位之上"（角色与家具的穿插契约）。
+        if (!entry.item || entry.item.kind !== 'prop') continue;
+        const footX = entry.rect.x + entry.rect.width / 2;
+        const footY = entry.rect.y + entry.rect.height;
+        let support = null;
+        for (const candidate of furnitureEntries) {
+          if (candidate === entry) continue;
+          const cRect = candidate.rect;
+          if (candidate.key <= entry.key + 0.5) continue;                  // 支撑物必须画在更近处（键更大）
+          if (footX < cRect.x || footX > cRect.x + cRect.width) continue;  // 落点需在其水平跨度内
+          if (footY < cRect.y - 0.02) continue;                           // 支撑面需在落点之下（允许 2% 场景高余量）
+          if (footY > cRect.y + cRect.height) continue;                    // 落点不能低于支撑物底边
+          if (!support || candidate.key < support.key) support = candidate;
+        }
+        if (support) {
+          const next = support.key + 0.5;
+          if (next > entry.key + 0.25) { entry.key = next; changed = true; }
+        }
+      }
+      if (!changed) break;
+    }
+
     if (furnitureEntries.length > 0) {
       const merged = [
         ...ordered.map((entry) => ({

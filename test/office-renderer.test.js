@@ -1362,19 +1362,58 @@ test('flat furniture paint order follows the draft depth inside each role', asyn
   }
   // M4.1c: the DECLARED order above is draft metadata; the real paint order is
   // the merged geometric pass — every sortY node lives in ground-entities and
-  // the children are ordered by bottom edge ascending (farthest first).
+  // the children are ordered by *effective* key ascending (farthest first).
+  // 2026-09-22 fix: items resting ON another item (rice bowls/cooker on the
+  // island, the desk phone on the coffee table) re-key to their supporter's
+  // bottom edge + 0.5, so the declared bottom edge is no longer the painter key
+  // for those props — assert on groundPaintOrder's recorded keys instead.
   const groundIds = view.layers.groundEntities.children
     .map((child) => child.__furnitureId).filter(Boolean);
   assert.ok(groundIds.length >= 32, `all flat furniture painted in the merged pass (${groundIds.length})`);
-  const bottomOf = (id) => {
-    const item = FLAT_LAYOUT_FIXTURE.furniture.find((entry) => entry.id === id);
-    const rect = item.parts.back || item.parts.main || item.parts.front;
-    return (rect.y + rect.height) * VIEWPORT.height;
-  };
-  for (let i = 1; i < groundIds.length; i += 1) {
-    assert.ok(bottomOf(groundIds[i - 1]) <= bottomOf(groundIds[i]),
-      `ground pass bottom edges ascend: ${groundIds[i - 1]}(${bottomOf(groundIds[i - 1]).toFixed(1)}) <= ${groundIds[i]}(${bottomOf(groundIds[i]).toFixed(1)})`);
+  const groundPaint = view.groundPaintOrder().filter((entry) => entry.kind === 'furniture');
+  assert.deepEqual(groundPaint.map((entry) => entry.id), groundIds, 'recorded keys describe the real children order');
+  for (let i = 1; i < groundPaint.length; i += 1) {
+    assert.ok(groundPaint[i - 1].key <= groundPaint[i].key,
+      `ground pass effective keys ascend: ${groundPaint[i - 1].id}(${groundPaint[i - 1].key.toFixed(1)}) <= ${groundPaint[i].id}(${groundPaint[i].key.toFixed(1)})`);
   }
+  // the fix itself: any prop whose foot rests inside another item's span must
+  // paint above the nearest such item below it (its supporter). Independent of
+  // ids: re-derive supporter candidates from the draft rects, then assert the
+  // prop's recorded key is greater than that supporter's recorded key.
+  const keyOf = (id) => {
+    const entry = groundPaint.find((candidate) => candidate.id === id);
+    return entry ? entry.key : undefined;
+  };
+  const rectOf = (id) => {
+    const item = FLAT_LAYOUT_FIXTURE.furniture.find((entry) => entry.id === id);
+    if (!item) return null;
+    return item.parts.back || item.parts.main || item.parts.front || null;
+  };
+  const props = ['draft-57', 'draft-58', 'draft-59', 'draft-60', 'draft-63'];
+  let checked = 0;
+  for (const propId of props) {
+    const propRect = rectOf(propId);
+    const propKey = keyOf(propId);
+    if (!propRect || propKey === undefined) continue;
+    const footX = propRect.x + propRect.width / 2;
+    const footY = propRect.y + propRect.height;
+    let supporter = null;
+    for (const other of FLAT_LAYOUT_FIXTURE.furniture) {
+      if (other.id === propId) continue;
+      const rect = rectOf(other.id);
+      if (!rect) continue;
+      const bottom = (rect.y + rect.height) * VIEWPORT.height;
+      if (bottom <= footY * VIEWPORT.height + 0.5) continue;
+      if (footX < rect.x || footX > rect.x + rect.width) continue;
+      if (footY < rect.y - 0.02) continue;
+      if (!supporter || bottom < supporter.bottom) supporter = { id: other.id, bottom, key: keyOf(other.id) };
+    }
+    if (!supporter || supporter.key === undefined) continue;
+    checked += 1;
+    assert.ok(propKey > supporter.key,
+      `${propId} paints above its supporter ${supporter.id} (${propKey.toFixed(1)} > ${supporter.key.toFixed(1)})`);
+  }
+  assert.ok(checked >= 3, `the resting-prop invariant was actually exercised (${checked} props)`);
   for (const entry of view.furniturePaintOrder()) {
     assert.equal(entry.paintsIn, entry.sortY ? 'ground-entities' : entry.layer,
       `${entry.id} paints in its contracted container`);
