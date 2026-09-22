@@ -1087,7 +1087,7 @@
             "x": 178,
             "y": 296
           },
-          "durationMs": null,
+          "durationMs": 350,
           "file": "assets/animations/working/back/working-back-04.png",
           "visibleBounds": {
             "height": 255,
@@ -1101,7 +1101,7 @@
             "x": 178,
             "y": 296
           },
-          "durationMs": null,
+          "durationMs": 350,
           "file": "assets/animations/working/back/working-back-05.png",
           "visibleBounds": {
             "height": 256,
@@ -1115,7 +1115,7 @@
             "x": 178,
             "y": 296
           },
-          "durationMs": null,
+          "durationMs": 350,
           "file": "assets/animations/working/back/working-back-06.png",
           "visibleBounds": {
             "height": 256,

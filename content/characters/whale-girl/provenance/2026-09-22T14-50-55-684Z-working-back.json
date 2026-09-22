@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "actionId": "working-back",
+  "packId": "deepseek-default",
+  "publishedAt": "2026-09-22T14:50:55.685Z",
+  "backupDir": "content/build/backups/2026-09-22T14-50-55-684Z",
+  "backupDirRelative": "build/backups/2026-09-22T14-50-55-684Z",
+  "summary": "animations.json: the target action entry rewritten (order/durations/loop/direction)",
+  "frames": [
+    "assets/animations/working/back/working-back-04.png",
+    "assets/animations/working/back/working-back-05.png",
+    "assets/animations/working/back/working-back-06.png"
+  ],
+  "files": {
+    "rewritten": [
+      "animation/animations.json"
+    ],
+    "added": []
+  },
+  "changes": [
+    "animations.json: the target action entry rewritten (order/durations/loop/direction)"
+  ]
+}

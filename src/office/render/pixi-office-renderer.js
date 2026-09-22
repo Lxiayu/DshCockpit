@@ -652,15 +652,71 @@ async function createOfficeRenderer(options) {
     }
 
     if (furnitureEntries.length > 0) {
-      const merged = [
-        ...ordered.map((entry) => ({
-          key: (entry.record.__snapshot ? entry.record.__snapshot.position.y : 0) * scene.height,
-          node: entry.record.container,
-          id: entry.id,
-          kind: 'character',
-        })),
-        ...furnitureEntries,
-      ];
+      // M4.1h（2026-09-22，用户实测截图反馈）："他工位的桌子图层比鲸鱼娘的图层要高"——
+      // 坐在自己工位上的角色被桌体盖住（生产场景 960×630 下中间排 desk-4 整张桌子把
+      // 角色压住，其余工位也只差 2~4px）。根因：坐姿角色的排序键是脚点（座位锚点），
+      // 而锚点恰好落在桌体底边附近，纯底边排序等于抛硬币。修法与上面 prop 的"支撑物
+      // +0.5"同一机制，对象从道具扩展到坐姿角色：脚点落在工位带内的角色按她工位的
+      // 堆叠键重挂。工位带 = 桌体的 x 跨度 ×（桌体顶边 → 椅子底边）；堆叠键 = 桌体/
+      // 显示器/桌面上家具的底边最大值。只升不降，且必须仍低于椅子键：
+      //   - 桌体/显示器在她下面 → 不再被桌面盖住，且保证 ≥0.5px 的稳定余量；
+      //   - 椅子底边在堆叠键之下约 60px → 椅背照旧遮住她的下半身（"seated bodies
+      //     sit behind" 契约不破坏；重挂键取 min(堆叠键+0.5, 椅子键-0.5)，草稿把
+      //     椅子放得再高也恒 < 椅子键，契约在任何草稿下都成立）；
+      //   - 走廊行人脚点在椅底更下方（或根本不在工位带内）→ 键不变，仍盖住整张工位
+      //     （"the corridor walker draws AFTER the desk" 契约不破坏）；
+      //   - 从桌后绕行的角色脚点在桌体顶边之上 → 不在工位带内 → 键不变，仍被桌子
+      //     盖住（绕到桌后的读法不变）。
+      const stationStacks = new Map(); // prefix -> { back, monitor, chair, stackKey }
+      for (const entry of furnitureEntries) {
+        const match = /-([a-z]+)$/.exec(entry.id || '');
+        if (!match || (match[1] !== 'back' && match[1] !== 'monitor' && match[1] !== 'chair')) continue;
+        const prefix = entry.id.slice(0, match.index);
+        if (!stationStacks.has(prefix)) stationStacks.set(prefix, { back: null, monitor: null, chair: null, stackKey: -Infinity });
+        stationStacks.get(prefix)[match[1]] = entry;
+      }
+      for (const station of stationStacks.values()) {
+        // 缺桌体或椅子的工位不判带（椅子是坐姿遮挡契约的一端，缺了就不重挂）。
+        if (!station.back || !station.chair) continue;
+        station.stackKey = Math.max(
+          station.back.key,
+          station.monitor ? station.monitor.key : -Infinity
+        );
+        // 工位带内、最终排在桌体之后的其它家具（例如被上面 prop 规则重挂到桌体的
+        // 道具）也属于这个工位的堆叠：坐姿角色坐在整组构图前面，只让椅子压她。
+        for (const other of furnitureEntries) {
+          if (other === station.back || other === station.monitor || other === station.chair) continue;
+          if (other.key <= station.stackKey || other.key >= station.chair.key) continue;
+          const centerX = other.rect.x + other.rect.width / 2;
+          if (centerX < station.back.rect.x || centerX > station.back.rect.x + station.back.rect.width) continue;
+          station.stackKey = other.key;
+        }
+      }
+      const characterEntries = ordered.map((entry) => ({
+        key: (entry.record.__snapshot ? entry.record.__snapshot.position.y : 0) * scene.height,
+        node: entry.record.container,
+        id: entry.id,
+        kind: 'character',
+        record: entry.record,
+      }));
+      for (const entry of characterEntries) {
+        const point = entry.record.__snapshot ? entry.record.__snapshot.position : null;
+        if (!point) continue;
+        for (const station of stationStacks.values()) {
+          const back = station.back.rect;
+          const chair = station.chair.rect;
+          if (point.x < back.x || point.x > back.x + back.width) continue;      // 水平落在桌体跨度内
+          if (point.y < back.y || point.y > chair.y + chair.height) continue;   // 桌体顶边 ~ 椅子底边
+          // 重挂键 = min(堆叠键 + 0.5, 椅子键 - 0.5)：正常工位（椅子底边在堆叠键
+          // 之下约 60px）取堆叠键 + 0.5；草稿若把椅子放得太高（椅子键 - 0.5 反而更
+          // 小）就贴着椅子底下取，仍然 > 堆叠键里她原本被盖住的键、且恒 < 椅子键
+          // （"seated bodies sit behind" 契约不被任何草稿破坏）。只升不降。
+          const target = Math.min(station.stackKey + 0.5, station.chair.key - 0.5);
+          if (target > entry.key) entry.key = target;
+          break;
+        }
+      }
+      const merged = [...characterEntries, ...furnitureEntries];
       merged.sort((a, b) => (a.key - b.key) || String(a.id).localeCompare(String(b.id)));
       for (const entry of merged) layer.addChild(entry.node);
       groundOrder = merged.map((entry) => ({ id: entry.id, kind: entry.kind, key: entry.key }));

@@ -6,15 +6,15 @@
   "frames": [
     {
       "file": "assets/animations/working/back/working-back-04.png",
-      "durationMs": null
+      "durationMs": 350
     },
     {
       "file": "assets/animations/working/back/working-back-05.png",
-      "durationMs": null
+      "durationMs": 350
     },
     {
       "file": "assets/animations/working/back/working-back-06.png",
-      "durationMs": null
+      "durationMs": 350
     }
   ],
   "geometry": {

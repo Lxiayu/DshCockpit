@@ -2720,7 +2720,10 @@ test('E6d: the pack registers the working-back seated-work loop (the three M3 ca
   const sideBackHeight = anchorsDoc.frames['assets/animations/side/none/side-back.png'].visibleBounds.height;
   for (const frame of entry.frames) {
     assert.match(frame.file, /^assets\/animations\/working\/back\/working-back-0[456]\.png$/);
-    assert.equal(frame.durationMs, null, 'frame timing inherits defaultFrameDurationMs');
+    // 2026-09-22（用户实测"工作动画用错了"）：working-back 三帧此前 durationMs=null，
+    // 落到 pack 默认的 1000ms/帧 → 三帧循环要 3 秒，看起来几乎静止。定稿为 350ms/帧
+    // （3 帧 ≈ 1.05s 的坐姿小动作循环，可调）。
+    assert.equal(frame.durationMs, 350, 'the seated-work loop runs at the 350ms per-frame pace');
     const declared = anchorsDoc.frames[frame.file];
     assert.ok(declared, `anchors.json declares ${frame.file}`);
     assert.deepEqual(declared.outputAnchor, { x: 178, y: 296 }, 'the declared foot contact is the pack anchor');

@@ -591,6 +591,173 @@ test('M4.1c: flat furniture and characters share one painter order — walkers p
   view.destroy();
 });
 
+test('M4.1h: a seated character paints ABOVE her workstation desk body and BELOW its chair (user-reported desk-over-whale-girl bug)', async () => {
+  // 用户实测（2026-09-22，真机截图）：鲸鱼娘坐在自己工位（working/sleeping 等坐姿）时，
+  // 工位桌子的图层压在她上面（截图里中间排 desk-4 被整张桌子盖住）。根因：坐姿角色的
+  // 排序键是脚点（座位锚点），而锚点恰好落在桌体底边附近——bundled-flat 布局里 desk-4
+  // 的座位点甚至比桌体底边还高 3~5px，纯底边 painter 排序于是让不透明桌体盖住角色。
+  // 修复（pixi-office-renderer.js sortGround，与 prop 的"支撑物+0.5"同一机制）：
+  // 脚点落在工位带（桌体 x 跨度 × 桌体顶边→椅子底边）内的角色，按键重挂到该工位的
+  // 堆叠键（桌体/显示器/桌面上家具底边最大值）+ 0.5，只升不降。本用例把六个工位全部
+  // 坐满，逐个断言键序；pre-fix 代码在 desk-4 上必红（desk-4-back 键高于座位脚点）。
+  const PIXI = stubPIXI();
+  const flat = () => officeRenderer.createOfficeRenderer({
+    PIXI,
+    layout: officeLayout.createOfficeLayout(FLAT_LAYOUT_FIXTURE),
+    pack: PACK,
+    textures: new Map(),
+    officeTextures: flatOfficeTextures(PIXI),
+    texturedWorkstations: ['desk-1', 'desk-2', 'desk-3', 'desk-4', 'desk-5', 'desk-6'],
+    scene: { ...VIEWPORT },
+    snapshot: null,
+    mount: null,
+  });
+  const layout = officeLayout.createOfficeLayout(FLAT_LAYOUT_FIXTURE);
+  const seated = [
+    { employeeId: 'orchestrator', deskId: 'desk-1' },
+    { employeeId: 'researcher', deskId: 'desk-2' },
+    { employeeId: 'coder', deskId: 'desk-3' },
+    { employeeId: 'reviewer', deskId: 'desk-4' },
+    { employeeId: 'collaborator', deskId: 'desk-5' },
+    { employeeId: 'companion', deskId: 'desk-6' },
+  ];
+  const view = await flat();
+  view.applySnapshot(baseSnapshot(seated.map(({ employeeId, deskId }, index) => employeeSnapshot({
+    employeeId,
+    seatNodeId: deskId,
+    position: { ...layout.nodeById(deskId).position },
+    activity: index % 2 === 0 ? 'working' : 'sleeping',
+    animation: { resource: index % 2 === 0 ? 'working' : 'sleeping', frameIndex: 0, fallbackReason: null },
+  }))));
+
+  const paint = view.groundPaintOrder();
+  const keyOf = (id) => {
+    const entry = paint.find((candidate) => candidate.id === id);
+    assert.ok(entry, `${id} is in the merged geometric pass`);
+    return entry.key;
+  };
+  // 断言①：坐姿角色的绘制键 > 自己工位桌体（与显示器）的键 —— 桌面/显示器不再盖住她。
+  // 断言②：且 < 自己工位椅子的键 —— 椅背照旧遮住她的下半身（既有契约保持）。
+  for (const { employeeId, deskId } of seated) {
+    const charKey = keyOf(employeeId);
+    const backKey = keyOf(`${deskId}-back`);
+    const monitorKey = keyOf(`${deskId}-monitor`);
+    const chairKey = keyOf(`${deskId}-chair`);
+    assert.ok(charKey > backKey,
+      `${employeeId}@${deskId} paints above her desk body (char ${charKey.toFixed(1)} > back ${backKey.toFixed(1)})`);
+    assert.ok(charKey > monitorKey,
+      `${employeeId}@${deskId} paints above her monitor (char ${charKey.toFixed(1)} > monitor ${monitorKey.toFixed(1)})`);
+    assert.ok(charKey < chairKey,
+      `${employeeId}@${deskId} still sits behind her chair back (char ${charKey.toFixed(1)} < chair ${chairKey.toFixed(1)})`);
+    // 重挂只升不降：修好的键永远不会低于脚点本身。
+    const footKey = layout.nodeById(deskId).position.y * VIEWPORT.height;
+    assert.ok(charKey >= footKey - 1e-9,
+      `${employeeId}@${deskId} re-key is raise-only (char ${charKey.toFixed(1)} >= foot ${footKey.toFixed(1)})`);
+  }
+  // 场景图顺序与记录键一致：角色在桌体之后、椅子之前（真正的 children 先后）。
+  const order = view.layers.groundEntities.children.map((child) => child.__furnitureId || child.__employeeId);
+  for (const { employeeId, deskId } of seated) {
+    assert.ok(order.indexOf(employeeId) > order.indexOf(`${deskId}-back`),
+      `${employeeId} mounts after ${deskId}-back in ground-entities`);
+    assert.ok(order.indexOf(employeeId) < order.indexOf(`${deskId}-chair`),
+      `${employeeId} mounts before ${deskId}-chair in ground-entities`);
+  }
+  // 记录的 painter 键严格递增（合并排序的不变量）。
+  for (let i = 1; i < paint.length; i += 1) {
+    assert.ok(paint[i - 1].key <= paint[i].key,
+      `painter keys ascend: ${paint[i - 1].id}(${paint[i - 1].key.toFixed(1)}) <= ${paint[i].id}(${paint[i].key.toFixed(1)})`);
+  }
+  view.destroy();
+
+  // 两条既有契约在同一张场景里复核：
+  //  (a) 走廊行人（脚点在椅底更下方）仍盖住整张工位；
+  //  (b) 从桌后绕行的角色（脚点在桌体顶边之上、桌体 x 跨度内）仍被桌子盖住。
+  const view2 = await flat();
+  const deskBack = FLAT_LAYOUT_FIXTURE.furniture.find((item) => item.id === 'desk-1-back').parts.back;
+  const chairRect = FLAT_LAYOUT_FIXTURE.furniture.find((item) => item.id === 'desk-1-chair').parts.front;
+  const walker = employeeSnapshot({
+    employeeId: 'walker',
+    position: { x: 0.6, y: Math.min(0.99, chairRect.y + chairRect.height + 0.08) },
+  });
+  const behindWalker = employeeSnapshot({
+    employeeId: 'behind',
+    position: { x: deskBack.x + deskBack.width / 2, y: Math.max(0.02, deskBack.y - 0.02) },
+  });
+  view2.applySnapshot(baseSnapshot([
+    ...seated.map(({ employeeId, deskId }) => employeeSnapshot({
+      employeeId,
+      seatNodeId: deskId,
+      position: { ...layout.nodeById(deskId).position },
+      activity: 'working',
+      animation: { resource: 'working', frameIndex: 0, fallbackReason: null },
+    })),
+    walker,
+    behindWalker,
+  ]));
+  const paint2 = view2.groundPaintOrder();
+  const order2 = view2.layers.groundEntities.children.map((child) => child.__furnitureId || child.__employeeId);
+  const idx2 = (id) => {
+    const at = order2.indexOf(id);
+    assert.ok(at !== -1, `${id} present`);
+    return at;
+  };
+  assert.ok(idx2('walker') > idx2('desk-1-back'),
+    'the corridor walker still draws AFTER the desk (on top of the station)');
+  assert.ok(idx2('behind') < idx2('desk-1-back'),
+    'a body passing behind the desk row is still occluded by the desk body');
+  for (const { employeeId, deskId } of seated) {
+    assert.ok(idx2(employeeId) > idx2(`${deskId}-back`), `${employeeId} still above her desk body`);
+    assert.ok(idx2(employeeId) < idx2(`${deskId}-chair`), `${employeeId} still below her chair`);
+  }
+  for (let i = 1; i < paint2.length; i += 1) {
+    assert.ok(paint2[i - 1].key <= paint2[i].key, `painter keys ascend: ${paint2[i - 1].id} <= ${paint2[i].id}`);
+  }
+  view2.destroy();
+
+  // 退化草稿复核：把 desk-4 的椅子底边抬到"座位脚点之上、桌体底边之下 1px"——
+  // 此时 min(堆叠键 + 0.5, 椅子键 - 0.5) 必须贴椅子键 - 0.5 取值：角色仍然被抬升
+  // （只升不降）、且恒 < 椅子键——"seated bodies sit behind"契约不依赖草稿摆得好不好。
+  const degenerate = JSON.parse(JSON.stringify(FLAT_LAYOUT_FIXTURE));
+  const dChair = degenerate.furniture.find((item) => item.id === 'desk-4-chair').parts.front;
+  const dBack = degenerate.furniture.find((item) => item.id === 'desk-4-back').parts.back;
+  dChair.y = dBack.y + dBack.height - dChair.height - 1 / VIEWPORT.height; // 底边 = 桌体底边 - 1px
+  const degenerateLayout = officeLayout.createOfficeLayout(degenerate);
+  const view3 = await officeRenderer.createOfficeRenderer({
+    PIXI,
+    layout: degenerateLayout,
+    pack: PACK,
+    textures: new Map(),
+    officeTextures: flatOfficeTextures(PIXI),
+    texturedWorkstations: ['desk-1', 'desk-2', 'desk-3', 'desk-4', 'desk-5', 'desk-6'],
+    scene: { ...VIEWPORT },
+    snapshot: null,
+    mount: null,
+  });
+  view3.applySnapshot(baseSnapshot([employeeSnapshot({
+    employeeId: 'reviewer',
+    seatNodeId: 'desk-4',
+    position: { ...degenerateLayout.nodeById('desk-4').position },
+    activity: 'working',
+    animation: { resource: 'working', frameIndex: 0, fallbackReason: null },
+  })]));
+  const paint3 = view3.groundPaintOrder();
+  const key3 = (id) => {
+    const entry = paint3.find((candidate) => candidate.id === id);
+    assert.ok(entry, `${id} is in the merged geometric pass`);
+    return entry.key;
+  };
+  const charKey3 = key3('reviewer');
+  const backKey3 = key3('desk-4-back');
+  const chairKey3 = key3('desk-4-chair');
+  const footKey3 = degenerateLayout.nodeById('desk-4').position.y * VIEWPORT.height;
+  assert.ok(Math.abs(charKey3 - (chairKey3 - 0.5)) < 1e-9,
+    `a draft with the chair raised to the desk bottom binds the re-key to chair - 0.5 (char ${charKey3.toFixed(2)} == chair ${chairKey3.toFixed(2)} - 0.5)`);
+  assert.ok(charKey3 < chairKey3, 'degenerate draft still keeps the seated body behind her chair');
+  assert.ok(charKey3 >= footKey3, `degenerate re-key is raise-only (char ${charKey3.toFixed(2)} >= foot ${footKey3.toFixed(2)})`);
+  assert.ok(chairKey3 < backKey3, 'the degenerate fixture really does place the chair above the desk bottom');
+  view3.destroy();
+});
+
 test('resize reprojects anchors and clamped visible height without touching logic', async () => {
   const PIXI = stubPIXI();
   const view = await createRenderer(PIXI);
