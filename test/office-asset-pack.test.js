@@ -1,8 +1,8 @@
 'use strict';
 
-// Task 2 / SPEC-02 — character pack contract tests (validator + fixture pack).
+// Task 2 / SPEC-02 — character pack contract tests (validator + shipped pack).
 // RED: src/office/runtime/validate-character-pack.js and the generated
-// fixture do not exist yet.
+// pack do not exist yet.
 //
 // Geometry authority rules under test:
 // - manifest.json allows exactly the nine SPEC-02 top-level fields
@@ -12,6 +12,14 @@
 // - walk-frame foot anchors within a direction stay within ±1px
 // - trim/rotate atlas metadata, unsafe paths, missing license, oversized or
 //   missing assets, and executable content are rejected with stable codes
+//
+// P5 (2026-09-24): the generated validation-report / immutability locks below
+// used to run against the retired first-generation fixture pack
+// (src/office/fixtures/character-pack, kept only for the deterministic
+// front-only profile the controller/module tests need). The shipped
+// deepseek-default pack carries the same report schema (same normalizer
+// pipeline, same tolerance table), so these locks now pin the pack that
+// actually ships — a strictly stronger target.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -21,7 +29,6 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 
 const ROOT = path.join(__dirname, '..');
-const FIXTURE_PACK = path.join(ROOT, 'src', 'office', 'fixtures', 'character-pack');
 const BUILTIN_PACK = path.join(ROOT, 'resources', 'characters', 'deepseek-default');
 
 let validator;
@@ -358,7 +365,7 @@ test('missing optional states warn with ANIMATION_CAPABILITY_MISSING but stay va
 });
 
 // ---------------------------------------------------------------------------
-// generated fixture pack and built-in fallback pack
+// shipped pack validation report and built-in fallback pack
 // ---------------------------------------------------------------------------
 
 test('manifest identity fields must be safe single path components', () => {
@@ -387,10 +394,10 @@ test('manifest identity fields must be safe single path components', () => {
   }
 });
 
-test('generated whale-girl fixture pack carries an immutable, self-consistent validation report', () => {
-  const reportPath = path.join(FIXTURE_PACK, 'validation-report.json');
+test('shipped deepseek-default pack carries an immutable, self-consistent validation report', () => {
+  const reportPath = path.join(BUILTIN_PACK, 'validation-report.json');
   if (!fs.existsSync(reportPath)) {
-    assert.fail('validation-report.json missing: run scripts/office-assets/normalize-character.py first');
+    assert.fail('validation-report.json missing: the shipped pack must carry its normalization report');
   }
   const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
   assert.equal(report.schemaVersion, 1);
@@ -417,22 +424,22 @@ test('generated whale-girl fixture pack carries an immutable, self-consistent va
   assert.deepEqual(bad, [], 'a passed frame may not exceed the ±1px tolerance');
 });
 
-test('generated fixture pack passes the validator exactly when its report passes', () => {
-  if (!fs.existsSync(path.join(FIXTURE_PACK, 'validation-report.json'))) {
-    assert.fail('fixture pack missing: run the normalizer first');
+test('shipped deepseek-default pack passes the validator exactly when its report passes', () => {
+  if (!fs.existsSync(path.join(BUILTIN_PACK, 'validation-report.json'))) {
+    assert.fail('the shipped pack must carry validation-report.json');
   }
-  const outcome = validator.validateCharacterPack(FIXTURE_PACK);
-  const report = JSON.parse(fs.readFileSync(path.join(FIXTURE_PACK, 'validation-report.json'), 'utf8'));
+  const outcome = validator.validateCharacterPack(BUILTIN_PACK);
+  const report = JSON.parse(fs.readFileSync(path.join(BUILTIN_PACK, 'validation-report.json'), 'utf8'));
   assert.equal(outcome.ok, report.result === 'passed', JSON.stringify(outcome.errors));
 });
 
 test('validator never writes into the pack (validation-report.json stays immutable)', () => {
-  if (!fs.existsSync(path.join(FIXTURE_PACK, 'validation-report.json'))) {
-    assert.fail('fixture pack missing: run the normalizer first');
+  if (!fs.existsSync(path.join(BUILTIN_PACK, 'validation-report.json'))) {
+    assert.fail('the shipped pack must carry validation-report.json');
   }
-  const before = fs.readFileSync(path.join(FIXTURE_PACK, 'validation-report.json'));
-  validator.validateCharacterPack(FIXTURE_PACK);
-  const after = fs.readFileSync(path.join(FIXTURE_PACK, 'validation-report.json'));
+  const before = fs.readFileSync(path.join(BUILTIN_PACK, 'validation-report.json'));
+  validator.validateCharacterPack(BUILTIN_PACK);
+  const after = fs.readFileSync(path.join(BUILTIN_PACK, 'validation-report.json'));
   assert.ok(before.equals(after), 'validation-report.json must not be modified by validation');
 });
 
@@ -547,7 +554,7 @@ test('every walk direction ships its own dedicated multi-frame sequence', () => 
   // 左右走是两段独立生成的视频（方案B），不是旧 M3 的"逐字节镜像"关系；
   // 它们只需要帧数一致、几何同一（鞋线/可见高由发布内核按方向中位数校验）。
   assert.equal(filesByDirection.left.length, filesByDirection.right.length, 'left and right carry the same frame count');
-  const { measureFrameFile } = require('../src/workbench/lib/character-geometry.js');
+  const { measureFrameFile } = require('./helpers/character-geometry.js');
   const measureMedianHeight = (files) => {
     const heights = files.map((file) => measureFrameFile(path.join(BUILTIN_PACK, file)).visibleHeight).sort((a, b) => a - b);
     return heights[Math.floor(heights.length / 2)];

@@ -1,6 +1,11 @@
 'use strict';
 
-// src/workbench/lib/png-geometry.js — Office Workbench M0 geometry kernel.
+// test/helpers/png-geometry.js — PNG codec + alpha-geometry measurement kit.
+//
+// P5 (2026-09-24): moved out of src/workbench/lib with the authoring block.
+// It is now pure TEST SUPPORT: the workbench tooling is gone, and the only
+// remaining consumers are the office asset tests (geometry measurement) and
+// the two sibling helpers below.
 //
 // A dependency-free PNG codec + alpha-geometry measurement kit for the
 // workbench tooling (character export, publish validator, geometry report,

@@ -1,6 +1,10 @@
 'use strict';
 
-// src/workbench/lib/character-geometry.js — Workbench M0 geometry report.
+// test/helpers/character-geometry.js — character geometry report.
+//
+// P5 (2026-09-24): moved out of src/workbench/lib with the authoring block.
+// Kept as TEST SUPPORT: office-asset-pack.test.js pins left/right walk visible
+// heights through measureFrameFile().
 //
 // Measures the whale-girl character engineering (content/characters/
 // whale-girl/character.json) against the actual PNG bytes and produces the

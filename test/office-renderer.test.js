@@ -33,11 +33,17 @@ const officeLayout = require('../src/office/runtime/office-layout.js');
 const officeRenderer = require('../src/office/render/pixi-office-renderer.js');
 const employeeProfiles = require('../src/office/runtime/employee-profile.js');
 
-const FIXTURE_PACK_ROOT = path.join(ROOT, 'src', 'office', 'fixtures', 'character-pack');
+// P5 (2026-09-24): the module-level pack is the SHIPPED production pack
+// (resources/characters/deepseek-default). The retired first-generation fixture
+// pack was byte-equivalent for everything this file asserts (working.png /
+// idle.png sha256-identical, same anchors subset: anchor {178,296},
+// visibleBounds {6,41,319,277}, outputCanvas 352²), so every assertion below is
+// unchanged — it now pins the art and geometry that actually ship.
+const PACK_ROOT = path.join(ROOT, 'resources', 'characters', 'deepseek-default');
 const PACK = assetPack.createAssetPack({
-  manifest: JSON.parse(fs.readFileSync(path.join(FIXTURE_PACK_ROOT, 'manifest.json'), 'utf8')),
-  anchors: JSON.parse(fs.readFileSync(path.join(FIXTURE_PACK_ROOT, 'animation', 'anchors.json'), 'utf8')),
-  animations: JSON.parse(fs.readFileSync(path.join(FIXTURE_PACK_ROOT, 'animation', 'animations.json'), 'utf8')),
+  manifest: JSON.parse(fs.readFileSync(path.join(PACK_ROOT, 'manifest.json'), 'utf8')),
+  anchors: JSON.parse(fs.readFileSync(path.join(PACK_ROOT, 'animation', 'anchors.json'), 'utf8')),
+  animations: JSON.parse(fs.readFileSync(path.join(PACK_ROOT, 'animation', 'animations.json'), 'utf8')),
 }).pack;
 
 const LAYOUT_FIXTURE = JSON.parse(

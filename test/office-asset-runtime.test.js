@@ -1272,8 +1272,8 @@ test('E6d: the pack registers the working-back seated-work loop (the three M3 ca
   assert.equal(entry.frames.length, 3, 'three seated-work frames');
   assert.deepEqual(entry.frames.map((f) => f.file.split('/').pop()),
     ['working-back-04.png', 'working-back-05.png', 'working-back-06.png']);
-  const { decodePng, alphaBounds } = require('../src/workbench/lib/png-geometry.js');
-  const { measureContact } = require('../src/workbench/lib/normalizer.js');
+  const { decodePng, alphaBounds } = require('./helpers/png-geometry.js');
+  const { measureContact } = require('./helpers/normalizer.js');
   const sideBackHeight = anchorsDoc.frames['assets/animations/side/none/side-back.png'].visibleBounds.height;
   for (const frame of entry.frames) {
     assert.match(frame.file, /^assets\/animations\/working\/back\/working-back-0[456]\.png$/);

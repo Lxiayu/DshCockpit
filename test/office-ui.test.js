@@ -42,23 +42,19 @@ const officePage = require('../src/office/office-page.js');
 const officeModule = require('../src/office/office-module.js');
 const { createWindowManager } = require('../src/window-manager.js');
 
-const FIXTURE_PACK_ROOT = path.join(ROOT, 'src', 'office', 'fixtures', 'character-pack');
-const PACK = assetPack.createAssetPack({
-  manifest: JSON.parse(fs.readFileSync(path.join(FIXTURE_PACK_ROOT, 'manifest.json'), 'utf8')),
-  anchors: JSON.parse(fs.readFileSync(path.join(FIXTURE_PACK_ROOT, 'animation', 'anchors.json'), 'utf8')),
-  animations: JSON.parse(fs.readFileSync(path.join(FIXTURE_PACK_ROOT, 'animation', 'animations.json'), 'utf8')),
-}).pack;
-
 const EMPLOYEE_IDS = ['orchestrator', 'researcher', 'coder', 'reviewer', 'collaborator'];
 
-// M4.1g: the production character pack and the compiled bundled-flat layout —
-// the nap art test must run against the art and layout the product ships.
+// P5 (2026-09-24): the module-level pack IS the production character pack —
+// the retired first-generation fixture pack was byte-equivalent for every
+// value this file observes (same anchors subset / expression art), and the
+// module contracts under test are pack-shape independent.
 const PROD_PACK_ROOT = path.join(ROOT, 'resources', 'characters', 'deepseek-default');
 const PROD_PACK = assetPack.createAssetPack({
   manifest: JSON.parse(fs.readFileSync(path.join(PROD_PACK_ROOT, 'manifest.json'), 'utf8')),
   anchors: JSON.parse(fs.readFileSync(path.join(PROD_PACK_ROOT, 'animation', 'anchors.json'), 'utf8')),
   animations: JSON.parse(fs.readFileSync(path.join(PROD_PACK_ROOT, 'animation', 'animations.json'), 'utf8')),
 }).pack;
+const PACK = PROD_PACK;
 const FLAT_LAYOUT_FIXTURE = JSON.parse(
   fs.readFileSync(path.join(ROOT, 'src', 'office', 'fixtures', 'office-layout-flat.json'), 'utf8')
 );

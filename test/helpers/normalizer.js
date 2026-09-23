@@ -1,6 +1,10 @@
 'use strict';
 
-// src/workbench/lib/normalizer.js — the M1 deterministic import normalizer.
+// test/helpers/normalizer.js — the M1 deterministic import normalizer.
+//
+// P5 (2026-09-24): moved out of src/workbench/lib with the authoring block.
+// Kept as TEST SUPPORT: office-asset-runtime.test.js pins the deterministic
+// scale+translate contact measurement through measureContact().
 //
 // An imported frame is NEVER dropped into the character raw ("归一化是一等
 // 公民", design §2.3): it is uniformly scaled and translated so it lands on
