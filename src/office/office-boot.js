@@ -139,9 +139,10 @@ function classifyLayoutAttempt({ status, body } = {}) {
 // Task 8 — production layout draft source priority (saved > built-in > none).
 // saved/bundled are tolerant fetch attempts shaped
 // { ok: true, draft } | { ok: false, code?, missing? }; validateDraftSchema is
-// the layout-editor schema-v1 probe (full asset-whitelist/kind/position rules)
-// injected for purity. A present-but-invalid saved layout degrades to the
-// built-in draft with a stable diagnostic instead of failing the boot; an
+// the layout-schema schema-v1 probe (full asset-whitelist/kind/position rules)
+// injected for purity — P5/B-1 moved it out of the editor core so the boot
+// chain carries no editor code. A present-but-invalid saved layout degrades to
+// the built-in draft with a stable diagnostic instead of failing the boot; an
 // absent saved layout is the normal first run and raises NO diagnostic.
 function resolveProductionLayoutDraft({ saved, bundled, validateDraftSchema } = {}) {
   if (typeof validateDraftSchema !== 'function') {

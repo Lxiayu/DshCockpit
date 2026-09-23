@@ -194,8 +194,9 @@ test('loadOfficePack rejects unsafe pack ids with a stable code and loads nothin
 // ---------------------------------------------------------------------------
 
 // Mini schema-v1 validator injected into the resolver: the page passes
-// layout-editor.validateDraftSchema (full schema-v1 rules); the tests pass a
-// controllable probe so priority logic is isolated from the catalog.
+// layout-schema.validateDraftSchema (full schema-v1 rules — P5/B-1 moved it
+// out of the editor core); the tests pass a controllable probe so priority
+// logic is isolated from the catalog.
 function fakeValidator(validIds = new Set(['good'])) {
   return (draft) => {
     if (!draft || typeof draft !== 'object' || draft.schemaVersion !== 1) return { ok: false, code: 'DRAFT_SCHEMA_UNSUPPORTED' };

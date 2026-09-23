@@ -491,13 +491,22 @@ test('office.html drops the development-period texts (spec §2)', () => {
   assert.ok(!html.includes('note.textContent = `渲染降级'), 'the render diagnostic is no longer a visible paragraph');
   assert.ok(html.includes('详情走 office:diagnostics'), 'the tooltip points at the diagnostics channel');
   // the layout editor entry is no longer a header action (P5 deletes it)
-  assert.ok(html.includes("document.getElementById('footer-tools').appendChild(layoutEditorButton);"),
-    'the layout editor chip lives in the footer, out of the prominent spots');
   assert.ok(!html.includes("document.getElementById('office-overview').appendChild"),
     'nothing is appended to the header anymore');
-  // the editor DOM and its wiring stay untouched (P5 removes them)
-  assert.ok(html.includes('id="layout-editor"'), 'the layout editor DOM is untouched');
-  assert.ok(html.includes('id="layout-canvas"'), 'the editor canvas is untouched');
+  // P5 (this step): the editor surface is GONE from the page — DOM, wiring,
+  // the footer chip and the ?editor=1 entry point were removed in one batch
+  // after the schema slice moved to layout-schema.js (B-1). The old P2
+  // assertion pinned the footer chip + #layout-editor DOM; the new facts
+  // are pinned as absences so the editor cannot silently come back.
+  assert.ok(!html.includes('btn-layout-editor'), 'the footer layout chip is gone');
+  assert.ok(!html.includes('布局编辑'), 'the editor entry label is gone');
+  assert.ok(!html.includes('id="layout-editor"'), 'the editor DOM is gone');
+  assert.ok(!html.includes('id="layout-canvas"'), 'the editor canvas is gone');
+  assert.ok(!html.includes("loadModule('./layout-editor.js')"), 'the boot chain no longer loads the editor module');
+  // the production boot still resolves + validates the layout draft, now via
+  // the standalone schema module (saved > bundled priority chain, Task 8)
+  assert.ok(html.includes("REGISTRY['layout-schema']"), 'the boot loads the standalone schema module');
+  assert.ok(html.includes('validateDraftSchema: REGISTRY'), 'the boot validator comes from the schema registry');
 });
 
 test('office.html keeps all four legacy panel renders together behind the throttle', () => {

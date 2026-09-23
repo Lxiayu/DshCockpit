@@ -301,9 +301,10 @@ function createOfficeStateStore(options = {}) {
   }
 
   // ---- Task 8: the saved production layout (office-layout.v1.json) ---------
-  // Full schema-v1 CONTENT validation lives in the page (layout-editor
-  // validateDraftSchema with the asset catalog); this layer only guards the
-  // envelope (object + schemaVersion) and never throws.
+  // Full schema-v1 CONTENT validation lives in the page (layout-schema.js
+  // validateDraftSchema with the asset catalog — P5/B-1 extracted it from the
+  // editor core); this layer only guards the envelope (object +
+  // schemaVersion) and never throws.
 
   function loadSavedLayout() {
     let raw;

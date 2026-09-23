@@ -123,7 +123,7 @@ npm install && npm start
 
 ## 🤝 贡献
 
-欢迎 PR！请先跑 `npm test`（471 项测试）。架构见 [`DESIGN.md`](DESIGN.md)，产品理念见 [`PHILOSOPHY.md`](PHILOSOPHY.md)，功能清单见 [`FEATURES.md`](FEATURES.md)，竞争路线图见 [`ROADMAP.md`](ROADMAP.md)。
+欢迎 PR！请先跑 `npm test`（1422 项测试）。架构见 [`DESIGN.md`](DESIGN.md)，产品理念见 [`PHILOSOPHY.md`](PHILOSOPHY.md)，功能清单见 [`FEATURES.md`](FEATURES.md)，竞争路线图见 [`ROADMAP.md`](ROADMAP.md)。
 
 <details>
 <summary><b>操作层原则（产品理念）</b></summary>
@@ -134,6 +134,17 @@ Harness owns the workspace. DshCockpit owns the operating layer.
 
 完整理念见 [`PHILOSOPHY.md`](PHILOSOPHY.md)。
 </details>
+
+## 🧰 开发日志 · P5（2026-09-23，未提交）
+
+**P5 第一步：B-1 外提 + 摘编辑器 UI**（顺序铁律：先外提验证切片，再摘 UI，物理删除与排包是第二步）
+
+- **B-1 外提**：`src/office/layout-editor.js`（52KB 编辑器内核）里生产启动链唯一需要的 schema-v1 验证切片（`parseDraft` / `validateDraftSchema` / `ASSET_BY_ID` / 层默认表 / 稳定错误码）**移动**到新模块 `src/office/layout-schema.js`——零 DOM/Electron/Pixi/fs 依赖的纯模块，唯一 require 是 `layout-assets.js` 目录。编辑器改为 require 它（单一真源），编辑器本体留在仓库等第二步处理。
+- **生产 boot 不再加载编辑器**：`office.html` 原来在任何界面动作前 `loadModule('./layout-editor.js')` 并造一次性 editor 实例取 `validateDraftSchema`；现在直接加载 `layout-schema.js` 并注入自由函数 `validateDraftSchema` 给 `office-boot.resolveProductionLayoutDraft`。saved > bundled 优先级与坏草稿拒绝行为逐字不变（`test/office-layout-schema.test.js` 用**真校验器**钉住整条链：有效 saved 胜出、损坏/不可解析 saved 回退 bundled 并报 `OFFICE_LAYOUT_SAVED_INVALID`、全失败 fail-closed）。真壳探针实测：boot 全程**零次**请求 `layout-editor.js`，`layout-schema.js` 正常加载。
+- **摘掉编辑器 UI 与入口**：`office.html` 删除编辑器 DOM 块（palette/toolbar/inspector/align-bar/shelf/canvas/layer-panel）、1218 行连续接线（指针/框选/快捷键/检查器/保存导入/图层面板）、页脚「布局编辑」chip 与 `?editor=1` 自动打开；`office.css` 删除约 61 条编辑器规则与 chip 样式（保留混排其中的 `.checkbox` 与两个生产媒体查询）。页面侧只服务该 UI 的代码（keyup/快捷键分支/resize 编辑器分支/证据钩子四条）随之清理。
+- **测试同批更新**（有意更新，不是放宽）：删除 28 个钉住编辑器 UI 的测试（随编辑器搬往工作台）；改写 boot 链测试指向 `layout-schema`；新增静态断言钉住「编辑器已不存在」（`office.html` 无 `layout-editor` DOM/模块加载/chip/`布局编辑`，`office.css` 无编辑器选择器）；`test/office-right-panel-p2.test.js` 原「编辑器 DOM 未动」断言反转为不存在断言。
+- **渲染证据**：`/tmp/office-e2e/p5-no-editor.png`（+ `p5-no-editor-live.png`、`p5-no-editor.json`）——无任何编辑器代码参与，office 页正常 boot（webgl、canvas 960×630、bundled-flat 布局链、五名员工在岗），右栏 P1–P4 各块齐全，页脚已无「布局编辑」入口。
+- **未动**：`resources/office/layout-editor/**`（生产家具素材源，名字骗人）、`resources/characters/**`、仿真/动画逻辑、`office:*` 通道数（8 个）；编辑器独立成页（B-2）与排包排除（A-1/A-6）属第二步。
 
 ## 📄 许可与致谢
 

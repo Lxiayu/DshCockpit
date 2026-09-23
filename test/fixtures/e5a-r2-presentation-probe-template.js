@@ -1,18 +1,20 @@
 'use strict';
 // Task E5a-R2 reproduction/evidence probe (spawned by office-ui.test.js).
 // Boots the REAL office page with the user's flat draft served as the saved
-// layout, so the EDITOR canvas and the RUNTIME office render the SAME draft.
-// Measures, for the desk-1 character (draft-39, whale-girl-back):
-//  - editor: the composed node box and its img box, normalized to the
-//    1280x840 reference scene (the scene frame maps to 1280);
+// layout, so the RUNTIME office renders exactly that draft. Measures, for
+// the desk-1 character (draft-39, whale-girl-back):
 //  - runtime: the renderer entity's visibleHeight (its __layout record) and
-//    the live scene height, normalized the same way;
+//    the live scene height;
 //  - the animation resource while seated-working and while walking
 //    (walk-left / walk-right), from the module snapshots;
 //  - the pack geometry numbers the mapping formula uses.
-// Captures an editor screenshot and a runtime (idle + working) screenshot for
-// the side-by-side evidence. Writes results.json into __EVIDENCE__; failures
-// are console.error + app.exit(1) (no assert inside probes).
+// Captures runtime (idle + working) screenshots for the side-by-side
+// evidence. Writes results.json into __EVIDENCE__; failures are
+// console.error + app.exit(1) (no assert inside probes).
+// P5 note: the editor-side measurement (toggleLayoutEditor + layoutDraft)
+// left with the editor UI; the draft character facts are read from the
+// served draft file in Node instead, and the height cross-check moved to
+// the documented formula (see office-module.js).
 const { app, protocol, BrowserWindow, ipcMain } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -50,8 +52,8 @@ if (process.platform === 'darwin' && app.dock) app.dock.hide(); // M2b: evidence
     protocol.handle('office-runtime', (request) => {
       const rel = decodeURIComponent(new URL(request.url).pathname).replace(/^\/+/, '');
       if (rel === 'office-layout.v1.json') {
-        // serve the committed flat draft as the user-saved layout: the editor
-        // boots it AND the runtime compiles it — one draft, both surfaces
+        // serve the committed flat draft as the user-saved layout: the page
+        // compiles it into the runtime layout — one draft, the real surface
         return new Response(fs.readFileSync(path.join(REPO, 'test/fixtures/office-layout-flat-draft.json')), { headers: { 'content-type': 'application/json' } });
       }
       for (const route of routes) {
@@ -70,6 +72,15 @@ if (process.platform === 'darwin' && app.dock) app.dock.hide(); // M2b: evidence
     const anchors = JSON.parse(fs.readFileSync(path.join(REPO, 'resources/characters/deepseek-default/animation/anchors.json'), 'utf8'));
     const animations = JSON.parse(fs.readFileSync(path.join(REPO, 'resources/characters/deepseek-default/animation/animations.json'), 'utf8'));
     const pack = createAssetPack({ manifest, anchors, animations }).pack;
+    // P5: the draft character facts used to be read through the editor's
+    // layoutDraft hook; the editor is gone, so read the same draft file the
+    // page resolves (schema-v1 normalization only touches layer/group, the
+    // asset/scale/direction fields are read verbatim either way).
+    const flatDraft = JSON.parse(fs.readFileSync(path.join(REPO, 'test/fixtures/office-layout-flat-draft.json'), 'utf8'));
+    const draftItem = flatDraft.items.find((item) => item.id === 'draft-39') || null;
+    const draftCharacter = draftItem
+      ? { id: draftItem.id, kind: draftItem.kind, asset: draftItem.asset, scale: draftItem.scale, direction: draftItem.direction }
+      : null;
     // the module reads the saved layout from the userData FILE (the page reads
     // it over the protocol) — seed both with the same committed draft
     fs.writeFileSync(path.join(RUN_DIR, 'office-layout.v1.json'), fs.readFileSync(path.join(REPO, 'test/fixtures/office-layout-flat-draft.json')));
@@ -120,29 +131,6 @@ if (process.platform === 'darwin' && app.dock) app.dock.hide(); // M2b: evidence
     })())`));
     const idleShot = await win.webContents.capturePage();
     fs.writeFileSync(path.join(EVIDENCE, 'runtime-idle.png'), idleShot.toPNG());
-
-    // ---- editor measurement (same draft) ------------------------------------
-    await evalJs('window.__office.api.toggleLayoutEditor()');
-    await sleep(900);
-    const editor = JSON.parse(await evalJs(`JSON.stringify((() => {
-      const frame = document.getElementById('layout-scene-frame').getBoundingClientRect();
-      const node = document.querySelector('[data-draft-id="draft-39"]');
-      const img = node ? node.querySelector('img') : null;
-      const nr = node ? node.getBoundingClientRect() : null;
-      const ir = img ? img.getBoundingClientRect() : null;
-      const draft = window.__office.api.layoutDraft();
-      const item = draft.items.find((i) => i.id === 'draft-39');
-      return {
-        frame: { w: frame.width, h: frame.height },
-        node: nr ? { w: nr.width, h: nr.height } : null,
-        img: ir ? { w: ir.width, h: ir.height } : null,
-        item: item ? { id: item.id, kind: item.kind, asset: item.asset, scale: item.scale, direction: item.direction } : null,
-      };
-    })())`));
-    const editorShot = await win.webContents.capturePage();
-    fs.writeFileSync(path.join(EVIDENCE, 'editor-canvas.png'), editorShot.toPNG());
-    await evalJs('window.__office.api.toggleLayoutEditor()');
-    await sleep(400);
 
     // ---- task loop: seated-working resource + walking resources -------------
     const readEntityLayout = async () => {
@@ -248,8 +236,7 @@ if (process.platform === 'darwin' && app.dock) app.dock.hide(); // M2b: evidence
         outputCanvas: anchors.outputCanvas,
         anchor: anchors.anchor,
       },
-      draftCharacter: editor.item,
-      editor: editor,
+      draftCharacter: draftCharacter,
       runtimeIdle: runtimeIdle,
       seated: seated,
       walking: walking,
