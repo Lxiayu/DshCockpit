@@ -17,6 +17,10 @@ const REDACTED = Object.freeze({
 
 // Coarse vocabulary approved by SPEC-00 / OFFICE-DESIGN-DISCUSSION that may
 // appear in redacted diagnostics. Everything else textual is redacted.
+// The P1 right-panel pipeline (spec §4/§5) adds its controlled enum values:
+// the usage block's currency/pricing/budget/savings-basis markers, the pending
+// risk levels and the pending kinds. All are fixed app vocabulary (never
+// runtime payload, identifiers or paths).
 const COARSE_ENUMS = new Set([
   // agent lifecycle
   'idle', 'running',
@@ -32,6 +36,14 @@ const COARSE_ENUMS = new Set([
   // control / queue / binding source
   'none', 'dispatchPending', 'cancellationPending', 'preemptPending', 'empty', 'queued',
   'root', 'manual', 'heuristic', 'one-shot', 'continuable',
+  // P1 usage block (spec §4): currency + pricing-basis + budget kinds +
+  // savings basis + pending risk levels + pending kinds
+  'CNY', 'USD',
+  'api-key', 'subscription',
+  'monthly', 'daily', 'none',
+  'cloud-equivalent',
+  'low', 'medium', 'high',
+  'approval', 'question',
 ]);
 
 const SECRET_KEY_RE = /(secret|passwd|password|credential|apikey|api_key|authorization|auth|bearer|cookie|privatekey|private_key)/i;
@@ -47,6 +59,10 @@ const LONG_HEX_RE = /^[0-9a-f]{16,}$/i;
 const PATH_VALUE_RE = /(^|[^\w])\/(Users|home|private|tmp|var|Volumes)\//;
 const WINDOWS_PATH_RE = /^[A-Za-z]:[\\/]/;
 const HOME_TILDE_RE = /^~\//;
+// Calendar-day keys ('YYYY-MM-DD') are coarse billing buckets (the P1 usage
+// block's dayKey, token-stats' per-day rollups), never identifiers — they
+// carry no identity and survive like the coarse enums below.
+const CALENDAR_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 // Short lowercase labels (tool names, event types like "tool/call", enum-ish
 // tags) are treated as coarse and kept; prose never matches this shape.
 const SHORT_ENUM_TOKEN_RE = /^[a-z][a-z0-9_/-]{0,31}$/;
@@ -70,6 +86,7 @@ function classifyString(mode, value) {
   if (byShape) return byShape;
   if (COARSE_ENUMS.has(value)) return value;
   if (SHORT_ENUM_TOKEN_RE.test(value)) return value;
+  if (CALENDAR_DAY_RE.test(value)) return value; // billing-day bucket key
   return mode === 'full' ? value : REDACTED.TEXT;
 }
 

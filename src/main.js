@@ -71,6 +71,15 @@ const { createQuickAskShortcutManager } = require('./quickask-shortcut');
 const { createMemoryFiles } = require('./memory-files');
 const { createPluginOpGuard, failureCode, shouldCleanupAfterFailure, summarizeOutput, inferStage, parsePnpmBlockedPackage, upsertOnlyBuiltDependencies, pickSubpackage, resolveDepKey, pruneBundles, sanitizeProfile } = require('./plugin-flow');
 const { resolveOfficeCharacterPack } = require('./office/office-pack-resolver.js');
+// P1 data pipeline (docs/strategy/2026-09-23-office-right-panel-spec.md §4):
+// the office usage block is assembled here from the shell's own caches (the
+// token-stats collect() cache, the cost snapshot and the balance monitor);
+// the office module never collects. toolNameOfJournalData is the shared M5
+// tool-name extraction (data.name, pre-0.1.5 data.tool) also used by the
+// office tool-phrase mapping.
+const { buildOfficeUsage } = require('./office/runtime/usage-snapshot.js');
+const { toolNameOfJournalData } = require('./office/runtime/tool-phrases.js');
+const { createPendingMirror } = require('./office/runtime/pending-mirror.js');
 const { createSkillsManager, buildSkillsMarketPayload } = require('./skills');
 const { createChannelManager } = require('./channels/channel-manager');
 const { computeCockpitBounds } = require('./cockpit-bounds');
@@ -305,7 +314,17 @@ function ensureOfficeModule() {
       dialogue: loadOfficeDialogueCorpus() || undefined,
       log,
       config: officeStateSettingsOrNull(),
+      // P1: the office pending answer surface. It is respondToRuntime itself —
+      // the SAME $events/result channel the IM channel answers approvals and
+      // questions through — so the panel can never grow a second, divergent
+      // answer implementation. P3 wires the click handlers to it.
+      answerRequest: ({ rpcId, value, what }) => respondToRuntime({ rpcId, value, what }),
     });
+    // P1: any waterfall request that arrived BEFORE the office view was first
+    // opened is waiting in the pre-module mirror — seed it now (bounded,
+    // synchronous, idempotent inside the module) so the panel opens with the
+    // full pending list, then let the module own every arrival from here on.
+    seedOfficePendingMirror(officeModuleInstance);
     // SPEC-08 persist-first facade: a settings change is written to
     // office-state.v1.json BEFORE it is applied to the live module; a failed
     // write returns { ok:false, code:'OFFICE_STATE_WRITE_FAILED' } and never
@@ -3138,6 +3157,127 @@ function checkBudget(monthCost) {
 }
 
 // ---------------------------------------------------------------------------
+// P1 office data pipeline (docs/strategy/2026-09-23-office-right-panel-spec.md
+// §4): inject the shell-assembled usage block into the office module, mirror
+// runtime waterfall requests into its pending list, and remove them through
+// the shared answer path. No new data collection happens here — every field
+// comes from the caches above (token-stats collect, cost snapshot, balance
+// monitor) or from the waterfall frames themselves.
+// ---------------------------------------------------------------------------
+
+/** Session id -> harness preset (read-only / workspace-write /
+ * danger-full-access), the second input of classifyRisk(). Filled from the
+ * session/list calls the office follow-sync and the IM bindings already make;
+ * unknown presets classify conservatively (the danger-full-access escalation
+ * only fires on positive evidence). */
+const officeSessionPresets = new Map();
+const OFFICE_PRESET_CAP = 200;
+// Pre-module pending mirror: the office module is created lazily (first office
+// view open), but waterfall requests must be waiting the moment the panel —
+// and the "需要你" badge — appears. Bounded and simulation-free; seeded into
+// the module on creation, after which the module is the single live store.
+const officePendingMirror = createPendingMirror({ log });
+
+function noteOfficeSessionPreset(sessionId, preset) {
+  if (typeof sessionId !== 'string' || sessionId === '') return;
+  const value = typeof preset === 'string' ? preset.trim() : '';
+  if (!value) return;
+  if (!officeSessionPresets.has(sessionId) && officeSessionPresets.size >= OFFICE_PRESET_CAP) {
+    officeSessionPresets.delete(officeSessionPresets.keys().next().value);
+  }
+  officeSessionPresets.set(sessionId, value);
+}
+
+/** Assemble the §4 usage block from the existing caches and inject it. Called
+ * from the token poll after every cost snapshot; a null block (no data yet)
+ * leaves the office snapshot at `usage: null`. */
+function injectOfficeUsage(stats) {
+  const mod = officeModuleInstance;
+  if (!mod || typeof mod.setUsageSnapshot !== 'function') return;
+  const dataAtMs = costCache.data === stats && costCache.at ? costCache.at : Date.now();
+  const block = buildOfficeUsage({
+    collectData: stats || costCache.data,
+    costSnap: latestCostSnapshot.data,
+    balanceSnapshot: balanceMonitor ? balanceMonitor.snapshot() : null,
+    settings: settings.get(),
+    nowMs: Date.now(),
+    dataAtMs,
+  });
+  if (block) mod.setUsageSnapshot(block);
+}
+
+/** Mirror one runtime waterfall request (approval / user question) into the
+ * office pending store: straight into the module when it is live, otherwise
+ * into the bounded pre-module mirror (seeded on module creation). Idempotent
+ * per eventId in both stores. */
+function officeNotePending({ kind, frame, rpcId }) {
+  const sessionId = frame && typeof frame.sessionId === 'string' ? frame.sessionId : '';
+  const toolName = kind === 'question'
+    ? 'ask_user_question'
+    : ((frame && (frame.toolName || frame.tool)) || '');
+  const preset = (frame && typeof frame.agentPreset === 'string' && frame.agentPreset.trim())
+    ? frame.agentPreset.trim()
+    : (officeSessionPresets.get(sessionId) || null);
+  const mux = runtimeMux;
+  // The second arrival argument doubles as the routing id: the 0.1.5 mux
+  // carries the waterfall eventId there, the 0.1.1 frame carries its
+  // server-request rpcId. On the mux protocol that id IS the eventId; on the
+  // legacy protocol there is no waterfall eventId at all.
+  const routingId = typeof rpcId === 'string' && rpcId !== '' ? rpcId : null;
+  const record = {
+    eventId: eventsFeedProtocol === 'mux' ? routingId : null,
+    rpcId: routingId,
+    kind,
+    sessionId,
+    toolName,
+    preset,
+    clientId: mux && typeof mux.clientId === 'string' && mux.clientId !== '' ? mux.clientId : null,
+    atMs: Date.now(),
+  };
+  const mod = officeModuleInstance;
+  if (mod && typeof mod.notePendingRequest === 'function') {
+    const res = mod.notePendingRequest(record);
+    if (res && res.ok && res.status === 'added') {
+      log(`[office] pending ${kind} noted (${toolName || 'unknown tool'})`);
+    }
+    return res;
+  }
+  // No office module yet (the office view has never been opened): hold the
+  // request so it — and the "需要你" state — is there the moment the office
+  // opens, instead of silently missing the most important arrival.
+  const held = officePendingMirror.note(record);
+  if (held && held.ok && held.status === 'added') {
+    log(`[office] pending ${kind} held for the first office view (${toolName || 'unknown tool'})`);
+  }
+  return held;
+}
+
+/** Remove a pending item once its request is answered or revoked. The id the
+ * runtime echoes back is the waterfall eventId (mux) or the server-request
+ * rpcId (0.1.1); the module matches either. */
+function officeResolvePending(id) {
+  if (typeof id !== 'string' || id === '') return null;
+  // Pre-module mirror first: an answer can land through the shared
+  // respondToRuntime path while the office view has never been opened, and a
+  // mirrored request must not resurrect when the module is later seeded.
+  const mirrored = officePendingMirror.resolve(id);
+  const mod = officeModuleInstance;
+  if (!mod || typeof mod.resolvePending !== 'function') return mirrored;
+  return mod.resolvePending(id) || mirrored;
+}
+
+/** Seed the pre-module mirror into a freshly created office module (bounded,
+ * synchronous, idempotent inside the module) and hand the live store over. */
+function seedOfficePendingMirror(mod) {
+  if (!mod || typeof mod.notePendingRequest !== 'function') return { seeded: 0, failed: officePendingMirror.size() };
+  const result = officePendingMirror.seed((record) => mod.notePendingRequest(record));
+  if (result.seeded > 0) {
+    log(`[office] pending mirror seeded: ${result.seeded} request(s) that arrived before the office view opened`);
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // per-turn cost at official prices (C1) + official account balance polling
 // ---------------------------------------------------------------------------
 let lastTurn = null;     // {cost, saved, inputTokens, outputTokens, cacheReadTokens, model, at}
@@ -3701,6 +3841,7 @@ function onMuxEventValue(value) {
   if (value.type === 'cancel') {
     // Host revoked a pending waterfall; nothing is pending on our side.
     log(`[shell] runtime cancelled a pending request (${value.eventId || '?'})`);
+    officeResolvePending(value.eventId); // P1: the office pending item goes too
   }
 }
 
@@ -3834,6 +3975,10 @@ async function seedOfficeFollowFromSessionList() {
     for (const item of items) {
       const sessionId = item && typeof item.sessionId === 'string' ? item.sessionId : '';
       if (sessionId && item.running === true) { noteOfficeSessionStatus(sessionId, true); running += 1; }
+      // P1: remember each session's harness preset (read-only /
+      // workspace-write / danger-full-access) — the second input of the
+      // office classifyRisk() table.
+      noteOfficeSessionPreset(sessionId, agentPresetOf(item));
     }
     log(`[office] follow seed: ${items.length} session(s) listed, ${running} running`);
   } catch (e) {
@@ -3915,10 +4060,12 @@ function ingestOfficeJournalEvent(sessionId, event) {
   }
   if (event.type === 'tool/call') {
     // Only the tool name is a fact; the raw arguments JSON never reaches the
-    // office (privacy boundary + the adapter's 64KB payload cap).
+    // office (privacy boundary + the adapter's 64KB payload cap). The
+    // extraction (0.1.5 data.name, legacy data.tool) lives in the shared
+    // tool-phrases module so the office tool mapping has exactly one source.
     mod.ingestHarnessEvent({
       sessionId, type: 'tool/call', seq: event.seq, time: event.time,
-      data: { tool: typeof data.name === 'string' ? data.name : (typeof data.tool === 'string' ? data.tool : null) },
+      data: { tool: toolNameOfJournalData(data) },
     });
     return;
   }
@@ -4018,6 +4165,9 @@ function imGetBinding(channelId, senderId) {
 }
 function onApprovalRequested(frame, rpcId) {
   const tool = frame.toolName || frame.tool || '';
+  // P1: mirror the request into the office pending list before anything else,
+  // so the panel sees it even if an IM channel is enabled and slow.
+  officeNotePending({ kind: 'approval', frame, rpcId });
   // IM push (C5/C6): approval cards carry a one-shot token (120s TTL) whose
   // payload keeps the runtime routing fields — the 0.1.5 mux carries the
   // waterfall eventId here (clientId lives in the mux client), 0.1.1 carried
@@ -4038,6 +4188,8 @@ function onApprovalRequested(frame, rpcId) {
 }
 
 function onQuestionRequested(frame, rpcId) {
+  // P1: same mirror path as approvals (one list, one answer channel).
+  officeNotePending({ kind: 'question', frame, rpcId });
   // IM push (C5/C6): question cards carry a one-shot reply token (120s TTL)
   // keeping the routing id + question shape for the answer channel.
   if (channelsMgr) {
@@ -4078,6 +4230,7 @@ async function respondToRuntime({ rpcId, value, what }) {
     const res = await mux.sendResult({ eventId: rpcId, outcome: { kind: 'result', value } });
     if (res.ok) {
       log(`[channels] ${what || 'respond'} accepted by runtime`);
+      officeResolvePending(rpcId); // P1: answered → drop the office pending item
       return { ok: true };
     }
     log(`[channels] ${what || 'respond'} refused: ${res.reason}`);
@@ -4099,6 +4252,7 @@ async function respondToRuntime({ rpcId, value, what }) {
     const body = await res.json().catch(() => ({}));
     if (res.status === 200 && body && body.accepted === true) {
       log(`[channels] ${what || 'respond'} accepted by runtime`);
+      officeResolvePending(rpcId); // P1: answered → drop the office pending item
       return { ok: true };
     }
     const reason = (body && body.reason) || `HTTP ${res.status}`;
@@ -4429,6 +4583,7 @@ if (!gotLock) {
         const stats = await collectStats();
         pushTokens(stats);
         await costSnapshot(stats);
+        injectOfficeUsage(stats); // P1: office usage block from the same caches
       } catch (e) {
         log(`[shell] token poll failed: ${e.message}`);
       } finally {
@@ -4446,6 +4601,7 @@ if (!gotLock) {
       setTimeout(async () => {
         const stats = await collectStats();
         await costSnapshot(stats);
+        injectOfficeUsage(stats); // P1: office usage block from the same caches
         primeTurnBaseline(stats); // seed the per-turn cost baseline (C1)
         const diag = diagnosticsInfo();
         if (diag.crashCount > 0) {

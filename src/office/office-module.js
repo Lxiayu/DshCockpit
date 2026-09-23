@@ -9,9 +9,16 @@
 //
 // Boundaries (SPEC-00/05/07):
 // - Renderer/UI consume ONLY `state()` snapshots; they never subscribe to
-//   Harness and never receive session IDs, tokens, prompts, tool arguments,
-//   raw errors or token counts. The snapshot is whitelist-built AND passed
-//   through the shared privacy redactor as a safety net.
+//   Harness and never receive session IDs, prompts, tool arguments or raw
+//   errors. The snapshot is whitelist-built AND passed through the shared
+//   privacy redactor as a safety net.
+// - P1 exception (authorized by docs/strategy/2026-09-23-office-right-panel-
+//   spec.md §4): the snapshot carries an AGGREGATE `usage` block (today's
+//   token counts + money estimate, assembled by main.js from the shell's own
+//   caches) and a `pending` list of approval/question requests. Neither
+//   carries task text, per-session/per-task token attribution or session ids;
+//   pending ids are the waterfall event handles the shared answer channel
+//   needs to address a request.
 // - Raw Harness session/run ids stay INSIDE the main process as registry
 //   handles only. Subagent runIds are consumed as Task-6 PROXIES verbatim
 //   (`fact.runId`, already `run-sha256:*`); this module never re-hashes a
@@ -42,6 +49,12 @@ const { createOfficeLayout } = require('./runtime/office-layout.js');
 const { resolveRuntimeLayout } = require('./runtime/office-layout-compiler.js');
 const { LAYOUT_ASSETS, DRAFT_WIDTHS, CHARACTER_FOOT_RATIO } = require('./layout-assets.js');
 const { SETTINGS_BOUNDS: PERSISTED_SETTINGS_BOUNDS } = require('./runtime/office-persistence.js');
+// P1 data pipeline (docs/strategy/2026-09-23-office-right-panel-spec.md §4/§5):
+// the approval risk table and the tool phrase vocabulary live beside the other
+// pure office runtime modules so the panel, the pending cards and main.js
+// share one implementation.
+const { classifyRisk, RISK_ORDER } = require('./runtime/approval-risk.js');
+const { toolPhraseZhOf, questionSummaryZh } = require('./runtime/tool-phrases.js');
 
 const TICK_MS = 16;
 // M2 (2026-09-16): the renderer paints on snapshot pushes (its Pixi ticker is
@@ -68,6 +81,16 @@ const DIAGNOSTICS_LIMIT = 100;
 const SNAPSHOT_LOG_TAIL = 50;
 const SNAPSHOT_DIAGNOSTICS_TAIL = 20;
 const MAX_IPC_PAYLOAD_BYTES = 8 * 1024;
+// P1 pending block (spec §4): the office module is the runtime bridge for
+// waterfall requests (approval/request, user-questions/request). `id` is the
+// waterfall eventId when the runtime supplies one (0.1.5 mux), else a derived
+// handle for the 0.1.1 server-request rpcId — both are stored so the shared
+// answer path can resolve either. Duplicate deliveries of one event are
+// idempotent (the eventId IS the key), and a long-unanswered backlog is capped
+// so the snapshot stays bounded (oldest first).
+const PENDING_LIMIT = 50;
+const PENDING_DETAIL_REF = 'office:pending-detail';
+const PENDING_KINDS = Object.freeze(['approval', 'question']);
 
 const OFFICE_IPC_CHANNELS = Object.freeze([
   'office:state',
@@ -409,6 +432,15 @@ function createOfficeModule(options = {}) {
   const rootHandleByDerived = new Map();
   // proxied subagent runId -> { childSessionId, parentSessionId }
   const runsByProxy = new Map();
+  // P1 right-panel data blocks (spec §4). `usage` is assembled by main.js from
+  // the shell's own caches (token-stats/cost/balance) and injected here; the
+  // module never collects. `pending` is written from waterfall events
+  // (approval/request, user-questions/request) and removed through the shared
+  // answer path; pendingRoutes keeps the answer routing handle per item id
+  // (never in the snapshot).
+  let usageBlock = null;
+  const pendingItems = new Map(); // id -> contract item (insertion ordered)
+  const pendingRoutes = new Map(); // id -> { rpcId } — the runtime routing id
 
   function noteLog(kind, employeeId, detail) {
     activityLog.push(detail
@@ -1682,6 +1714,26 @@ function createOfficeModule(options = {}) {
   // presentation fields.
   const PRESENTATION_ALLOWLIST = Object.freeze(['displayName', 'role', 'taskLabel', 'marker', 'bubble']);
 
+  // P1 pending items (spec §4). Every field is either app-controlled
+  // vocabulary (kind / risk / toolName / summary / detailRef / employeeId), a
+  // monotonic timestamp (createdAtMs), or the shell-owned answer-routing
+  // handles (id / eventId / clientId) the panel needs in order to address the
+  // shared answer channel. None of them are session identifiers, prompt text
+  // or tool arguments — task text structurally never enters an item. The
+  // projection mirrors the employees presentation allowlist above.
+  const PENDING_ALLOWLIST = Object.freeze([
+    'id', 'kind', 'employeeId', 'toolName', 'summary', 'detailRef', 'risk',
+    'createdAtMs', 'eventId', 'clientId',
+  ]);
+
+  function safePendingItem(item) {
+    const out = {};
+    for (const field of PENDING_ALLOWLIST) {
+      out[field] = item[field] === undefined ? null : item[field];
+    }
+    return out;
+  }
+
   function redactSnapshot(snapshot) {
     const safeEmployees = snapshot.employees.map((employee) => {
       const presentation = {};
@@ -1693,12 +1745,17 @@ function createOfficeModule(options = {}) {
     // activityLog kinds and diagnostics codes are controlled enum vocabularies
     // (documented whitelist constants), so they skip the value-shape redactor
     // that would otherwise misread e.g. 'task-started' as a secret pattern.
-    const { employees, activityLog, diagnostics, ...rest } = snapshot;
+    // The P1 usage block rides the redactor itself (extended coarse enums +
+    // the calendar-day shape keep its numbers and markers); pending items are
+    // projected through the allowlist above.
+    const { employees, activityLog, diagnostics, usage, pending, ...rest } = snapshot;
     return {
       ...redactor.redactValue(rest),
       employees: safeEmployees,
       activityLog: snapshot.activityLog,
       diagnostics: snapshot.diagnostics,
+      usage: usage ? redactor.redactValue(usage) : null,
+      pending: Array.isArray(pending) ? pending.map(safePendingItem) : [],
     };
   }
 
@@ -1714,6 +1771,10 @@ function createOfficeModule(options = {}) {
       activityLog: activityLog.slice(-SNAPSHOT_LOG_TAIL),
       diagnostics: diagnostics.slice(-SNAPSHOT_DIAGNOSTICS_TAIL),
       capabilities: capabilitySnapshot(),
+      // P1 data blocks (spec §4): usage is null until main.js injects the
+      // shell's own caches; pending is the runtime waterfall list.
+      usage: usageBlock,
+      pending: pendingSnapshot(),
     };
     for (const rec of employees.values()) {
       const binding = registry.getBindingForSession(activeSessionIdFor(rec.employeeId));
@@ -1819,6 +1880,209 @@ function createOfficeModule(options = {}) {
     }
     void pair;
     return redactSnapshot(snapshot);
+  }
+
+  // ---- P1 data pipeline: usage + pending blocks (spec §4) ---------------------
+
+  /** Normalize (never trust) the main-process usage block into the exact
+   * contract shape. A block missing the contract markers (billing day, token
+   * or money buckets) is REJECTED rather than degraded to zeros — showing
+   * ¥0/tokens 0 for data the shell never sent would be a lie. Unknown fields
+   * are dropped and wrong-typed values neutralized. */
+  function normalizeUsageBlock(raw) {
+    if (!isPlainObject(raw)) return null;
+    if (typeof raw.dayKey !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw.dayKey)) return null;
+    if (!isPlainObject(raw.tokens) || !isPlainObject(raw.money)) return null;
+    const nonNeg = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 0);
+    const oneOf = (v, allowed, fallback) => (allowed.includes(v) ? v : fallback);
+    const tokens = raw.tokens;
+    const money = raw.money;
+    const savings = isPlainObject(raw.savings) ? raw.savings : {};
+    const budget = isPlainObject(raw.budget) ? raw.budget : {};
+    return Object.freeze({
+      dayKey: raw.dayKey,
+      tokens: Object.freeze({
+        input: nonNeg(tokens.input),
+        output: nonNeg(tokens.output),
+        cacheRead: nonNeg(tokens.cacheRead),
+        total: nonNeg(tokens.total),
+      }),
+      money: Object.freeze({
+        paid: nonNeg(money.paid),
+        currency: typeof money.currency === 'string' && money.currency ? money.currency : 'CNY',
+      }),
+      savings: Object.freeze({
+        cacheRead: nonNeg(savings.cacheRead),
+        localModel: nonNeg(savings.localModel),
+        localModelBasis: typeof savings.localModelBasis === 'string' && savings.localModelBasis
+          ? savings.localModelBasis
+          : 'cloud-equivalent',
+      }),
+      budget: Object.freeze({
+        kind: oneOf(budget.kind, ['monthly', 'daily', 'none'], 'none'),
+        limit: nonNeg(budget.limit),
+        used: nonNeg(budget.used),
+      }),
+      pricingBasis: oneOf(raw.pricingBasis, ['api-key', 'subscription'], 'api-key'),
+      staleAt: Number.isFinite(Number(raw.staleAt)) && Number(raw.staleAt) > 0 ? Number(raw.staleAt) : null,
+    });
+  }
+
+  /** Inject the shell-assembled usage block (spec §4). main.js owns the data;
+   * this module owns the snapshot shape. Returns {ok, code}. */
+  function setUsageSnapshot(block) {
+    const normalized = normalizeUsageBlock(block);
+    if (!normalized) return Object.freeze({ ok: false, code: 'USAGE_INVALID' });
+    usageBlock = normalized;
+    return Object.freeze({ ok: true });
+  }
+
+  /** Employee currently bound to a raw session id (derived `raw#tN` handles
+   * reduce to the raw id), or null when no live binding owns it. */
+  function employeeIdForSession(rawSessionId) {
+    if (typeof rawSessionId !== 'string' || rawSessionId === '') return null;
+    const raw = rawSessionId.split('#')[0];
+    const snapshot = registry.snapshot();
+    for (const binding of (snapshot && snapshot.bindings) || []) {
+      if (!binding || binding.releasedAt !== null) continue;
+      if (typeof binding.sessionId !== 'string') continue;
+      if (binding.sessionId.split('#')[0] === raw) return binding.employeeId;
+    }
+    return null;
+  }
+
+  /**
+   * Record a runtime waterfall request (approval / user question) as a pending
+   * item. Idempotent on the eventId: a re-delivery of the same event returns
+   * the existing item with status 'duplicate' and never appends twice.
+   *
+   * @param {{eventId?: string, rpcId?: string, clientId?: string,
+   *          kind: 'approval'|'question', sessionId?: string,
+   *          toolName?: string, preset?: string, atMs?: number}} request
+   * @returns {{ok: true, status: 'added'|'duplicate', id: string, item: object}
+   *          |{ok: false, code: string}}
+   */
+  function notePendingRequest(request) {
+    if (!isPlainObject(request)) return Object.freeze({ ok: false, code: 'REQUEST_INVALID' });
+    const kind = PENDING_KINDS.includes(request.kind) ? request.kind : null;
+    if (!kind) return Object.freeze({ ok: false, code: 'KIND_INVALID' });
+    const eventId = typeof request.eventId === 'string' && request.eventId !== '' ? request.eventId : null;
+    const rpcId = typeof request.rpcId === 'string' && request.rpcId !== '' ? request.rpcId : null;
+    // The 0.1.5 mux waterfall carries the eventId; the 0.1.1 server-request
+    // frame only carries the rpcId. One stable id either way.
+    const id = eventId || (rpcId ? `legacy:${rpcId}` : null);
+    if (!id) return Object.freeze({ ok: false, code: 'EVENT_ID_MISSING' });
+    const existing = pendingItems.get(id);
+    if (existing) {
+      return Object.freeze({ ok: true, status: 'duplicate', id, item: existing });
+    }
+    const rawTool = typeof request.toolName === 'string' && request.toolName.trim() !== ''
+      ? request.toolName.trim()
+      : null;
+    // A question pending is an ask_user_question by definition: normalizing it
+    // here (not trusting the caller) is what keeps classifyRisk() on the spec
+    // §5 low row for question cards.
+    const toolName = kind === 'question' ? (rawTool || 'ask_user_question') : rawTool;
+    const preset = typeof request.preset === 'string' && request.preset.trim() !== ''
+      ? request.preset.trim()
+      : null;
+    const item = Object.freeze({
+      id,
+      kind,
+      employeeId: employeeIdForSession(typeof request.sessionId === 'string' ? request.sessionId : ''),
+      toolName,
+      // 一句话摘要（工具名/意图，spec §4）: the tool phrase, never runtime text.
+      // Question summaries state the intent only — the question body is task
+      // text and must never reach the snapshot.
+      summary: kind === 'question' ? questionSummaryZh() : toolPhraseZhOf(toolName),
+      detailRef: PENDING_DETAIL_REF,
+      risk: classifyRisk({ toolName, preset }),
+      createdAtMs: Number.isFinite(Number(request.atMs)) ? Number(request.atMs) : clock.nowMs(),
+      eventId,
+      clientId: typeof request.clientId === 'string' && request.clientId !== '' ? request.clientId : null,
+    });
+    pendingItems.set(id, item);
+    pendingRoutes.set(id, { rpcId: rpcId || eventId });
+    while (pendingItems.size > PENDING_LIMIT) {
+      const oldest = pendingItems.keys().next().value;
+      pendingItems.delete(oldest);
+      pendingRoutes.delete(oldest);
+      noteDiagnostic('PENDING_BACKLOG_TRUNCATED');
+    }
+    return Object.freeze({ ok: true, status: 'added', id, item });
+  }
+
+  /** Remove a pending item (answered / revoked). Accepts any of the ids the
+   * runtime uses: the waterfall eventId or the routing rpcId. Returns the
+   * removed item, or null. */
+  function resolvePending(idOrRpcId) {
+    if (typeof idOrRpcId !== 'string' || idOrRpcId === '') return null;
+    if (pendingItems.has(idOrRpcId)) {
+      const item = pendingItems.get(idOrRpcId);
+      pendingItems.delete(idOrRpcId);
+      pendingRoutes.delete(idOrRpcId);
+      return item;
+    }
+    for (const [id, item] of pendingItems) {
+      if (item.eventId === idOrRpcId) {
+        pendingItems.delete(id);
+        pendingRoutes.delete(id);
+        return item;
+      }
+      const route = pendingRoutes.get(id);
+      if (route && route.rpcId === idOrRpcId) {
+        pendingItems.delete(id);
+        pendingRoutes.delete(id);
+        return item;
+      }
+    }
+    return null;
+  }
+
+  /** The answer routing handle for a pending id (main process only — never
+   * part of the snapshot). Used by the shared answer surface. */
+  function pendingRoute(id) {
+    const route = pendingRoutes.get(id);
+    return route ? Object.freeze({ ...route }) : null;
+  }
+
+  /**
+   * Answer a pending request through the SHARED runtime answer path (the same
+   * respondToRuntime($events/result) implementation the IM channel uses, so
+   * the panel and IM can never double-answer with divergent logic). main.js
+   * injects the transport; on success the pending item is removed here.
+   *
+   * @param {{id: string, value: any, what?: string}} request
+   * @returns {Promise<{ok: boolean, reason?: string}>}
+   */
+  async function answerPending(request) {
+    if (!isPlainObject(request) || typeof request.id !== 'string' || request.id === '') {
+      return Object.freeze({ ok: false, reason: 'missing pending id' });
+    }
+    const route = pendingRoute(request.id);
+    if (!route) return Object.freeze({ ok: false, reason: 'unknown pending id' });
+    if (typeof options.answerRequest !== 'function') {
+      return Object.freeze({ ok: false, reason: 'answer channel unavailable' });
+    }
+    const res = await options.answerRequest({
+      rpcId: route.rpcId,
+      value: request.value,
+      what: typeof request.what === 'string' && request.what !== ''
+        ? request.what
+        : `office pending answer (${request.id})`,
+    });
+    if (res && res.ok) resolvePending(request.id);
+    return res;
+  }
+
+  /** Snapshot-ordered pending list: risk desc, then age asc (spec §3 sort). */
+  function pendingSnapshot() {
+    return [...pendingItems.values()].sort((a, b) => {
+      const byRisk = RISK_ORDER[b.risk] - RISK_ORDER[a.risk];
+      if (byRisk !== 0) return byRisk;
+      if (a.createdAtMs !== b.createdAtMs) return a.createdAtMs - b.createdAtMs;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
   }
 
   function activeSessionIdFor(employeeId) {
@@ -2003,6 +2267,13 @@ function createOfficeModule(options = {}) {
     stop,
     state,
     ingestHarnessEvent,
+    // P1 data pipeline surface (spec §4): usage injection + pending lifecycle +
+    // the shared answer entry the panel and the IM channel both call.
+    setUsageSnapshot,
+    notePendingRequest,
+    resolvePending,
+    pendingRoute,
+    answerPending,
     dispatch: ({ employeeId } = {}) => controlIntent(employeeId, 'followup'),
     cancel: ({ employeeId } = {}) => controlIntent(employeeId, 'cancel'),
     interrupt: ({ employeeId } = {}) => controlIntent(employeeId, 'interrupt'),
