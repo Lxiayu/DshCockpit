@@ -12,8 +12,10 @@
 //     layout, still rejects corrupt/invalid saved layouts with the same
 //     stable codes, and still degrades to the bundled draft.
 //
-// The editor core (layout-editor.js) now requires this module (single source
-// of truth); the editor API keeps the same validateDraftSchema behaviour.
+// P5/B-1 (2026-09-23): the editor core left the product repo with the
+// authoring block (docs/strategy/2026-09-23-p5-deletion-inventory.md); the
+// schema module it used to require is now the sole in-repo implementation,
+// consumed directly by the production boot chain.
 
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
@@ -22,7 +24,6 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const layoutSchema = require('../src/office/layout-schema.js');
-const layoutEditor = require('../src/office/layout-editor.js');
 const boot = require('../src/office/office-boot.js');
 
 const BUNDLED_DRAFT_PATH = path.join(ROOT, 'src', 'office', 'fixtures', 'office-layout-draft.json');
@@ -99,21 +100,11 @@ test('validateDraftSchema answers ok/count/code without throwing (stable codes)'
   assert.equal(layoutSchema.validateDraftSchema(noDesk).code, 'DRAFT_GROUP_NO_DESK');
 });
 
-test('the editor core and the schema module share one validator (B-1 single source of truth)', () => {
-  const editorSrc = fs.readFileSync(path.join(ROOT, 'src', 'office', 'layout-editor.js'), 'utf8');
-  assert.match(editorSrc, /require\('\.\/layout-schema\.js'\)/, 'the editor requires the schema module');
-  assert.doesNotMatch(editorSrc, /require\('\.\/layout-assets\.js'\)/, 'the editor no longer requires the catalog directly');
-  assert.doesNotMatch(editorSrc, /function parseDraft\(/, 'parseDraft is not re-implemented in the editor');
-
-  const editor = layoutEditor.createLayoutEditor({ scene: { width: 1, height: 1 } });
-  const good = bundledDraft();
-  assert.deepEqual(editor.validateDraftSchema(good), layoutSchema.validateDraftSchema(good),
-    'the editor API answers identically for a valid draft');
-  const bad = clone(good);
-  bad.items[0].asset = 'nope-not-an-asset';
-  assert.deepEqual(editor.validateDraftSchema(bad), layoutSchema.validateDraftSchema(bad),
-    'the editor API answers identically for an invalid draft');
-});
+// P5 (2026-09-23): the "editor core requires the schema module" contract
+// test left with the editor itself (src/office/layout-editor.js moved to the
+// workbench side, byte-identical in DshCockpit-s1). What stays pinned here is
+// the in-repo surface: layout-schema.js is the ONLY schema-v1 implementation
+// left in the product repo, and the production boot chain runs on it.
 
 // ---------------------------------------------------------------------------
 // 2. the production boot chain through the REAL validator (Task 8 + P5/B-1)

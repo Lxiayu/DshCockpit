@@ -744,9 +744,12 @@ test('E5a-R1: no code path sorts walk frame filenames for playback order', () =>
   // would silently move the passing frame after 04. The play order must come
   // from animations.json array order only. If a sort is ever needed for a
   // non-playback purpose, restructure the line so this scan stays clean.
+  // P5 (2026-09-23): test/fixtures (the acceptance-harness probe templates)
+  // left the product repo with the authoring block — the scan root that no
+  // longer exists was removed; the production page under src/office stays
+  // fully covered.
   const scanRoots = [
     path.join(ROOT, 'src', 'office'),
-    path.join(ROOT, 'test', 'fixtures'),
   ];
   const offenders = [];
   const walkFramePattern = /walk-(?:left|right|up|down)[^'"]*\.(?:png|json)/;

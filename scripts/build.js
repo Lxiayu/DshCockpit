@@ -118,12 +118,20 @@ if (result.status !== 0) process.exit(result.status === null ? 1 : result.status
 // Post-build artifact verification: the portable zip must contain the app
 // exe, app.asar, the updater feed and a non-empty bundled runtime seed
 // (a broken seed is exactly the "cannot find dsh runtime (lib/bin.js)" bug).
-if (args.includes('--win')) {
+// P5: the gates now also open app.asar (authoring block must be absent,
+// production office surface + runtime materials must be present) and run on
+// every track — win (zip/win-unpacked) and mac (.app/zip) alike, including
+// the flagless `npm run build` (host default). Only artifacts of THIS build's
+// version are checked, so stale zips left in dist/ by older builds are never
+// failed against current gates; a build that produced nothing verifiable
+// (e.g. a failed packaging) simply reports "skipping".
+const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+{
   const { verify } = require('./verify-dist');
   const pi = args.indexOf('--publish');
   const publishing = pi !== -1 && args[pi + 1] !== 'never';
   try {
-    if (!verify({ requireUpdaterFeed: publishing, slim: SLIM })) process.exit(1);
+    if (!verify({ requireUpdaterFeed: publishing, slim: SLIM, version: pkg.version })) process.exit(1);
   } catch (e) {
     console.error('[build] artifact verification failed:', e.message);
     process.exit(1);

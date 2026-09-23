@@ -24,7 +24,9 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 // Which evidence round this gate evaluates: OFFICE_RELEASE_EVIDENCE_ID names
 // the artifacts/office/task9/<id> directory under gate. Without it nothing
 // is gated and the suite reports skips (never passes) — an evidence round
-// must be selected explicitly, e.g. by scripts/office-acceptance-run.js.
+// must be selected explicitly (the acceptance-run driver that used to live
+// at scripts/office-acceptance-run.js moved to the workbench side with the
+// authoring block; the evidence tree it produced stays in this repo).
 const EVIDENCE_ID = process.env.OFFICE_RELEASE_EVIDENCE_ID || '2194abc-task9-fix1';
 const EVIDENCE_DIR = EVIDENCE_ID ? path.join(REPO_ROOT, 'artifacts', 'office', 'task9', EVIDENCE_ID) : null;
 const gateTest = EVIDENCE_ID ? test : test.skip;

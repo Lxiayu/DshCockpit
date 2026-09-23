@@ -38,6 +38,37 @@ const config = {
   files: [
     'src/**/*',
     '!**/*.map',
+    // 2026-09-23 P5 排包闸门：创作/开发期表面不进正式包（作者工具工作台化，
+    // 见 docs/strategy/2026-09-23-authoring-tools-extraction-plan.md）。
+    //  ⚠ 同名陷阱：extraResources 里的 resources/office/layout-editor/ 是生产
+    //  家具素材源（layout-assets.js catalog 的渲染输入），与此处的
+    //  src/office/layout-editor.js 同名不同物，严禁按名字清目录/加排除。
+    '!src/workbench/**',
+    '!src/office/layout-editor.js',
+    '!src/office/playground.html',
+    '!src/office/playground-page.js',
+    '!src/office/playground.css',
+    '!src/office/fixtures/character-pack/**',
+    '!src/office/fixtures/events.json',
+    '!src/office/fixtures/waypoints.json',
+    // Defence in depth：白名单（src/**/*）本就排除的创作树，显式钉死，
+    // 未来若有人放宽 files 白名单，这些也绝不回流进包。
+    '!content/**',
+    '!photo/**',
+    '!artifacts/**',
+    '!test/**',
+    '!docs/**',
+    '!scripts/gen-*/**',
+    '!scripts/office-editor.js',
+    '!scripts/office-workbench.js',
+    '!scripts/workbench-publish.js',
+    '!scripts/workbench-export-character.js',
+    '!scripts/apply-walk-sequence.js',
+    '!scripts/asset-gap-report.js',
+    '!scripts/office-generate-flat-layout.js',
+    '!scripts/office-acceptance-run.js',
+    '!scripts/office-acceptance-evidence.js',
+    '!scripts/office-view-evidence.js',
   ],
   asar: true,
   // pnpm is spawned as a plain node child by the dsh CLI ("spawnSync('pnpm')"),

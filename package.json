@@ -13,9 +13,7 @@
     "build:mac": "node scripts/build.js --mac --publish never",
     "publish:win": "node scripts/build.js --win --publish always",
     "publish:mac": "node scripts/build.js --mac --publish always",
-    "test": "node --test \"test/*.test.js\"",
-    "office:editor": "electron scripts/office-editor.js",
-    "office:workbench": "electron scripts/office-workbench.js"
+    "test": "node --test \"test/*.test.js\""
   },
   "author": "Lxiayu",
   "license": "MIT",
