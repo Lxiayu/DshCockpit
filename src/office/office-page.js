@@ -29,6 +29,12 @@
 // detailRef fetch) and pendingModalModel (the pure danger-modal / question-form
 // view model). None of it touches the pushed snapshot: the answers route
 // through the shared answer channel, the details through the per-action fetch.
+//
+// P4 (spec §3 block 5 / §8 P4 行): the controller exposes recordFor() — the
+// selected employee's 今日工作记录 view model over the module's `record`
+// snapshot projection (day-scoped counts, the per-turn usage attribution, the
+// tool-phrase tally and the recent activity kinds) — plus formatClock(), the
+// local wall-clock renderer the record rows and the timeline now share.
 
 const ACTIVITY_LABELS = Object.freeze({
   roaming: '漫游中',
@@ -118,11 +124,24 @@ const USAGE_BASIS_LABELS = Object.freeze({
 // approve/reject actions. The page keeps its historical zh-only convention;
 // every string below mirrors an office.pending.* dictionary key (the i18n
 // contract tests pin the key sets in both dictionaries).
+//
+// P4-R1 AXIS CORRECTION (user-verified, first-hand on the installed
+// 0.1.5-rc.2): `agentPreset` (session/list projections + the waterfall frame)
+// is the AGENT composition preset id (dsh-agent-presets; the real value is
+// `standard`) — a DIFFERENT axis from the permission presets
+// (dsh-permission-presets: read-only / workspace-write / danger-full-access).
+// That axis's `sandboxMode` is a mount-time composition property the harness
+// does NOT project onto sessions, so the panel can never read a session's
+// current sandbox mode. Consequences:
+//   - the value is shown verbatim under 「Agent 预设」 and is never relabelled
+//     "unknown" (`standard` is a legal value on its own axis);
+//   - the impact line can speak about the sandbox only on a REAL widening
+//     request (the approval reason) — never inferred from the agent preset.
 const PENDING_MODAL_TEXT = Object.freeze({
   title: '高危操作 · 批准请求',
   questionTitle: '提问',
   tool: '工具',
-  preset: '权限预设',
+  agentPreset: 'Agent 预设',
   steps: '将要执行',
   impact: '影响范围',
   command: '命令原文',
@@ -137,12 +156,35 @@ const PENDING_MODAL_TEXT = Object.freeze({
   submit: '提交回答',
   close: '关闭',
   escalate: (mode) => `批准后本次调用可按 ${mode} 运行（沙箱放宽请求，仅本次有效）`,
-  presetImpact: {
-    'read-only': '沙箱为 read-only：写操作无法在当前沙箱内运行',
-    'workspace-write': '沙箱为 workspace-write：影响范围限工作区内',
-    'danger-full-access': 'danger-full-access：无沙箱边界，影响范围无法预先界定',
-  },
-  presetImpactUnknown: 'harness 未提供该会话的沙箱信息，影响范围未知',
+  // P4 polish ④: the "将要执行" steps (and the 命令原文 block) are the
+  // harness's own ENGLISH text — mark them so they are never mistaken for
+  // panel UI copy. Mirrors the office.pending.modal.raw dictionary key.
+  rawTag: 'harness 原文',
+  // P4-R1: the sandbox mode is not projected onto sessions (see the axis note
+  // above) — the impact line states that plainly instead of guessing a tier
+  // from the agent preset. Mirrors office.pending.modal.sandbox.unprojected.
+  sandboxUnprojected: '沙箱模式：harness 未投影（仅在放宽请求时可见），影响范围无法预先界定',
+});
+
+// P4 ⑤ 选中员工「今日工作记录」(spec §3 block 5). The zh strings mirror the
+// office.record.* dictionary keys (same convention as the blocks above). Every
+// row is a projection of module-side real data: counts of task-started /
+// result-* log kinds, the per-turn usage attribution (first-hand provider
+// usage), the day-scoped tool phrase tally and the recent activity kinds —
+// never task text, never session ids.
+const RECORD_TEXT = Object.freeze({
+  title: '今日工作记录',
+  empty: '今日暂无工作记录',
+  tasks: '今日任务',
+  completed: '完成',
+  failed: '未完成',
+  cancelled: '已取消',
+  usage: '累计用量',
+  duration: '用时',
+  tools: '常用工具',
+  timeline: '今日动态',
+  note: '按 UTC+8 自然日聚合 · 仅计数与时间，不含任务内容',
+  sessionNote: '本次办公室会话内的记录（未提供真实时钟，不标注为「今日」）',
 });
 
 /** Compact token count: 千 / 万 (百万 rides 万), original value on hover. */
@@ -174,6 +216,23 @@ function formatDuration(ms) {
   return `${Math.floor(totalSeconds / 60)}m ${String(totalSeconds % 60).padStart(2, '0')}s`;
 }
 
+/** Wall-clock HH:MM:SS for the panel's real timestamps (P4). The office day
+ * boundary is UTC+8 (billingDayKey), so real times are shown in the viewer's
+ * LOCAL zone — the same zone a calendar "today" means to them. `fallbackAtMs`
+ * is the module's logical stamp, used only while no real time exists (tests /
+ * deterministic probes), keeping the historical UTC-of-logical display. */
+function formatClock(realMs, fallbackAtMs) {
+  const real = Number(realMs);
+  if (Number.isFinite(real) && real > 0) {
+    const d = new Date(real);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+  const n = Number(fallbackAtMs);
+  if (fallbackAtMs === null || fallbackAtMs === undefined || !Number.isFinite(n) || n < 0) return '--:--:--';
+  return new Date(n).toISOString().slice(11, 19);
+}
+
 function activityLabel(activity) {
   return ACTIVITY_LABELS[activity] || '在岗';
 }
@@ -199,10 +258,15 @@ function buildPendingModalModel({ item, detail }) {
   }
   let impact;
   if (d && typeof d.requestedSandboxMode === 'string' && d.requestedSandboxMode) {
+    // The ONE place the sandbox axis is observable: a real widening request
+    // names the target mode in its reason.
     impact = PENDING_MODAL_TEXT.escalate(d.requestedSandboxMode);
   } else {
-    const preset = d && typeof d.preset === 'string' ? d.preset : '';
-    impact = PENDING_MODAL_TEXT.presetImpact[preset] || PENDING_MODAL_TEXT.presetImpactUnknown;
+    // P4-R1: the agent preset is NOT a sandbox tier (different axis; see the
+    // PENDING_MODAL_TEXT header). Guessing one from it is exactly the inaccuracy
+    // this correction removes — the panel states that the sandbox mode is not
+    // projected instead.
+    impact = PENDING_MODAL_TEXT.sandboxUnprojected;
   }
   const targetPath = d && typeof d.targetPath === 'string' && d.targetPath !== '' ? d.targetPath : null;
   return {
@@ -211,7 +275,10 @@ function buildPendingModalModel({ item, detail }) {
     title: approval ? PENDING_MODAL_TEXT.title : PENDING_MODAL_TEXT.questionTitle,
     toolName: item ? item.toolName : null,
     summary: item ? item.summary : null,
-    preset: d && typeof d.preset === 'string' && d.preset !== '' ? d.preset : null,
+    // P4-R1: the AGENT composition preset (agent-presets axis, e.g. `standard`)
+    // — shown verbatim as 「Agent 预设」; NOT a sandbox tier, never mapped to
+    // one. Null when the session carries no agent preset (the row is omitted).
+    agentPreset: d && typeof d.preset === 'string' && d.preset !== '' ? d.preset : null,
     steps,
     impact,
     // 目标路径或命令原文（若有）: the REAL arguments when main.js correlated the
@@ -228,6 +295,59 @@ function buildPendingModalModel({ item, detail }) {
     // guessing — the safe reading is "treat as irreversible".
     reversibleNote: PENDING_MODAL_TEXT.reversibleUnknown,
     questions: !approval && d && Array.isArray(d.questions) ? d.questions : null,
+  };
+}
+
+/**
+ * P4 ⑤ 选中员工「今日工作记录」: the presentation view model over the
+ * snapshot's `record` projection (module-side aggregation, see
+ * office-module.safeDayRecord). `record` is null when the employee has nothing
+ * recorded today — the page then shows the empty state instead of zeros.
+ *
+ * Sources (all real, none invented):
+ *   tasks/completed/failed/cancelled — task-started / result-* activity kinds;
+ *   usage — the per-turn provider usage attribution (null when no turn
+ *     carried one; money is the same local-rate estimate the usage block uses);
+ *   durationMs — the sum of attributed turn durations;
+ *   tools — the day-scoped tool-phrase tally (fixed zh phrases, Top 5);
+ *   recent — the employee's recent activity kinds (today only, ≤6).
+ *
+ * NOT shown, and why (no source exists):
+ *   - a per-employee token/money DISPLAY beyond the attributed turns — the
+ *     module only ever sees turns (runtime/usage facts); cache-only sessions
+ *     and other employees' local behaviour carry no accounting;
+ *   - tool ARGUMENTS, task text, session ids — structurally absent from the
+ *     module's privacy boundary (same rule as the rest of the snapshot);
+ *   - "效率/趋势" charts — derived from no first-hand source in this module.
+ */
+function buildRecordViewModel(record) {
+  if (!record || typeof record !== 'object') return null;
+  const usage = record.usage && typeof record.usage === 'object' ? record.usage : null;
+  return {
+    dayKey: typeof record.dayKey === 'string' ? record.dayKey : null,
+    tasks: Number.isFinite(Number(record.tasks)) ? Number(record.tasks) : 0,
+    completed: Number.isFinite(Number(record.completed)) ? Number(record.completed) : 0,
+    failed: Number.isFinite(Number(record.failed)) ? Number(record.failed) : 0,
+    cancelled: Number.isFinite(Number(record.cancelled)) ? Number(record.cancelled) : 0,
+    usage: usage && Number(usage.total) > 0
+      ? {
+          input: Number(usage.input) || 0,
+          output: Number(usage.output) || 0,
+          cacheRead: Number(usage.cacheRead) || 0,
+          total: Number(usage.total) || 0,
+          cost: Number.isFinite(Number(usage.cost)) ? Number(usage.cost) : 0,
+        }
+      : null,
+    durationMs: Number.isFinite(Number(record.durationMs)) ? Number(record.durationMs) : 0,
+    tools: (Array.isArray(record.tools) ? record.tools : [])
+      .filter((row) => row && typeof row.phrase === 'string' && row.phrase !== '')
+      .map((row) => ({ phrase: row.phrase, count: Number(row.count) || 0 })),
+    recent: (Array.isArray(record.recent) ? record.recent : []).map((row) => ({
+      kind: typeof row.kind === 'string' ? row.kind : '',
+      label: ACTIVITY_LOG_LABELS[row.kind] || row.kind || '—',
+      atMs: Number.isFinite(Number(row.atMs)) ? Number(row.atMs) : 0,
+      realMs: Number.isFinite(Number(row.realMs)) ? Number(row.realMs) : null,
+    })),
   };
 }
 
@@ -338,6 +458,13 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
       return employee ? buildDetailsViewModel(employee) : null;
     },
 
+    /** P4 (spec §3 block 5): the selected employee's 今日工作记录 view model
+     * (null when the snapshot carries no record for them). */
+    recordFor(employeeId) {
+      const employee = employeeById(employeeId);
+      return employee ? buildRecordViewModel(employee.record) : null;
+    },
+
     // Keyboard model over the fixed employee order: arrows move a roving
     // focus, Enter/Space select the focused employee, Escape clears.
     handleKey({ key } = {}) {
@@ -386,6 +513,9 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
     activityLog() {
       return (snapshot ? snapshot.activityLog : []).map((entry) => ({
         atMs: entry.atMs,
+        // P4: the real event instant (null without an injected realClock) so
+        // the timeline can show wall-clock times instead of logical ones.
+        realMs: Number.isFinite(entry.realMs) ? entry.realMs : null,
         employeeId: entry.employeeId,
         kind: entry.kind,
         label: ACTIVITY_LOG_LABELS[entry.kind] || entry.kind,
@@ -548,8 +678,10 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
 module.exports = {
   createOfficePageController,
   buildDetailsViewModel,
+  buildRecordViewModel,
   buildPendingModalModel,
   PENDING_MODAL_TEXT,
+  RECORD_TEXT,
   ACTIVITY_LABELS,
   ACTIVITY_LOG_LABELS,
   STAFF_STATUS_LABELS,
@@ -557,4 +689,5 @@ module.exports = {
   formatCount,
   formatMoney,
   formatDuration,
+  formatClock,
 };

@@ -2,6 +2,21 @@
 
 // src/office/runtime/approval-risk.js — approval risk classification.
 //
+// P4-R1 AXIS NOTE (user-verified, first-hand on the installed 0.1.5-rc.2):
+// the `preset` input below is named for the PERMISSION preset vocabulary
+// (dsh-permission-presets: read-only / workspace-write / danger-full-access,
+// whose `sandboxMode` is a mount-time composition property). The session-facing
+// axis the office actually reads is a DIFFERENT one: `agentPreset` from
+// session/list projections is the AGENT composition preset id
+// (dsh-agent-presets; the real value is `standard`), and the harness does NOT
+// project the permission/sandbox axis onto sessions at all. So in the current
+// wiring this table can never receive a real sandbox tier from the session
+// path: values like `standard` are legal values on the agent axis and MUST NOT
+// be mapped to any sandbox tier — they simply fail the two exact-match
+// branches below and land on the class-based (conservative) result. The
+// read-only / danger-full-access branches remain the contract for a future
+// permission-axis projection (or a frame that carries a real tier verbatim).
+//
 // P1 data pipeline of the office right-panel spec (docs/strategy/
 // 2026-09-23-office-right-panel-spec.md §5), cross-checked against
 // 2026-09-23-approval-ux-cross-tool.md (Warp denylist / Devin Smart

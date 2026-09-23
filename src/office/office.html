@@ -109,10 +109,11 @@
       </div>
     </section>
 
-    <!-- ② 员工状态行（spec §3 block 2）：状态徽标 + 去标识化任务标题 + 当前工具短语 + 需要你角标 -->
+    <!-- ② 员工状态行（spec §3 block 2）：状态徽标 + 去标识化任务标题 + 当前工具短语 + 需要你角标。
+         P4 打磨②：下方常驻的「方向键移动焦点…」说教提示收进列表的 title/aria-label
+         （鼠标悬停与读屏均可发现），不再占一行视觉空间。 -->
     <section id="employee-list-block" aria-label="员工列表">
-      <ul id="employee-list" role="listbox" aria-label="选择员工查看详情"></ul>
-      <p class="hint">方向键移动焦点，Enter 或空格选中，Esc 取消选中</p>
+      <ul id="employee-list" role="listbox" aria-label="选择员工查看详情（方向键移动焦点，Enter 或空格选中，Esc 取消选中）" title="方向键移动焦点，Enter 或空格选中，Esc 取消选中"></ul>
     </section>
 
     <!-- ③ 待你处理（spec §3 block 3）。P2 容器 + 计数；P3 行内批/拒（低/中风险）与危险模态
@@ -153,7 +154,11 @@
       <button id="timeline-more" type="button" hidden>更多</button>
     </section>
 
-    <!-- ⑤ 选中员工详情（spec §3 block 5，结构保留；今日工作记录是 P4） -->
+    <!-- ⑤ 选中员工详情（spec §3 block 5，结构保留）＋ P4 ⑤「今日工作记录」：当日任务数/
+         完成/未完成/取消、累计 token 与金额（逐 turn provider usage 归属）、用时合计、
+         常用工具短语 Top N（tool/call 事实日聚合）、今日动态（进入/落座/小憩/任务起止）。
+         全部为模块侧 day record 投影：实数与固定短语，无任务正文、无会话 id；无数据时
+         显示空态而不编造。dayKey 为空（未注入真实时钟的调试路径）时标注为会话记录。 -->
     <section id="details" aria-label="员工详情" aria-live="polite">
       <p class="hint" id="details-placeholder">点击场景中的员工或用键盘选择查看详情</p>
       <div id="details-body" hidden>
@@ -162,6 +167,20 @@
         <p id="details-primary"></p>
         <ul id="details-dim"></ul>
         <p id="details-queue" class="queue-line"></p>
+        <div id="details-record">
+          <div class="block-head">
+            <h3 id="details-record-title">今日工作记录</h3>
+            <span id="record-day" class="record-day" hidden></span>
+          </div>
+          <p id="record-empty" class="hint" hidden>今日暂无工作记录</p>
+          <div id="record-body" hidden>
+            <p id="record-counts" class="record-line"></p>
+            <p id="record-usage" class="record-line"></p>
+            <p id="record-tools" class="record-line" hidden></p>
+            <ul id="record-recent" class="record-recent"></ul>
+            <p id="record-note" class="hint record-note"></p>
+          </div>
+        </div>
         <div id="details-actions" class="actions">
           <button id="btn-dispatch" type="button">追加任务</button>
           <button id="btn-cancel" type="button">请求取消</button>
@@ -1660,10 +1679,16 @@
       document.getElementById('editor-ungroup').addEventListener('click', () => { editor.ungroupSelection(); renderEditorDraft(); });
       syncEditorControls();
 
+      // P4 打磨③（spec §8 P4 行）：原「在岗 N 人 · 执行任务 N · 排队 N」与员工状态行
+      // 信息重叠——`presence` 在模块快照里恒为 'present'（六名常驻员工永远在岗），
+      // 「在岗 6 人」是一条永不变的重复计数；执行/排队总数与行内徽标/排队 chip 重复。
+      // 结论：删去恒定的「在岗」计数，压缩为一行弱化汇总（仅保留真正会变的两个数），
+      // 视觉重量让给①用量块；完整逐员事实仍由②员工行承载，读屏播报保持不变。
       function renderOverview(snapshot) {
         const overview = page.overview();
         document.getElementById('overview-summary').textContent =
-          `在岗 ${overview.presentCount} 人 · 执行任务 ${overview.runningCount} · 排队 ${overview.queuedCount}`;
+          `执行任务 ${overview.runningCount} · 排队 ${overview.queuedCount}`;
+        document.getElementById('overview-summary').title = '全体员工当前在执行的任务数与排队数（逐员状态见下方员工列表）';
         // P2: the sync long text left the header for the footer's minimal dot.
         syncDot(snapshot.sync);
         void snapshot;
@@ -1801,11 +1826,94 @@
         queueEl.textContent = vm.queueCount > 0
           ? `排队任务 ${vm.queueCount} 项${vm.waiting.length ? '：' + vm.waiting.map((w) => `第 ${w.position} 位`).join('、') : ''}`
           : '';
+        renderRecord(selected);
         const capabilities = page.capabilities() || {};
         const bound = !!latestSnapshot && !!latestSnapshot.employees.find((e) => e.employeeId === selected && e.binding);
         document.getElementById('btn-dispatch').disabled = !bound || !capabilities.followup;
         document.getElementById('btn-cancel').disabled = !bound || !capabilities.cancel;
         document.getElementById('btn-interrupt').disabled = !bound || !capabilities.interrupt;
+      }
+
+      // ⑤ P4 今日工作记录（spec §3 block 5）：选中员工的当日聚合。每一行都来自模块
+      // 侧 day record 投影（activity-log 计数 / 逐 turn provider usage 归属 /
+      // tool/call 事实日聚合 / 近期动态），没有对应真实来源的行一律不渲染——
+      // 无 usage 归属就没有用量行，无工具调用就没有常用工具行，当日无记录显示空态。
+      function renderRecord(employeeId) {
+        const REC = REGISTRY['office-page'].RECORD_TEXT;
+        const root = document.getElementById('details-record');
+        const vm = page.recordFor(employeeId);
+        const empty = document.getElementById('record-empty');
+        const body = document.getElementById('record-body');
+        const dayEl = document.getElementById('record-day');
+        const titleEl = document.getElementById('details-record-title');
+        const note = document.getElementById('record-note');
+        root.hidden = false;
+        note.textContent = vm && !vm.dayKey ? REC.sessionNote : REC.note;
+        if (!vm) {
+          // 选中但当日无任何记录：显示空态（不编造 0）
+          titleEl.textContent = REC.title;
+          dayEl.hidden = true;
+          dayEl.textContent = '';
+          empty.hidden = false;
+          body.hidden = true;
+          return;
+        }
+        titleEl.textContent = vm.dayKey ? REC.title : '工作记录';
+        dayEl.hidden = !vm.dayKey;
+        if (vm.dayKey) dayEl.textContent = vm.dayKey;
+        // 有计数/用量/工具才显示对应行；只有动态（闲聊/小憩）时动态行独自成立。
+        const hasCounts = vm.tasks > 0 || vm.completed > 0 || vm.failed > 0 || vm.cancelled > 0;
+        empty.hidden = true;
+        body.hidden = false;
+        const countsEl = document.getElementById('record-counts');
+        if (hasCounts) {
+          const parts = [`${REC.tasks} ${vm.tasks}`];
+          if (vm.completed > 0) parts.push(`${REC.completed} ${vm.completed}`);
+          if (vm.failed > 0) parts.push(`${REC.failed} ${vm.failed}`);
+          if (vm.cancelled > 0) parts.push(`${REC.cancelled} ${vm.cancelled}`);
+          countsEl.textContent = parts.join(' · ');
+          countsEl.hidden = false;
+        } else {
+          countsEl.hidden = true;
+          countsEl.textContent = '';
+        }
+        const usageEl = document.getElementById('record-usage');
+        if (vm.usage) {
+          usageEl.hidden = false;
+          // 用时只对拿到了 provider 归属的轮次存在（turnDurationMs 之和），
+          // 与用量同行展示，没有归属就不编造时长。
+          const duration = vm.durationMs > 0 ? ` · ${REC.duration} ${FMT.formatDuration(vm.durationMs)}` : '';
+          usageEl.textContent = `${REC.usage} ${FMT.formatCount(vm.usage.total)} ≈ ${FMT.formatMoney(vm.usage.cost)}${duration}`;
+          usageEl.title = `输入 ${vm.usage.input} · 输出 ${vm.usage.output} · 缓存读 ${vm.usage.cacheRead}（原始值 ${vm.usage.total} tokens）≈ ${vm.usage.cost} CNY${duration ? ` · ${REC.duration} ${FMT.formatDuration(vm.durationMs)}` : ''}`;
+        } else {
+          // 无 provider usage 归属的会话不显示用量行（不编造 0）
+          usageEl.hidden = true;
+          usageEl.textContent = '';
+          usageEl.removeAttribute('title');
+        }
+        const toolsEl = document.getElementById('record-tools');
+        if (vm.tools.length > 0) {
+          toolsEl.hidden = false;
+          toolsEl.textContent = `${REC.tools} ${vm.tools.map((t) => `${t.phrase} ×${t.count}`).join('、')}`;
+          toolsEl.title = `当日工具调用按短语归类（top ${vm.tools.length}）；不记录工具参数与任务内容`;
+        } else {
+          toolsEl.hidden = true;
+          toolsEl.textContent = '';
+          toolsEl.removeAttribute('title');
+        }
+        const recentEl = document.getElementById('record-recent');
+        recentEl.title = `${REC.timeline}（进入队列/落座/小憩/任务起止，仅时间与事件，不含任务内容）`;
+        recentEl.replaceChildren(...vm.recent.map((row) => {
+          const li = document.createElement('li');
+          const time = document.createElement('span');
+          time.className = 'tl-time';
+          time.textContent = FMT.formatClock(row.realMs, row.atMs);
+          const what = document.createElement('span');
+          what.className = 'record-recent-what';
+          what.textContent = row.label;
+          li.append(time, what);
+          return li;
+        }));
       }
 
       // ④ timeline (spec §3 block 4): time + employee + event + this turn's
@@ -1826,7 +1934,9 @@
           if (entry.employeeId) li.dataset.employeeId = entry.employeeId;
           const time = document.createElement('span');
           time.className = 'tl-time';
-          time.textContent = new Date(entry.atMs).toISOString().slice(11, 19);
+          // P4 打磨⑥：真实时钟（realMs，main.js 注入）优先，本地时区显示；无真实
+          // 时钟的调试路径回落到逻辑时钟的历史显示约定。
+          time.textContent = FMT.formatClock(entry.realMs, entry.atMs);
           const who = document.createElement('span');
           who.className = 'tl-who';
           who.textContent = employeeName(entry.employeeId);
@@ -1890,7 +2000,7 @@
         document.getElementById('usage-cloud').textContent = FMT.formatMoney(view.moneyPaid);
         stale.hidden = !view.staleAt;
         if (view.staleAt) {
-          stale.title = `用量数据自 ${new Date(view.staleAt).toISOString().slice(11, 19)} 后未更新（${view.dayKey} 计费日）`;
+          stale.title = `用量数据自 ${FMT.formatClock(view.staleAt)} 后未更新（${view.dayKey} 计费日）`;
         }
         const budget = document.getElementById('usage-budget');
         if (view.budgetKind === 'monthly' && view.budgetLimit > 0) {
@@ -2021,7 +2131,12 @@
           if (!live.has(id)) pendingCardState.delete(id); // answered / revoked elsewhere
         }
         if (pendingModalItem && !live.has(pendingModalItem.id)) closePendingModal();
-        document.getElementById('pending-count').textContent = String(summary.count);
+        // P4 打磨①（spec §8 P4 行）：红色只留给 >0。计数为 0 时徽标降为中性
+        // （need-zero），不再用警示红点制造「有东西待办」的错觉。
+        const countEl = document.getElementById('pending-count');
+        countEl.textContent = String(summary.count);
+        countEl.classList.toggle('need-zero', summary.count === 0);
+        countEl.title = summary.count > 0 ? `${summary.count} 项待你处理` : '暂无待处理';
         document.getElementById('pending-empty').hidden = summary.count > 0;
         const list = document.getElementById('pending-list');
         list.replaceChildren(...summary.items.map((item) => {
@@ -2041,7 +2156,7 @@
           body.append(who, what);
           const at = document.createElement('span');
           at.className = 'pending-time';
-          at.textContent = new Date(item.createdAtMs).toISOString().slice(11, 19);
+          at.textContent = FMT.formatClock(item.createdAtMs);
           li.append(risk, body, at, renderPendingCardActions(item));
           return li;
         }));
@@ -2058,6 +2173,24 @@
         return [dt, dd];
       }
 
+      /** dt-only variant for rows whose dd carries several nodes (raw tag). */
+      function modalDt(term) {
+        const dt = document.createElement('dt');
+        dt.textContent = term;
+        return dt;
+      }
+
+      // P4 打磨④（spec §8 P4 行）：「将要执行」的步骤与「命令原文」是 harness 的
+      // 英文原文（reason / journal arguments），加一枚「harness 原文」小标注，
+      // 避免与面板中文 UI 文案混淆。
+      function rawTag() {
+        const tag = document.createElement('span');
+        tag.className = 'pending-modal-raw-tag';
+        tag.textContent = PENDING_MODAL_TXT.rawTag;
+        tag.title = '本段为 harness 原文，未经翻译';
+        return tag;
+      }
+
       function modalText(value, className) {
         const node = document.createElement('span');
         if (className) node.className = className;
@@ -2071,10 +2204,13 @@
         body.replaceChildren();
         actions.replaceChildren();
         const title = document.getElementById('pending-modal-title');
-        const blocked = document.getElementById('pending-modal-blocked');
         const closeBtn = document.getElementById('pending-modal-close');
         title.textContent = item.kind === 'question' ? PENDING_MODAL_TXT.questionTitle : PENDING_MODAL_TXT.title;
-        blocked.textContent = PENDING_MODAL_TXT.blockedNote;
+        // The blocked-composer note is set in renderPendingModalBody from the
+        // view model (P4 打磨⑥: the pre-P4 code read the raw text object here
+        // with a key that does not exist on it (`blocked` vs the read key), so
+        // the note silently rendered empty since P3; the model carries it as
+        // blockedNote like every other modal row).
 
         // detailRef (spec §4): fetch the REAL command text / question body per
         // user action — never on the snapshot cadence, never in the snapshot.
@@ -2100,15 +2236,28 @@
         const actions = document.getElementById('pending-modal-actions');
         body.replaceChildren();
         actions.replaceChildren();
+        document.getElementById('pending-modal-blocked').textContent = model.blockedNote || '';
         if (model.toolName) body.append(...modalRow(PENDING_MODAL_TXT.tool, modalText(model.toolName)));
-        if (model.preset) body.append(...modalRow(PENDING_MODAL_TXT.preset, modalText(model.preset)));
-        for (const step of model.steps) body.append(...modalRow(PENDING_MODAL_TXT.steps, modalText(step)));
+        if (model.agentPreset) {
+          // P4-R1: the Agent 预设 row shows the verbatim agent composition
+          // preset (agent-presets axis, e.g. `standard`) — never relabelled
+          // "unknown", and never mapped to a sandbox tier.
+          const value = modalText(model.agentPreset);
+          body.append(...modalRow(PENDING_MODAL_TXT.agentPreset, value));
+        }
+        for (const step of model.steps) {
+          const dd = document.createElement('dd');
+          dd.append(modalText(step), rawTag());
+          body.append(modalDt(PENDING_MODAL_TXT.steps), dd);
+        }
         body.append(...modalRow(PENDING_MODAL_TXT.impact, modalText(model.impact)));
         if (model.command) {
           const pre = document.createElement('pre');
           pre.className = 'pending-modal-command';
           pre.textContent = model.command;
-          body.append(...modalRow(PENDING_MODAL_TXT.command, pre));
+          const dd = document.createElement('dd');
+          dd.append(pre, rawTag());
+          body.append(modalDt(PENDING_MODAL_TXT.command), dd);
         } else if (model.targetPath) {
           body.append(...modalRow(PENDING_MODAL_TXT.target, modalText(model.targetPath)));
         }

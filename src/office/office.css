@@ -8,7 +8,12 @@
    timeline with per-turn attribution, the employee details (structure
    retained) and the minimal footer. Dark theme follows the shell through
    html[data-theme] (P2 preload shell:get-theme / shell:theme, same
-   convention as the rail page). */
+   convention as the rail page).
+
+   P4 (spec §3 block 5 / §8 P4 行): the selected employee's 今日工作记录 rows
+   inside #details-record, the neutral zero-count pending badge (red is for
+   >0 only), the "harness 原文" modal tag and the compressed overview line —
+   all on the same tokens, so light/dark stay identical in structure. */
 
 :root {
   color-scheme: light;
@@ -114,9 +119,12 @@ html, body {
 }
 
 #overview-summary {
+  /* P4 打磨③：压缩后的一行汇总（执行/排队），弱化为 dim 小字——视觉重量让给
+     ① 今日用量块；逐员事实由② 员工状态行承载。 */
   margin: 0;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-dim);
 }
 
 .hint {
@@ -168,6 +176,67 @@ html, body {
   margin: 10px 0 0;
   color: var(--badge);
   font-size: 13px;
+}
+
+/* ---- P4 ⑤ 今日工作记录（spec §3 block 5）------------------------------- */
+
+/* ⑥ 密度：记录块是详情的紧凑子块，跟随面板 token，深浅主题一致。 */
+#details-record {
+  margin-top: 10px;
+  border-top: 1px dashed var(--panel-edge);
+  padding-top: 8px;
+}
+
+#details-record .block-head h3 {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.record-day {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.record-line {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.record-line[hidden] { display: none; }
+
+.record-note {
+  margin-top: 6px;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.record-recent {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.record-recent li {
+  display: flex;
+  gap: 6px;
+}
+
+.record-recent .tl-time {
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.record-recent-what {
+  color: var(--text-dim);
 }
 
 .actions {
@@ -455,6 +524,15 @@ html, body {
   padding: 0 8px;
 }
 
+/* P4 打磨①（spec §8 P4 行）：红色只留给 >0。计数为 0 时徽标降为中性描边，
+   不再制造「有东西待办」的错觉（与空态「暂无待处理 ✓」一致）。 */
+.need-badge.need-zero {
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--panel-edge);
+  font-weight: 400;
+}
+
 #pending-count {
   min-width: 20px;
   text-align: center;
@@ -475,6 +553,8 @@ html, body {
 
 @media (prefers-reduced-motion: reduce) {
   .need-pulse { animation: none; }
+  /* P4 打磨⑥：进度条填充也不再补间（与 need-pulse 同一约定）。 */
+  .usage-progress-bar { transition: none; }
 }
 
 /* ---- P2 ③ pending inbox (container + count only; actions are P3) ------- */
@@ -657,6 +737,19 @@ html, body {
 .pending-modal-note {
   color: var(--warn);
   font-size: 11px;
+}
+
+/* P4 打磨④：harness 英文原文小标注（将要执行 / 命令原文）。弱化呈现，不与
+   面板中文 UI 文案混淆。 */
+.pending-modal-raw-tag {
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--text-dim);
+  border: 1px solid var(--panel-edge);
+  border-radius: 999px;
+  padding: 0 6px;
+  white-space: nowrap;
+  vertical-align: 1px;
 }
 
 .pending-modal-body > .pending-modal-note {

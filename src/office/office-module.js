@@ -33,6 +33,14 @@
 // - Visibility pauses the logical clock; resume continues from the current
 //   logical position and never replays time.
 // - Two office views consume this one module: one snapshot, one clock.
+//
+// P4 (spec §3 block 5 / §8 P4 行): the snapshot carries a per-employee
+// `record` — the selected employee's 今日工作记录 — aggregated from the
+// module's own real sources (activity-log kinds, the P2 per-turn usage
+// attribution, the M5 tool facts) and scoped to the real UTC+8 calendar day
+// through a main.js-injected realClock. It adds no collection and no new IPC
+// channel; without the injection the record degrades to a session window
+// (dayKey null) and the panel never labels it 今日.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -57,6 +65,12 @@ const { SETTINGS_BOUNDS: PERSISTED_SETTINGS_BOUNDS } = require('./runtime/office
 // share one implementation.
 const { classifyRisk, RISK_ORDER } = require('./runtime/approval-risk.js');
 const { toolPhraseZhOf, questionSummaryZh } = require('./runtime/tool-phrases.js');
+// P4 (spec §3 block 5 / §8 P4 行): the selected employee's 今日工作记录 aggregates
+// the module's own real sources (activity log, per-turn usage attribution, tool
+// facts) scoped to a real calendar day. The day key comes from the SAME pure
+// billing-day helper the shell's usage block uses (UTC+8), so "今日" can never
+// mean two different days in one panel.
+const { billingDayKey } = require('./runtime/usage-snapshot.js');
 
 const TICK_MS = 16;
 // M2 (2026-09-16): the renderer paints on snapshot pushes (its Pixi ticker is
@@ -261,6 +275,16 @@ function createOfficeModule(options = {}) {
     seed = 'office-seed',
     config = null,
     log = () => {},
+    // P4 (spec §3 block 5): an OPTIONAL real wall-clock reader, injected by
+    // main.js (`() => Date.now()`). It is metadata-only: the simulation, the
+    // movement controller and every date-math consumer keep using the logical
+    // counter above, and the module itself never reads a wall clock. Its ONLY
+    // uses are stamping activity-log entries with the real event instant
+    // (`realMs`) and scoping the per-employee day record to a real UTC+8
+    // calendar day. Omitted (unit tests, deterministic probes) → realMs is
+    // null everywhere and the day record aggregates without a day boundary
+    // (documented fallback: a session-window record, never labelled "today").
+    realClock = null,
   } = options || {};
 
   const layout = layoutFixture
@@ -441,6 +465,71 @@ function createOfficeModule(options = {}) {
   let autoTimer = null;
   const activityLog = [];
   const diagnostics = [];
+
+  // P4 (spec §3 block 5 / §8 P4 行): the selected employee's 今日工作记录.
+  // One bounded counter set per employee, aggregated from the module's own
+  // REAL sources — never estimated, never carried across a day boundary:
+  //   tasks/completed/failed/cancelled — the task-started / result-* activity
+  //     log kinds (state transitions driven by runtime facts);
+  //   usage {input,output,cacheRead,total,cost} + durationMs — the per-turn
+  //     provider usage attribution finalizeTurnUsage() stamps (P2; first-hand
+  //     assistant/message `data.usage` records translated by main.js);
+  //   tools — the runtime/tool facts (M5 tool/call journal events), tallied as
+  //     the fixed zh phrase family (office.staff.currentTool.*). Tool ARGUMENTS
+  //     and task text structurally never enter this record.
+  // Day scoping: `dayKey` is the real UTC+8 calendar day (billingDayKey, the
+  // same rule the usage block uses) when a realClock is injected; a day
+  // rollover resets the counters. Without a realClock the record keeps
+  // dayKey=null and accumulates for the module's lifetime — the page then
+  // labels it as the session record, not 今日 (see recordViewModel note).
+  const DAY_RECORD_TOOL_KINDS_CAP = 8;
+  const DAY_RECORD_TOOL_ROWS_CAP = 5;
+  const DAY_RECORD_RECENT_CAP = 6;
+  const dayRecords = new Map(); // employeeId -> record state (see emptyDayRecord)
+  function emptyDayRecord() {
+    return {
+      dayKey: null,
+      tasks: 0,
+      completed: 0,
+      failed: 0,
+      cancelled: 0,
+      usage: { input: 0, output: 0, cacheRead: 0, total: 0 },
+      cost: 0,
+      durationMs: 0,
+      tools: new Map(), // toolKind -> count (bounded by DAY_RECORD_TOOL_KINDS_CAP)
+      toolsTotal: 0,
+      // Last DAY_RECORD_RECENT_CAP logged kinds for this employee (the record
+      // timeline rows). Bounded ring; a day rollover drops it with the record.
+      recentRing: [],
+    };
+  }
+  function dayRecordFor(employeeId) {
+    let record = dayRecords.get(employeeId);
+    if (!record) {
+      record = emptyDayRecord();
+      record.employeeId = employeeId;
+      dayRecords.set(employeeId, record);
+    }
+    return record;
+  }
+  /** The record's current real day key, or null without a realClock. */
+  function currentDayKey() {
+    return realClock ? billingDayKey(realClock()) : null;
+  }
+  /** Reset the record when the real calendar day rolled over (midnight). A no-op
+   * without a realClock (dayKey stays null — the session-window fallback). */
+  function rollDayRecordIfNeeded(record) {
+    const key = currentDayKey();
+    if (key !== null && record.dayKey !== null && record.dayKey !== key) {
+      const fresh = emptyDayRecord();
+      fresh.employeeId = record.employeeId;
+      fresh.dayKey = key;
+      dayRecords.set(record.employeeId, fresh);
+      return fresh;
+    }
+    if (key !== null && record.dayKey === null) record.dayKey = key;
+    return record;
+  }
   const adapters = new Map(); // raw root sessionId -> adapter
   // Raw Harness root sessionId -> CURRENT active internal binding handle.
   // The registry keeps session ids single-use, so turn 2+ of the same raw
@@ -528,6 +617,10 @@ function createOfficeModule(options = {}) {
       turnCost: Math.round(entry.cost * 1e4) / 1e4,
       turnDurationMs: Math.max(0, logicalMs - entry.startedAtMs),
     };
+    // P4 (spec §3 block 5): accrue the same first-hand per-turn attribution
+    // into the employee's day record — the panel's 累计 token/金额/用时 rows
+    // are exactly this sum, never a day-bucket difference.
+    accrueDayRecordUsage(entry.employeeId, stamp);
     if (entry.startEntry && entry.startEntry.turnUsage === undefined) {
       Object.assign(entry.startEntry, stamp);
     }
@@ -535,13 +628,62 @@ function createOfficeModule(options = {}) {
     return stamp;
   }
 
+  /** P4: add one finalized turn's attribution to an employee's day record. */
+  function accrueDayRecordUsage(employeeId, stamp) {
+    if (!employeeId || !stamp) return;
+    const record = rollDayRecordIfNeeded(dayRecordFor(employeeId));
+    const u = stamp.turnUsage || {};
+    record.usage.input += Number.isFinite(Number(u.input)) ? Number(u.input) : 0;
+    record.usage.output += Number.isFinite(Number(u.output)) ? Number(u.output) : 0;
+    record.usage.cacheRead += Number.isFinite(Number(u.cacheRead)) ? Number(u.cacheRead) : 0;
+    record.usage.total += Number.isFinite(Number(u.total)) ? Number(u.total) : 0;
+    record.cost += Number.isFinite(Number(stamp.turnCost)) ? Number(stamp.turnCost) : 0;
+    record.durationMs += Number.isFinite(Number(stamp.turnDurationMs)) ? Number(stamp.turnDurationMs) : 0;
+  }
+
   function noteLog(kind, employeeId, detail) {
     const entry = detail
       ? { atMs: logicalMs, employeeId, kind, ...detail }
       : { atMs: logicalMs, employeeId, kind };
+    // P4: the REAL event instant (main.js-injected clock) beside the logical
+    // one. null when no realClock was injected — the day record and the
+    // record timeline then fall back to the session-window behaviour and the
+    // page never labels them 今日.
+    entry.realMs = realClock ? realClock() : null;
+    if (employeeId) {
+      const record = rollDayRecordIfNeeded(dayRecordFor(employeeId));
+      bumpDayRecordCount(record, kind);
+      record.recentRing.push({ kind, atMs: entry.atMs, realMs: entry.realMs });
+      while (record.recentRing.length > DAY_RECORD_RECENT_CAP) record.recentRing.shift();
+    }
     activityLog.push(entry);
     if (activityLog.length > ACTIVITY_LOG_LIMIT) activityLog.splice(0, activityLog.length - ACTIVITY_LOG_LIMIT);
     return entry;
+  }
+
+  /** P4: count one activity-log kind into an employee's day record. Only the
+   * four task-outcome kinds are counted; everything else (sleep / chat /
+   * control) stays in the log and the record timeline. */
+  function bumpDayRecordCount(record, kind) {
+    const field = {
+      'task-started': 'tasks',
+      'result-completed': 'completed',
+      'result-failed': 'failed',
+      'result-cancelled': 'cancelled',
+    }[kind];
+    if (field) record[field] += 1;
+  }
+
+  /** P4: tally one runtime/tool fact (M5 tool/call journal event) into the
+   * employee's day record, as the fixed zh phrase family — the 常用工具 row.
+   * Bounded: at most DAY_RECORD_TOOL_KINDS_CAP distinct kinds per day, and a
+   * day rollover resets the tally with the rest of the record. */
+  function tallyDayRecordTool(employeeId, toolKind) {
+    if (!employeeId || typeof toolKind !== 'string' || toolKind === '') return;
+    const record = rollDayRecordIfNeeded(dayRecordFor(employeeId));
+    if (!record.tools.has(toolKind) && record.tools.size >= DAY_RECORD_TOOL_KINDS_CAP) return;
+    record.tools.set(toolKind, (record.tools.get(toolKind) || 0) + 1);
+    record.toolsTotal += 1;
   }
 
   function noteDiagnostic(code) {
@@ -1066,6 +1208,10 @@ function createOfficeModule(options = {}) {
         if (!resolved) return;
         const rec = employees.get(resolved.binding.employeeId);
         rec.toolKind = fact.tool || null;
+        // P4 (spec §3 block 5): the SAME first-hand tool/call fact feeds the
+        // day record's 常用工具 tally (a bounded per-day count per fixed zh
+        // phrase; the tool name/arguments never leave this counter set).
+        tallyDayRecordTool(resolved.binding.employeeId, rec.toolKind);
         reduce(rec, { type: 'runtime/tool', tool: fact.tool || null });
         break;
       }
@@ -1827,7 +1973,12 @@ function createOfficeModule(options = {}) {
   // currentTool.*, zh value of the shared tool-phrases module) and `taskSeq`
   // a per-employee counter — the de-identified task title (任务 #N). Neither
   // carries runtime text.
-  const PRESENTATION_ALLOWLIST = Object.freeze(['displayName', 'role', 'taskLabel', 'marker', 'bubble', 'toolPhrase', 'taskSeq']);
+  // P4 extends it again the same way (spec §3 block 5): `record` is the
+  // selected employee's 今日工作记录 projection below — counts, the turn
+  // attribution numbers, fixed zh tool phrases and controlled activity-log
+  // kinds with timestamps. It carries NO session id, task text, tool name or
+  // arguments (the 常用工具 row shows the phrase family, not the raw tool name).
+  const PRESENTATION_ALLOWLIST = Object.freeze(['displayName', 'role', 'taskLabel', 'marker', 'bubble', 'toolPhrase', 'taskSeq', 'record']);
 
   // P1 pending items (spec §4). Every field is either app-controlled
   // vocabulary (kind / risk / toolName / summary / detailRef / employeeId), a
@@ -1847,6 +1998,57 @@ function createOfficeModule(options = {}) {
       out[field] = item[field] === undefined ? null : item[field];
     }
     return out;
+  }
+
+  /**
+   * P4 (spec §3 block 5): project one employee's day record for the snapshot.
+   * Returns null when the record holds nothing at all (an idle employee on a
+   * fresh day shows no record rows rather than zeros — no fabricated data).
+   *
+   * Shape (all numbers / fixed vocabularies; `dayKey` is the real UTC+8 day
+   * when a realClock is injected, else null):
+   *   { dayKey, tasks, completed, failed, cancelled,
+   *     usage: { input, output, cacheRead, total, cost } | null,   // no turn
+   *       carried a provider usage record → null, never zeros
+   *     durationMs, tools: [{ phrase, count }],                     // zh phrases
+   *     recent: [{ kind, atMs, realMs }] }                          // today only
+   */
+  function safeDayRecord(employeeId) {
+    const record = rollDayRecordIfNeeded(dayRecordFor(employeeId));
+    const hasCounts = record.tasks > 0 || record.completed > 0 || record.failed > 0 || record.cancelled > 0;
+    // An employee whose only events today were naps / chats still has a record
+    // (the 今日动态 rows) — the null gate is "nothing logged at all today".
+    if (!hasCounts && record.usage.total <= 0 && record.toolsTotal === 0 && record.recentRing.length === 0) return null;
+    const recent = record.dayKey === null
+      // No realClock (tests / deterministic probes): the record covers the
+      // module's whole session window — the page must NOT label it 今日.
+      ? record.recentRing.slice()
+      : record.recentRing.filter((row) => typeof row.realMs === 'number' && billingDayKey(row.realMs) === record.dayKey);
+    return {
+      dayKey: record.dayKey,
+      tasks: record.tasks,
+      completed: record.completed,
+      failed: record.failed,
+      cancelled: record.cancelled,
+      usage: record.usage.total > 0
+        ? {
+            input: record.usage.input,
+            output: record.usage.output,
+            cacheRead: record.usage.cacheRead,
+            total: record.usage.total,
+            cost: Math.round(record.cost * 1e4) / 1e4,
+          }
+        : null,
+      durationMs: record.durationMs,
+      // De-identified 常用工具 rows: the fixed zh phrase family + count only —
+      // the raw tool NAME (e.g. 'bash') is deliberately not projected, the
+      // phrase is the presentation vocabulary the staff rows already use.
+      tools: [...record.tools.entries()]
+        .map(([toolName, count]) => ({ phrase: toolPhraseZhOf(toolName), count }))
+        .sort((a, b) => b.count - a.count || a.phrase.localeCompare(b.phrase))
+        .slice(0, DAY_RECORD_TOOL_ROWS_CAP),
+      recent: recent.slice(-DAY_RECORD_RECENT_CAP),
+    };
   }
 
   /** The answer-value vocabulary per pending kind (harness outcome words; a
@@ -2029,6 +2231,9 @@ function createOfficeModule(options = {}) {
         // de-identified task title counter. Both are presentation fields.
         toolPhrase: rec.toolKind ? toolPhraseZhOf(rec.toolKind) : null,
         taskSeq: rec.taskSeq || 0,
+        // P4 (spec §3 block 5): the selected employee's 今日工作记录 (null when
+        // the record is empty — see safeDayRecord).
+        record: safeDayRecord(rec.employeeId),
         bubble: rec.bubble ? { text: rec.bubble.text, topic: rec.bubble.topic || null, untilMs: rec.bubble.untilMs } : null,
         animation: {
           resource: animation.resource,

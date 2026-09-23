@@ -382,7 +382,7 @@ test('pendingModalModel: the danger modal shows steps, impact, command, reversib
   });
   assert.equal(model.approval, true);
   assert.equal(model.title, '高危操作 · 批准请求');
-  assert.equal(model.preset, 'workspace-write');
+  assert.equal(model.agentPreset, 'workspace-write', 'the agent preset rides the modal verbatim (P4-R1: agent-presets axis, not a sandbox tier)');
   assert.ok(model.steps.some((s) => s.includes('escalate sandbox to danger-full-access')), 'the harness reason is the step');
   assert.ok(model.impact.includes('danger-full-access') && model.impact.includes('仅本次有效'), 'the impact names the widening');
   assert.equal(model.command, 'touch ~/dsh-p3-e2e-marker.txt', 'the REAL command text rides the modal');
@@ -397,15 +397,20 @@ test('pendingModalModel: the danger modal shows steps, impact, command, reversib
   assert.equal(empty.command, null);
   assert.equal(empty.noToolArguments, true);
   assert.match(empty.noArgsNote, /harness 未暴露该工具的参数/);
-  assert.match(empty.impact, /workspace-write|未知/, 'impact falls back honestly');
+  // P4-R1: with no widening request there is NO sandbox fact to show — the
+  // harness does not project the sandbox mode onto sessions, and the impact
+  // line states that instead of guessing a tier from the agent preset.
+  assert.match(empty.impact, /沙箱模式：harness 未投影/, 'the impact states the unprojected sandbox axis');
+  assert.equal(empty.agentPreset, null, 'no agent preset -> the row is omitted, no "unknown" label');
 
-  // target path + preset-based impact
+  // target path rides the modal; the agent preset NEVER becomes a sandbox tier
   const write = officePage.buildPendingModalModel({
     item: { ...item, toolName: 'edit', risk: 'medium' },
     detail: { id: 'evt-high', kind: 'approval', toolName: 'edit', preset: 'workspace-write', targetPath: '/Users/x/proj/src/main.js' },
   });
   assert.equal(write.targetPath, '/Users/x/proj/src/main.js');
-  assert.match(write.impact, /workspace-write/);
+  assert.equal(write.agentPreset, 'workspace-write');
+  assert.match(write.impact, /沙箱模式：harness 未投影/, 'P4-R1: a preset value is not inferred as a sandbox tier');
 });
 
 test('pendingModalModel: the question variant builds the answer form fields', () => {
@@ -481,12 +486,10 @@ test('i18n: every P3 office.pending key exists in BOTH dictionaries with identic
     'office.pending.title', 'office.pending.empty', 'office.pending.approve', 'office.pending.reject',
     'office.pending.review', 'office.pending.modal.steps', 'office.pending.modal.impact',
     'office.pending.modal.approveOnce', 'office.pending.modal.title', 'office.pending.modal.question',
-    'office.pending.modal.tool', 'office.pending.modal.preset', 'office.pending.modal.reason',
+    'office.pending.modal.tool', 'office.pending.modal.agentPreset', 'office.pending.modal.reason',
     'office.pending.modal.command', 'office.pending.modal.target', 'office.pending.modal.reversible',
     'office.pending.modal.reversible.unknown', 'office.pending.modal.noArgs', 'office.pending.modal.noAlways',
-    'office.pending.modal.blocked', 'office.pending.modal.escalate',
-    'office.pending.modal.preset.read-only', 'office.pending.modal.preset.workspace-write',
-    'office.pending.modal.preset.danger-full-access', 'office.pending.modal.preset.unknown',
+    'office.pending.modal.blocked', 'office.pending.modal.escalate', 'office.pending.modal.sandbox.unprojected',
     'office.pending.question.submit', 'office.pending.question.custom',
   ]) {
     assert.ok(typeof STRINGS.zh[key] === 'string' && STRINGS.zh[key] !== '', `zh missing ${key}`);

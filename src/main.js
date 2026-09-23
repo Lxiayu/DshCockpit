@@ -324,6 +324,12 @@ function ensureOfficeModule() {
       // payload); the module owns the boundary (unknown ids are a no-op, the
       // payload is allowlist-normalized, nothing reaches the snapshot).
       pendingDetail: (id) => officeResolvePendingDetail(id),
+      // P4 (spec §3 block 5): the real wall clock, injected so the module can
+      // stamp activity-log entries with the real event instant and scope the
+      // selected employee's 今日工作记录 to the same UTC+8 billing day the
+      // usage block uses. Metadata-only — the simulation keeps its logical
+      // clock; without this injection the record stays a session window.
+      realClock: () => Date.now(),
     });
     // P1: any waterfall request that arrived BEFORE the office view was first
     // opened is waiting in the pre-module mirror — seed it now (bounded,
@@ -3170,11 +3176,19 @@ function checkBudget(monthCost) {
 // monitor) or from the waterfall frames themselves.
 // ---------------------------------------------------------------------------
 
-/** Session id -> harness preset (read-only / workspace-write /
- * danger-full-access), the second input of classifyRisk(). Filled from the
- * session/list calls the office follow-sync and the IM bindings already make;
- * unknown presets classify conservatively (the danger-full-access escalation
- * only fires on positive evidence). */
+/** Session id -> agent composition preset (the `agentPreset` axis:
+ * dsh-agent-presets, real value `standard`). Filled from the session/list calls
+ * the office follow-sync and the IM bindings already make.
+ *
+ * P4-R1 AXIS NOTE (user-verified, first-hand on the installed 0.1.5-rc.2):
+ * this is NOT the permission/sandbox axis (dsh-permission-presets:
+ * read-only / workspace-write / danger-full-access). That axis's `sandboxMode`
+ * is a mount-time composition property the harness does NOT project onto
+ * sessions, so the panel can never read a session's current sandbox mode. The
+ * values here are therefore shown verbatim as 「Agent 预设」 (never relabelled
+ * "unknown"), and they are NOT mapped to any sandbox tier: passed into
+ * classifyRisk() they simply fail its two exact-match preset branches and land
+ * on the class-based (conservative) result. */
 const officeSessionPresets = new Map();
 const OFFICE_PRESET_CAP = 200;
 // Pre-module pending mirror: the office module is created lazily (first office
@@ -3230,6 +3244,10 @@ function officeNotePending({ kind, frame, rpcId, agentId }) {
   const toolName = kind === 'question'
     ? 'ask_user_question'
     : ((frame && (frame.toolName || frame.tool)) || '');
+  // The session's AGENT composition preset (agent-presets axis, e.g.
+  // `standard`) — the office classifyRisk() second input and the modal's
+  // 「Agent 预设」 row. NOT a sandbox/permission tier (P4-R1: the harness does
+  // not project that axis onto sessions), so it never maps to one.
   const preset = (frame && typeof frame.agentPreset === 'string' && frame.agentPreset.trim())
     ? frame.agentPreset.trim()
     : (officeSessionPresets.get(sessionId) || null);
@@ -3433,6 +3451,42 @@ async function officePageToolCallArgs(sessionId, callId) {
   return null;
 }
 
+/** P4 打磨⑤（spec §8 P4 行）：agent 预设的实时刷新。原实现只从开启办公室时的
+ * `session/list` 种子读 `officeSessionPresets`，之后新建的会话在审批模态里
+ * 没有可显示的 Agent 预设。两层补丁，都不新增 IPC 通道：
+ *   1) 周期性重列：办公室 follow 心跳（5s）每第 12 次（≈60s）重列一次
+ *      `session/list`，让 `officeSessionPresets` 对新建会话也保持温备；
+ *   2) 按需刷新：详情拉取（用户点开模态）时若该会话预设仍缺失，立刻重列
+ *      一次并取回该会话的真实 agent 预设——模态打开正是用户需要它的时刻。
+ * 若两次都拿不到（mux 掉线 / 会话已退出），模态直接省略该行（不编造值）。
+ * 不用「每 N 秒定时重列 + 常驻」的更重方案：面板只在模态里展示预设，60s 一次
+ * 的心跳重列已足够，按需刷新覆盖即时性，成本有界。
+ * 轴系说明见 officeSessionPresets 上方的 P4-R1 注释：这里的值是 agent 组合
+ * 预设（如 `standard`），不是权限/沙箱档位。 */
+let officePresetResyncTick = 0;
+function officePresetResyncDue() {
+  officePresetResyncTick += 1;
+  return officePresetResyncTick % 12 === 0;
+}
+
+async function officeRefreshSessionPreset(sessionId) {
+  const mux = runtimeMux;
+  if (!mux || mux.state !== 'live' || typeof sessionId !== 'string' || sessionId === '') return null;
+  try {
+    const res = await mux.call('session/list', { _request: {} });
+    const items = (res && res.ok && res.value && Array.isArray(res.value.items)) ? res.value.items : [];
+    for (const item of items) {
+      if (!item || item.sessionId !== sessionId) continue;
+      const preset = agentPresetOf(item);
+      if (preset) {
+        noteOfficeSessionPreset(sessionId, preset);
+        return preset;
+      }
+    }
+  } catch { /* advisory: the modal falls back to the honest unknown note */ }
+  return null;
+}
+
 /** Resolve one pending id's detailRef payload (module-injected resolver). The
  * approval case correlates the same-turn tool/call by callId; when nothing is
  * found the payload says so explicitly (noToolArguments) instead of inventing
@@ -3440,11 +3494,18 @@ async function officePageToolCallArgs(sessionId, callId) {
 async function officeResolvePendingDetail(id) {
   const detail = officePendingDetails.get(id);
   if (!detail) return null;
+  // P4 打磨⑤: a session created AFTER the seed has no known agent preset —
+  // refresh it live from the session list at the exact moment the modal opens.
+  let preset = detail.preset;
+  if ((!preset || preset === '') && detail.sessionId) {
+    preset = await officeRefreshSessionPreset(detail.sessionId);
+    if (preset) detail.preset = preset; // keep the store warm for the next open
+  }
   const base = {
     id,
     kind: detail.kind,
     toolName: detail.toolName,
-    preset: detail.preset,
+    preset,
     reason: detail.reason,
     requestedSandboxMode: detail.requestedSandboxMode,
     atMs: detail.atMs,
@@ -4217,9 +4278,10 @@ async function seedOfficeFollowFromSessionList() {
     for (const item of items) {
       const sessionId = item && typeof item.sessionId === 'string' ? item.sessionId : '';
       if (sessionId && item.running === true) { noteOfficeSessionStatus(sessionId, true); running += 1; }
-      // P1: remember each session's harness preset (read-only /
-      // workspace-write / danger-full-access) — the second input of the
-      // office classifyRisk() table.
+      // P1: remember each session's AGENT composition preset (agent-presets
+      // axis, e.g. `standard`) — the office classifyRisk() second input. NOT a
+      // sandbox tier: the harness does not project the permission/sandbox axis
+      // onto sessions (see the P4-R1 note on officeSessionPresets).
       noteOfficeSessionPreset(sessionId, agentPresetOf(item));
     }
     log(`[office] follow seed: ${items.length} session(s) listed, ${running} running`);
@@ -4233,6 +4295,10 @@ function officeFollowSyncTick() {
   // Mux down (cookie failing, runtime restarting): the office keeps its local
   // behavior — this is a container posture, the shell must not wobble.
   if (!mux || mux.state !== 'live') return;
+  // P4 打磨⑤：约每 60s（5s 心跳的第 12 次）重列一次 session/list，让会话预设
+  // 映射对开启办公室之后新建的会话也保持温备（classifyRisk 第二输入 + 审批
+  // 模态的「权限预设」行）。成本有界：一次 RPC/分钟，无新增通道。
+  if (officePresetResyncDue()) seedOfficeFollowFromSessionList();
   const desired = officeDesiredFollowIds();
   for (const sessionId of desired) {
     const streamId = `session-follow-${sessionId}`;

@@ -191,7 +191,11 @@ const STRINGS = {
     'office.pending.modal.title': '高危操作 · 批准请求',
     'office.pending.modal.question': '提问',
     'office.pending.modal.tool': '工具',
-    'office.pending.modal.preset': '权限预设',
+    // P4-R1: the session's agent composition preset (agent-presets axis, real
+    // value e.g. `standard`) — a different axis from the permission presets
+    // (read-only / workspace-write / danger-full-access); never mapped to a
+    // sandbox tier.
+    'office.pending.modal.agentPreset': 'Agent 预设',
     'office.pending.modal.reason': '原因',
     'office.pending.modal.command': '命令原文',
     'office.pending.modal.target': '目标路径',
@@ -201,12 +205,28 @@ const STRINGS = {
     'office.pending.modal.noAlways': '本版本不支持记住此类授权（harness 仅提供一次性批准）',
     'office.pending.modal.blocked': '审批等待期间，面板操作已阻塞；不回答不会自动继续',
     'office.pending.modal.escalate': '批准后本次调用可按 {mode} 运行（沙箱放宽请求，仅本次有效）',
-    'office.pending.modal.preset.read-only': '沙箱为 read-only：写操作无法在当前沙箱内运行',
-    'office.pending.modal.preset.workspace-write': '沙箱为 workspace-write：影响范围限工作区内',
-    'office.pending.modal.preset.danger-full-access': 'danger-full-access：无沙箱边界，影响范围无法预先界定',
-    'office.pending.modal.preset.unknown': 'harness 未提供该会话的沙箱信息，影响范围未知',
+    // P4-R1: the harness does NOT project the sandbox mode onto sessions — the
+    // panel can only speak about the sandbox on a real widening request (the
+    // approval reason). Stated plainly instead of guessing from the agent
+    // preset (a different axis).
+    'office.pending.modal.sandbox.unprojected': '沙箱模式：harness 未投影（仅在放宽请求时可见），影响范围无法预先界定',
+    'office.pending.modal.raw': 'harness 原文',
     'office.pending.question.submit': '提交回答',
     'office.pending.question.custom': '自定义回答…',
+    // P4 ⑤ 选中员工「今日工作记录」(spec §3 block 5): day-scoped counts, the
+    // per-turn usage attribution, the tool-phrase tally and the recent kinds.
+    'office.record.title': '今日工作记录',
+    'office.record.empty': '今日暂无工作记录',
+    'office.record.tasks': '今日任务',
+    'office.record.completed': '完成',
+    'office.record.failed': '未完成',
+    'office.record.cancelled': '已取消',
+    'office.record.usage': '累计用量',
+    'office.record.duration': '用时',
+    'office.record.tools': '常用工具',
+    'office.record.timeline': '今日动态',
+    'office.record.note': '按 UTC+8 自然日聚合 · 仅计数与时间，不含任务内容',
+    'office.record.sessionNote': '本次办公室会话内的记录（未提供真实时钟，不标注为「今日」）',
     'office.staff.currentTool.typing': '打字',
     'office.staff.currentTool.search': '查档案',
     'office.staff.currentTool.retrieval': '检索',
@@ -555,7 +575,8 @@ const STRINGS = {
     'office.pending.modal.title': 'High-risk action · approval request',
     'office.pending.modal.question': 'Question',
     'office.pending.modal.tool': 'Tool',
-    'office.pending.modal.preset': 'Permission preset',
+    // P4-R1: the session's agent composition preset (agent-presets axis)
+    'office.pending.modal.agentPreset': 'Agent preset',
     'office.pending.modal.reason': 'Reason',
     'office.pending.modal.command': 'Command',
     'office.pending.modal.target': 'Target path',
@@ -565,12 +586,24 @@ const STRINGS = {
     'office.pending.modal.noAlways': 'This version cannot remember such a grant (the harness offers one-shot approvals only)',
     'office.pending.modal.blocked': 'Panel actions are blocked while this approval waits; it will not continue on its own',
     'office.pending.modal.escalate': 'Approving lets this one call run as {mode} (sandbox widening request, one-shot)',
-    'office.pending.modal.preset.read-only': 'Sandbox is read-only: writes cannot run inside it',
-    'office.pending.modal.preset.workspace-write': 'Sandbox is workspace-write: the blast radius stays inside the workspace',
-    'office.pending.modal.preset.danger-full-access': 'danger-full-access: no sandbox boundary — the blast radius cannot be pre-bounded',
-    'office.pending.modal.preset.unknown': 'The harness exposed no sandbox information for this session; the impact is unknown',
+    // P4-R1: the harness does NOT project the sandbox mode onto sessions
+    'office.pending.modal.sandbox.unprojected': 'Sandbox mode: not projected by the harness (visible only on a widening request) — the impact cannot be pre-bounded',
+    'office.pending.modal.raw': 'harness raw',
     'office.pending.question.submit': 'Submit answer',
     'office.pending.question.custom': 'Custom answer…',
+    // P4 ⑤ selected-employee 今日工作记录 (spec §3 block 5)
+    'office.record.title': "Today's work record",
+    'office.record.empty': 'No work recorded today',
+    'office.record.tasks': 'Tasks today',
+    'office.record.completed': 'completed',
+    'office.record.failed': 'failed',
+    'office.record.cancelled': 'cancelled',
+    'office.record.usage': 'Usage',
+    'office.record.duration': 'Time',
+    'office.record.tools': 'Usual tools',
+    'office.record.timeline': 'Today',
+    'office.record.note': 'Aggregated per UTC+8 calendar day · counts and times only, never task content',
+    'office.record.sessionNote': "This office session's record (no real clock injected — not labelled “today”)",
     'office.staff.currentTool.typing': 'Typing',
     'office.staff.currentTool.search': 'Searching files',
     'office.staff.currentTool.retrieval': 'Web search',
