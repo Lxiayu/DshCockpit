@@ -23,6 +23,15 @@
 // operation. `command` / `targetPath` + `workspacePath` are OPTIONAL seams for
 // P3, which reads the real arguments through spec §4's `detailRef`
 // ('office:pending-detail') — when present, the full §5 explicit list applies.
+//
+// P3 adds the `sandboxWidening` seam. The one approval path the shipped harness
+// actually raises is the sandbox escalation retry (dsh-sandbox
+// approveEscalation → `approver.request({ toolName, callId, reason: 'escalate
+// sandbox to <mode>: <justification>' })`), which IS the §5 high row ④ "任何
+// 沙箱放宽请求" by construction. The request payload carries no flag for it, so
+// main.js derives the boolean from the harness's own reason phrasing (first-hand
+// evidence: dsh-sandbox/lib/index.js approveEscalation) and passes it in — the
+// raw reason text itself never enters this pure module or the snapshot.
 
 const RISK = Object.freeze({ LOW: 'low', MEDIUM: 'medium', HIGH: 'high' });
 
@@ -176,7 +185,8 @@ function isOutsideWorkspace(targetPath, workspacePath) {
  * Classify one pending approval/question into low | medium | high.
  *
  * @param {{toolName?: string, preset?: string, command?: string,
- *          targetPath?: string, workspacePath?: string}} [input]
+ *          targetPath?: string, workspacePath?: string,
+ *          sandboxWidening?: boolean}} [input]
  * @returns {'low'|'medium'|'high'}
  */
 function classifyRisk(input = {}) {
@@ -193,6 +203,12 @@ function classifyRisk(input = {}) {
     && isOutsideWorkspace(input.targetPath, input.workspacePath)) {
     return RISK.HIGH;
   }
+
+  // (1b) §5 high row ④ — a sandbox WIDENING request ("escalate sandbox to
+  // <mode>: …", dsh-sandbox approveEscalation). Granting it widens what the
+  // sandbox permits for the one call, so the request is high by definition —
+  // no matter which tool asked.
+  if (input.sandboxWidening === true) return RISK.HIGH;
 
   // (2) §5 high row — tool-name level explicit list.
   if (cls === 'high') return RISK.HIGH;

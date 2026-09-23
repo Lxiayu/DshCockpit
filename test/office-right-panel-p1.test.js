@@ -637,8 +637,10 @@ test('main.js wires the P1 pipeline into the shared paths', () => {
   assert.ok(src.includes('injectOfficeUsage(stats);'), 'the token poll injects the office usage block');
   assert.ok(src.includes('buildOfficeUsage({'), 'main.js assembles the block (no new collection)');
   // pending: mirrored at arrival, removed through the shared answer path
-  assert.ok(src.includes("officeNotePending({ kind: 'approval', frame, rpcId });"), 'approval requests mirror into pending');
-  assert.ok(src.includes("officeNotePending({ kind: 'question', frame, rpcId });"), 'question requests mirror into pending');
+  // (P3 passes the frame's agentId — an Agent id IS its SessionId — so the
+  // pending item binds to the employee and correlates its detailRef).
+  assert.ok(src.includes("officeNotePending({ kind: 'approval', frame, rpcId, agentId });"), 'approval requests mirror into pending');
+  assert.ok(src.includes("officeNotePending({ kind: 'question', frame, rpcId, agentId });"), 'question requests mirror into pending');
   assert.ok(src.includes('officeResolvePending(rpcId);'), 'answers remove pending through respondToRuntime');
   assert.ok(src.includes('officeResolvePending(value.eventId);'), 'host revocations remove pending too');
   // pre-module mirror: held before the first office view, seeded at creation,

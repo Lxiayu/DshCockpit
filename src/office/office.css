@@ -104,6 +104,8 @@ html, body {
   border-left: 1px solid var(--panel-edge);
   overflow-y: auto;
   max-height: 100vh;
+  /* P3: the danger modal covers the panel only (position: absolute anchor). */
+  position: relative;
 }
 
 #office-overview h1 {
@@ -528,6 +530,211 @@ html, body {
   margin-left: auto;
   color: var(--text-dim);
   font-size: 11px;
+}
+
+/* ---- P3 ③ pending inbox actions (inline approve/reject + danger modal) ---- */
+
+.pending-item {
+  flex-wrap: wrap;
+}
+
+.pending-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.pending-btn {
+  border: 1px solid var(--panel-edge);
+  border-radius: 4px;
+  background: var(--chip);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.pending-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pending-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.pending-btn-approve {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.pending-btn-reject {
+  border-color: var(--risk-high);
+  color: var(--risk-high);
+}
+
+.pending-status {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.pending-status-failed {
+  color: var(--risk-high);
+}
+
+/* Danger modal (spec §5): a hard interrupt for high-risk approvals. It covers
+   the panel (never the scene) so the employee who is waiting stays visible. */
+.pending-modal {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px 10px;
+  overflow: auto;
+  background: color-mix(in srgb, var(--office-bg) 72%, transparent);
+}
+
+.pending-modal[hidden] {
+  display: none;
+}
+
+.pending-modal-card {
+  width: 100%;
+  border: 1px solid var(--risk-high);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.28);
+  padding: 10px 12px;
+}
+
+.pending-modal-close {
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.pending-modal-body {
+  margin: 8px 0 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  font-size: 12px;
+}
+
+.pending-modal-body dt {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.pending-modal-body dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pending-modal-command {
+  margin: 0;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--chip);
+  border: 1px solid var(--panel-edge);
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 120px;
+  overflow: auto;
+}
+
+.pending-modal-note {
+  color: var(--warn);
+  font-size: 11px;
+}
+
+.pending-modal-body > .pending-modal-note {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+}
+
+.pending-modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pending-modal-actions button {
+  flex: 1 1 0;
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  background: var(--chip);
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.pending-modal-actions button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pending-modal-actions .pending-btn-approve {
+  font-weight: 600;
+}
+
+.pending-modal-question {
+  margin: 8px 0 0;
+  font-size: 12px;
+  grid-column: 1 / -1;
+}
+
+.pending-modal-options {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.pending-modal-options button {
+  border: 1px solid var(--panel-edge);
+  border-radius: 4px;
+  background: var(--chip);
+  color: var(--text);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.pending-modal-options button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pending-modal-options input {
+  flex: 1 1 120px;
+  min-width: 0;
+  border: 1px solid var(--panel-edge);
+  border-radius: 4px;
+  background: var(--chip);
+  color: var(--text);
+  font-size: 11px;
+  padding: 2px 6px;
+}
+
+/* While the modal is open the panel's own action surface is blocked (spec §5 /
+   cross-tool memo: the next action cannot be queued accidentally). */
+#office-panel[data-pending-blocking="true"] #details-actions button {
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 /* ---- P2 ④ timeline ------------------------------------------------------ */

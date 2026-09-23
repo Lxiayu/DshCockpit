@@ -22,7 +22,8 @@
 // - subagent runIds are consumed as Task-6 PROXIES verbatim (never re-derived)
 // - visibility pause freezes the simulation clock and resumes from the
 //   logical position without replaying time
-// - exactly the seven office:* IPC channels; payload schema validation,
+// - exactly the office:* IPC channels (eight since P3 added office:pending
+//   for the 待你处理 answer/detail actions); payload schema validation,
 //   size limits and privacy redaction
 // - two office views share one main-process snapshot/simulation clock and
 //   closing one view releases only that view
@@ -772,12 +773,26 @@ test('two office views consume one main-process snapshot/clock (no per-view simu
 // office module: IPC surface
 // ---------------------------------------------------------------------------
 
-test('exactly the seven office:* IPC channels are declared', () => {
+// P3 (spec §3 block 3 / §8 P3 行) DELIBERATELY widened the pinned channel
+// count from seven to EIGHT: the 待你处理 inbox needs a way to ACT on a
+// pending runtime request (inline approve/reject + the danger modal + the
+// spec §4 detailRef fetch). The six legacy channels plus the P1-era seven
+// were all snapshots or employee control; none of them could answer a
+// waterfall request through the shared respondToRuntime ($events/result)
+// path. Rather than smuggling the answer through office:dispatch (which is
+// employee-scoped and validated to a single employeeId key) or through a
+// settings-shaped action, P3 adds ONE new whitelisted channel —
+// `office:pending` — with an `action` discriminator mirroring
+// office:settings ('answer' | 'detail'). The channel is whitelisted in
+// office-module.js, mirrored in office-preload.js and payload-validated in
+// the main process like every other office channel.
+test('exactly the eight office:* IPC channels are declared (P3 adds office:pending)', () => {
   assert.deepEqual([...officeModule.OFFICE_IPC_CHANNELS].sort(), [
     'office:cancel',
     'office:diagnostics',
     'office:dispatch',
     'office:interrupt',
+    'office:pending',
     'office:settings',
     'office:state',
     'office:visibility',
@@ -1166,11 +1181,13 @@ test('main process registers the office runtime protocol handler after Electron 
 test('office-preload.js exposes only the whitelisted office bridge API', () => {
   execFileSync(process.execPath, ['--check', path.join(ROOT, 'src', 'office', 'office-preload.js')]);
   const source = fs.readFileSync(path.join(ROOT, 'src', 'office', 'office-preload.js'), 'utf8');
-  for (const channel of ['office:state', 'office:dispatch', 'office:cancel', 'office:interrupt', 'office:settings', 'office:diagnostics', 'office:visibility']) {
+  // eight channels since P3 (office:pending answers pending requests + fetches
+  // their spec §4 detailRef); the delivery API stays invoke-only.
+  for (const channel of ['office:state', 'office:dispatch', 'office:cancel', 'office:interrupt', 'office:settings', 'office:diagnostics', 'office:visibility', 'office:pending']) {
     assert.ok(source.includes(`'${channel}'`), `preload references ${channel}`);
   }
   assert.doesNotMatch(source, /ipcRenderer\.send\(/, 'invoke only, no raw send channels');
-  assert.doesNotMatch(source, /office:(?!(state|dispatch|cancel|interrupt|settings|diagnostics|visibility))/, 'no other office channels');
+  assert.doesNotMatch(source, /office:(?!(state|dispatch|cancel|interrupt|settings|diagnostics|visibility|pending))/, 'no other office channels');
 });
 
 test('office page resolves the production character pack from a portable descriptor', () => {

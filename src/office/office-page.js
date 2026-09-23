@@ -18,9 +18,17 @@
 // P2 (right-panel rework, spec §3): the controller also shapes the six-block
 // panel view models — usageView (today's usage), staffRows (status badge +
 // de-identified 任务 #N title + current tool phrase + 需要你), pendingSummary
-// (inbox container + count only; inline actions are P3) and the timeline rows
-// with their per-turn token attribution (turnUsage/turnCost/turnDurationMs,
-// stamped by the module from first-hand provider usage records).
+// (inbox container + count) and the timeline rows with their per-turn token
+// attribution (turnUsage/turnCost/turnDurationMs, stamped by the module from
+// first-hand provider usage records).
+//
+// P3 (spec §3 block 3 actions): pendingSummary gains its ACTIONS — the
+// controller exposes answerPending (inline approve/reject + the danger modal's
+// 仅本次批准/拒绝, through the same office:pending → respondToRuntime
+// ($events/result) path the IM channel uses), pendingDetail (the spec §4
+// detailRef fetch) and pendingModalModel (the pure danger-modal / question-form
+// view model). None of it touches the pushed snapshot: the answers route
+// through the shared answer channel, the details through the per-action fetch.
 
 const ACTIVITY_LABELS = Object.freeze({
   roaming: '漫游中',
@@ -106,6 +114,37 @@ const USAGE_BASIS_LABELS = Object.freeze({
   subscription: '订阅套餐（金额仅供参考）',
 });
 
+// P3 待你处理 (spec §3 block 3 / §5 / §6): the danger modal + the inline
+// approve/reject actions. The page keeps its historical zh-only convention;
+// every string below mirrors an office.pending.* dictionary key (the i18n
+// contract tests pin the key sets in both dictionaries).
+const PENDING_MODAL_TEXT = Object.freeze({
+  title: '高危操作 · 批准请求',
+  questionTitle: '提问',
+  tool: '工具',
+  preset: '权限预设',
+  steps: '将要执行',
+  impact: '影响范围',
+  command: '命令原文',
+  target: '目标路径',
+  reversible: '可否撤销',
+  reversibleUnknown: 'harness 未提供撤销路径，请按不可逆操作对待',
+  noArgs: 'harness 未暴露该工具的参数',
+  noAlways: '本版本不支持记住此类授权（harness 仅提供一次性批准）',
+  blocked: '审批等待期间，面板操作已阻塞；不回答不会自动继续',
+  reason: '原因',
+  customPlaceholder: '自定义回答…',
+  submit: '提交回答',
+  close: '关闭',
+  escalate: (mode) => `批准后本次调用可按 ${mode} 运行（沙箱放宽请求，仅本次有效）`,
+  presetImpact: {
+    'read-only': '沙箱为 read-only：写操作无法在当前沙箱内运行',
+    'workspace-write': '沙箱为 workspace-write：影响范围限工作区内',
+    'danger-full-access': 'danger-full-access：无沙箱边界，影响范围无法预先界定',
+  },
+  presetImpactUnknown: 'harness 未提供该会话的沙箱信息，影响范围未知',
+});
+
 /** Compact token count: 千 / 万 (百万 rides 万), original value on hover. */
 function formatCount(value) {
   const n = Number(value);
@@ -137,6 +176,59 @@ function formatDuration(ms) {
 
 function activityLabel(activity) {
   return ACTIVITY_LABELS[activity] || '在岗';
+}
+
+/** P3: the danger-modal (and question-form) view model, built from the pending
+ * card item plus its spec §4 detailRef payload. `item` is a pendingSummary()
+ * row; `detail` is the office:pending {action:'detail'} response (or null when
+ * the resolver found nothing). Every field is presentation-only — the raw
+ * command/question text comes from the main-process detail resolver, which
+ * normalizes it through the module allowlist; nothing here invents data: when
+ * the harness exposed no tool arguments the model says so instead of
+ * fabricating a command. */
+function buildPendingModalModel({ item, detail }) {
+  const d = detail && typeof detail === 'object' ? detail : null;
+  const approval = !item || item.kind !== 'question';
+  const hasCommand = !!(d && typeof d.command === 'string' && d.command !== '');
+  const noToolArguments = approval && !hasCommand;
+  const steps = [];
+  if (approval) {
+    steps.push(d && typeof d.reason === 'string' && d.reason !== ''
+      ? d.reason
+      : `${(item && item.toolName) || 'harness'} 工具的执行请求`);
+  }
+  let impact;
+  if (d && typeof d.requestedSandboxMode === 'string' && d.requestedSandboxMode) {
+    impact = PENDING_MODAL_TEXT.escalate(d.requestedSandboxMode);
+  } else {
+    const preset = d && typeof d.preset === 'string' ? d.preset : '';
+    impact = PENDING_MODAL_TEXT.presetImpact[preset] || PENDING_MODAL_TEXT.presetImpactUnknown;
+  }
+  const targetPath = d && typeof d.targetPath === 'string' && d.targetPath !== '' ? d.targetPath : null;
+  return {
+    approval,
+    risk: item ? item.risk : null,
+    title: approval ? PENDING_MODAL_TEXT.title : PENDING_MODAL_TEXT.questionTitle,
+    toolName: item ? item.toolName : null,
+    summary: item ? item.summary : null,
+    preset: d && typeof d.preset === 'string' && d.preset !== '' ? d.preset : null,
+    steps,
+    impact,
+    // 目标路径或命令原文（若有）: the REAL arguments when main.js correlated the
+    // same-turn tool/call by callId; otherwise the honest "not exposed" note.
+    command: hasCommand ? d.command : null,
+    commandSource: d && typeof d.commandSource === 'string' ? d.commandSource : null,
+    targetPath,
+    noToolArguments,
+    noArgsNote: noToolArguments ? PENDING_MODAL_TEXT.noArgs : null,
+    noAlwaysNote: approval ? PENDING_MODAL_TEXT.noAlways : null,
+    blockedNote: PENDING_MODAL_TEXT.blocked,
+    // 可否撤销: the harness seam carries no undo information (no such field in
+    // the approval request), so the modal states that plainly rather than
+    // guessing — the safe reading is "treat as irreversible".
+    reversibleNote: PENDING_MODAL_TEXT.reversibleUnknown,
+    questions: !approval && d && Array.isArray(d.questions) ? d.questions : null,
+  };
 }
 
 // Builds the details view model. `employee` is one snapshot employee entry;
@@ -358,8 +450,10 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
       });
     },
 
-    // P2 §3 block 3: the "待你处理" inbox CONTAINER and its count only —
-    // inline approve/reject and the danger modal are P3 (spec §8).
+    // P2 §3 block 3: the "待你处理" inbox CONTAINER and its count. P3 adds the
+    // actions below: inline approve/reject (low/medium), the danger modal
+    // (high) and the question form — all answered through the shared
+    // respondToRuntime ($events/result) path over office:pending.
     pendingSummary() {
       const pending = snapshot && Array.isArray(snapshot.pending) ? snapshot.pending : [];
       return {
@@ -374,6 +468,31 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
           createdAtMs: item.createdAtMs,
         })),
       };
+    },
+
+    /** P3: answer a pending request through the shared runtime answer path
+     * (office:pending {action:'answer'} → module.answerPending →
+     * respondToRuntime → $events/result; the SAME implementation the IM
+     * channel answers with). The value is the harness outcome word
+     * ('allowed-once' | 'rejected') for approvals, or the answers batch for
+     * questions. On success the item disappears from the next snapshot
+     * (module-side removal), so the panel and IM can never disagree. */
+    async answerPending(id, value) {
+      if (typeof bridge.pending !== 'function') return { ok: false, code: 'BRIDGE_MISSING' };
+      return bridge.pending({ action: 'answer', id, value });
+    },
+
+    /** P3: fetch the spec §4 detailRef payload (real tool arguments /
+     * question body resolved by main.js). Called when the user opens the
+     * danger modal or the question form — never on the snapshot cadence. */
+    async pendingDetail(id) {
+      if (typeof bridge.pending !== 'function') return { ok: false, code: 'BRIDGE_MISSING' };
+      return bridge.pending({ action: 'detail', id });
+    },
+
+    /** P3: the danger-modal / question-form view model for one pending card. */
+    pendingModalModel(item, detail) {
+      return buildPendingModalModel({ item, detail });
     },
 
     accessibleLabelFor(employeeId) {
@@ -429,6 +548,8 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
 module.exports = {
   createOfficePageController,
   buildDetailsViewModel,
+  buildPendingModalModel,
+  PENDING_MODAL_TEXT,
   ACTIVITY_LABELS,
   ACTIVITY_LOG_LABELS,
   STAFF_STATUS_LABELS,

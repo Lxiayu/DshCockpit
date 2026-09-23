@@ -3,17 +3,18 @@
 // src/office/office-preload.js — Task 7 / SPEC-07.
 //
 // The ONLY bridge between the office page and the main process. It exposes a
-// narrow promise API over exactly the seven whitelisted invoke channels
-// (office:state/dispatch/cancel/interrupt/settings/diagnostics/visibility);
-// there are no raw send/on business channels. The main process
-// re-validates every payload (schema + size limit + privacy redactor); the
-// size guard here is defense in depth, not the authority.
+// narrow promise API over exactly the whitelisted invoke channels
+// (office:state/dispatch/cancel/interrupt/settings/diagnostics/visibility/
+// pending — the eighth, office:pending, was added by P3: the 待你处理 inbox
+// answers pending runtime requests through it and fetches their spec §4
+// detailRef payloads); there are no raw send/on business channels. The main
+// process re-validates every payload (schema + size limit + privacy redactor);
+// the size guard here is defense in depth, not the authority.
 //
 // P2 (right-panel rework, spec §3 block 6 "主题跟随"): the page ALSO follows
 // the shell theme, exactly like the left rail page does — shell-owned state
 // (shell:get-theme / the shell:theme push) read through the same narrow
-// bridge. This adds no new business channel; the whitelisted seven above
-// stay exactly seven.
+// bridge. This adds no new business channel.
 
 const { contextBridge, ipcRenderer } = require('electron');
 
@@ -27,6 +28,10 @@ const ALLOWED_CHANNELS = Object.freeze([
   'office:settings',
   'office:diagnostics',
   'office:visibility',
+  // P3 待你处理 (spec §3 block 3): answer a pending approval/question and
+  // fetch its detailRef payload. One channel with an `action` discriminator,
+  // mirroring office:settings.
+  'office:pending',
 ]);
 
 const MAX_PAYLOAD_BYTES = 8 * 1024;
@@ -79,6 +84,10 @@ contextBridge.exposeInMainWorld('officeBridge', {
   updateSettings: (settings) => invokeAllowed('office:settings', { action: 'set', settings }),
   getDiagnostics: () => invokeAllowed('office:diagnostics', {}),
   notifyVisibility: (visible) => invokeAllowed('office:visibility', { visible }),
+  // P3 待你处理: {action:'answer', id, value} answers through the shared
+  // respondToRuntime path (approval: 'allowed-once'|'rejected'; question: the
+  // answers batch); {action:'detail', id} resolves the spec §4 detailRef.
+  pending: (payload) => invokeAllowed('office:pending', payload),
   onVisibilityPush: (listener) => {
     if (typeof listener === 'function') visibilityListeners.add(listener);
     return () => visibilityListeners.delete(listener);

@@ -5,7 +5,9 @@
 // The single main-process Office composition root. It composes the Task 3/4/5
 // pure runtime (movement, scheduler, registry/queue, reducer, transition) and
 // the Task 6 adapter into ONE simulation with ONE logical clock, and exposes a
-// privacy-redacted snapshot plus the seven `office:*` IPC channels.
+// privacy-redacted snapshot plus the `office:*` IPC channels (eight since P3:
+// `office:pending` answers pending requests through the shared runtime answer
+// path and fetches their spec §4 detailRef payloads).
 //
 // Boundaries (SPEC-00/05/07):
 // - Renderer/UI consume ONLY `state()` snapshots; they never subscribe to
@@ -91,7 +93,31 @@ const MAX_IPC_PAYLOAD_BYTES = 8 * 1024;
 const PENDING_LIMIT = 50;
 const PENDING_DETAIL_REF = 'office:pending-detail';
 const PENDING_KINDS = Object.freeze(['approval', 'question']);
+// P3 (spec §4 detailRef / §8 P3 行): the harness outcome vocabulary
+// (dsh-user-approval: "Only one-shot grants exist — the outcome vocabulary has
+// `allowed-once` but no `allow-always`"). The panel therefore offers exactly
+// 批准 = allowed-once and 拒绝 = rejected — no "always allow" exists to offer.
+const APPROVAL_OUTCOMES = Object.freeze(['allowed-once', 'rejected']);
+// The pending DETAIL (spec §4 `detailRef: 'office:pending-detail'`): the
+// approval request itself carries no tool arguments (dsh-user-approval Known
+// Limitations), so the command text / question body are resolved by main.js
+// from the session's journal (same-turn tool/call by callId, with a
+// session/page fallback) and handed to the module through an injected
+// resolver. The detail is NEVER part of the pushed snapshot: it is fetched per
+// user action (opening the danger modal / the question form) and normalized
+// through the allowlist below — same boundary philosophy as the pending items.
+const PENDING_DETAIL_MAX_CHARS = 4000;
+const PENDING_DETAIL_ALLOWLIST = Object.freeze([
+  'id', 'kind', 'toolName', 'reason', 'preset', 'command', 'commandSource',
+  'targetPath', 'requestedSandboxMode', 'questions', 'atMs', 'noToolArguments',
+]);
 
+// P3: the EIGHTH office:* channel. The six legacy ones plus the P1-era seven
+// carried no way to ACT on a pending request; the inline approve/reject and the
+// detailRef fetch are the first office actions that talk to the runtime
+// (answering through the shared respondToRuntime $events/result path), so they
+// need their own whitelisted channel — mirroring the office:settings action
+// discriminator instead of inventing one channel per action.
 const OFFICE_IPC_CHANNELS = Object.freeze([
   'office:state',
   'office:dispatch',
@@ -100,6 +126,7 @@ const OFFICE_IPC_CHANNELS = Object.freeze([
   'office:settings',
   'office:diagnostics',
   'office:visibility',
+  'office:pending',
 ]);
 
 const PROVEN_CAPABILITIES = Object.freeze({
@@ -1822,6 +1849,59 @@ function createOfficeModule(options = {}) {
     return out;
   }
 
+  /** The answer-value vocabulary per pending kind (harness outcome words; a
+   * question rides an AskUserQuestionAnswer-style batch, same shape the IM
+   * dispatcher answers with). */
+  function isAnswerValueForKind(kind, value) {
+    if (kind === 'question') {
+      if (!isPlainObject(value) || !Array.isArray(value.answers) || value.answers.length === 0) return false;
+      return value.answers.every((answer) => isPlainObject(answer)
+        && typeof answer.id === 'string' && answer.id !== ''
+        && (Array.isArray(answer.selected) || typeof answer.custom === 'string'));
+    }
+    return typeof value === 'string' && APPROVAL_OUTCOMES.includes(value);
+  }
+
+  /** Normalize one main.js-supplied detailRef payload. Every field is capped:
+   * strings are clipped (never thrown — a truncated command still shows), the
+   * question batch is size-bounded, and ONLY allowlisted presentation fields
+   * cross. Unknown fields are dropped exactly like the pending item
+   * projection, so a resolver bug can never widen the boundary. */
+  function safePendingDetail(raw, fallbackId) {
+    if (!isPlainObject(raw)) return null;
+    const str = (value, max) => {
+      if (typeof value !== 'string' || value === '') return null;
+      return value.length > max ? `${value.slice(0, max)}…` : value;
+    };
+    const kind = PENDING_KINDS.includes(raw.kind) ? raw.kind : null;
+    if (!kind) return null;
+    const out = { id: typeof raw.id === 'string' && raw.id !== '' ? raw.id : (fallbackId || null), kind };
+    out.toolName = str(raw.toolName, 64);
+    out.reason = str(raw.reason, PENDING_DETAIL_MAX_CHARS);
+    out.preset = str(raw.preset, 64);
+    out.command = str(raw.command, PENDING_DETAIL_MAX_CHARS);
+    out.commandSource = str(raw.commandSource, 32);
+    out.targetPath = str(raw.targetPath, 512);
+    out.requestedSandboxMode = str(raw.requestedSandboxMode, 64);
+    out.noToolArguments = raw.noToolArguments === true;
+    out.atMs = Number.isFinite(Number(raw.atMs)) ? Number(raw.atMs) : null;
+    if (kind === 'question') {
+      const list = Array.isArray(raw.questions) ? raw.questions.slice(0, 4) : [];
+      out.questions = list.map((q) => {
+        const question = isPlainObject(q) ? q : {};
+        const options = Array.isArray(question.options) ? question.options.slice(0, 6) : [];
+        return {
+          id: str(question.id, 64) || '',
+          question: str(question.question, PENDING_DETAIL_MAX_CHARS) || '',
+          options: options.map((o) => ({ label: str(isPlainObject(o) ? o.label : o, 200) || '' })).filter((o) => o.label),
+        };
+      }).filter((q) => q.id && q.question);
+    } else {
+      out.questions = null;
+    }
+    return out;
+  }
+
   function redactSnapshot(snapshot) {
     const safeEmployees = snapshot.employees.map((employee) => {
       const presentation = {};
@@ -2051,7 +2131,8 @@ function createOfficeModule(options = {}) {
    *
    * @param {{eventId?: string, rpcId?: string, clientId?: string,
    *          kind: 'approval'|'question', sessionId?: string,
-   *          toolName?: string, preset?: string, atMs?: number}} request
+   *          toolName?: string, preset?: string, sandboxWidening?: boolean,
+   *          atMs?: number}} request
    * @returns {{ok: true, status: 'added'|'duplicate', id: string, item: object}
    *          |{ok: false, code: string}}
    */
@@ -2089,7 +2170,11 @@ function createOfficeModule(options = {}) {
       // text and must never reach the snapshot.
       summary: kind === 'question' ? questionSummaryZh() : toolPhraseZhOf(toolName),
       detailRef: PENDING_DETAIL_REF,
-      risk: classifyRisk({ toolName, preset }),
+      // §5 判据输入: toolName + preset (+ the sandbox-widening flag main.js
+      // derives from the harness escalation reason). The command-shape seams
+      // stay empty here — the raw arguments never enter the snapshot; they are
+      // fetched per user action through the detailRef channel instead.
+      risk: classifyRisk({ toolName, preset, sandboxWidening: request.sandboxWidening === true }),
       createdAtMs: Number.isFinite(Number(request.atMs)) ? Number(request.atMs) : clock.nowMs(),
       eventId,
       clientId: typeof request.clientId === 'string' && request.clientId !== '' ? request.clientId : null,
@@ -2145,6 +2230,11 @@ function createOfficeModule(options = {}) {
    * the panel and IM can never double-answer with divergent logic). main.js
    * injects the transport; on success the pending item is removed here.
    *
+   * The value is gated against the harness outcome vocabulary per kind:
+   * approvals accept exactly `allowed-once` / `rejected` (there is no
+   * `allow-always` to offer — dsh-user-approval Known Limitations), questions
+   * accept an AskUserQuestionAnswer-style `{answers:[…]}` batch.
+   *
    * @param {{id: string, value: any, what?: string}} request
    * @returns {Promise<{ok: boolean, reason?: string}>}
    */
@@ -2154,6 +2244,10 @@ function createOfficeModule(options = {}) {
     }
     const route = pendingRoute(request.id);
     if (!route) return Object.freeze({ ok: false, reason: 'unknown pending id' });
+    const item = pendingItems.get(request.id);
+    if (item && !isAnswerValueForKind(item.kind, request.value)) {
+      return Object.freeze({ ok: false, reason: 'unsupported answer value' });
+    }
     if (typeof options.answerRequest !== 'function') {
       return Object.freeze({ ok: false, reason: 'answer channel unavailable' });
     }
@@ -2166,6 +2260,36 @@ function createOfficeModule(options = {}) {
     });
     if (res && res.ok) resolvePending(request.id);
     return res;
+  }
+
+  /** Resolve the spec §4 detailRef for a pending id. The data comes from the
+   * main-process resolver main.js injects (journal correlation / session/page
+   * / the question payload); this function is the boundary: unknown ids are a
+   * no-op, and the payload is normalized through PENDING_DETAIL_ALLOWLIST so
+   * only the presentation fields the modal needs can cross. */
+  async function resolvePendingDetail(id) {
+    if (typeof id !== 'string' || id === '') {
+      return Object.freeze({ ok: false, code: 'DETAIL_ID_MISSING' });
+    }
+    const known = pendingItems.has(id)
+      || [...pendingItems.values()].some((item) => item.eventId === id
+        || (pendingRoutes.get(item.id) || {}).rpcId === id
+        || id === `legacy:${(pendingRoutes.get(item.id) || {}).rpcId}`);
+    if (!known) return Object.freeze({ ok: false, code: 'UNKNOWN_PENDING_ID' });
+    if (typeof options.pendingDetail !== 'function') {
+      return Object.freeze({ ok: false, code: 'DETAIL_UNAVAILABLE' });
+    }
+    let raw = null;
+    try {
+      // awaited: the main-process resolver may be async (the session/page
+      // fallback is an RPC), and a promise must never reach the normalizer.
+      raw = await options.pendingDetail(id);
+    } catch {
+      raw = null;
+    }
+    const detail = safePendingDetail(raw, id);
+    if (!detail) return Object.freeze({ ok: false, code: 'DETAIL_UNAVAILABLE' });
+    return Object.freeze({ ok: true, detail });
   }
 
   /** Snapshot-ordered pending list: risk desc, then age asc (spec §3 sort). */
@@ -2368,6 +2492,9 @@ function createOfficeModule(options = {}) {
     resolvePending,
     pendingRoute,
     answerPending,
+    // P3: the spec §4 detailRef gate (main-process resolver injected at
+    // creation as the `pendingDetail` option; unknown ids are a no-op).
+    resolvePendingDetail,
     dispatch: ({ employeeId } = {}) => controlIntent(employeeId, 'followup'),
     cancel: ({ employeeId } = {}) => controlIntent(employeeId, 'cancel'),
     interrupt: ({ employeeId } = {}) => controlIntent(employeeId, 'interrupt'),
@@ -2450,6 +2577,30 @@ function validateOfficeIpcPayload(channel, payload) {
       }
       return { ok: false, code: 'PAYLOAD_INVALID' };
     }
+    // P3 待你处理 actions: answering a pending request (inline approve/reject +
+    // the danger modal) and fetching its detailRef payload. The answer value is
+    // either a harness outcome word (approval) or an answers batch (question) —
+    // the module's answerPending re-gates it per kind; the size guard above is
+    // the transport bound.
+    case 'office:pending': {
+      if (payload.action === 'detail') {
+        if (keys.length !== 2 || keys[1] !== 'id' || typeof payload.id !== 'string'
+          || payload.id === '' || payload.id.length > 128) {
+          return { ok: false, code: 'PAYLOAD_INVALID' };
+        }
+        return { ok: true, value: { action: 'detail', id: payload.id } };
+      }
+      if (payload.action === 'answer') {
+        if (keys.length !== 3 || keys[2] !== 'value') return { ok: false, code: 'PAYLOAD_INVALID' };
+        if (typeof payload.id !== 'string' || payload.id === '' || payload.id.length > 128) {
+          return { ok: false, code: 'PAYLOAD_INVALID' };
+        }
+        const valueIsWord = typeof payload.value === 'string' && payload.value.length > 0 && payload.value.length <= 64;
+        if (!valueIsWord && !isPlainObject(payload.value)) return { ok: false, code: 'PAYLOAD_INVALID' };
+        return { ok: true, value: { action: 'answer', id: payload.id, value: payload.value } };
+      }
+      return { ok: false, code: 'PAYLOAD_INVALID' };
+    }
     default:
       return { ok: false, code: 'PAYLOAD_INVALID' };
   }
@@ -2485,6 +2636,12 @@ function registerOfficeIpc({ ipcMain, module, log = () => {}, enabled = true }) 
             return { ok: true, diagnostics: module.diagnostics() };
           case 'office:visibility':
             return module.noteVisibility(validation.value);
+          // P3 待你处理: answer → the shared respondToRuntime path (module.answerPending);
+          // detail → the main.js resolver behind the spec §4 detailRef.
+          case 'office:pending':
+            return validation.value.action === 'detail'
+              ? module.resolvePendingDetail(validation.value.id)
+              : module.answerPending(validation.value);
           default:
             return { ok: false, code: 'CHANNEL_UNKNOWN' };
         }
@@ -2582,6 +2739,9 @@ module.exports = {
   loadRuntimeLayoutFixture,
   resolveLeaveNodeId,
   OFFICE_IPC_CHANNELS,
+  APPROVAL_OUTCOMES,
+  PENDING_DETAIL_REF,
+  PENDING_DETAIL_ALLOWLIST,
   MAX_IPC_PAYLOAD_BYTES,
   TICK_MS,
   EMPLOYEE_IDS,

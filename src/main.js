@@ -319,6 +319,11 @@ function ensureOfficeModule() {
       // questions through — so the panel can never grow a second, divergent
       // answer implementation. P3 wires the click handlers to it.
       answerRequest: ({ rpcId, value, what }) => respondToRuntime({ rpcId, value, what }),
+      // P3: the spec §4 detailRef resolver behind office:pending {action:'detail'}.
+      // main.js owns the data (journal correlation / session/page / the question
+      // payload); the module owns the boundary (unknown ids are a no-op, the
+      // payload is allowlist-normalized, nothing reaches the snapshot).
+      pendingDetail: (id) => officeResolvePendingDetail(id),
     });
     // P1: any waterfall request that arrived BEFORE the office view was first
     // opened is waiting in the pre-module mirror — seed it now (bounded,
@@ -3209,9 +3214,19 @@ function injectOfficeUsage(stats) {
 /** Mirror one runtime waterfall request (approval / user question) into the
  * office pending store: straight into the module when it is live, otherwise
  * into the bounded pre-module mirror (seeded on module creation). Idempotent
- * per eventId in both stores. */
-function officeNotePending({ kind, frame, rpcId }) {
-  const sessionId = frame && typeof frame.sessionId === 'string' ? frame.sessionId : '';
+ * per eventId in both stores.
+ *
+ * The session is the 0.1.1 frame's own `sessionId` when present, else the
+ * waterfall frame's `agentId` — an Agent id IS its SessionId (dsh-agent:
+ * `Agent.id: SessionId`). The mux approval/question request payload carries no
+ * session id of its own (first-hand: dsh-user-approval ApprovalRequestEvent /
+ * dsh-user-questions AskUserQuestionRequestEvent + the api-gateway projection),
+ * so the agentId is what lets the pending item bind to the employee and the
+ * detailRef correlation find the same-turn journal record. */
+function officeNotePending({ kind, frame, rpcId, agentId }) {
+  const sessionId = (frame && typeof frame.sessionId === 'string' && frame.sessionId !== '')
+    ? frame.sessionId
+    : (typeof agentId === 'string' && agentId !== '' ? agentId : '');
   const toolName = kind === 'question'
     ? 'ask_user_question'
     : ((frame && (frame.toolName || frame.tool)) || '');
@@ -3224,6 +3239,15 @@ function officeNotePending({ kind, frame, rpcId }) {
   // server-request rpcId. On the mux protocol that id IS the eventId; on the
   // legacy protocol there is no waterfall eventId at all.
   const routingId = typeof rpcId === 'string' && rpcId !== '' ? rpcId : null;
+  // §5 高危判据 ④「任何沙箱放宽请求」: the one approval path the shipped
+  // harness raises is the sandbox escalation retry — dsh-sandbox
+  // approveEscalation asks with reason `escalate sandbox to <mode>:
+  // <justification>` (first-hand evidence from the installed package). The
+  // request carries no widening flag, so the boolean is derived from the
+  // harness's own reason phrasing; the reason text itself stays in the
+  // main-process detail store and never enters the snapshot.
+  const reason = frame && typeof frame.reason === 'string' ? frame.reason : '';
+  const sandboxWidening = /^escalate sandbox to\b/i.test(reason.trim());
   const record = {
     eventId: eventsFeedProtocol === 'mux' ? routingId : null,
     rpcId: routingId,
@@ -3231,9 +3255,18 @@ function officeNotePending({ kind, frame, rpcId }) {
     sessionId,
     toolName,
     preset,
+    sandboxWidening,
     clientId: mux && typeof mux.clientId === 'string' && mux.clientId !== '' ? mux.clientId : null,
     atMs: Date.now(),
   };
+  // P3 detailRef: hold the answerable context (session/call routing + the
+  // harness-provided reason / question payload) so the danger modal can show
+  // REAL data on demand. The store is bounded and never part of any snapshot.
+  noteOfficePendingDetail(record, {
+    callId: (frame && (frame.callId || frame.approvalId)) || null,
+    reason,
+    questions: kind === 'question' && frame && Array.isArray(frame.questions) ? frame.questions : null,
+  });
   const mod = officeModuleInstance;
   if (mod && typeof mod.notePendingRequest === 'function') {
     const res = mod.notePendingRequest(record);
@@ -3264,6 +3297,209 @@ function officeResolvePending(id) {
   const mod = officeModuleInstance;
   if (!mod || typeof mod.resolvePending !== 'function') return mirrored;
   return mod.resolvePending(id) || mirrored;
+}
+
+// ---------------------------------------------------------------------------
+// P3 detailRef store (spec §4 'office:pending-detail' / §5 实施备注 1)
+//
+// The harness approval request carries NO tool arguments — first-hand evidence
+// (installed 0.1.5-rc.2 packages):
+//   - dsh-user-approval README Known Limitations: "The request carries no tool
+//     arguments — an answerer sees the tool name, reason, and optional call id."
+//   - dsh-api-gateway projectRemoteEventRequest(): the waterfall frame is
+//     {type:'waterfall', event, eventId, agentId, request} where request is the
+//     ApprovalRequestEvent minus agent/signal — i.e. {toolName, callId?, reason?}.
+// So the danger modal's "命令原文 / 目标路径" is resolved HERE, from the
+// same-turn journal record:
+//   - dsh-agent-loop appendToolCall(): the journal `tool/call` event carries
+//     {turn, step, callId, name, arguments} (the raw model arguments JSON);
+//   - dsh-tools serviceAsk(): the approval ask passes `callId: exec.callId` —
+//     the SAME ToolCallId. So sessionId + callId correlates the approval with
+//     its tool/call record, whose `arguments` is the command text the harness
+//     itself shows the answerer.
+// The records arrive over the session/follow journal streams main.js already
+// opens; a `session/page` RPC re-read of the durable log tail (by the follow
+// cursor) covers the case where the follow stream opened after the call.
+// The store is bounded + TTL'd and NEVER part of any snapshot: the only exit
+// is the office:pending {action:'detail'} IPC the page sends when the user
+// opens the danger modal / question form (a deliberate, user-initiated
+// disclosure into the office view — the same text the harness's own approval
+// UI shows).
+// ---------------------------------------------------------------------------
+const officePendingDetails = new Map(); // id (eventId | rpcId | legacy:rpcId) -> detail record
+const officeToolCallArgs = new Map();   // `${sessionId}#${callId}` -> {name, arguments, atMs}
+const officeFollowCursors = new Map();  // sessionId -> latest seen journal seq (session/page throughSeq)
+const OFFICE_PENDING_DETAIL_CAP = 32;
+const OFFICE_TOOL_ARGS_CAP = 64;
+const OFFICE_TOOL_ARGS_MAX_CHARS = 4000;
+// Approvals never time out (cross-tool memo: permission requests always wait),
+// so the TTL is a generous cleanup, never a request deadline.
+const OFFICE_DETAIL_TTL_MS = 2 * 60 * 60 * 1000;
+
+/** Best-effort target-path extraction for write/edit-class tools: parse the
+ * arguments JSON and read a path-ish key. Returns null instead of guessing
+ * (bash commands are not JSON; a failed parse simply yields no path). */
+const OFFICE_TARGET_PATH_KEYS = ['path', 'file_path', 'filePath', 'file', 'target', 'filename', 'targetPath'];
+function officeTargetPathOf(argsText) {
+  if (typeof argsText !== 'string' || argsText === '') return null;
+  let parsed = null;
+  try {
+    parsed = JSON.parse(argsText);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  for (const key of OFFICE_TARGET_PATH_KEYS) {
+    if (typeof parsed[key] === 'string' && parsed[key] !== '') return parsed[key];
+  }
+  return null;
+}
+
+/** Capture one follow-journal tool/call record for later detailRef
+ * correlation (the raw arguments never enter any snapshot). Bounded by count
+ * and age; the command text itself is capped when stored. */
+function noteOfficeToolCallArgs(sessionId, data, atMs) {
+  if (typeof sessionId !== 'string' || sessionId === '' || !data || typeof data !== 'object') return;
+  const callId = typeof data.callId === 'string' && data.callId !== '' ? data.callId : null;
+  const args = typeof data.arguments === 'string' && data.arguments !== '' ? data.arguments : null;
+  if (!callId || !args) return;
+  const key = `${sessionId}#${callId}`;
+  officeToolCallArgs.set(key, {
+    name: typeof data.name === 'string' ? data.name : null,
+    arguments: args.length > OFFICE_TOOL_ARGS_MAX_CHARS ? `${args.slice(0, OFFICE_TOOL_ARGS_MAX_CHARS)}…` : args,
+    atMs: Number.isFinite(Number(atMs)) ? Number(atMs) : Date.now(),
+  });
+  while (officeToolCallArgs.size > OFFICE_TOOL_ARGS_CAP) {
+    const oldest = officeToolCallArgs.keys().next().value;
+    officeToolCallArgs.delete(oldest);
+  }
+}
+
+/** Hold the answerable context of one waterfall request so the danger modal
+ * and the question form can show REAL data on demand. Keys cover every id
+ * form the panel can address: the routing id and its 0.1.1 legacy: handle. */
+function noteOfficePendingDetail(record, extra = {}) {
+  const routingId = record.eventId || record.rpcId;
+  if (!routingId) return;
+  const now = record.atMs || Date.now();
+  const reason = typeof extra.reason === 'string' && extra.reason !== '' ? extra.reason : null;
+  const detail = {
+    routingId,
+    kind: record.kind,
+    sessionId: record.sessionId || null,
+    toolName: record.toolName || null,
+    preset: record.preset || null,
+    callId: extra.callId || null,
+    reason: reason && reason.length > OFFICE_TOOL_ARGS_MAX_CHARS
+      ? `${reason.slice(0, OFFICE_TOOL_ARGS_MAX_CHARS)}…`
+      : reason,
+    requestedSandboxMode: reason ? (/^escalate sandbox to ([\w.-]+)/i.exec(reason.trim()) || [])[1] || null : null,
+    questions: extra.questions || null,
+    atMs: now,
+  };
+  officePendingDetails.set(routingId, detail);
+  if (record.rpcId) officePendingDetails.set(`legacy:${record.rpcId}`, detail);
+  const cutoff = now - OFFICE_DETAIL_TTL_MS;
+  for (const [key, value] of officePendingDetails) {
+    if (value.atMs < cutoff) officePendingDetails.delete(key);
+  }
+  while (officePendingDetails.size > OFFICE_PENDING_DETAIL_CAP * 2) {
+    const oldest = officePendingDetails.keys().next().value;
+    officePendingDetails.delete(oldest);
+  }
+}
+
+/** session/page fallback: re-read the durable log tail (through the latest
+ * journal seq the follow stream delivered) and find the tool/call record with
+ * the given callId. Best-effort — any failure simply yields "not exposed". */
+async function officePageToolCallArgs(sessionId, callId) {
+  const mux = runtimeMux;
+  if (!mux || mux.state !== 'live' || !sessionId || !callId) return null;
+  const throughSeq = officeFollowCursors.get(sessionId);
+  if (!Number.isInteger(throughSeq) || throughSeq < 0) return null;
+  try {
+    const res = await mux.call('session/page', {
+      request: { address: { kind: 'session', sessionId }, throughSeq, maxMessages: 30 },
+    });
+    const records = res && res.ok && res.value && Array.isArray(res.value.records) ? res.value.records : [];
+    for (const entry of records) {
+      const event = entry && typeof entry === 'object' ? entry.event : null;
+      if (!event || event.type !== 'tool/call') continue;
+      const data = event.data && typeof event.data === 'object' ? event.data : {};
+      if (data.callId !== callId) continue;
+      return typeof data.arguments === 'string' && data.arguments !== '' ? data.arguments : null;
+    }
+  } catch { /* the fallback is advisory; the modal falls back to the honest note */ }
+  return null;
+}
+
+/** Resolve one pending id's detailRef payload (module-injected resolver). The
+ * approval case correlates the same-turn tool/call by callId; when nothing is
+ * found the payload says so explicitly (noToolArguments) instead of inventing
+ * a command. */
+async function officeResolvePendingDetail(id) {
+  const detail = officePendingDetails.get(id);
+  if (!detail) return null;
+  const base = {
+    id,
+    kind: detail.kind,
+    toolName: detail.toolName,
+    preset: detail.preset,
+    reason: detail.reason,
+    requestedSandboxMode: detail.requestedSandboxMode,
+    atMs: detail.atMs,
+  };
+  if (detail.kind === 'question') {
+    return {
+      ...base,
+      questions: Array.isArray(detail.questions)
+        ? detail.questions.map((q) => ({
+          id: q && typeof q.id === 'string' ? q.id : '',
+          question: q && typeof q.question === 'string' ? q.question : '',
+          options: Array.isArray(q && q.options)
+            ? q.options.map((o) => ({ label: o && typeof o.label === 'string' ? o.label : '' })).filter((o) => o.label)
+            : [],
+        })).filter((q) => q.id && q.question)
+        : [],
+      noToolArguments: false,
+    };
+  }
+  let command = null;
+  let commandSource = null;
+  if (detail.sessionId && detail.callId) {
+    const hit = officeToolCallArgs.get(`${detail.sessionId}#${detail.callId}`);
+    if (hit) {
+      command = hit.arguments;
+      commandSource = 'journal-tool-call';
+    } else {
+      const paged = await officePageToolCallArgs(detail.sessionId, detail.callId);
+      if (paged) {
+        command = paged.length > OFFICE_TOOL_ARGS_MAX_CHARS
+          ? `${paged.slice(0, OFFICE_TOOL_ARGS_MAX_CHARS)}…`
+          : paged;
+        commandSource = 'session-page';
+      }
+    }
+  } else if (detail.callId) {
+    // No session id (a legacy frame without one, or an unresolvable agent):
+    // the callId is a globally unique tool-call handle, so a suffix scan over
+    // the captured journal records still correlates the same-turn call.
+    const suffix = `#${detail.callId}`;
+    for (const [key, value] of officeToolCallArgs) {
+      if (!key.endsWith(suffix)) continue;
+      command = value.arguments;
+      commandSource = 'journal-tool-call';
+      break;
+    }
+  }
+  return {
+    ...base,
+    command,
+    commandSource,
+    targetPath: command ? officeTargetPathOf(command) : null,
+    noToolArguments: !command,
+    questions: null,
+  };
 }
 
 /** Seed the pre-module mirror into a freshly created office module (bounded,
@@ -3832,10 +4068,14 @@ function onMuxEventValue(value) {
   if (value.type === 'waterfall') {
     // approval / user-question requests; the request payload carries the
     // 0.1.5 field names (toolName/callId/reason, questions) — the consumers
-    // also accept the legacy names.
+    // also accept the legacy names. The frame's `agentId` is the scoped
+    // Agent's id, and an Agent id IS its SessionId (dsh-agent: `Agent.id:
+    // SessionId`, "Session-backed Agent identity") — it is how the office
+    // pending item learns WHICH session raised this request (the request
+    // payload itself carries no session id).
     const request = value.request && typeof value.request === 'object' ? value.request : {};
-    if (value.event === 'approval/request') onApprovalRequested(request, value.eventId);
-    else if (value.event === 'user-questions/request') onQuestionRequested(request, value.eventId);
+    if (value.event === 'approval/request') onApprovalRequested(request, value.eventId, value.agentId);
+    else if (value.event === 'user-questions/request') onQuestionRequested(request, value.eventId, value.agentId);
     return;
   }
   if (value.type === 'cancel') {
@@ -3909,6 +4149,7 @@ function noteOfficeSessionRemoved(sessionId) {
   if (typeof sessionId !== 'string' || !sessionId) return;
   officeFollowRemoved.add(sessionId);
   officeFollowRunning.delete(sessionId);
+  officeFollowCursors.delete(sessionId);
 }
 
 /** Raw root sessionIds the office currently has an ACTIVE binding for.
@@ -3963,6 +4204,7 @@ function stopOfficeFollowSync() {
   officeFollowKnown.clear();
   officeFollowRemoved.clear();
   officeFollowKnownOrder.length = 0;
+  officeFollowCursors.clear();
 }
 
 async function seedOfficeFollowFromSessionList() {
@@ -4027,6 +4269,11 @@ function ingestOfficeFollowFrame(sessionId, value) {
     return;
   }
   if (value.type === 'snapshot') {
+    // The opening cursor doubles as the session/page throughSeq the P3
+    // detailRef fallback needs (officePageToolCallArgs).
+    if (Number.isInteger(value.cursor) && value.cursor >= 0) {
+      officeFollowCursors.set(sessionId, Math.max(officeFollowCursors.get(sessionId) ?? -1, value.cursor));
+    }
     for (const record of Array.isArray(value.records) ? value.records : []) {
       if (record && record.type === 'event') ingestOfficeJournalEvent(sessionId, record.event);
     }
@@ -4036,7 +4283,20 @@ function ingestOfficeFollowFrame(sessionId, value) {
 
 function ingestOfficeJournalEvent(sessionId, event) {
   const mod = officeModuleInstance;
+  // P3 detailRef capture — BEFORE the module gate (the office module is created
+  // lazily, and the follow journal is the only place the raw tool arguments
+  // exist). The tool/call record carries {callId, name, arguments}; the
+  // approval request carries the same callId, so the danger modal can later
+  // show the REAL command. Bounded + TTL'd; never part of any snapshot.
+  if (event && event.type === 'tool/call') {
+    noteOfficeToolCallArgs(sessionId, event.data, event.time);
+  }
   if (!mod || !event || typeof event !== 'object' || typeof event.type !== 'string') return;
+  // Track the latest delivered journal seq per session: it is a valid
+  // session/page throughSeq for the detailRef fallback.
+  if (Number.isInteger(event.seq) && event.seq >= 0) {
+    officeFollowCursors.set(sessionId, Math.max(officeFollowCursors.get(sessionId) ?? -1, event.seq));
+  }
   const data = event.data && typeof event.data === 'object' ? event.data : {};
   // P2 turn/usage helpers: only non-negative integers ever enter the office
   // envelope (provider usage counters); the message text never does.
@@ -4200,11 +4460,12 @@ async function handleImCommand({ command, senderId, text }) {
 function imGetBinding(channelId, senderId) {
   return imCommandBindings.get(`im:${senderId}`) || null;
 }
-function onApprovalRequested(frame, rpcId) {
+function onApprovalRequested(frame, rpcId, agentId) {
   const tool = frame.toolName || frame.tool || '';
   // P1: mirror the request into the office pending list before anything else,
-  // so the panel sees it even if an IM channel is enabled and slow.
-  officeNotePending({ kind: 'approval', frame, rpcId });
+  // so the panel sees it even if an IM channel is enabled and slow. agentId is
+  // the raising session (Agent.id = SessionId, first-hand dsh-agent types).
+  officeNotePending({ kind: 'approval', frame, rpcId, agentId });
   // IM push (C5/C6): approval cards carry a one-shot token (120s TTL) whose
   // payload keeps the runtime routing fields — the 0.1.5 mux carries the
   // waterfall eventId here (clientId lives in the mux client), 0.1.1 carried
@@ -4224,9 +4485,9 @@ function onApprovalRequested(frame, rpcId) {
   notifyAs('approval', t(lang(), 'notify.approval'), t(lang(), 'notify.approvalBody', { tool }));
 }
 
-function onQuestionRequested(frame, rpcId) {
+function onQuestionRequested(frame, rpcId, agentId) {
   // P1: same mirror path as approvals (one list, one answer channel).
-  officeNotePending({ kind: 'question', frame, rpcId });
+  officeNotePending({ kind: 'question', frame, rpcId, agentId });
   // IM push (C5/C6): question cards carry a one-shot reply token (120s TTL)
   // keeping the routing id + question shape for the answer channel.
   if (channelsMgr) {

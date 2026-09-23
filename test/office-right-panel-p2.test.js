@@ -517,11 +517,13 @@ test('office.html follows the shell theme through the preload bridge (no new bus
   const preload = read('src/office/office-preload.js');
   assert.ok(preload.includes("getTheme: () => ipcRenderer.invoke('shell:get-theme')"), 'the preload exposes getTheme');
   assert.ok(preload.includes("ipcRenderer.on('shell:theme'"), 'the preload exposes the theme push');
-  // the seven whitelisted office business channels stay exactly seven
-  for (const channel of ['office:state', 'office:dispatch', 'office:cancel', 'office:interrupt', 'office:settings', 'office:diagnostics', 'office:visibility']) {
+  // the whitelisted office business channels stay exactly the pinned set
+  // (eight since P3 added office:pending — see office-ui.test.js for why the
+  // count widened and office-right-panel-p3.test.js for the channel contract).
+  for (const channel of ['office:state', 'office:dispatch', 'office:cancel', 'office:interrupt', 'office:settings', 'office:diagnostics', 'office:visibility', 'office:pending']) {
     assert.ok(preload.includes(`'${channel}'`), `preload references ${channel}`);
   }
-  assert.doesNotMatch(preload, /office:(?!(state|dispatch|cancel|interrupt|settings|diagnostics|visibility))/, 'no other office channels');
+  assert.doesNotMatch(preload, /office:(?!(state|dispatch|cancel|interrupt|settings|diagnostics|visibility|pending))/, 'no other office channels');
   assert.ok(preload.includes('contextBridge'), 'still a contextBridge surface');
 });
 

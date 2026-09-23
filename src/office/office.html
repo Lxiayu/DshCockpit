@@ -115,8 +115,10 @@
       <p class="hint">方向键移动焦点，Enter 或空格选中，Esc 取消选中</p>
     </section>
 
-    <!-- ③ 待你处理（spec §3 block 3）。P2 只做容器与计数（spec §8）：行内批/拒与危险模态是 P3；
-         回答统一走既有 respondToRuntime（$events/result）共享通道，P3 接入。 -->
+    <!-- ③ 待你处理（spec §3 block 3）。P2 容器 + 计数；P3 行内批/拒（低/中风险）与危险模态
+         （高风险）：回答统一走既有 respondToRuntime（$events/result）共享通道（office:pending
+         IPC → 模块 answerPending），与 IM 同一实现；命令原文/问题正文经 detailRef
+         （office:pending {action:'detail'}）按需取回，永不进快照。 -->
     <section id="pending-block" aria-label="待你处理">
       <div class="block-head">
         <h2>待你处理</h2>
@@ -125,6 +127,23 @@
       <p id="pending-empty" class="hint">暂无待处理 ✓</p>
       <ul id="pending-list" aria-live="polite"></ul>
     </section>
+
+    <!-- P3 危险模态（spec §5 高风险）：列出将要执行的步骤 / 影响范围 / 命令原文或目标路径（若有，
+         经 detailRef 取回的真实数据）/ 可否撤销说明；按钮仅 拒绝 / 仅本次批准（harness 结果词表没有
+         长期授权档位，故不提供"总是允许"）。模态打开期间阻塞面板操作（追加任务/取消/中断及
+         其他卡片的行内按钮），审批不设超时——不回答不会自动继续。按钮由 renderPendingModalBody
+         按类型生成（审批：拒绝/仅本次批准；提问：选项与自定义表单）。 -->
+    <div id="pending-modal" class="pending-modal" hidden role="dialog" aria-modal="true" aria-labelledby="pending-modal-title">
+      <div class="pending-modal-card">
+        <div class="block-head">
+          <h2 id="pending-modal-title">高危操作 · 批准请求</h2>
+          <button id="pending-modal-close" type="button" class="pending-modal-close" aria-label="关闭">×</button>
+        </div>
+        <dl id="pending-modal-body" class="pending-modal-body"></dl>
+        <p id="pending-modal-blocked" class="hint"></p>
+        <div id="pending-modal-actions" class="pending-modal-actions"></div>
+      </div>
+    </div>
 
     <!-- ④ 时间线（spec §3 block 4）：时间 + 员工 + 事件 + 本轮 token/金额归属（provider usage 一手记录）。
          默认 20 条，更多展开到 100 条。 -->
@@ -1888,14 +1907,120 @@
         void snapshot;
       }
 
-      // ③ 待你处理 inbox (spec §3 block 3): P2 ships the container and the
-      // count only (spec §8 P2 row). Inline approve/reject and the danger
-      // modal are P3 and will answer through the shared respondToRuntime
-      // ($events/result) path; the rows below are read-only for now.
+      // ③ 待你处理 inbox (spec §3 block 3). P3 actions: low/medium approvals
+      // answer INLINE (批准/拒绝); high approvals open the danger modal
+      // (查看并批准); questions open the question form. Every answer goes
+      // through the shared respondToRuntime ($events/result) path — the same
+      // implementation the IM channel uses — so the panel and IM can never
+      // double-answer with divergent logic, and a successful answer removes
+      // the card from the shared snapshot (one store, both entries agree).
       const PENDING_KIND_LABELS = { approval: '审批', question: '提问' };
       const PENDING_RISK_LABELS = { low: '低', medium: '中', high: '高' };
+      const PENDING_MODAL_TXT = REGISTRY['office-page'].PENDING_MODAL_TEXT;
+      const pendingModalRoot = document.getElementById('pending-modal');
+      // Per-card answer state (survives the ~10Hz list rebuild): 'sending' or a
+      // failure reason string. Entries are dropped when the card is gone from
+      // the snapshot (answered / revoked) — the module owns removal.
+      const pendingCardState = new Map();
+      // The card the danger modal / question form is open for. While it is
+      // set, the panel's own action inputs are blocked (spec §5 / cross-tool
+      // memo: "the composer is blocked so the next action cannot be queued
+      // accidentally") — the approval waits as long as it takes, no timeout.
+      let pendingModalItem = null;
+
+      function setPanelActionsBlocked(blocked) {
+        for (const id of ['btn-dispatch', 'btn-cancel', 'btn-interrupt']) {
+          const button = document.getElementById(id);
+          if (button) button.disabled = blocked;
+        }
+        // The CSS dims + disables the detail action row as a second layer; the
+        // list rebuild also disables every other card's inline buttons while
+        // pendingModalItem is set.
+        document.getElementById('office-panel').dataset.pendingBlocking = blocked ? 'true' : 'false';
+      }
+
+      /** Shared answer delegation — ONE implementation for the inline buttons,
+       * the danger modal and the question form (page → office:pending →
+       * module.answerPending → respondToRuntime → $events/result). */
+      async function answerPendingCard(item, value) {
+        if (!item || pendingCardState.get(item.id) === 'sending') return { ok: false, reason: 'already-answering' };
+        pendingCardState.set(item.id, 'sending');
+        renderPendingBlock(latestSnapshot);
+        let res = null;
+        try {
+          res = await page.answerPending(item.id, value);
+        } catch (error) {
+          res = { ok: false, reason: String(error && error.message || error) };
+        }
+        if (res && res.ok) {
+          // The shared answer path already removed the item; the next snapshot
+          // drops the card. Nothing to re-render synchronously.
+          if (pendingModalItem && pendingModalItem.id === item.id) closePendingModal();
+          return res;
+        }
+        pendingCardState.set(item.id, (res && res.reason) || '回答失败');
+        renderPendingBlock(latestSnapshot);
+        return res;
+      }
+
+      function renderPendingCardActions(item) {
+        const state = pendingCardState.get(item.id) || null;
+        const actions = document.createElement('span');
+        actions.className = 'pending-actions';
+        if (item.kind === 'question') {
+          const review = document.createElement('button');
+          review.type = 'button';
+          review.className = 'pending-btn pending-btn-review';
+          review.textContent = '查看并回答';
+          review.disabled = state === 'sending' || !!pendingModalItem;
+          review.addEventListener('click', () => openPendingModal(item));
+          actions.append(review);
+        } else if (item.risk === 'high') {
+          // spec §5: dangerous operations go through the modal (never a
+          // one-click irreversible approval).
+          const review = document.createElement('button');
+          review.type = 'button';
+          review.className = 'pending-btn pending-btn-review';
+          review.textContent = '查看并批准';
+          review.disabled = state === 'sending' || !!pendingModalItem;
+          review.addEventListener('click', () => openPendingModal(item));
+          actions.append(review);
+        } else {
+          const approve = document.createElement('button');
+          approve.type = 'button';
+          approve.className = 'pending-btn pending-btn-approve';
+          approve.textContent = '批准';
+          approve.disabled = state === 'sending' || !!pendingModalItem;
+          approve.addEventListener('click', () => answerPendingCard(item, 'allowed-once'));
+          const reject = document.createElement('button');
+          reject.type = 'button';
+          reject.className = 'pending-btn pending-btn-reject';
+          reject.textContent = '拒绝';
+          reject.disabled = state === 'sending' || !!pendingModalItem;
+          reject.addEventListener('click', () => answerPendingCard(item, 'rejected'));
+          actions.append(approve, reject);
+        }
+        if (state === 'sending') {
+          const status = document.createElement('span');
+          status.className = 'pending-status';
+          status.textContent = '回答中…';
+          actions.append(status);
+        } else if (typeof state === 'string') {
+          const status = document.createElement('span');
+          status.className = 'pending-status pending-status-failed';
+          status.textContent = state;
+          actions.append(status);
+        }
+        return actions;
+      }
+
       function renderPendingBlock(snapshot) {
         const summary = page.pendingSummary();
+        const live = new Set(summary.items.map((item) => item.id));
+        for (const id of [...pendingCardState.keys()]) {
+          if (!live.has(id)) pendingCardState.delete(id); // answered / revoked elsewhere
+        }
+        if (pendingModalItem && !live.has(pendingModalItem.id)) closePendingModal();
         document.getElementById('pending-count').textContent = String(summary.count);
         document.getElementById('pending-empty').hidden = summary.count > 0;
         const list = document.getElementById('pending-list');
@@ -1903,6 +2028,7 @@
           const li = document.createElement('li');
           li.className = 'pending-item';
           li.dataset.risk = item.risk;
+          li.dataset.pendingId = item.id;
           const risk = document.createElement('span');
           risk.className = `pending-risk risk-${item.risk}`;
           risk.textContent = PENDING_RISK_LABELS[item.risk] || item.risk;
@@ -1916,11 +2042,150 @@
           const at = document.createElement('span');
           at.className = 'pending-time';
           at.textContent = new Date(item.createdAtMs).toISOString().slice(11, 19);
-          li.append(risk, body, at);
+          li.append(risk, body, at, renderPendingCardActions(item));
           return li;
         }));
         void snapshot;
       }
+
+      // ---- P3 danger modal (spec §5 high risk) + question form --------------
+
+      function modalRow(term, valueNode) {
+        const dt = document.createElement('dt');
+        dt.textContent = term;
+        const dd = document.createElement('dd');
+        dd.append(valueNode);
+        return [dt, dd];
+      }
+
+      function modalText(value, className) {
+        const node = document.createElement('span');
+        if (className) node.className = className;
+        node.textContent = value;
+        return node;
+      }
+
+      function openPendingModal(item) {
+        const body = document.getElementById('pending-modal-body');
+        const actions = document.getElementById('pending-modal-actions');
+        body.replaceChildren();
+        actions.replaceChildren();
+        const title = document.getElementById('pending-modal-title');
+        const blocked = document.getElementById('pending-modal-blocked');
+        const closeBtn = document.getElementById('pending-modal-close');
+        title.textContent = item.kind === 'question' ? PENDING_MODAL_TXT.questionTitle : PENDING_MODAL_TXT.title;
+        blocked.textContent = PENDING_MODAL_TXT.blockedNote;
+
+        // detailRef (spec §4): fetch the REAL command text / question body per
+        // user action — never on the snapshot cadence, never in the snapshot.
+        Promise.resolve(page.pendingDetail(item.id))
+          .then((res) => {
+            const detail = res && res.ok ? res.detail : null;
+            const model = page.pendingModalModel(item, detail);
+            renderPendingModalBody(model);
+          })
+          .catch(() => {
+            // A failed detail fetch must not answer anything: the modal shows
+            // the honest "not exposed" state via the null-detail model.
+            renderPendingModalBody(page.pendingModalModel(item, null));
+          });
+        pendingModalRoot.hidden = false;
+        pendingModalItem = item;
+        setPanelActionsBlocked(true);
+        closeBtn.focus();
+      }
+
+      function renderPendingModalBody(model) {
+        const body = document.getElementById('pending-modal-body');
+        const actions = document.getElementById('pending-modal-actions');
+        body.replaceChildren();
+        actions.replaceChildren();
+        if (model.toolName) body.append(...modalRow(PENDING_MODAL_TXT.tool, modalText(model.toolName)));
+        if (model.preset) body.append(...modalRow(PENDING_MODAL_TXT.preset, modalText(model.preset)));
+        for (const step of model.steps) body.append(...modalRow(PENDING_MODAL_TXT.steps, modalText(step)));
+        body.append(...modalRow(PENDING_MODAL_TXT.impact, modalText(model.impact)));
+        if (model.command) {
+          const pre = document.createElement('pre');
+          pre.className = 'pending-modal-command';
+          pre.textContent = model.command;
+          body.append(...modalRow(PENDING_MODAL_TXT.command, pre));
+        } else if (model.targetPath) {
+          body.append(...modalRow(PENDING_MODAL_TXT.target, modalText(model.targetPath)));
+        }
+        if (model.noArgsNote) body.append(...modalRow(PENDING_MODAL_TXT.command, modalText(model.noArgsNote, 'pending-modal-note')));
+        if (model.noAlwaysNote) {
+          const note = document.createElement('p');
+          note.className = 'pending-modal-note';
+          note.textContent = model.noAlwaysNote;
+          body.append(note);
+        }
+        body.append(...modalRow(PENDING_MODAL_TXT.reversible, modalText(model.reversibleNote, 'pending-modal-note')));
+
+        if (model.approval) {
+          const reject = document.createElement('button');
+          reject.id = 'pending-modal-reject';
+          reject.type = 'button';
+          reject.textContent = '拒绝';
+          reject.addEventListener('click', () => answerPendingCard(pendingModalItem, 'rejected'));
+          const approve = document.createElement('button');
+          approve.id = 'pending-modal-approve';
+          approve.type = 'button';
+          approve.className = 'pending-btn-approve';
+          approve.textContent = '仅本次批准';
+          approve.addEventListener('click', () => answerPendingCard(pendingModalItem, 'allowed-once'));
+          actions.append(reject, approve);
+        } else {
+          // question form: options as one-click answers + a custom free-text
+          // input (same {answers} batch shape the IM dispatcher sends).
+          const questions = Array.isArray(model.questions) ? model.questions : [];
+          for (const question of questions) {
+            const q = document.createElement('p');
+            q.className = 'pending-modal-question';
+            q.textContent = question.question;
+            body.append(q);
+            const options = document.createElement('div');
+            options.className = 'pending-modal-options';
+            for (const option of question.options || []) {
+              const button = document.createElement('button');
+              button.type = 'button';
+              button.textContent = option.label;
+              button.addEventListener('click', () => answerPendingCard(pendingModalItem, {
+                answers: [{ id: question.id, selected: [option.label] }],
+              }));
+              options.append(button);
+            }
+            const custom = document.createElement('input');
+            custom.type = 'text';
+            custom.placeholder = PENDING_MODAL_TXT.customPlaceholder;
+            custom.maxLength = 500;
+            const submit = document.createElement('button');
+            submit.type = 'button';
+            submit.textContent = PENDING_MODAL_TXT.submit;
+            submit.addEventListener('click', () => {
+              const text = custom.value.trim();
+              if (!text) return;
+              answerPendingCard(pendingModalItem, {
+                answers: [{ id: question.id, selected: [], custom: text }],
+              });
+            });
+            options.append(custom, submit);
+            body.append(options);
+          }
+        }
+      }
+
+      function closePendingModal() {
+        pendingModalRoot.hidden = true;
+        pendingModalItem = null;
+        document.getElementById('pending-modal-body').replaceChildren();
+        document.getElementById('pending-modal-actions').replaceChildren();
+        setPanelActionsBlocked(false);
+      }
+
+      document.getElementById('pending-modal-close').addEventListener('click', closePendingModal);
+      pendingModalRoot.addEventListener('click', (event) => {
+        if (event.target === pendingModalRoot) closePendingModal(); // backdrop: answer nothing
+      });
 
       function employeeName(employeeId) {
         const employee = latestSnapshot && latestSnapshot.employees.find((e) => e.employeeId === employeeId);
@@ -1965,6 +2230,15 @@
       });
       document.addEventListener('keydown', (event) => {
         if (event.key === 'Tab') return; // native focus order handles panel traversal
+        // P3: the danger modal owns Escape while it is open. Closing it
+        // answers NOTHING — an approval request never times out, so the card
+        // simply stays until the user decides (cross-tool memo: "Permission
+        // requests and plan approvals always wait").
+        if (!pendingModalRoot.hidden && event.key === 'Escape') {
+          closePendingModal();
+          event.preventDefault();
+          return;
+        }
         // Task E2a: when the layout editor is open its editing shortcuts win
         // (typing fields are excluded); unmatched keys keep the page's
         // employee navigation behaviour.
