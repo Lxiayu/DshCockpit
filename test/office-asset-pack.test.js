@@ -1,7 +1,7 @@
 'use strict';
 
 // Task 2 / SPEC-02 — character pack contract tests (validator + fixture pack).
-// RED: scripts/office-assets/validate-character-pack.js and the generated
+// RED: src/office/runtime/validate-character-pack.js and the generated
 // fixture do not exist yet.
 //
 // Geometry authority rules under test:
@@ -26,7 +26,7 @@ const BUILTIN_PACK = path.join(ROOT, 'resources', 'characters', 'deepseek-defaul
 
 let validator;
 try {
-  validator = require(path.join(ROOT, 'scripts', 'office-assets', 'validate-character-pack.js'));
+  validator = require(path.join(ROOT, 'src', 'office', 'runtime', 'validate-character-pack.js'));
 } catch (error) {
   validator = null;
 }
@@ -202,8 +202,8 @@ function inTemp(rel) {
 // ---------------------------------------------------------------------------
 
 test('validator module exists and is dependency-free', () => {
-  assert.ok(validator, 'scripts/office-assets/validate-character-pack.js must exist');
-  const src = fs.readFileSync(path.join(ROOT, 'scripts', 'office-assets', 'validate-character-pack.js'), 'utf8');
+  assert.ok(validator, 'src/office/runtime/validate-character-pack.js must exist');
+  const src = fs.readFileSync(path.join(ROOT, 'src', 'office', 'runtime', 'validate-character-pack.js'), 'utf8');
   assert.doesNotMatch(src, /require\(\s*['"](?!\.\/|\.\/|node:)[^'"]+\)/, 'only relative/node: requires');
   assert.match(src, /['"]use strict['"]/);
 });

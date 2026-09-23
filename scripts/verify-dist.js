@@ -77,6 +77,9 @@ const REQUIRED_ASAR_PATHS = [
   'src/office/fixtures/office-layout-flat.json',
   'src/office/render/pixi-office-renderer.js',
   'src/office/runtime/character-pack-installer.js',
+  // P5: the installer requires this validator at module level — it MUST ship
+  // inside the asar (script trees under scripts/ are not packaged).
+  'src/office/runtime/validate-character-pack.js',
   'node_modules/pixi.js/dist/pixi.min.js',
 ];
 

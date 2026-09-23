@@ -28,7 +28,7 @@ try {
 const { createCharacterPackInstaller } = installerModule || {};
 const validator = (() => {
   try {
-    return require(path.join(ROOT, 'scripts', 'office-assets', 'validate-character-pack.js'));
+    return require(path.join(ROOT, 'src', 'office', 'runtime', 'validate-character-pack.js'));
   } catch (error) {
     return null;
   }

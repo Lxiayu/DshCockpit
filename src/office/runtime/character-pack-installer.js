@@ -16,8 +16,9 @@
 //   symlinks, encrypted entries, unknown compression methods, duplicate entry
 //   names, entry-count/per-file/total-size limits and compression-ratio bombs
 //   BEFORE inflating; verifies CRC-32 of every extracted entry.
-// - Validation reuses scripts/office-assets/validate-character-pack.js (the
-//   single source of truth) before installation and again before activation.
+// - Validation reuses ./validate-character-pack.js (the single source of
+//   truth, internalized into src/ in P5) before installation and again
+//   before activation.
 // - Fallback order: selected pack -> pinned built-in pack -> stable
 //   diagnostic placeholder error (never a blank scene).
 
@@ -26,7 +27,7 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 const { randomBytes } = require('node:crypto');
 
-const { validateCharacterPack } = require('../../../scripts/office-assets/validate-character-pack.js');
+const { validateCharacterPack } = require('./validate-character-pack.js');
 
 const LIMITS = Object.freeze({
   maxFileCount: 512,

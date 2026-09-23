@@ -1,16 +1,25 @@
 'use strict';
 
-// scripts/office-assets/validate-character-pack.js — Task 2 / SPEC-02.
+// src/office/runtime/validate-character-pack.js — Task 2 / SPEC-02.
 // Declarative, dependency-free character pack validator. It never executes
 // pack content and never writes into the pack: validation-report.json is
 // produced by the normalizer and treated as immutable diagnostic input.
 //
 // Pixel-level geometry (alpha thresholds, foot candidates) is measured by
-// scripts/office-assets/normalize-character.py with Pillow; this validator
+// the workbench-side normalize-character.py with Pillow; this validator
 // checks schema, paths, license, declared geometry consistency, PNG header
 // sanity, size limits and pack safety with stable error codes.
 //
-// CLI: node scripts/office-assets/validate-character-pack.js <packPath>
+// CLI: node src/office/runtime/validate-character-pack.js <packPath>
+//
+// P5 (2026-09-23) internalization: the character pack installer is PRODUCT
+// code (src/office/runtime/character-pack-installer.js), so the validator it
+// requires must live inside src/** — the packaged asar only ships src/**.
+// It used to live at scripts/office-assets/ (the dev-only asset pipeline) and
+// the require edge src/** -> scripts/** would have pointed at a file that does
+// not exist in the artifact. Moved here; the assertions in
+// test/office-packaging-boundary.test.js pin both facts.
+//
 //   prints one JSON object; exit 0 = valid, 4 = invalid, 3 = usage/internal.
 
 const fs = require('node:fs');
