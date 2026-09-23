@@ -1,7 +1,14 @@
 /* src/office/office.css — Task 7 / SPEC-07. Placeholder styling for the
    office view: canvas on the left, details panel on the right. Hierarchy per
    decision 35: large employee name, role dot, prominent task/result, small
-   dim diagnostics. Visual polish (final art) is a later task. */
+   dim diagnostics. Visual polish (final art) is a later task.
+
+   P2 (right-panel rework, spec §3 six blocks): the panel carries the today's
+   usage block, the staff status rows, the pending inbox container, the
+   timeline with per-turn attribution, the employee details (structure
+   retained) and the minimal footer. Dark theme follows the shell through
+   html[data-theme] (P2 preload shell:get-theme / shell:theme, same
+   convention as the rail page). */
 
 :root {
   color-scheme: light;
@@ -13,6 +20,36 @@
   --accent: #1677a8;
   --accent-soft: #e1e8ec;
   --badge: #a96e00;
+  /* P2 additions */
+  --ok: #2e7d32;
+  --warn: #b26a00;
+  --risk-low: #2e7d32;
+  --risk-medium: #b26a00;
+  --risk-high: #b3261e;
+  --need: #b3261e;
+  --track: #d8dde1;
+  --chip: #ffffff;
+}
+
+/* P2 dark theme (shell-owned via html[data-theme]; light is the default). */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --office-bg: #14171a;
+  --panel-bg: #1b1f23;
+  --panel-edge: #333a41;
+  --text: #e6eaee;
+  --text-dim: #9aa5ae;
+  --accent: #58b6e8;
+  --accent-soft: #22303a;
+  --badge: #e3b341;
+  --ok: #7bd88f;
+  --warn: #e3b341;
+  --risk-low: #7bd88f;
+  --risk-medium: #e3b341;
+  --risk-high: #f28b82;
+  --need: #f28b82;
+  --track: #333a41;
+  --chip: #23282d;
 }
 
 * { box-sizing: border-box; }
@@ -87,33 +124,6 @@ html, body {
 }
 
 #employee-list-block { margin: 0; }
-
-#employee-list {
-  list-style: none;
-  margin: 6px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-#employee-list li {
-  padding: 6px 10px;
-  border-radius: 6px;
-  background: var(--accent-soft);
-  cursor: pointer;
-  font-size: 13px;
-}
-
-#employee-list li:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-#employee-list li.selected {
-  outline: 2px solid var(--accent);
-  background: #33507a;
-}
 
 #details { border-top: 1px solid var(--panel-edge); padding-top: 10px; }
 
@@ -201,15 +211,371 @@ html, body {
   gap: 2px;
 }
 
-#activity-log li {
-  font-size: 12px;
-  color: var(--text-dim);
-}
+#activity-block { border-top: 1px solid var(--panel-edge); padding-top: 10px; }
 
 #office-footer {
   margin-top: auto;
   border-top: 1px solid var(--panel-edge);
   padding-top: 10px;
+}
+
+/* P2 ⑥ footer: minimal sync dot + reduced motion + theme following. The
+   layout-editor entry (P5 removes it) stays as a dim footer chip, out of
+   the new structure's prominent spots. */
+.footer-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sync-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--ok);
+}
+
+.sync-dot[data-sync="stale"] { background: var(--warn); }
+.sync-dot[data-sync="resyncing"] { background: var(--accent); }
+.sync-dot.sync-warn { background: var(--warn); }
+
+#footer-tools {
+  margin-left: auto;
+}
+
+#btn-layout-editor {
+  opacity: 0.55;
+  font-size: 11px;
+  padding: 3px 7px;
+}
+
+#btn-layout-editor:hover {
+  opacity: 0.9;
+}
+
+[data-theme="dark"] #btn-layout-editor {
+  background: var(--chip);
+}
+
+/* ---- P2: shared block head -------------------------------------------- */
+
+.block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.block-head h2 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+/* ---- P2 ① today's usage ------------------------------------------------ */
+
+#usage-block {
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  background: var(--chip);
+  padding: 10px 12px;
+}
+
+.usage-headline {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 6px 0 0;
+  flex-wrap: wrap;
+}
+
+.usage-headline strong {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.usage-unit {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.usage-money {
+  margin-left: auto;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.usage-stale {
+  font-size: 11px;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.usage-split {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.usage-split li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-dim);
+}
+
+.usage-split b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.usage-note {
+  font-style: normal;
+  opacity: 0.75;
+  margin-left: 2px;
+}
+
+.usage-budget {
+  margin-top: 8px;
+}
+
+.usage-budget-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.usage-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--track);
+  overflow: hidden;
+}
+
+.usage-progress-bar {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.usage-progress-bar.over {
+  background: var(--need);
+}
+
+/* ---- P2 ② staff status rows -------------------------------------------- */
+
+#employee-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#employee-list li {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+#employee-list li:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+#employee-list li.selected {
+  outline: 2px solid var(--accent);
+  background: #33507a;
+}
+
+[data-theme="dark"] #employee-list li.selected {
+  background: #2b4a66;
+}
+
+.staff-name {
+  font-weight: 600;
+}
+
+.staff-status {
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 0 7px;
+  border: 1px solid var(--panel-edge);
+  background: var(--chip);
+  color: var(--text-dim);
+}
+
+.staff-status.status-working { color: var(--ok); border-color: var(--ok); }
+.staff-status.status-roaming { color: var(--accent); border-color: var(--accent); }
+.staff-status.status-chatting { color: var(--badge); border-color: var(--badge); }
+.staff-status.status-sleeping { color: var(--text-dim); }
+.staff-status.status-celebrating { color: var(--ok); border-color: var(--ok); }
+
+.staff-task,
+.staff-tool,
+.staff-queue {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.staff-tool::before {
+  content: "· ";
+}
+
+.need-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--need);
+  border-radius: 999px;
+  padding: 0 8px;
+}
+
+#pending-count {
+  min-width: 20px;
+  text-align: center;
+}
+
+#employee-list li .need-badge {
+  margin-left: auto;
+}
+
+.need-pulse {
+  animation: need-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes need-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .need-pulse { animation: none; }
+}
+
+/* ---- P2 ③ pending inbox (container + count only; actions are P3) ------- */
+
+#pending-block {
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  background: var(--chip);
+  padding: 10px 12px;
+}
+
+#pending-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pending-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.pending-risk {
+  flex: 0 0 auto;
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 0 5px;
+  border: 1px solid var(--panel-edge);
+  color: var(--text-dim);
+}
+
+.pending-risk.risk-low { color: var(--risk-low); border-color: var(--risk-low); }
+.pending-risk.risk-medium { color: var(--risk-medium); border-color: var(--risk-medium); }
+.pending-risk.risk-high { color: var(--risk-high); border-color: var(--risk-high); }
+
+.pending-body {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.pending-body b {
+  font-weight: 600;
+}
+
+.pending-time {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+/* ---- P2 ④ timeline ------------------------------------------------------ */
+
+#activity-log li {
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  gap: 6px;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 1px 2px;
+}
+
+#activity-log li:hover {
+  background: var(--accent-soft);
+}
+
+.tl-time {
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.tl-who {
+  flex: 0 0 auto;
+  color: var(--text);
+}
+
+.tl-turn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+#timeline-more {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+#timeline-more:hover {
+  text-decoration: underline;
 }
 
 #layout-editor {

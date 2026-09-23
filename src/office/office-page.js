@@ -14,6 +14,13 @@
 // from a FIXED whitelist of snapshot fields. Task summaries, session ids,
 // token counts, tool arguments/results and raw error text are structurally
 // absent — extra snapshot fields are ignored, not rendered.
+//
+// P2 (right-panel rework, spec §3): the controller also shapes the six-block
+// panel view models — usageView (today's usage), staffRows (status badge +
+// de-identified 任务 #N title + current tool phrase + 需要你), pendingSummary
+// (inbox container + count only; inline actions are P3) and the timeline rows
+// with their per-turn token attribution (turnUsage/turnCost/turnDurationMs,
+// stamped by the module from first-hand provider usage records).
 
 const ACTIVITY_LABELS = Object.freeze({
   roaming: '漫游中',
@@ -75,6 +82,58 @@ const OUTCOME_LABELS = Object.freeze({
   failed: '未完成',
   cancelled: '已取消',
 });
+
+// P2 staff status badges (spec §3 block 2): short office-semantics labels.
+// The coarse activities map to 工作/巡游/闲聊/小憩; anything unknown falls
+// back to the activity label above.
+const STAFF_STATUS_LABELS = Object.freeze({
+  working: '工作',
+  roaming: '巡游',
+  chatting: '闲聊',
+  resting: '休息',
+  sleeping: '小憩',
+  thinking: '思考',
+  waiting: '等待',
+  celebrating: '庆祝',
+});
+
+// P2 usage block (spec §3 block 1 / §6 i18n): the zh texts mirror the shell
+// dictionary keys office.usage.* (the page keeps its historical zh-only
+// convention — the shared tool phrase already rides the snapshot through the
+// same family). pricingBasis markers are the §4 contract vocabulary.
+const USAGE_BASIS_LABELS = Object.freeze({
+  'api-key': '按 API Key 用量估算（本地速率）',
+  subscription: '订阅套餐（金额仅供参考）',
+});
+
+/** Compact token count: 千 / 万 (百万 rides 万), original value on hover. */
+function formatCount(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  if (n >= 1e8) return `${(n / 1e8).toFixed(2)} 亿`;
+  if (n >= 1e5) return `${(n / 1e4).toFixed(0)} 万`;
+  if (n >= 1e4) return `${(n / 1e4).toFixed(1)} 万`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)} 千`;
+  return String(Math.round(n));
+}
+
+/** Money in CNY: two decimals below ¥100, tighter above. */
+function formatMoney(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '¥0.00';
+  if (n >= 1000) return `¥${n.toFixed(0)}`;
+  if (n >= 100) return `¥${n.toFixed(1)}`;
+  return `¥${n.toFixed(2)}`;
+}
+
+/** Turn duration ms -> "12s" / "3m 05s". */
+function formatDuration(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n <= 0) return '—';
+  const totalSeconds = Math.round(n / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  return `${Math.floor(totalSeconds / 60)}m ${String(totalSeconds % 60).padStart(2, '0')}s`;
+}
 
 function activityLabel(activity) {
   return ACTIVITY_LABELS[activity] || '在岗';
@@ -238,15 +297,95 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
         employeeId: entry.employeeId,
         kind: entry.kind,
         label: ACTIVITY_LOG_LABELS[entry.kind] || entry.kind,
+        // P2 per-turn attribution: present only when the turn carried a
+        // provider usage record (module-stamped; null otherwise — never
+        // estimated). Numbers only; the money is the same local-rate
+        // estimate the §4 usage block uses.
+        turnUsage: entry.turnUsage ? { ...entry.turnUsage } : null,
+        turnCost: Number.isFinite(entry.turnCost) ? entry.turnCost : null,
+        turnDurationMs: Number.isFinite(entry.turnDurationMs) ? entry.turnDurationMs : null,
       }));
+    },
+
+    // P2 §3 block 1: today's usage view model. Null while the shell has no
+    // usage data yet (the snapshot stays honest instead of showing zeros).
+    usageView() {
+      const usage = snapshot ? snapshot.usage : null;
+      if (!usage) return null;
+      return {
+        dayKey: usage.dayKey,
+        tokensTotal: usage.tokens.total,
+        tokensInput: usage.tokens.input,
+        tokensOutput: usage.tokens.output,
+        tokensCacheRead: usage.tokens.cacheRead,
+        moneyPaid: usage.money.paid,
+        currency: usage.money.currency,
+        savingsCacheRead: usage.savings.cacheRead,
+        savingsLocalModel: usage.savings.localModel,
+        savingsLocalModelBasis: usage.savings.localModelBasis,
+        budgetKind: usage.budget.kind,
+        budgetLimit: usage.budget.limit,
+        budgetUsed: usage.budget.used,
+        pricingBasis: usage.pricingBasis,
+        pricingBasisLabel: USAGE_BASIS_LABELS[usage.pricingBasis] || USAGE_BASIS_LABELS['api-key'],
+        staleAt: usage.staleAt,
+      };
+    },
+
+    // P2 §3 block 2: one view-model row per employee (snapshot whitelist
+    // fields only). `needsYou` is the count of live pending items addressed
+    // to this employee (the "需要你" badge).
+    staffRows() {
+      const pending = snapshot && Array.isArray(snapshot.pending) ? snapshot.pending : [];
+      return employees().map((employee) => {
+        const bound = !!employee.binding;
+        return {
+          employeeId: employee.employeeId,
+          displayName: employee.displayName,
+          role: employee.role,
+          statusLabel: STAFF_STATUS_LABELS[employee.activity] || activityLabel(employee.activity),
+          statusKey: employee.activity,
+          // De-identified title: a per-employee task counter (任务 #N),
+          // visible only while a task is bound. Never runtime text.
+          taskTitle: bound && employee.taskSeq > 0 ? `任务 #${employee.taskSeq}` : null,
+          // Current tool phrase (shared tool-phrases module via the
+          // snapshot); shown only while a task is bound.
+          toolPhrase: bound && employee.toolPhrase ? employee.toolPhrase : null,
+          queueCount: employee.queueCount || 0,
+          needsYou: pending.filter((item) => item.employeeId === employee.employeeId).length,
+          selected: employee.employeeId === selectedId,
+        };
+      });
+    },
+
+    // P2 §3 block 3: the "待你处理" inbox CONTAINER and its count only —
+    // inline approve/reject and the danger modal are P3 (spec §8).
+    pendingSummary() {
+      const pending = snapshot && Array.isArray(snapshot.pending) ? snapshot.pending : [];
+      return {
+        count: pending.length,
+        items: pending.map((item) => ({
+          id: item.id,
+          kind: item.kind,
+          employeeId: item.employeeId,
+          toolName: item.toolName,
+          summary: item.summary,
+          risk: item.risk,
+          createdAtMs: item.createdAtMs,
+        })),
+      };
     },
 
     accessibleLabelFor(employeeId) {
       const employee = employeeById(employeeId);
       if (!employee) return { label: '' };
+      // P2: the de-identified task title and the current tool phrase ride the
+      // label (both are snapshot presentation fields — no runtime text).
       const parts = [
         employee.displayName,
         activityLabel(employee.activity),
+        employee.binding && employee.taskSeq > 0 ? `任务 ${employee.taskSeq}` : null,
+        employee.binding && employee.toolPhrase ? employee.toolPhrase : null,
         employee.queueCount > 0 ? `排队 ${employee.queueCount}` : null,
       ].filter(Boolean);
       return { label: `${parts.join('，')}` };
@@ -292,4 +431,9 @@ module.exports = {
   buildDetailsViewModel,
   ACTIVITY_LABELS,
   ACTIVITY_LOG_LABELS,
+  STAFF_STATUS_LABELS,
+  USAGE_BASIS_LABELS,
+  formatCount,
+  formatMoney,
+  formatDuration,
 };

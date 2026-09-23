@@ -441,12 +441,80 @@ function createOfficeModule(options = {}) {
   let usageBlock = null;
   const pendingItems = new Map(); // id -> contract item (insertion ordered)
   const pendingRoutes = new Map(); // id -> { rpcId } — the runtime routing id
+  // P2 timeline token attribution (spec §3 block 4). One open turn per active
+  // binding handle: `runtime/usage` facts (main.js translated the 0.1.5
+  // assistant/message `data.usage` provider record into them — a first-hand
+  // per-turn source, never a day-bucket difference) accrue here and are
+  // attached to the turn's task-started and result activity-log entries when
+  // it ends. Keyed by the turn-scoped binding handle, so concurrent sessions
+  // can never mix their accounting.
+  const turnUsage = new Map(); // handle -> {employeeId, usage, cost, startedAtMs, startEntry}
+  const TURN_USAGE_CAP = 32;
+
+  /** Open one turn's accumulator when the employee sits down for a task. */
+  function openTurnUsage(handle, employeeId, startEntry) {
+    if (typeof handle !== 'string' || handle === '') return;
+    while (turnUsage.size >= TURN_USAGE_CAP) {
+      const oldest = turnUsage.keys().next().value;
+      turnUsage.delete(oldest);
+    }
+    turnUsage.set(handle, {
+      employeeId,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      cost: 0,
+      startedAtMs: logicalMs,
+      startEntry: startEntry || null,
+    });
+  }
+
+  /** Add one translated provider usage bucket (numbers only). */
+  function accrueTurnUsage(handle, employeeId, usage, cost) {
+    if (typeof handle !== 'string' || handle === '') return;
+    let entry = turnUsage.get(handle);
+    if (!entry) {
+      openTurnUsage(handle, employeeId, null);
+      entry = turnUsage.get(handle);
+    }
+    const u = entry.usage;
+    u.input += Number.isFinite(Number(usage && usage.input)) ? Math.max(0, Math.round(Number(usage.input))) : 0;
+    u.output += Number.isFinite(Number(usage && usage.output)) ? Math.max(0, Math.round(Number(usage.output))) : 0;
+    u.cacheRead += Number.isFinite(Number(usage && usage.cacheRead)) ? Math.max(0, Math.round(Number(usage.cacheRead))) : 0;
+    u.cacheWrite += Number.isFinite(Number(usage && usage.cacheWrite)) ? Math.max(0, Math.round(Number(usage.cacheWrite))) : 0;
+    entry.cost += Number.isFinite(Number(cost)) && Number(cost) > 0 ? Number(cost) : 0;
+  }
+
+  /**
+   * Close one turn's accumulator and stamp its attribution onto the turn's
+   * activity-log entries (the task-started row and the result row). A turn
+   * with no provider accounting stays unattributed — no invented numbers.
+   * @returns {object|null} the attribution, or null when there is nothing.
+   */
+  function finalizeTurnUsage(handle, resultEntry) {
+    const entry = turnUsage.get(handle);
+    if (!entry) return null;
+    turnUsage.delete(handle);
+    const u = entry.usage;
+    const total = u.input + u.output + u.cacheRead + u.cacheWrite;
+    if (total <= 0) return null;
+    const stamp = {
+      turnUsage: { input: u.input, output: u.output, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite, total },
+      turnCost: Math.round(entry.cost * 1e4) / 1e4,
+      turnDurationMs: Math.max(0, logicalMs - entry.startedAtMs),
+    };
+    if (entry.startEntry && entry.startEntry.turnUsage === undefined) {
+      Object.assign(entry.startEntry, stamp);
+    }
+    if (resultEntry) Object.assign(resultEntry, stamp);
+    return stamp;
+  }
 
   function noteLog(kind, employeeId, detail) {
-    activityLog.push(detail
+    const entry = detail
       ? { atMs: logicalMs, employeeId, kind, ...detail }
-      : { atMs: logicalMs, employeeId, kind });
+      : { atMs: logicalMs, employeeId, kind };
+    activityLog.push(entry);
     if (activityLog.length > ACTIVITY_LOG_LIMIT) activityLog.splice(0, activityLog.length - ACTIVITY_LOG_LIMIT);
+    return entry;
   }
 
   function noteDiagnostic(code) {
@@ -801,9 +869,13 @@ function createOfficeModule(options = {}) {
     scheduler.interruptForTask({ employeeId: rec.employeeId, reason: 'runtime-task', nowMs: logicalMs });
     if (wasNapping) noteLog('sleep-ended', rec.employeeId, { reason: 'task' });
     rec.marker = null;
-    beginTaskTransition(rec);
+    beginTaskTransition(rec, binding.sessionId);
     scheduler.markTaskStarted({ employeeId: rec.employeeId, nowMs: logicalMs });
-    noteLog('task-started', rec.employeeId);
+    // P2: the de-identified task title (任务 #N — a per-employee counter, never
+    // runtime text) and this turn's token-attribution accumulator both open
+    // here; the entry is stamped when the turn ends.
+    rec.taskSeq = (rec.taskSeq || 0) + 1;
+    openTurnUsage(binding.sessionId, rec.employeeId, noteLog('task-started', rec.employeeId));
     for (const effect of effects || []) {
       if (effect.type === 'dispatch-started') queue.markRunning({ queueItemId: effect.queueItemId, nowMs: logicalMs });
     }
@@ -817,7 +889,7 @@ function createOfficeModule(options = {}) {
   // - the graph route ends at the workstation APPROACH node; approach->seat
   //   is a separate anchor interpolation segment (never collapsed)
   // - repeated running facts on an active task-start never restart the route
-  function beginTaskTransition(rec) {
+  function beginTaskTransition(rec, handle) {
     const seatNode = nodesById.get(rec.seatNodeId);
     const workstationTemplate = seatNode ? layout.workstation(rec.seatNodeId) : null;
     if (!seatNode || !workstationTemplate) {
@@ -922,7 +994,7 @@ function createOfficeModule(options = {}) {
           const binding = ensureRootBinding(rawSessionId);
           if (!binding) return;
           const rec = employees.get(binding.employeeId);
-          if (!rec.transition || rec.transition.kind !== 'task-start') beginTaskTransition(rec);
+          if (!rec.transition || rec.transition.kind !== 'task-start') beginTaskTransition(rec, binding.sessionId);
           reduce(rec, { type: 'runtime/fact', fact: fact.fact, reason: fact.reason || null });
           const active = queue.activeItem(rec.employeeId);
           if (active) queue.markRunning({ queueItemId: active.queueItemId, nowMs: logicalMs });
@@ -968,6 +1040,16 @@ function createOfficeModule(options = {}) {
         const rec = employees.get(resolved.binding.employeeId);
         rec.toolKind = fact.tool || null;
         reduce(rec, { type: 'runtime/tool', tool: fact.tool || null });
+        break;
+      }
+      case 'runtime/usage': {
+        // P2 timeline attribution: the provider usage record translated by
+        // main.js from the 0.1.5 assistant/message event (first-hand; the
+        // adapter already dropped everything but the numbers). Without a live
+        // binding there is no employee to attribute the turn to.
+        const resolved = resolveActiveRootBinding(rawSessionId);
+        if (!resolved) return;
+        accrueTurnUsage(resolved.handle, resolved.binding.employeeId, fact.usage, fact.cost);
         break;
       }
       case 'runtime/subagent-start': {
@@ -1075,7 +1157,8 @@ function createOfficeModule(options = {}) {
     rec.resultUntilMs = logicalMs + settings.resultPresentationMs;
     rec.lastResult = { outcome, atMs: logicalMs };
     reduce(rec, { type: 'runtime/fact', fact: outcome, reason: outcome });
-    noteLog(outcome === 'completed' ? 'result-completed' : 'result-failed', rec.employeeId);
+    // P2: stamp this turn's provider usage onto its start and result rows.
+    finalizeTurnUsage(sessionId, noteLog(outcome === 'completed' ? 'result-completed' : 'result-failed', rec.employeeId));
     pushSnapshot();
   }
 
@@ -1120,7 +1203,8 @@ function createOfficeModule(options = {}) {
       reduce(rec, { type: 'runtime/fact', fact: 'idle' });
       scheduler.markTaskReleased({ employeeId: rec.employeeId, nowMs: logicalMs });
       releasePathReservation(rec);
-      noteLog('result-cancelled', rec.employeeId);
+      // P2: the cancelled turn's provider usage still belongs to its rows.
+      finalizeTurnUsage(handle, noteLog('result-cancelled', rec.employeeId));
     }
     applyRegistryEffects(result.effects);
     pushSnapshot();
@@ -1711,8 +1795,12 @@ function createOfficeModule(options = {}) {
   // runtime payload text.
   // `bubble` carries a STATIC corpus line (authored content, never runtime
   // payload), so it skips the value-shape redactor like the other allowlisted
-  // presentation fields.
-  const PRESENTATION_ALLOWLIST = Object.freeze(['displayName', 'role', 'taskLabel', 'marker', 'bubble']);
+  // presentation fields. P2 extends the whitelist (never bypasses the
+  // redactor): `toolPhrase` is a fixed i18n-family phrase (office.staff.
+  // currentTool.*, zh value of the shared tool-phrases module) and `taskSeq`
+  // a per-employee counter — the de-identified task title (任务 #N). Neither
+  // carries runtime text.
+  const PRESENTATION_ALLOWLIST = Object.freeze(['displayName', 'role', 'taskLabel', 'marker', 'bubble', 'toolPhrase', 'taskSeq']);
 
   // P1 pending items (spec §4). Every field is either app-controlled
   // vocabulary (kind / risk / toolName / summary / detailRef / employeeId), a
@@ -1856,6 +1944,11 @@ function createOfficeModule(options = {}) {
           ? 'chat-ellipsis'
           : rec.state.activity === 'sleeping' ? 'sleep-zzz' : null,
         toolKind: rec.toolKind,
+        // P2 staff row: the current tool as the shared zh phrase (tool-phrases
+        // module → §6 i18n family; '其他' for unknown tools) and the
+        // de-identified task title counter. Both are presentation fields.
+        toolPhrase: rec.toolKind ? toolPhraseZhOf(rec.toolKind) : null,
+        taskSeq: rec.taskSeq || 0,
         bubble: rec.bubble ? { text: rec.bubble.text, topic: rec.bubble.topic || null, untilMs: rec.bubble.untilMs } : null,
         animation: {
           resource: animation.resource,
@@ -2257,6 +2350,7 @@ function createOfficeModule(options = {}) {
     stop();
     listeners.clear();
     adapters.clear();
+    turnUsage.clear();
     visibleViews.clear();
   }
 

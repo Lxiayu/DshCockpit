@@ -8,6 +8,12 @@
 // there are no raw send/on business channels. The main process
 // re-validates every payload (schema + size limit + privacy redactor); the
 // size guard here is defense in depth, not the authority.
+//
+// P2 (right-panel rework, spec §3 block 6 "主题跟随"): the page ALSO follows
+// the shell theme, exactly like the left rail page does — shell-owned state
+// (shell:get-theme / the shell:theme push) read through the same narrow
+// bridge. This adds no new business channel; the whitelisted seven above
+// stay exactly seven.
 
 const { contextBridge, ipcRenderer } = require('electron');
 
@@ -80,5 +86,16 @@ contextBridge.exposeInMainWorld('officeBridge', {
   onState: (listener) => {
     if (typeof listener === 'function') stateListeners.add(listener);
     return () => stateListeners.delete(listener);
+  },
+  // P2: shell theme following (same convention as the office-rail preload —
+  // shell-owned state, no new business channel). getTheme resolves the
+  // current theme once; onTheme receives every later shell:theme push.
+  getTheme: () => ipcRenderer.invoke('shell:get-theme'),
+  onTheme: (listener) => {
+    const themeListener = (_event, value) => {
+      if (typeof listener === 'function') listener(value);
+    };
+    ipcRenderer.on('shell:theme', themeListener);
+    return () => ipcRenderer.removeListener('shell:theme', themeListener);
   },
 });

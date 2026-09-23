@@ -369,6 +369,31 @@ function createRuntimeAdapter(options = {}) {
         facts.push({ type: 'runtime/tool', tool: coarse(payload.tool) });
         break;
       }
+      // P2 timeline attribution: main.js's ingestOfficeJournalEvent already
+      // translated the 0.1.5 assistant/message `data.usage` (TokenUsage) into
+      // the §4-shaped bucket {input, output, cacheRead, cacheWrite} + a
+      // per-turn money estimate. Only non-negative integers pass here — the
+      // redacted payload carries no text. A zero bucket is dropped (a turn
+      // with no provider accounting simply gets no attribution).
+      case 'turn/usage': {
+        const usage = isPlainObject(payload.usage) ? payload.usage : {};
+        const bucket = {};
+        let total = 0;
+        for (const key of ['input', 'output', 'cacheRead', 'cacheWrite']) {
+          const n = Number(usage[key]);
+          bucket[key] = Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+          total += bucket[key];
+        }
+        const cost = Number(payload.cost);
+        if (total > 0) {
+          facts.push({
+            type: 'runtime/usage',
+            usage: bucket,
+            cost: Number.isFinite(cost) && cost > 0 ? cost : 0,
+          });
+        }
+        break;
+      }
       case 'subagent/start': {
         const runId = runProxy(raw.runId);
         if (runId) activeRuns.add(runId);

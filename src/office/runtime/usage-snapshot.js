@@ -99,6 +99,25 @@ function ratesOf(input) {
 }
 
 /**
+ * Price ONE turn/step usage bucket at the SAME local rates the §4 block uses
+ * (the cost-center snapshot's rates when present, else the raw settings).
+ * Kept beside buildOfficeUsage so the panel's per-turn money (timeline
+ * attribution, P2) and its daily money can never diverge in basis.
+ * @param {{input?: number, output?: number, cacheRead?: number, cacheWrite?: number}} usage
+ * @param {{costSnap?: object, settings?: object}} [input]
+ * @returns {number} CNY, rounded like the block's money fields.
+ */
+function priceUsageAt(usage, input = {}) {
+  const bucket = {
+    input: int(usage && usage.input),
+    output: int(usage && usage.output),
+    cacheRead: int(usage && usage.cacheRead),
+    cacheWrite: int(usage && usage.cacheWrite),
+  };
+  return money(costOf(bucket, ratesOf(input)));
+}
+
+/**
  * @param {object} [input]
  * @param {object} [input.collectData]  token-stats collect() cache output
  *   (totals.days carries the R4 per-day buckets).
@@ -166,4 +185,4 @@ function buildOfficeUsage(input = {}) {
   return block;
 }
 
-module.exports = { buildOfficeUsage, billingDayKey, STALE_AFTER_MS };
+module.exports = { buildOfficeUsage, priceUsageAt, billingDayKey, STALE_AFTER_MS };

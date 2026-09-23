@@ -77,7 +77,7 @@ const { resolveOfficeCharacterPack } = require('./office/office-pack-resolver.js
 // the office module never collects. toolNameOfJournalData is the shared M5
 // tool-name extraction (data.name, pre-0.1.5 data.tool) also used by the
 // office tool-phrase mapping.
-const { buildOfficeUsage } = require('./office/runtime/usage-snapshot.js');
+const { buildOfficeUsage, priceUsageAt } = require('./office/runtime/usage-snapshot.js');
 const { toolNameOfJournalData } = require('./office/runtime/tool-phrases.js');
 const { createPendingMirror } = require('./office/runtime/pending-mirror.js');
 const { createSkillsManager, buildSkillsMarketPayload } = require('./skills');
@@ -4038,6 +4038,9 @@ function ingestOfficeJournalEvent(sessionId, event) {
   const mod = officeModuleInstance;
   if (!mod || !event || typeof event !== 'object' || typeof event.type !== 'string') return;
   const data = event.data && typeof event.data === 'object' ? event.data : {};
+  // P2 turn/usage helpers: only non-negative integers ever enter the office
+  // envelope (provider usage counters); the message text never does.
+  const nonNegInt = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.round(Number(v)) : 0);
   // 0.1.5 journal → office envelope translation (plan §5). The adapter's
   // vocabulary still speaks the 0.1.x wire: turn/start carries the running
   // fact (the old agent/status runtime event no longer exists), turn/end's
@@ -4067,6 +4070,40 @@ function ingestOfficeJournalEvent(sessionId, event) {
       sessionId, type: 'tool/call', seq: event.seq, time: event.time,
       data: { tool: toolNameOfJournalData(data) },
     });
+    return;
+  }
+  if (event.type === 'assistant/message') {
+    // P2 timeline token attribution. The 0.1.5 journal carries the provider
+    // usage record ON the assistant/message event itself — dsh-session's
+    // 'assistant/message' type: "Carries the step's `usage` when the adapter
+    // reported token accounting, so the model output and its accounting
+    // travel together (there is no separate usage record)"; the same
+    // `data.usage = {inputTokens, outputTokens, cacheReadTokens,
+    // cacheWriteTokens}` is what src/token-stats.js reads off session logs.
+    // This is a FIRST-HAND per-turn source (never a day-bucket difference,
+    // which would mis-attribute under concurrency), so only the four NUMBERS
+    // are translated — the message text itself never reaches the office —
+    // under the §4 usage-block key convention, plus a per-turn money
+    // estimate priced at the same local rates as the usage block.
+    const usage = data.usage && typeof data.usage === 'object' && !Array.isArray(data.usage) ? data.usage : null;
+    if (usage) {
+      const bucket = {
+        input: nonNegInt(usage.inputTokens),
+        output: nonNegInt(usage.outputTokens),
+        cacheRead: nonNegInt(usage.cacheReadTokens),
+        cacheWrite: nonNegInt(usage.cacheWriteTokens),
+      };
+      if (bucket.input + bucket.output + bucket.cacheRead + bucket.cacheWrite > 0) {
+        mod.ingestHarnessEvent({
+          sessionId, type: 'turn/usage', seq: event.seq, time: event.time,
+          data: {
+            turn: Number.isFinite(Number(data.turn)) ? Number(data.turn) : null,
+            usage: bucket,
+            cost: priceUsageAt(bucket, { costSnap: latestCostSnapshot.data, settings: settings.get() }),
+          },
+        });
+      }
+    }
     return;
   }
   mod.ingestHarnessEvent({ sessionId, type: event.type, seq: event.seq, time: event.time, data });

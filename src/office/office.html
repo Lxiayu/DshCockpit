@@ -80,14 +80,61 @@
     <header id="office-overview">
       <h1>Agent Office</h1>
       <p id="overview-summary" aria-live="polite">载入中…</p>
-      <p class="hint" id="sync-summary">同步：未知</p>
     </header>
 
+    <!-- ① 今日用量（spec §3 block 1）：token 与金额双显示、节省拆分（缓存/本地模型·云端等价）、
+         预算进度、数据延迟标记。只读；数值来自壳侧缓存（usage 块，P1 数据管道）。 -->
+    <section id="usage-block" aria-label="今日用量">
+      <div class="block-head">
+        <h2>今日用量</h2>
+        <span id="usage-stale" class="usage-stale" hidden>数据延迟</span>
+      </div>
+      <p id="usage-empty" class="hint" hidden>今日暂无用量数据</p>
+      <div id="usage-body" hidden>
+        <p class="usage-headline">
+          <strong id="usage-tokens" title="">0</strong>
+          <span class="usage-unit">tokens</span>
+          <span id="usage-money" class="usage-money">≈ ¥0.00</span>
+        </p>
+        <p id="usage-basis" class="hint">按 API Key 用量估算（本地速率）</p>
+        <ul class="usage-split">
+          <li><span>缓存命中省</span><b id="usage-save-cache">¥0.00</b></li>
+          <li><span>本地模型省<i class="usage-note">（云端等价）</i></span><b id="usage-save-local">¥0.00</b></li>
+          <li><span>云端实付</span><b id="usage-cloud">¥0.00</b></li>
+        </ul>
+        <div id="usage-budget" class="usage-budget" hidden>
+          <p class="usage-budget-line"><span>本月预算</span><span id="usage-budget-text">¥0.00 / ¥0.00</span></p>
+          <div class="usage-progress"><div id="usage-progress-bar" class="usage-progress-bar"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ② 员工状态行（spec §3 block 2）：状态徽标 + 去标识化任务标题 + 当前工具短语 + 需要你角标 -->
     <section id="employee-list-block" aria-label="员工列表">
       <ul id="employee-list" role="listbox" aria-label="选择员工查看详情"></ul>
       <p class="hint">方向键移动焦点，Enter 或空格选中，Esc 取消选中</p>
     </section>
 
+    <!-- ③ 待你处理（spec §3 block 3）。P2 只做容器与计数（spec §8）：行内批/拒与危险模态是 P3；
+         回答统一走既有 respondToRuntime（$events/result）共享通道，P3 接入。 -->
+    <section id="pending-block" aria-label="待你处理">
+      <div class="block-head">
+        <h2>待你处理</h2>
+        <span id="pending-count" class="need-badge">0</span>
+      </div>
+      <p id="pending-empty" class="hint">暂无待处理 ✓</p>
+      <ul id="pending-list" aria-live="polite"></ul>
+    </section>
+
+    <!-- ④ 时间线（spec §3 block 4）：时间 + 员工 + 事件 + 本轮 token/金额归属（provider usage 一手记录）。
+         默认 20 条，更多展开到 100 条。 -->
+    <section id="activity-block" aria-label="时间线">
+      <h3>时间线</h3>
+      <ul id="activity-log" aria-live="polite"></ul>
+      <button id="timeline-more" type="button" hidden>更多</button>
+    </section>
+
+    <!-- ⑤ 选中员工详情（spec §3 block 5，结构保留；今日工作记录是 P4） -->
     <section id="details" aria-label="员工详情" aria-live="polite">
       <p class="hint" id="details-placeholder">点击场景中的员工或用键盘选择查看详情</p>
       <div id="details-body" hidden>
@@ -104,16 +151,18 @@
       </div>
     </section>
 
-    <section id="activity-block" aria-label="活动日志">
-      <h3>活动</h3>
-      <ul id="activity-log" aria-live="polite"></ul>
-    </section>
-
+    <!-- ⑥ 页脚（spec §3 block 6）：极简同步点（正常/迟到/重连中 + tooltip）+ 减少动画 + 主题跟随。
+         降级诊断收进 tooltip（细节仍走 office:diagnostics）；布局编辑入口保留但不显眼（删除是 P5）。 -->
     <footer id="office-footer">
-      <label class="checkbox">
-        <input id="ctl-reduced-motion" type="checkbox" />
-        减少动画
-      </label>
+      <div class="footer-row">
+        <span id="sync-dot" class="sync-dot" data-sync="healthy" role="img" aria-label="同步正常" title="同步正常"></span>
+        <span id="degraded-dot" class="sync-dot sync-warn" hidden role="img" aria-label="降级" title=""></span>
+        <label class="checkbox">
+          <input id="ctl-reduced-motion" type="checkbox" />
+          减少动画
+        </label>
+        <span id="footer-tools"></span>
+      </div>
       <p class="hint" id="fallback-note" hidden></p>
     </footer>
   </aside>
@@ -327,29 +376,36 @@
         // stays in the main process. Threshold per SPEC-09 (30 fps).
         fpsMonitor: { thresholdFps: 30, windowFrames: 30, lowWindowLimit: 5 },
       });
+      // ② degraded diagnostics (pack / layout / renderer) moved from the
+      // visible fallback note into a footer dot tooltip; details still flow
+      // through the office:diagnostics channel (spec §2). Declared before the
+      // boot diagnostics below so the first note never hits a TDZ.
+      const degradedNotes = [];
+      function noteDegraded(text) {
+        degradedNotes.push(text);
+        const dot = document.getElementById('degraded-dot');
+        dot.hidden = false;
+        dot.title = `${degradedNotes.join('；')}；详情走 office:diagnostics`;
+      }
       if (packDiagnostic) {
-        const note = document.getElementById('fallback-note');
-        note.hidden = false;
-        note.textContent = `角色包降级：${packDiagnostic}；已切换诊断占位形象，详情与日志保持可用`;
+        noteDegraded(`角色包降级：${packDiagnostic}；已切换诊断占位形象，详情与日志保持可用`);
       }
       // Task 8: the production layout draft resolved through saved > bundled;
       // a failed chain degrades to an empty editor with a stable diagnostic
       // instead of blocking the boot. Import/export/undo stay available.
       if (layoutDiagnostic) {
-        const note = document.getElementById('fallback-note');
-        note.hidden = false;
-        note.textContent = `布局降级：${layoutDiagnostic}；编辑器以内置默认布局继续，导入导出保持可用`;
+        noteDegraded(`布局降级：${layoutDiagnostic}；编辑器以内置默认布局继续，导入导出保持可用`);
       }
       if (renderer.mode !== 'webgl') {
-        const note = document.getElementById('fallback-note');
-        note.hidden = false;
-        note.textContent = `渲染降级：${renderer.mode} 模式（${renderer.diagnosticCode || 'ok'}）；详情与日志保持可用`;
+        noteDegraded(`渲染降级：${renderer.mode} 模式（${renderer.diagnosticCode || 'ok'}）；详情与日志保持可用`);
       }
 
+      // P2 presentation helpers (compact counts / money / durations) come from
+      // the shared page module so the panel and its tests pin one formatter.
+      const FMT = REGISTRY['office-page'];
       const page = REGISTRY['office-page'].createOfficePageController({
         bridge,
-        reducedMotion: false,
-        onSnapshot: (snapshot) => {
+        reducedMotion: false,        onSnapshot: (snapshot) => {
           latestSnapshot = snapshot;
           renderer.applySnapshot(snapshot);
           const now = Date.now();
@@ -359,6 +415,9 @@
             renderEmployeeList(snapshot);
             renderDetails();
             renderActivity(snapshot);
+            // P2 blocks (① usage, ③ pending inbox) ride the same ~10Hz cadence.
+            renderUsageBlock(snapshot);
+            renderPendingBlock(snapshot);
           }
         },
       });
@@ -1586,40 +1645,100 @@
         const overview = page.overview();
         document.getElementById('overview-summary').textContent =
           `在岗 ${overview.presentCount} 人 · 执行任务 ${overview.runningCount} · 排队 ${overview.queuedCount}`;
-        const syncLabel = { healthy: '同步正常', stale: '同步滞后', resyncing: '正在重新同步' }[snapshot.sync] || snapshot.sync;
-        document.getElementById('sync-summary').textContent = `同步：${syncLabel}`;
+        // P2: the sync long text left the header for the footer's minimal dot.
+        syncDot(snapshot.sync);
+        void snapshot;
+      }
+
+      // ⑥ minimal sync point: dot + tooltip (status itself unchanged; spec §2
+      // demoted the long text). Labels mirror the §6 i18n family (office.sync.*).
+      const SYNC_LABELS_PAGE = { healthy: '同步正常', stale: '同步迟到', resyncing: '重新连接中' };
+      function syncDot(sync) {
+        const dot = document.getElementById('sync-dot');
+        const label = SYNC_LABELS_PAGE[sync] || sync;
+        dot.dataset.sync = sync || 'healthy';
+        dot.title = label;
+        dot.setAttribute('aria-label', label);
       }
 
       const listEl = document.getElementById('employee-list');
       const listItems = new Map();
+      // ② staff status rows (spec §3 block 2): stable element per employee,
+      // content rebuilt per render. Click selects; the 需要你 badge jumps to
+      // the ③ inbox block.
       function renderEmployeeList(snapshot) {
         const order = page.focusOrder();
-        // stable element per employee: status refresh never rebuilds the list
-        for (const employee of snapshot.employees) {
-          let item = listItems.get(employee.employeeId);
+        for (const row of page.staffRows()) {
+          let item = listItems.get(row.employeeId);
           if (!item) {
             item = document.createElement('li');
             item.setAttribute('role', 'option');
             item.tabIndex = -1;
-            const label = page.accessibleLabelFor(employee.employeeId).label;
-            item.setAttribute('aria-label', label);
-            item.addEventListener('click', () => {
-              page.select(employee.employeeId);
+            item.dataset.employeeId = row.employeeId;
+            item.addEventListener('click', (event) => {
+              if (event.target.closest('.need-badge')) {
+                document.getElementById('pending-block').scrollIntoView({
+                  behavior: page.reducedMotion() ? 'auto' : 'smooth',
+                  block: 'start',
+                });
+                return;
+              }
+              page.select(row.employeeId);
               renderDetails();
               syncListSelection();
             });
             listEl.appendChild(item);
-            listItems.set(employee.employeeId, item);
+            listItems.set(row.employeeId, item);
           }
-          const a11y = page.accessibleLabelFor(employee.employeeId).label;
-          item.setAttribute('aria-label', a11y);
-          item.setAttribute('aria-selected', page.selectedEmployeeId() === employee.employeeId ? 'true' : 'false');
-          item.textContent = `${employee.displayName} · ${employee.activity}${employee.queueCount > 0 ? `（排队 ${employee.queueCount}）` : ''}`;
+          item.setAttribute('aria-label', page.accessibleLabelFor(row.employeeId).label);
+          item.setAttribute('aria-selected', row.selected ? 'true' : 'false');
+          item.classList.toggle('selected', row.selected);
+          item.classList.toggle('needs-you', row.needsYou > 0);
+          item.replaceChildren(...staffRowNodes(row));
         }
         for (const [id, item] of [...listItems]) {
           if (!order.includes(id)) { item.remove(); listItems.delete(id); }
         }
-        void listEl;
+        void snapshot;
+      }
+
+      function staffRowNodes(row) {
+        const nodes = [];
+        const name = document.createElement('span');
+        name.className = 'staff-name';
+        name.textContent = row.displayName;
+        nodes.push(name);
+        const status = document.createElement('span');
+        status.className = `staff-status status-${row.statusKey}`;
+        status.textContent = row.statusLabel;
+        nodes.push(status);
+        if (row.taskTitle) {
+          const task = document.createElement('span');
+          task.className = 'staff-task';
+          task.textContent = row.taskTitle;
+          task.title = '去标识化任务标题（仅计数，不含任务内容）';
+          nodes.push(task);
+        }
+        if (row.toolPhrase) {
+          const tool = document.createElement('span');
+          tool.className = 'staff-tool';
+          tool.textContent = row.toolPhrase;
+          nodes.push(tool);
+        }
+        if (row.queueCount > 0) {
+          const queue = document.createElement('span');
+          queue.className = 'staff-queue';
+          queue.textContent = `排队 ${row.queueCount}`;
+          nodes.push(queue);
+        }
+        if (row.needsYou > 0) {
+          const need = document.createElement('span');
+          need.className = 'need-badge need-pulse';
+          need.textContent = `需要你 ×${row.needsYou}`;
+          need.title = '有等待你的审批/提问，点击查看待你处理';
+          nodes.push(need);
+        }
+        return nodes;
       }
 
       function syncListSelection() {
@@ -1670,12 +1789,134 @@
         document.getElementById('btn-interrupt').disabled = !bound || !capabilities.interrupt;
       }
 
+      // ④ timeline (spec §3 block 4): time + employee + event + this turn's
+      // token/money attribution. The attribution comes from the provider
+      // usage record on the 0.1.5 assistant/message event (first-hand; the
+      // module stamps it onto the turn's rows) — never from a day-bucket
+      // difference, which would mis-attribute under concurrency. Default 20
+      // rows, 更多 expands to 100.
+      const TIMELINE_PAGE_SIZE = 20;
+      const TIMELINE_MAX = 100;
+      let timelineExpanded = false;
       function renderActivity(snapshot) {
         const logEl = document.getElementById('activity-log');
-        const entries = page.activityLog().slice(-12).reverse();
-        logEl.replaceChildren(...entries.map((entry) => {
+        const entries = page.activityLog();
+        const limit = timelineExpanded ? TIMELINE_MAX : TIMELINE_PAGE_SIZE;
+        logEl.replaceChildren(...entries.slice(-limit).reverse().map((entry) => {
           const li = document.createElement('li');
-          li.textContent = `${new Date(entry.atMs).toISOString().slice(11, 19)} · ${employeeName(entry.employeeId)} · ${entry.label}`;
+          if (entry.employeeId) li.dataset.employeeId = entry.employeeId;
+          const time = document.createElement('span');
+          time.className = 'tl-time';
+          time.textContent = new Date(entry.atMs).toISOString().slice(11, 19);
+          const who = document.createElement('span');
+          who.className = 'tl-who';
+          who.textContent = employeeName(entry.employeeId);
+          const what = document.createElement('span');
+          what.className = 'tl-what';
+          what.textContent = entry.label;
+          li.append(time, who, what);
+          if (entry.turnUsage) {
+            const attr = document.createElement('span');
+            attr.className = 'tl-turn';
+            attr.textContent = `本轮 ${FMT.formatCount(entry.turnUsage.total)} · ${FMT.formatMoney(entry.turnCost)}`;
+            attr.title = `本轮 ${entry.turnUsage.total} tokens（输入 ${entry.turnUsage.input} · 输出 ${entry.turnUsage.output} · 缓存读 ${entry.turnUsage.cacheRead}）≈ ${entry.turnCost} CNY · 时长 ${FMT.formatDuration(entry.turnDurationMs)}`;
+            li.appendChild(attr);
+          }
+          li.addEventListener('click', () => {
+            if (!entry.employeeId) return;
+            page.select(entry.employeeId);
+            renderer.setSelection(entry.employeeId);
+            renderDetails();
+            syncListSelection();
+          });
+          return li;
+        }));
+        const more = document.getElementById('timeline-more');
+        more.hidden = timelineExpanded || entries.length <= TIMELINE_PAGE_SIZE;
+        void snapshot;
+      }
+
+      document.getElementById('timeline-more').addEventListener('click', () => {
+        timelineExpanded = true;
+        renderActivity(latestSnapshot);
+      });
+
+      // ① today's usage (spec §3 block 1): tokens + money dual display, the
+      // savings split (cache hits / local model at the cloud-equivalent
+      // basis), budget progress, the stale marker. Null usage (no shell data
+      // yet) keeps the honest empty state.
+      function renderUsageBlock(snapshot) {
+        const view = page.usageView();
+        const empty = document.getElementById('usage-empty');
+        const body = document.getElementById('usage-body');
+        const stale = document.getElementById('usage-stale');
+        if (!view) {
+          empty.hidden = false;
+          body.hidden = true;
+          stale.hidden = true;
+          document.getElementById('usage-budget').hidden = true;
+          return;
+        }
+        empty.hidden = true;
+        body.hidden = false;
+        const tokensEl = document.getElementById('usage-tokens');
+        tokensEl.textContent = FMT.formatCount(view.tokensTotal);
+        tokensEl.title = `输入 ${view.tokensInput} · 输出 ${view.tokensOutput} · 缓存读 ${view.tokensCacheRead}（原始值 ${view.tokensTotal} tokens）`;
+        document.getElementById('usage-money').textContent = `≈ ${FMT.formatMoney(view.moneyPaid)}`;
+        document.getElementById('usage-money').title = `${view.currency} ${view.moneyPaid}`;
+        document.getElementById('usage-basis').textContent = view.pricingBasisLabel;
+        document.getElementById('usage-save-cache').textContent = FMT.formatMoney(view.savingsCacheRead);
+        document.getElementById('usage-save-local').textContent = FMT.formatMoney(view.savingsLocalModel);
+        document.getElementById('usage-save-local').title = `本地模型按云端价折算（${view.savingsLocalModelBasis}）`;
+        document.getElementById('usage-cloud').textContent = FMT.formatMoney(view.moneyPaid);
+        stale.hidden = !view.staleAt;
+        if (view.staleAt) {
+          stale.title = `用量数据自 ${new Date(view.staleAt).toISOString().slice(11, 19)} 后未更新（${view.dayKey} 计费日）`;
+        }
+        const budget = document.getElementById('usage-budget');
+        if (view.budgetKind === 'monthly' && view.budgetLimit > 0) {
+          budget.hidden = false;
+          const pct = Math.min(100, Math.round((view.budgetUsed / view.budgetLimit) * 100));
+          document.getElementById('usage-budget-text').textContent =
+            `${FMT.formatMoney(view.budgetUsed)} / ${FMT.formatMoney(view.budgetLimit)}（${pct}%）`;
+          const bar = document.getElementById('usage-progress-bar');
+          bar.style.width = `${pct}%`;
+          bar.classList.toggle('over', view.budgetUsed > view.budgetLimit);
+        } else {
+          budget.hidden = true;
+        }
+        void snapshot;
+      }
+
+      // ③ 待你处理 inbox (spec §3 block 3): P2 ships the container and the
+      // count only (spec §8 P2 row). Inline approve/reject and the danger
+      // modal are P3 and will answer through the shared respondToRuntime
+      // ($events/result) path; the rows below are read-only for now.
+      const PENDING_KIND_LABELS = { approval: '审批', question: '提问' };
+      const PENDING_RISK_LABELS = { low: '低', medium: '中', high: '高' };
+      function renderPendingBlock(snapshot) {
+        const summary = page.pendingSummary();
+        document.getElementById('pending-count').textContent = String(summary.count);
+        document.getElementById('pending-empty').hidden = summary.count > 0;
+        const list = document.getElementById('pending-list');
+        list.replaceChildren(...summary.items.map((item) => {
+          const li = document.createElement('li');
+          li.className = 'pending-item';
+          li.dataset.risk = item.risk;
+          const risk = document.createElement('span');
+          risk.className = `pending-risk risk-${item.risk}`;
+          risk.textContent = PENDING_RISK_LABELS[item.risk] || item.risk;
+          const body = document.createElement('span');
+          body.className = 'pending-body';
+          const who = document.createElement('b');
+          who.textContent = item.employeeId ? employeeName(item.employeeId) : '未绑定';
+          const what = document.createElement('span');
+          what.textContent = `${PENDING_KIND_LABELS[item.kind] || item.kind} · ${item.summary}`;
+          body.append(who, what);
+          const at = document.createElement('span');
+          at.className = 'pending-time';
+          at.textContent = new Date(item.createdAtMs).toISOString().slice(11, 19);
+          li.append(risk, body, at);
           return li;
         }));
         void snapshot;
@@ -1790,12 +2031,26 @@
       reducedMotionCtl.addEventListener('change', async () => {
         await page.setReducedMotion(reducedMotionCtl.checked);
       });
+      // P5 removes the layout editor (B-1 → UI → repack order); until then the
+      // entry stays OUT of the new structure's prominent spots — a dim footer
+      // chip (spec §2: no longer a header action).
       const layoutEditorButton = document.createElement('button');
       layoutEditorButton.id = 'btn-layout-editor';
       layoutEditorButton.type = 'button';
       layoutEditorButton.textContent = '布局编辑';
       layoutEditorButton.addEventListener('click', () => setEditorVisible(editorRoot.hidden));
-      document.getElementById('office-overview').appendChild(layoutEditorButton);
+      document.getElementById('footer-tools').appendChild(layoutEditorButton);
+      // P2 ⑥ theme following: the shell owns the theme (themeMode setting);
+      // the office page consumes it exactly like the rail page does
+      // (shell:get-theme once + shell:theme pushes). Light until it arrives.
+      function applyPageTheme(theme) {
+        document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light';
+      }
+      applyPageTheme('light');
+      if (bridge.getTheme) {
+        Promise.resolve(bridge.getTheme()).then(applyPageTheme).catch(() => {});
+        if (bridge.onTheme) bridge.onTheme(applyPageTheme);
+      }
       if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
         reducedMotionCtl.checked = true;
         await page.setReducedMotion(true);
