@@ -2591,12 +2591,34 @@ function createOfficeModule(options = {}) {
     return Object.freeze({ ok: true, control });
   }
 
-  function noteVisibility({ viewId, visible } = {}) {
+  function noteVisibility({ viewId, visible, renderer } = {}) {
     if (typeof viewId !== 'string' || viewId === '') return Object.freeze({ ok: false, code: 'VIEW_ID_REQUIRED' });
     visibilityNoted = true;
     if (visible === true) visibleViews.add(viewId);
     else visibleViews.delete(viewId);
+    noteRendererState(viewId, renderer);
     return Object.freeze({ ok: true, paused: isPaused() });
+  }
+
+  // 2026-09-24 latch fix: the view reports its renderer mode / diagnostic code
+  // (and the bounded-recovery attempt count) on the EXISTING office:visibility
+  // invoke — no new channel. The shell log used to show nothing at all about
+  // renderer degradation (the static latch was only found by experiment); now
+  // every change is logged as it happens and the latest state rides the
+  // office:diagnostics response.
+  let lastRendererState = null;
+  function noteRendererState(viewId, renderer) {
+    const normalized = normalizeRendererReport(renderer);
+    if (!normalized) return;
+    if (lastRendererState
+      && lastRendererState.mode === normalized.mode
+      && lastRendererState.diagnosticCode === normalized.diagnosticCode
+      && lastRendererState.recoveryAttempts === normalized.recoveryAttempts) {
+      return; // unchanged: no log line
+    }
+    lastRendererState = normalized;
+    log(`[office] renderer mode=${normalized.mode} code=${normalized.diagnosticCode || 'ok'} `
+      + `recoveryAttempts=${normalized.recoveryAttempts} (view ${viewId})`);
   }
 
   function isPaused() {
@@ -2672,6 +2694,10 @@ function createOfficeModule(options = {}) {
       packPresent: !!pack,
       adapterCount: adapters.size,
       seed,
+      // 2026-09-24 latch fix: the VIEW-side renderer state as last reported
+      // over office:visibility (null before the first report). Mode/code/
+      // recoveryAttempts mirror the page's pixi-office-renderer diagnostics.
+      renderer: lastRendererState ? { ...lastRendererState } : null,
     });
   }
 
@@ -2743,6 +2769,24 @@ function createOfficeModule(options = {}) {
 
 // ---- IPC payload validation ---------------------------------------------------
 
+// 2026-09-24 latch fix: normalizes the optional view-side renderer report on
+// the office:visibility invoke. Returns undefined when the field is absent
+// (optional), null when present but malformed, else the normalized
+// { mode, diagnosticCode, recoveryAttempts }. Validated, never trusted: the
+// shape mirrors pixi-office-renderer's diagnostics() surface.
+function normalizeRendererReport(renderer) {
+  if (renderer === undefined || renderer === null) return undefined;
+  if (!isPlainObject(renderer)) return null;
+  const keys = Object.keys(renderer);
+  if (!keys.every((key) => key === 'mode' || key === 'diagnosticCode' || key === 'recoveryAttempts')) return null;
+  if (typeof renderer.mode !== 'string' || renderer.mode.length === 0 || renderer.mode.length > 32) return null;
+  const diagnosticCode = renderer.diagnosticCode === undefined ? null : renderer.diagnosticCode;
+  if (diagnosticCode !== null && (typeof diagnosticCode !== 'string' || diagnosticCode.length === 0 || diagnosticCode.length > 64)) return null;
+  const attempts = renderer.recoveryAttempts === undefined ? 0 : renderer.recoveryAttempts;
+  if (!Number.isInteger(attempts) || attempts < 0 || attempts > 1000) return null;
+  return { mode: renderer.mode, diagnosticCode, recoveryAttempts: attempts };
+}
+
 function validateOfficeIpcPayload(channel, payload) {
   if (!OFFICE_IPC_CHANNELS.includes(channel)) return { ok: false, code: 'CHANNEL_UNKNOWN' };
   if (payload === undefined) return { ok: true, value: {} };
@@ -2767,11 +2811,23 @@ function validateOfficeIpcPayload(channel, payload) {
       return { ok: true, value: { employeeId: payload.employeeId } };
     }
     case 'office:visibility': {
-      const ok = keys.every((key) => key === 'visible' || key === 'viewId')
+      // 2026-09-24 latch fix: `renderer` is the view-side renderer state the
+      // page attaches on the EXISTING invoke (mode / diagnosticCode /
+      // recoveryAttempts). It is validated exactly like the other keys — no
+      // new channel, no raw pass-through.
+      const ok = keys.every((key) => key === 'visible' || key === 'viewId' || key === 'renderer')
         && typeof payload.visible === 'boolean'
-        && (payload.viewId === undefined || (typeof payload.viewId === 'string' && payload.viewId.length <= 64));
+        && (payload.viewId === undefined || (typeof payload.viewId === 'string' && payload.viewId.length <= 64))
+        && normalizeRendererReport(payload.renderer) !== null;
       if (!ok) return { ok: false, code: 'PAYLOAD_INVALID' };
-      return { ok: true, value: { visible: payload.visible, viewId: payload.viewId || 'page-default' } };
+      return {
+        ok: true,
+        value: {
+          visible: payload.visible,
+          viewId: payload.viewId || 'page-default',
+          renderer: normalizeRendererReport(payload.renderer) || undefined,
+        },
+      };
     }
     case 'office:settings': {
       if (keys.length === 1 && payload.action === 'get') return { ok: true, value: { action: 'get' } };

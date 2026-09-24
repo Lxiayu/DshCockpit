@@ -83,7 +83,14 @@ contextBridge.exposeInMainWorld('officeBridge', {
   getSettings: () => invokeAllowed('office:settings', { action: 'get' }),
   updateSettings: (settings) => invokeAllowed('office:settings', { action: 'set', settings }),
   getDiagnostics: () => invokeAllowed('office:diagnostics', {}),
-  notifyVisibility: (visible) => invokeAllowed('office:visibility', { visible }),
+  // 2026-09-24 latch fix: the page may attach the view-side renderer state
+  // ({ mode, diagnosticCode, recoveryAttempts }) to the SAME invoke so renderer
+  // mode changes reach the shell log without a new channel. The bare boolean
+  // form stays supported (legacy callers / tests).
+  notifyVisibility: (visible, renderer) => invokeAllowed(
+    'office:visibility',
+    renderer === undefined || renderer === null ? { visible: !!visible } : { visible: !!visible, renderer }
+  ),
   // P3 待你处理: {action:'answer', id, value} answers through the shared
   // respondToRuntime path (approval: 'allowed-once'|'rejected'; question: the
   // answers batch); {action:'detail', id} resolves the spec §4 detailRef.

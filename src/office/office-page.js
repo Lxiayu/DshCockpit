@@ -5,10 +5,12 @@
 // Headless controller for the Office HTML page: it owns the derived view
 // model (details hierarchy, overview counts, queue badges, activity log),
 // the keyboard/pointer selection model and the reduced-motion/visibility
-// plumbing. Pure CommonJS with an injected `bridge` — the page passes the
-// office-preload bridge, tests pass a stub. No DOM, Pixi, Electron or
-// Harness access in here; the renderer consumes snapshots from the same
-// source (office:state), never the other way around.
+// plumbing (2026-09-24: the office:visibility payload's `active` flag gates
+// the renderer's frame pump and triggers its bounded recovery). Pure
+// CommonJS with an injected `bridge` — the page passes the office-preload
+// bridge, tests pass a stub. No DOM, Pixi, Electron or Harness access in
+// here; the renderer consumes snapshots from the same source (office:state),
+// never the other way around.
 //
 // Privacy contract (decision 35 / SPEC-07): the details view model is built
 // from a FIXED whitelist of snapshot fields. Task summaries, session ids,
@@ -397,7 +399,7 @@ function buildDetailsViewModel(employee) {
   };
 }
 
-function createOfficePageController({ bridge, onSnapshot = null, reducedMotion = false } = {}) {
+function createOfficePageController({ bridge, onSnapshot = null, reducedMotion = false, renderer = null } = {}) {
   if (!bridge || typeof bridge.getState !== 'function') {
     throw new TypeError('createOfficePageController requires a bridge with getState()');
   }
@@ -406,6 +408,22 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
   let focusIndex = 0;
   let selectedId = null;
   let motionReduced = !!reducedMotion;
+
+  // 2026-09-24 latch fix: the view's renderer state as the module/shell log
+  // needs it — mode, stable diagnostic code and the bounded-recovery attempt
+  // count. Null when this controller has no renderer attached (legacy callers
+  // keep the historical bare-boolean notifyVisibility shape).
+  function rendererStateOf() {
+    if (!renderer || typeof renderer.diagnostics !== 'function') return null;
+    try {
+      const diagnostics = renderer.diagnostics();
+      return {
+        mode: diagnostics.mode,
+        diagnosticCode: diagnostics.diagnosticCode || null,
+        recoveryAttempts: diagnostics.recoveryAttempts || 0,
+      };
+    } catch { return null; }
+  }
 
   function applySnapshot(next) {
     if (!next || !Array.isArray(next.employees)) return;
@@ -654,8 +672,27 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
       return motionReduced;
     },
 
+    // 2026-09-24 latch fix (SPEC-07 correction): the office:visibility payload
+    // carries TWO different flags — `visible` (the window is visible and not
+    // minimized) and `active` (the office is the current main-area view).
+    //   - `visible` pauses the main-process simulation clock (unchanged);
+    //   - `active` gates the renderer's frame pump and triggers the bounded
+    //     LOW_FPS_PERSISTENT recovery: a detached view still presents frames,
+    //     but only at background rate (~1.3-7.9 fps), which is exactly the
+    //     state that used to latch the FPS monitor and kill the scene.
+    // A bare boolean keeps the historical window-visibility-only semantics
+    // (no `active` information available; the pump gate is left untouched).
     handleVisibility(visible) {
-      if (typeof bridge.notifyVisibility === 'function') bridge.notifyVisibility(!!visible);
+      const payload = visible !== null && typeof visible === 'object' ? visible : { visible: !!visible };
+      const windowVisible = !!payload.visible;
+      if (typeof payload.active === 'boolean' && renderer && typeof renderer.setVisible === 'function') {
+        // setVisible may kick off an async bounded-recovery rebuild; it never
+        // rejects, but the page does not await it either way.
+        try { Promise.resolve(renderer.setVisible(payload.active)).catch(() => {}); } catch { /* renderer errors never break the page */ }
+      }
+      if (typeof bridge.notifyVisibility === 'function') {
+        bridge.notifyVisibility(windowVisible, rendererStateOf());
+      }
     },
 
     async dispatch(employeeId) {

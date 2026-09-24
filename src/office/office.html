@@ -348,17 +348,43 @@
         // observer counts presented frames only; the office simulation clock
         // stays in the main process. Threshold per SPEC-09 (30 fps).
         fpsMonitor: { thresholdFps: 30, windowFrames: 30, lowWindowLimit: 5 },
+        // 2026-09-24 latch fix: renderer mode / diagnostic code changes (the
+        // LOW_FPS_PERSISTENT latch and the bounded recovery attempts) flow to
+        // the shell log and the footer dot — through the existing
+        // office:visibility invoke, no new channel.
+        onStateChange: () => { syncRendererDegradeNote(); reportRendererState(); },
       });
       // ② degraded diagnostics (pack / layout / renderer) moved from the
       // visible fallback note into a footer dot tooltip; details still flow
       // through the office:diagnostics channel (spec §2). Declared before the
       // boot diagnostics below so the first note never hits a TDZ.
       const degradedNotes = [];
+      // 2026-09-24 latch fix: the renderer note is DYNAMIC (a runtime
+      // LOW_FPS_PERSISTENT latch and its bounded recovery can flip it after
+      // boot) and always names the SPECIFIC stable code, so the footer dot
+      // reads 「渲染降级：LOW_FPS_PERSISTENT」 instead of a generic mode — the
+      // user (and we) can tell a low-frame-rate degrade from a hard WebGL
+      // failure at a glance.
+      let rendererDegradeNote = null;
+      function applyDegradeDot() {
+        const notes = rendererDegradeNote ? [...degradedNotes, rendererDegradeNote] : [...degradedNotes];
+        const dot = document.getElementById('degraded-dot');
+        dot.hidden = notes.length === 0;
+        dot.title = notes.length > 0 ? `${notes.join('；')}；详情走 office:diagnostics` : '';
+      }
       function noteDegraded(text) {
         degradedNotes.push(text);
-        const dot = document.getElementById('degraded-dot');
-        dot.hidden = false;
-        dot.title = `${degradedNotes.join('；')}；详情走 office:diagnostics`;
+        applyDegradeDot();
+      }
+      function syncRendererDegradeNote() {
+        const diagnostics = renderer.diagnostics();
+        // Any non-webgl mode is a degrade: 'canvas' (WebGL init failed, the
+        // canvas fallback carries the scene) and 'static' (the diagnostic
+        // presentation). The note names the SPECIFIC stable code.
+        rendererDegradeNote = diagnostics.mode !== 'webgl'
+          ? `渲染降级：${diagnostics.diagnosticCode || 'RENDERER_UNAVAILABLE'}（${diagnostics.mode} 模式）；详情与日志保持可用`
+          : null;
+        applyDegradeDot();
       }
       if (packDiagnostic) {
         noteDegraded(`角色包降级：${packDiagnostic}；已切换诊断占位形象，详情与日志保持可用`);
@@ -370,15 +396,18 @@
       if (layoutDiagnostic) {
         noteDegraded(`布局降级：${layoutDiagnostic}；已回退内置默认布局，页面保持可用`);
       }
-      if (renderer.mode !== 'webgl') {
-        noteDegraded(`渲染降级：${renderer.mode} 模式（${renderer.diagnosticCode || 'ok'}）；详情与日志保持可用`);
-      }
+      // 2026-09-24: the renderer note is dynamic — syncRendererDegradeNote()
+      // renders the SPECIFIC stable code (WEBGL_INIT_FAILED /
+      // RENDERER_UNAVAILABLE at boot, LOW_FPS_PERSISTENT after a runtime
+      // latch, cleared when a bounded recovery rebuild succeeds).
+      syncRendererDegradeNote();
 
       // P2 presentation helpers (compact counts / money / durations) come from
       // the shared page module so the panel and its tests pin one formatter.
       const FMT = REGISTRY['office-page'];
       const page = REGISTRY['office-page'].createOfficePageController({
         bridge,
+        renderer,
         reducedMotion: false,        onSnapshot: (snapshot) => {
           latestSnapshot = snapshot;
           renderer.applySnapshot(snapshot);
@@ -1139,12 +1168,29 @@
         await page.setReducedMotion(true);
       }
 
-      // visibility lifecycle: pause the main-process clock when hidden
-      const visibility = (visible) => page.handleVisibility(visible);
-      document.addEventListener('visibilitychange', () => visibility(document.visibilityState === 'visible'));
-      window.addEventListener('blur', () => visibility(false));
-      window.addEventListener('focus', () => visibility(true));
-      bridge.onVisibilityPush((payload) => visibility(payload && payload.visible));
+      // visibility lifecycle: pause the main-process clock when hidden.
+      // 2026-09-24 latch fix: the office:visibility payload carries BOTH
+      // `visible` (window visible / not minimized — the module's simulation
+      // pause) and `active` (the office is the current main-area view). Only
+      // `active` gates the renderer's frame pump and triggers the bounded
+      // recovery: a detached view still presents frames at background rate,
+      // and feeding those used to latch LOW_FPS_PERSISTENT permanently.
+      let officeActive = true; // the office opens as the active main view
+      const visibility = (payload) => page.handleVisibility(payload);
+      document.addEventListener('visibilitychange', () => visibility({ visible: document.visibilityState === 'visible', active: officeActive }));
+      window.addEventListener('blur', () => visibility({ visible: false, active: officeActive }));
+      window.addEventListener('focus', () => visibility({ visible: true, active: officeActive }));
+      bridge.onVisibilityPush((payload) => {
+        officeActive = !!(payload && payload.active);
+        visibility({ visible: !!(payload && payload.visible), active: officeActive });
+      });
+      // Forwards the view's renderer state to the module (shell log +
+      // office:diagnostics) — on every renderer state change (latch, recovery
+      // attempts) and on every activation/visibility event, so the change is
+      // never more than one event behind.
+      function reportRendererState() {
+        page.handleVisibility({ visible: document.visibilityState === 'visible', active: officeActive });
+      }
 
       function resize() {
         const rect = stage.getBoundingClientRect();
@@ -1191,6 +1237,9 @@
           snapshot: () => latestSnapshot,
           rendererMode: () => renderer.mode,
           diagnosticCode: () => renderer.diagnosticCode,
+          // 2026-09-24 latch fix: the bounded-recovery budget is part of the
+          // observable renderer state (each attempt is logged by the shell).
+          rendererDiagnostics: () => renderer.diagnostics(),
           officeDiagnostics: () => renderer.officeDiagnostics(),
           furniturePaintOrder: () => renderer.furniturePaintOrder(),
           packDiagnostic: () => packDiagnostic,

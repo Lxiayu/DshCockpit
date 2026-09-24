@@ -31,12 +31,27 @@
 //   renderer-owned logic ticker (the main process owns the single clock)
 // - destroy() releases THIS view's owned textures and application; two views
 //   never share mutable Pixi resources
-// - runtime FPS observer (Task 9 blocker B / SPEC-07): when the caller arms
-//   `fpsMonitor`, a presentation-rate observer counts rendered frames and
-//   degrades THIS view to the static diagnostic presentation with the stable
-//   code `LOW_FPS_PERSISTENT` after sustained sub-threshold windows. The
-//   observer never advances movement/animation and never creates a simulation
-//   ticker; there is no automatic recovery.
+// - runtime FPS observer (Task 9 blocker B / SPEC-07, corrected 2026-09-24):
+//   when the caller arms `fpsMonitor`, a presentation-rate observer counts
+//   rendered frames and degrades THIS view to the static diagnostic
+//   presentation with the stable code `LOW_FPS_PERSISTENT` after sustained
+//   sub-threshold windows. The observer never advances movement/animation and
+//   never creates a simulation ticker.
+//   - FOREGROUND GATING (2026-09-24 latch fix): the frame pump only runs while
+//     this view is the foreground/active main view (`setVisible(true)`).
+//     A detached view (syncShellViews() removeChildView while the harness is
+//     active) still presents frames — its rAF pump keeps running because
+//     backgroundThrottling is false — but only at ~1.3-7.9 fps; feeding those
+//     to the monitor used to latch LOW_FPS_PERSISTENT after ~2 minutes in the
+//     harness and permanently kill the scene. setVisible(false) stops the
+//     pump (rendering itself is snapshot-push driven and unaffected); the
+//     transition back to foreground RESETS the monitor window so detached-rate
+//     frames can never mix into a foreground window.
+//   - BOUNDED RECOVERY (2026-09-24, SPEC-07 contract correction): one rebuild
+//     attempt per re-activation, at most 3 per session, and ONLY for the
+//     recoverable LOW_FPS_PERSISTENT case. WEBGL_INIT_FAILED /
+//     RENDERER_UNAVAILABLE are hard failures: a rebuild would just fail again,
+//     so they are never retried.
 
 const { createFpsMonitor } = require('./fps-monitor.js');
 // Task E4: the shared catalog declares contentBbox (opaque-art bounds) and
@@ -88,6 +103,12 @@ async function createOfficeRenderer(options) {
     createFallbackElement = null,
     devicePixelRatio = 1,
     fpsMonitor = null,
+    // 2026-09-24: invoked whenever the renderer mode / diagnostic code changes
+    // (LOW_FPS_PERSISTENT latch, bounded-recovery rebuild attempts, hard
+    // failures), so the page can forward the state to the shell log and the
+    // footer degrade dot. View-owner plumbing only — never called from the
+    // simulation path.
+    onStateChange = null,
   } = options || {};
 
   if (!layout || typeof layout.waypointGraph !== 'function') {
@@ -106,6 +127,11 @@ async function createOfficeRenderer(options) {
   let selectionId = null;
   let currentSnapshot = initialSnapshot;
   const entities = new Map(); // employeeId -> entity record (persistent)
+  // 2026-09-24 latch fix: the frame pump runs only while this view is the
+  // foreground (active main-area) view. Production creates the office as the
+  // active view; the first office:visibility push corrects this if the view
+  // was opened into the background.
+  let foreground = true;
 
   // ---- init chain: webgl -> canvas -> static -------------------------------
 
@@ -234,7 +260,7 @@ async function createOfficeRenderer(options) {
     }
   }
 
-  function buildFurniture() {
+  function buildFurniture({ recordMissing = true } = {}) {
     const floor = new PIXI.Graphics();
     floor.__furnitureId = 'floor-band';
     layers.background.addChild(floor);
@@ -312,7 +338,7 @@ async function createOfficeRenderer(options) {
           mirrorRect: null,
           sortable,
         });
-        if (wantedAssetId) {
+        if (wantedAssetId && recordMissing) {
           const reason = texture
             ? 'TEXTURE_INVALID'
             : (loaderErrors.find((entry) => entry.assetId === wantedAssetId) || {}).reason || 'TEXTURE_NOT_PROVIDED';
@@ -749,7 +775,13 @@ async function createOfficeRenderer(options) {
     for (const employee of snapshot.employees) {
       if (!employee || !employee.employeeId) continue;
       seen.add(employee.employeeId);
-      const record = entities.get(employee.employeeId) || createEntity(employee.employeeId);
+      // 2026-09-24 latch fix: a snapshot that lands while the view is static
+      // (the office:state pushes keep flowing during a bounded-recovery
+      // rebuild's init await) creates records WITHOUT Pixi nodes. Such a
+      // record can never be updated in place — rebuild its nodes instead of
+      // throwing on the missing sprite.
+      const existing = entities.get(employee.employeeId);
+      const record = existing && existing.container ? existing : createEntity(employee.employeeId);
       updateEntity(record, employee);
     }
     // An employee that truly left the snapshot is removed; residents never do.
@@ -768,10 +800,20 @@ async function createOfficeRenderer(options) {
     renderNow();
   }
 
-  // ---- public surface -------------------------------------------------------
-
-  if (PIXI && typeof PIXI.Application === 'function') {
+  // ---- init chain: webgl -> canvas -> static (shared by boot and recovery) --
+  // Returns the live mode ('webgl' | 'canvas' | 'static'); leaves `app`,
+  // `stage`, `layers` and `diagnosticCode` consistent with it. `recordMissing`
+  // is false on the recovery rebuild: the furniture texture load diagnostics
+  // were already reported at boot and must not be duplicated.
+  async function initApplication({ recordMissing = true } = {}) {
+    if (!PIXI || typeof PIXI.Application !== 'function') {
+      diagnosticCode = 'RENDERER_UNAVAILABLE';
+      mode = 'static';
+      buildStaticFallback();
+      return mode;
+    }
     const webgl = await tryInitApplication('webgl');
+    if (destroyed) { discardFailedApplication(webgl.app); return 'static'; }
     if (webgl.ok) {
       app = webgl.app;
       mode = 'webgl';
@@ -779,6 +821,7 @@ async function createOfficeRenderer(options) {
       diagnosticCode = 'WEBGL_INIT_FAILED';
       discardFailedApplication(webgl.app);
       const canvas = await tryInitApplication('canvas');
+      if (destroyed) { discardFailedApplication(canvas.app); return 'static'; }
       if (canvas.ok) {
         app = canvas.app;
         mode = 'canvas';
@@ -790,17 +833,36 @@ async function createOfficeRenderer(options) {
     }
     if (mode !== 'static') {
       buildLayers();
-      buildFurniture();
+      buildFurniture({ recordMissing });
       if (mount && app.canvas && mount.appendChild) mount.appendChild(app.canvas);
       app.ticker.stop(); // rendering happens on snapshot pushes, not on a clock
     } else {
       buildStaticFallback();
     }
-  } else {
-    diagnosticCode = 'RENDERER_UNAVAILABLE';
-    mode = 'static';
-    buildStaticFallback();
+    return mode;
   }
+
+  // Keeps the exposed view object in sync with the live renderer state (the
+  // view captured these values at creation time).
+  function syncViewSurface() {
+    if (typeof view === 'object' && view) {
+      view.mode = mode;
+      view.diagnosticCode = diagnosticCode;
+      view.staticElement = staticElement;
+      view.app = app;
+      view.stage = stage;
+      view.layers = layers;
+    }
+  }
+
+  function notifyStateChange() {
+    if (typeof onStateChange !== 'function') return;
+    try { onStateChange({ mode, diagnosticCode, recoveryAttempts }); } catch { /* observer errors never break the renderer */ }
+  }
+
+  // ---- public surface -------------------------------------------------------
+
+  await initApplication();
 
   if (currentSnapshot) applySnapshot(currentSnapshot);
   if (selectionId && mode !== 'static') applySelection();
@@ -811,13 +873,26 @@ async function createOfficeRenderer(options) {
   // state — the single simulation clock stays in the main process. Sustained
   // sub-threshold presentation degrades THIS view to the static diagnostic
   // presentation (LOW_FPS_PERSISTENT, distinct from WEBGL_INIT_FAILED /
-  // RENDERER_UNAVAILABLE). No automatic recovery: the diagnostic state stays
-  // stable once degraded. When the caller does not arm `fpsMonitor`, nothing
+  // RENDERER_UNAVAILABLE). When the caller does not arm `fpsMonitor`, nothing
   // is scheduled and behavior is unchanged.
+  //
+  // 2026-09-24 latch fix: the pump is gated on `foreground`. While the view is
+  // NOT the active main-area view (detached from the window by
+  // syncShellViews()), no frames are fed — a detached view still presents at
+  // 1.3-7.9 fps and feeding those frames latched LOW_FPS_PERSISTENT after
+  // ~2 minutes in the harness, permanently killing the scene. The foreground
+  // transition resets the monitor window so detached-rate frames can never
+  // share a measurement window with foreground frames.
   let monitor = null;
   let pumpHandle = null;
   let scheduleFrame = null;
   let cancelFrame = null;
+  // Bounded LOW_FPS_PERSISTENT recovery (SPEC-07 contract correction): at most
+  // ONE rebuild attempt per re-activation and 3 per view session. The counter
+  // is exposed through diagnostics() so the shell log records every attempt.
+  const RECOVERY_LIMIT_PER_SESSION = 3;
+  let recoveryAttempts = 0;
+  let rebuildInFlight = null;
   if (fpsMonitor && mode !== 'static') {
     scheduleFrame = fpsMonitor.scheduleFrame
       || (typeof requestAnimationFrame === 'function' ? (cb) => requestAnimationFrame(cb) : null);
@@ -826,12 +901,12 @@ async function createOfficeRenderer(options) {
   }
   function pump() {
     pumpHandle = null;
-    if (destroyed || !monitor || monitor.degraded()) return;
+    if (destroyed || !foreground || !monitor || monitor.degraded()) return;
     monitor.frame();
     schedulePump();
   }
   function schedulePump() {
-    if (destroyed || !monitor || monitor.degraded() || pumpHandle !== null || !scheduleFrame) return;
+    if (destroyed || !foreground || !monitor || monitor.degraded() || pumpHandle !== null || !scheduleFrame) return;
     pumpHandle = scheduleFrame(pump);
   }
   function stopPump() {
@@ -839,6 +914,12 @@ async function createOfficeRenderer(options) {
       try { cancelFrame(pumpHandle); } catch { /* already canceled */ }
     }
     pumpHandle = null;
+  }
+  function resetMonitor() {
+    // Re-arms the observer with a fresh measurement window. Only ever called
+    // at the foreground transition and after a successful recovery rebuild —
+    // the monitor never re-arms itself.
+    if (monitor && typeof monitor.reset === 'function') monitor.reset();
   }
   function degradeToStatic(code) {
     if (destroyed || mode === 'static') return;
@@ -861,6 +942,12 @@ async function createOfficeRenderer(options) {
     }
     officeTextureMap.clear();
     if (app) {
+      // Pixi's destroy() leaves the canvas in the DOM (removeView defaults to
+      // false). Detach it here so a later bounded-recovery rebuild mounts
+      // exactly one canvas and the static fallback owns the stage.
+      try {
+        if (app.canvas && app.canvas.parentNode) app.canvas.parentNode.removeChild(app.canvas);
+      } catch { /* host already gone */ }
       try { app.destroy(true, { children: true, texture: false }); } catch { /* already gone */ }
     }
     app = null;
@@ -870,15 +957,72 @@ async function createOfficeRenderer(options) {
     buildStaticFallback();
     // Keep the exposed view surface consistent with the degraded state (the
     // view object captured these values at creation time).
-    if (typeof view === 'object' && view) {
-      view.mode = mode;
-      view.diagnosticCode = diagnosticCode;
-      view.staticElement = staticElement;
-      view.app = app;
-      view.stage = stage;
-      view.layers = layers;
-    }
+    syncViewSurface();
+    notifyStateChange();
   }
+
+  // ---- bounded recovery from LOW_FPS_PERSISTENT (2026-09-24) ---------------
+  // Rebuild the Pixi application, layers and furniture, then restore the
+  // entities from the last pushed snapshot (degradeToStatic already cleared
+  // entities/textures; the snapshot is the only source of entity truth, and
+  // it keeps flowing from the single main-process clock). ONE attempt per
+  // re-activation, at most RECOVERY_LIMIT_PER_SESSION per session, and ONLY
+  // for LOW_FPS_PERSISTENT: WEBGL_INIT_FAILED / RENDERER_UNAVAILABLE are hard
+  // failures (a fresh application would fail exactly the same way), so they
+  // stay static forever on purpose.
+  async function rebuildRenderer() {
+    if (destroyed) return 'failed';
+    if (staticElement && typeof staticElement.remove === 'function') {
+      try { staticElement.remove(); } catch { /* host already gone */ }
+    }
+    staticElement = null;
+    // Boots the shared init chain (webgl -> canvas -> static): it builds the
+    // layers + furniture, mounts the fresh canvas and stops the ticker.
+    const next = await initApplication({ recordMissing: false });
+    if (destroyed) return 'failed';
+    if (next === 'static') {
+      // The rebuild hit a HARD failure (WEBGL_INIT_FAILED — initApplication
+      // already set diagnosticCode and built the static fallback). That code
+      // is never retried by the recovery policy.
+      syncViewSurface();
+      notifyStateChange();
+      return 'failed';
+    }
+    diagnosticCode = null;
+    // A half-rebuilt view must never stay "live": if anything below throws
+    // (e.g. a host/Pixi hiccup), tear the fresh application down and settle
+    // in the static diagnostic presentation with a stable hard-failure code
+    // instead of leaving mode='webgl' over a broken stage.
+    try {
+      if (currentSnapshot) applySnapshot(currentSnapshot);
+      if (selectionId) applySelection();
+      resetMonitor(); // fresh measurement window for the rebuilt view
+      schedulePump();
+    } catch {
+      degradeToStatic('RENDERER_UNAVAILABLE');
+      return 'failed';
+    }
+    syncViewSurface();
+    notifyStateChange();
+    return 'recovered';
+  }
+
+  // Returns 'recovered' | 'failed' | 'exhausted' | 'none'. `none` means no
+  // attempt was warranted (already live, or a hard-failure code).
+  function attemptRecovery() {
+    if (destroyed) return 'none';
+    if (mode !== 'static') return 'none';
+    if (diagnosticCode !== 'LOW_FPS_PERSISTENT') return 'none'; // hard failure: never retry
+    if (recoveryAttempts >= RECOVERY_LIMIT_PER_SESSION) return 'exhausted';
+    recoveryAttempts += 1;
+    if (!rebuildInFlight) {
+      rebuildInFlight = rebuildRenderer()
+        .catch(() => 'failed') // never throws into the page
+        .finally(() => { rebuildInFlight = null; });
+    }
+    return rebuildInFlight;
+  }
+
   if (fpsMonitor && mode !== 'static' && scheduleFrame) {
     monitor = createFpsMonitor({
       thresholdFps: fpsMonitor.thresholdFps,
@@ -950,6 +1094,46 @@ async function createOfficeRenderer(options) {
       // stable API for the page.
     },
 
+    // 2026-09-24 latch fix: `visible` means "this view is the foreground /
+    // active main-area view" — the office:visibility payload's `active` flag,
+    // NOT the window visibility flag (a hidden window stops rAF entirely, so
+    // it cannot feed the monitor anyway; and a detached view still presents
+    // frames at background rate, which is what used to latch the monitor).
+    //   false -> stopPump(): the presentation-rate observer stops counting.
+    //     Rendering is snapshot-push driven (app.ticker stays stopped), so the
+    //     picture is unaffected while the simulation keeps updating in the
+    //     main process. backgroundThrottling is deliberately NOT touched — it
+    //     keeps the page's boot/snapshot pump alive in the background.
+    //   true  -> on a real false->true transition: reset the monitor's
+    //     measurement window (detached-rate frames must never share a window
+    //     with foreground frames) and re-arm the pump; if the view is sitting
+    //     in the static LOW_FPS_PERSISTENT diagnostic, attempt ONE bounded
+    //     recovery rebuild (at most once per activation, 3 per session).
+    // Returns a promise that resolves to
+    //   { mode, diagnosticCode, recovery: 'none'|'recovered'|'failed'|'exhausted' }.
+    // It never rejects: a failed rebuild stays static with a stable code.
+    setVisible(visible) {
+      const next = !!visible;
+      if (destroyed) return Promise.resolve({ mode, diagnosticCode, recovery: 'none' });
+      if (!next) {
+        foreground = false;
+        stopPump();
+        return Promise.resolve({ mode, diagnosticCode, recovery: 'none' });
+      }
+      const becameForeground = !foreground;
+      foreground = true;
+      if (!becameForeground) {
+        // Already foreground (e.g. a window focus event): never a new attempt.
+        return Promise.resolve({ mode, diagnosticCode, recovery: 'none' });
+      }
+      if (mode === 'static' && diagnosticCode === 'LOW_FPS_PERSISTENT') {
+        return Promise.resolve(attemptRecovery()).then((recovery) => ({ mode, diagnosticCode, recovery }));
+      }
+      resetMonitor();
+      schedulePump();
+      return Promise.resolve({ mode, diagnosticCode, recovery: 'none' });
+    },
+
     pause() {
       if (destroyed || mode === 'static') return;
       paused = true;
@@ -968,6 +1152,10 @@ async function createOfficeRenderer(options) {
       return {
         mode,
         diagnosticCode,
+        // 2026-09-24 latch-fix observability: the bounded-recovery budget is
+        // part of the renderer state the shell log records.
+        recoveryAttempts,
+        foreground,
         scene: { ...scene },
         devicePixelRatio: clamp(Number(devicePixelRatio) || 1, 1, 3),
         entityCount: entities.size,

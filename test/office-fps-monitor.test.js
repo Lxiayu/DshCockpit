@@ -111,11 +111,71 @@ test('no wall-clock reads: the injected now() is the only time source', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Renderer integration (Blocker B): sustained low FPS degrades THIS view to
-// the static diagnostic presentation with a code distinct from WebGL init
-// failure. Uses a minimal Proxy PIXI stub — the monitor is driven through
-// injected now() and direct frame() calls, no real timers, no rAF.
+// reset() — the SPEC-07 contract correction (2026-09-24 latch fix).
+//
+// The monitor used to be latch-only ("no automatic recovery"). While the
+// pump was gated on view foreground the observer can still legitimately
+// latch (a real sustained low-fps foreground), and the view owner then
+// re-arms it with reset() after a bounded recovery rebuild. reset() is the
+// ONLY re-arm path: there is no timer, no wall-clock re-check and no
+// self-recovery — an unattended degraded monitor stays degraded, exactly
+// like before. These tests pin that contract.
 // ---------------------------------------------------------------------------
+
+test('reset() re-arms a latched monitor: the degraded state clears and new windows are measured fresh', () => {
+  let nowMs = 0;
+  const degradeEvents = [];
+  const monitor = createFpsMonitor({ thresholdFps: 30, windowFrames: 30, lowWindowLimit: 2, now: () => nowMs, onDegrade: (c) => degradeEvents.push(c) });
+  for (let i = 0; i < 30 * 3; i += 1) { nowMs += 50; monitor.frame(); }
+  assert.equal(monitor.degraded(), true);
+  assert.equal(monitor.code(), 'LOW_FPS_PERSISTENT');
+  assert.equal(degradeEvents.length, 1);
+
+  monitor.reset();
+  assert.equal(monitor.degraded(), false, 'reset() clears the latch');
+  assert.equal(monitor.code(), null);
+  // the fresh window needs the FULL lowWindowLimit consecutive low windows
+  // again — one low window must not re-degrade immediately
+  for (let i = 0; i < 30; i += 1) { nowMs += 50; monitor.frame(); }
+  assert.equal(monitor.degraded(), false);
+  assert.equal(degradeEvents.length, 1, 'no new degrade event yet');
+  for (let i = 0; i < 30; i += 1) { nowMs += 50; monitor.frame(); }
+  assert.equal(monitor.degraded(), true, 'the second consecutive low window re-latches');
+  assert.equal(degradeEvents.length, 2);
+});
+
+test('reset() discards the in-flight window: partial progress never survives a re-arm', () => {
+  let nowMs = 0;
+  const monitor = createFpsMonitor({ thresholdFps: 30, windowFrames: 30, lowWindowLimit: 5, now: () => nowMs });
+  // 4 low windows, then a PARTIAL 5th window (20 of 30 frames at 20 fps)
+  for (let i = 0; i < 30 * 4 + 20; i += 1) { nowMs += 50; monitor.frame(); }
+  // the foreground transition re-arms: the partial window and the streak are gone
+  monitor.reset();
+  // 4 fresh low windows must NOT degrade — the streak restarted from zero
+  for (let i = 0; i < 30 * 4; i += 1) { nowMs += 50; monitor.frame(); }
+  assert.equal(monitor.degraded(), false);
+  // the 5th consecutive low window of the NEW streak crosses the limit
+  for (let i = 0; i < 30; i += 1) { nowMs += 50; monitor.frame(); }
+  assert.equal(monitor.degraded(), true);
+});
+
+test('without reset(), a detached-rate window mix latches the monitor at ~150 frames (the 2026-09-24 bug)', () => {
+  // Evidence for the bug this fix removes: fed continuously, a 1.3 fps
+  // presentation rate (a detached view with backgroundThrottling:false)
+  // completes 5 windows of 30 frames = 150 frames and latches. The renderer
+  // now stops the pump while detached and resets on the way back, so those
+  // frames are never delivered; this test pins the monitor-level arithmetic
+  // that made the latch reachable in ~2 minutes of harness time.
+  let nowMs = 0;
+  const degradeEvents = [];
+  const monitor = createFpsMonitor({ thresholdFps: 30, windowFrames: 30, lowWindowLimit: 5, now: () => nowMs, onDegrade: (c) => degradeEvents.push(c) });
+  for (let i = 0; i < 149; i += 1) { nowMs += 1000 / 1.3; monitor.frame(); }
+  assert.equal(monitor.degraded(), false, '4 windows are not enough');
+  nowMs += 1000 / 1.3;
+  monitor.frame();
+  assert.equal(monitor.degraded(), true, 'the 150th frame (5th window) latches');
+  assert.deepEqual(degradeEvents, ['LOW_FPS_PERSISTENT']);
+});
 
 const officeRenderer = require('../src/office/render/pixi-office-renderer.js');
 const officeLayout = require('../src/office/runtime/office-layout.js');

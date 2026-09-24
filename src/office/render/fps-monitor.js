@@ -7,12 +7,18 @@
 // and can never advance movement, animation or any office state (the single
 // office simulation clock stays in the main process).
 //
-// Degradation contract (SPEC-07): when the observed presentation rate stays
-// below thresholdFps for lowWindowLimit consecutive windows of windowFrames
-// frames, the monitor latches degraded=true exactly once and reports the
-// stable code LOW_FPS_PERSISTENT — distinct from WEBGL_INIT_FAILED /
-// RENDERER_UNAVAILABLE. There is no automatic recovery: a degraded monitor
-// stays degraded so the fallback diagnostic state remains stable.
+// Degradation contract (SPEC-07, corrected 2026-09-24): when the observed
+// presentation rate stays below thresholdFps for lowWindowLimit consecutive
+// windows of windowFrames frames, the monitor latches degraded=true exactly
+// once and reports the stable code LOW_FPS_PERSISTENT — distinct from
+// WEBGL_INIT_FAILED / RENDERER_UNAVAILABLE. There is no automatic recovery:
+// an unattended monitor stays degraded so the fallback diagnostic state
+// remains stable. The ONE sanctioned re-arm is reset(), which the view
+// owner calls explicitly when the office becomes the foreground view again
+// (after a rebuild): it clears the latch and the in-flight window so the
+// foreground windows can never inherit the previous measurement history.
+// No timers, no wall-clock reads, no self-recovery path — reset() is the
+// only way back, and only the renderer's bounded recovery policy calls it.
 
 function createFpsMonitor(options) {
   const {
@@ -58,8 +64,23 @@ function createFpsMonitor(options) {
     return degraded;
   }
 
+  // Re-arm the monitor (SPEC-07 correction, 2026-09-24): clears the degraded
+  // latch AND discards the in-flight measurement window. Called by the view
+  // owner at the foreground transition (renderer.setVisible(true)) and after
+  // a bounded LOW_FPS_PERSISTENT recovery rebuild, so a fresh measurement
+  // window starts from zero frames — frames delivered at background rate
+  // (a detached view presents at ~1.3-7.9 fps) can never share a window with
+  // foreground frames and latch the monitor artificially.
+  function reset() {
+    degraded = false;
+    framesInWindow = 0;
+    windowStartMs = null;
+    consecutiveLowWindows = 0;
+  }
+
   return {
     frame,
+    reset,
     degraded: () => degraded,
     code: () => (degraded ? 'LOW_FPS_PERSISTENT' : null),
   };
