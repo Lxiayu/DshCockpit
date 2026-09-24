@@ -1262,3 +1262,108 @@ test('M0 boundary: the product entry dependency graph never references src/workb
   assert.doesNotMatch(html, /["']content\//, 'office.html never references the content tree');
 });
 
+
+// Task E5a-R1 real shell: play-order diagnosis + foot-line stability.
+// The probe records per-employee played file streams (every observed
+// transition must be an animations.json adjacency — a filename-sorted, skipping
+// or scrambled order can never produce that), re-runs the E4 clipping sampling,
+// and captures the full 15-frame cycle for the footY measurement.
+// ---------------------------------------------------------------------------
+test('E5a-R1 real shell: the walk sequence plays in metadata order with a stable foot line', { timeout: 420000 }, () => {
+  const electronBin = path.join(ROOT, 'node_modules', '.bin', 'electron');
+  if (!fs.existsSync(electronBin)) return; // environment without the Electron dev dependency
+  const evidenceDir = '/tmp/e5a-r1-evidence';
+  fs.mkdirSync(evidenceDir, { recursive: true });
+  const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'e5a-r1-probe-'));
+  const probeScript = path.join(probeDir, 'probe.js');
+  fs.writeFileSync(probeScript, fs.readFileSync(path.join(ROOT, 'test', 'fixtures', 'e5a-r1-order-probe-template.js'), 'utf8')
+    .replace(/__REPO__/g, ROOT)
+    .replace(/__EVIDENCE__/g, evidenceDir));
+  // E5a-R1 fix: the screen-space sole measurement is only calibrated for
+  // devicePixelRatio 2 (at DPR 1 the blue-mask lowest row drops out for a
+  // specific frame -> range 11; at DPR 3 -> range 5). Pin the render scale so
+  // the measurement is reproducible on any host/monitor instead of flaking.
+  execFileSync(electronBin, ['--force-device-scale-factor=2', probeScript], { stdio: 'ignore', timeout: 480000 });
+  const resultsFile = path.join(probeDir, 'results.json');
+  assert.ok(fs.existsSync(resultsFile), 'the probe wrote its results file');
+  const summary = JSON.parse(fs.readFileSync(resultsFile, 'utf8'));
+  // 播放保真：观测流里每一对相邻帧都必须是 animations.json 声明的相邻对（含循环回绕）
+  assert.equal(summary.orderFidelity.left.ok, true, `left stream plays declared adjacencies only (${summary.orderFidelity.left.detail || 'ok'})`);
+  assert.equal(summary.orderFidelity.right.ok, true, `right stream plays declared adjacencies only (${summary.orderFidelity.right.detail || 'ok'})`);
+  // the E4 no-clipping walk sampling stays at zero
+  assert.equal(summary.walk.clippingViolations, 0, 'no employee position clipped foreign furniture');
+  assert.ok(summary.walk.sampleCount >= 100, 'the walk sampling actually ran');
+  // the full-cycle consecutive captures exist for both directions (15 帧/方向)
+  for (const direction of ['left', 'right']) {
+    for (let step = 0; step < 15; step += 1) {
+      const file = path.join(evidenceDir, `seq-${direction}-${String(step).padStart(2, '0')}-f${step}.png`);
+      assert.ok(fs.existsSync(file) && fs.statSync(file).size > 1000, `${direction} sequence capture ${step}`);
+    }
+  }
+  // foot-line stability: the character's lowest screen row across the full
+  // 15-frame consecutive captures stays within 1px
+  const measure = `
+import json
+from PIL import Image
+import numpy as np
+soles = []
+for step in range(15):
+    im = Image.open(f'/tmp/e5a-r1-evidence/seq-left-{step:02d}-f{step}.png').convert('RGBA')
+    a = np.array(im)
+    r, g, b = a[:, :, 0].astype(int), a[:, :, 1].astype(int), a[:, :, 2].astype(int)
+    mask = (b > 90) & (b - r > 40) & (b - g > 30)
+    col_density = mask.sum(axis=0)
+    cum = [0]
+    for value in col_density:
+        cum.append(cum[-1] + value)
+    best_x, best_sum = 0, -1
+    for x in range(0, im.width - 240):
+        s = cum[x + 240] - cum[x]
+        if s > best_sum:
+            best_sum, best_x = s, x
+    rows = np.where(mask[:, best_x:best_x + 240].any(axis=1))[0]
+    soles.append(int(rows.max()))
+print(json.dumps({'soles': soles, 'range': max(soles) - min(soles)}))
+`;
+  const measured = JSON.parse(execFileSync('python3', ['-c', measure], { encoding: 'utf8' }));
+  // 屏幕空间测量在固定的 devicePixelRatio=2 参考尺度下，真实 range = 2px（素材层
+  // 鞋线 ±1px，经 DPR2 取整放大）。阈值保持 ≤2px 不放宽：它抓 ≥3px 的单帧漂移
+  // （注入实验：把 walk-left-b04 的 outputAnchor.y 移 6 素材px → 该帧 sole 862→865，
+  // range 3，断言转红）。素材层面的权威判据仍是 office-asset-pack.test.js 的
+  // "every walk frame shares the pack sole line"（alpha>=128 鞋线全方向 ≤1px）。
+  assert.equal(summary.devicePixelRatio, 2, `the probe ran at the pinned reference scale (got ${summary.devicePixelRatio})`);
+  assert.equal(measured.range <= 2, true,
+    `footY range across the 15-frame cycle must be ≤2px at the pinned DPR=2 scale: range=${measured.range}, soles=[${measured.soles.join(', ')}], frames=${measured.soles.map((value, step) => `${step}:${value}`).join(' ')}`);
+  // review strips re-emitted for the human check
+  const stripScript = `
+from PIL import Image
+import numpy as np
+def crop(im):
+    a = np.array(im.convert('RGBA'))
+    r, g, b = a[:, :, 0].astype(int), a[:, :, 1].astype(int), a[:, :, 2].astype(int)
+    mask = (b > 90) & (b - r > 40) & (b - g > 30)
+    col_density = mask.sum(axis=0)
+    cum = [0]
+    for value in col_density:
+        cum.append(cum[-1] + value)
+    best_x, best_sum = 0, -1
+    for x in range(0, im.width - 240):
+        s = cum[x + 240] - cum[x]
+        if s > best_sum:
+            best_sum, best_x = s, x
+    rows = np.where(mask[:, best_x:best_x + 240].any(axis=1))[0]
+    cy = int(rows.mean()) if len(rows) else im.height // 2
+    top = max(0, min(im.height - 280, cy - int(280 * 0.55)))
+    return im.crop((best_x, top, best_x + 240, top + 280)).convert('RGB')
+for direction in ['left', 'right']:
+    strip = Image.new('RGB', (240 * 15 + 14 * 6, 280), (255, 255, 255))
+    for step in range(15):
+        strip.paste(crop(Image.open(f'/tmp/e5a-r1-evidence/seq-{direction}-{step:02d}-f{step}.png')), (step * 246, 0))
+    strip.save(f'/tmp/e5a-r1-evidence/walk-{direction}-strip.png')
+print('strips ok')
+`;
+  assert.match(execFileSync('python3', ['-c', stripScript], { encoding: 'utf8' }), /strips ok/);
+  for (const direction of ['left', 'right']) {
+    assert.ok(fs.existsSync(path.join(evidenceDir, `walk-${direction}-strip.png`)), `${direction} strip composed`);
+  }
+});
