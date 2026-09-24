@@ -208,6 +208,45 @@ test('reconnect re-opens every registered stream (caller sees no generation chan
   }
 });
 
+test('isStreamOpen reports the real open state: host end flips it, re-open restores it', async () => {
+  const fx = await startFixture();
+  try {
+    const mux = createRuntimeMux({
+      baseUrl: fx.baseUrl, auth: fakeAuth(), log: () => {}, WebSocketImpl: require('ws').WebSocket,
+      reconnectMs: 20, maxBackoffMs: 40,
+    });
+    const opensBefore = () => fx.state.connections.reduce((n, c) => n + c.opens.length, 0);
+    mux.onItem('session-follow-s1', () => {});
+    mux.openStream('session-follow-s1', 'session/follow', {
+      request: { address: { kind: 'session', sessionId: 's1' }, assistantStream: false },
+    });
+    mux.connect();
+    await waitFor(() => mux.state === 'live', 'mux live');
+    const conn = fx.state.connections[0];
+    assert.equal(mux.isStreamOpen('session-follow-s1'), true, 'open once ready');
+    assert.equal(mux.isStreamOpen('session-follow-nope'), false, 'unknown streams are not open');
+
+    // The host ends the follow stream: the caller's reconcile must see it as
+    // NOT open (a real change worth re-opening) — this is what the office
+    // follow tick uses to avoid needless re-opens (session/follow has no
+    // resume cursor, so every needless open restarts the opening window).
+    fx.sendTo(conn, { type: 'end', streamId: 'session-follow-s1' });
+    await waitFor(() => mux.isStreamOpen('session-follow-s1') === false, 'host end observed');
+    const opensAtEnd = opensBefore();
+    mux.openStream('session-follow-s1', 'session/follow', {
+      request: { address: { kind: 'session', sessionId: 's1' }, assistantStream: false },
+    });
+    await waitFor(() => opensBefore() === opensAtEnd + 1, 'the re-open after a host end is a real wire open');
+    assert.equal(mux.isStreamOpen('session-follow-s1'), true, 'open again after the explicit re-open');
+
+    mux.closeStream('session-follow-s1');
+    assert.equal(mux.isStreamOpen('session-follow-s1'), false, 'a closed stream is not open');
+    mux.close();
+  } finally {
+    await fx.stop();
+  }
+});
+
 test('sendResult posts the exact $events/result envelope with the cookie', async () => {
   const fx = await startFixture();
   try {

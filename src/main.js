@@ -330,6 +330,15 @@ function ensureOfficeModule() {
       // usage block uses. Metadata-only — the simulation keeps its logical
       // clock; without this injection the record stays a session window.
       realClock: () => Date.now(),
+      // 2026-09-24 resync fix: the office module's runtime adapters ask for a
+      // baseline (office:runtime-resync-request) whenever a forward seq gap
+      // opens. main.js owns the durable-log re-read (session/page) and answers
+      // through the module's ingestHarnessSnapshot() — the request used to die
+      // as a diagnostic string, so every gap ended in sync=stale with the
+      // employee frozen on its last known phase.
+      onResyncRequest: ({ sessionId, request }) => {
+        officeAnswerResync(sessionId, request);
+      },
     });
     // P1: any waterfall request that arrived BEFORE the office view was first
     // opened is waiting in the pre-module mirror — seed it now (bounded,
@@ -4185,6 +4194,16 @@ function windowHidden() {
 const OFFICE_FOLLOW_INTERVAL_MS = 5_000;
 const OFFICE_FOLLOW_GRACE_TICKS = 2; // close a stream only after 2 idle ticks
 const OFFICE_FOLLOW_KNOWN_CAP = 32; // bound the added-session memory
+// 2026-09-24 resync fix: the durable-log re-read that answers one
+// office:runtime-resync-request. session/page is a BACKWARDS page
+// (first-hand: SessionPageRequest "One message-aligned backwards-history
+// request", throughSeq inclusive + optional beforeSeq), so the re-read walks
+// backwards from the latest delivered journal seq until the requested
+// fromSequence is covered — bounded by page count and message count so a
+// pathological gap can never turn into an unbounded RPC loop.
+const OFFICE_RESYNC_PAGE_MESSAGES = 200;
+const OFFICE_RESYNC_MAX_PAGES = 8;
+const officeResyncInFlight = new Set(); // sessionIds with a re-read running
 const officeFollowKnownOrder = [];
 
 function noteOfficeSessionStatus(sessionId, running) {
@@ -4306,15 +4325,23 @@ function officeFollowSyncTick() {
       mux.onItem(streamId, (value) => ingestOfficeFollowFrame(sessionId, value));
       officeFollowStreams.set(sessionId, { streamId, misses: 0 });
       log(`[office] follow open (${sessionId.slice(0, 8)})`);
+      // Spike-verified wire shape: a flat SessionFollowRequest. `assistantStream`
+      // is z.literal(true).optional() on 0.1.5 — it must be OMITTED, not false.
+      mux.openStream(streamId, 'session/follow', { request: { address: { kind: 'session', sessionId } } });
+    } else if (typeof mux.isStreamOpen === 'function' && !mux.isStreamOpen(streamId)) {
+      // A REAL change (not a refresh): the host ended/errored this follow
+      // stream, or a reconnect dropped it before the mux re-opened it. Re-open
+      // it — the fresh opening window is handled as a stream-restart baseline
+      // by ingestOfficeFollowFrame, so the re-open can no longer manufacture a
+      // forward gap. A stream that is merely already open is NEVER re-opened:
+      // session/follow has no resume cursor, so every needless open would
+      // restart the window for nothing.
+      officeFollowStreams.get(sessionId).misses = 0;
+      log(`[office] follow reopen (${sessionId.slice(0, 8)})`);
+      mux.openStream(streamId, 'session/follow', { request: { address: { kind: 'session', sessionId } } });
     } else {
       officeFollowStreams.get(sessionId).misses = 0;
     }
-    // (Re-)open every tick: openStream is a no-op while the stream is open on
-    // this generation, and it also heals a stream the host errored or ended
-    // (the follow-stream error frame only logs — see runtime-mux).
-    // Spike-verified wire shape: a flat SessionFollowRequest. `assistantStream`
-    // is z.literal(true).optional() on 0.1.5 — it must be OMITTED, not false.
-    mux.openStream(streamId, 'session/follow', { request: { address: { kind: 'session', sessionId } } });
   }
   for (const [sessionId, entry] of [...officeFollowStreams]) {
     if (desired.has(sessionId)) continue;
@@ -4327,7 +4354,19 @@ function officeFollowSyncTick() {
 }
 
 /** session/follow frames: the opening {type:'snapshot', records:[…]} window
- * plus incremental {type:'event', event} records — same entry shape. */
+ * plus incremental {type:'event', event} records — same entry shape.
+ *
+ * 2026-09-24 resync fix: an opening window is a BASELINE (stream restart), not
+ * an increment. First-hand contract (0.1.5-rc.2
+ * @deepseek-ai/dsh-api-session-controller SessionFollowFrame): "Complete
+ * opening window followed by ordered durable events"; SessionFollowRequest
+ * carries NO resume cursor, so every open — first open, host-end heal, mux
+ * reconnect re-open — restarts at a fresh window whose first record can sit
+ * ABOVE the office adapter's watermark. Feeding such a window as an increment
+ * is exactly what manufactured forward gaps (buffered → 5 unanswered resync
+ * attempts → sync=stale → employee frozen mid-task). Window records therefore
+ * go to the module's ingestHarnessSnapshot(), which decides continuation vs
+ * baseline restart from the live watermark. */
 function ingestOfficeFollowFrame(sessionId, value) {
   if (!value || typeof value !== 'object') return;
   if (value.type === 'event') {
@@ -4340,29 +4379,49 @@ function ingestOfficeFollowFrame(sessionId, value) {
     if (Number.isInteger(value.cursor) && value.cursor >= 0) {
       officeFollowCursors.set(sessionId, Math.max(officeFollowCursors.get(sessionId) ?? -1, value.cursor));
     }
-    for (const record of Array.isArray(value.records) ? value.records : []) {
-      if (record && record.type === 'event') ingestOfficeJournalEvent(sessionId, record.event);
+    const records = Array.isArray(value.records) ? value.records : [];
+    for (const record of records) {
+      if (record && record.type === 'event') noteOfficeFollowJournalRecord(sessionId, record.event);
+    }
+    const mod = officeModuleInstance;
+    if (mod && typeof mod.ingestHarnessSnapshot === 'function' && records.length > 0) {
+      const res = mod.ingestHarnessSnapshot({ sessionId, records });
+      if (res && res.ok) {
+        log(`[office] follow window (${sessionId.slice(0, 8)}): ${res.mode}`
+          + ` (watermark ${res.watermark}, sync ${res.sync})`);
+      } else {
+        log(`[office] follow window (${sessionId.slice(0, 8)}): refused (${res && res.code})`);
+      }
     }
   }
   // assistant-stream frames never arrive (assistantStream omitted).
 }
 
-function ingestOfficeJournalEvent(sessionId, event) {
-  const mod = officeModuleInstance;
+/** Per-journal-record shell capture that must happen for BOTH delivery shapes
+ * (opening-window records and live event records): the session/page throughSeq
+ * cursor and the P3 detailRef tool-arguments store. Module ingestion is the
+ * caller's business (event → ingestHarnessEvent, window → ingestHarnessSnapshot). */
+function noteOfficeFollowJournalRecord(sessionId, event) {
+  if (!event || typeof event !== 'object' || typeof event.type !== 'string') return;
   // P3 detailRef capture — BEFORE the module gate (the office module is created
   // lazily, and the follow journal is the only place the raw tool arguments
   // exist). The tool/call record carries {callId, name, arguments}; the
   // approval request carries the same callId, so the danger modal can later
   // show the REAL command. Bounded + TTL'd; never part of any snapshot.
-  if (event && event.type === 'tool/call') {
+  if (event.type === 'tool/call') {
     noteOfficeToolCallArgs(sessionId, event.data, event.time);
   }
-  if (!mod || !event || typeof event !== 'object' || typeof event.type !== 'string') return;
   // Track the latest delivered journal seq per session: it is a valid
-  // session/page throughSeq for the detailRef fallback.
+  // session/page throughSeq for the detailRef fallback and the resync re-read.
   if (Number.isInteger(event.seq) && event.seq >= 0) {
     officeFollowCursors.set(sessionId, Math.max(officeFollowCursors.get(sessionId) ?? -1, event.seq));
   }
+}
+
+function ingestOfficeJournalEvent(sessionId, event) {
+  const mod = officeModuleInstance;
+  noteOfficeFollowJournalRecord(sessionId, event);
+  if (!mod || !event || typeof event !== 'object' || typeof event.type !== 'string') return;
   const data = event.data && typeof event.data === 'object' ? event.data : {};
   // P2 turn/usage helpers: only non-negative integers ever enter the office
   // envelope (provider usage counters); the message text never does.
@@ -4433,6 +4492,100 @@ function ingestOfficeJournalEvent(sessionId, event) {
     return;
   }
   mod.ingestHarnessEvent({ sessionId, type: event.type, seq: event.seq, time: event.time, data });
+}
+
+/** 2026-09-24 resync fix — answer ONE office:runtime-resync-request with a
+ * re-read of the durable session log, handed to the office module's
+ * ingestHarnessSnapshot() (which owns the watermark decision).
+ *
+ * Why session/page and not a follow re-open: session/follow has no resume
+ * cursor (first-hand SessionFollowRequest), so re-opening the stream to
+ * "refresh" would restart the opening window for nothing — and the follow
+ * reconcile deliberately no longer re-opens without a real change. The unary
+ * session/page RPC reads the durable log without touching the live stream.
+ * It is a BACKWARDS page (SessionPageRequest: throughSeq inclusive +
+ * optional beforeSeq), so the read walks backwards from the latest delivered
+ * journal seq until the requested fromSequence is covered; when the log start
+ * is reached first, the module adopts a partial baseline (honest diagnostic +
+ * log, never a guess). Every failure path simply returns: the adapter's retry
+ * timeline (250ms…5s, 5 attempts) re-asks, so a transient mux/RPC failure
+ * heals on the next attempt instead of escalating. */
+async function officeAnswerResync(sessionId, request) {
+  const mod = officeModuleInstance;
+  if (!mod || typeof mod.ingestHarnessSnapshot !== 'function') return;
+  if (officeResyncInFlight.has(sessionId)) return; // one re-read per session
+  const mux = runtimeMux;
+  const short = sessionId.slice(0, 8);
+  if (!mux || mux.state !== 'live') {
+    log(`[office] resync answer deferred (${short}): mux not live`);
+    return;
+  }
+  const throughSeq = officeFollowCursors.get(sessionId);
+  if (!Number.isInteger(throughSeq) || throughSeq < 0) {
+    // No journal seq ever delivered for this session: nothing to page from.
+    // The next follow window sets the cursor and the retry re-asks.
+    log(`[office] resync answer deferred (${short}): no follow cursor yet`);
+    return;
+  }
+  officeResyncInFlight.add(sessionId);
+  try {
+    const records = [];
+    let beforeSeq = null;
+    for (let page = 0; page < OFFICE_RESYNC_MAX_PAGES; page += 1) {
+      const args = {
+        request: {
+          address: { kind: 'session', sessionId },
+          throughSeq,
+          maxMessages: OFFICE_RESYNC_PAGE_MESSAGES,
+        },
+      };
+      if (beforeSeq !== null) args.request.beforeSeq = beforeSeq;
+      let res;
+      try {
+        res = await mux.call('session/page', args);
+      } catch (e) {
+        log(`[office] resync read failed (${short}): ${e && e.message || e}`);
+        return;
+      }
+      if (!res || res.ok !== true) {
+        log(`[office] resync read rejected (${short}): ${(res && res.reason) || 'unknown'}`);
+        return;
+      }
+      const value = res.value || {};
+      const pageRecords = Array.isArray(value.records) ? value.records : [];
+      if (pageRecords.length === 0) break;
+      const firstSeq = firstJournalSeq(pageRecords);
+      if (firstSeq === null) {
+        log(`[office] resync read malformed (${short})`);
+        return;
+      }
+      records.unshift(...pageRecords); // pages arrive newest-first
+      if (firstSeq <= request.fromSequence) break; // the gap is fully covered
+      if (value.hasMore !== true) break; // log start reached: partial baseline
+      beforeSeq = firstSeq; // the next page ends just before this page's first record
+    }
+    if (records.length === 0) {
+      log(`[office] resync read empty (${short})`);
+      return;
+    }
+    const result = mod.ingestHarnessSnapshot({ sessionId, records });
+    if (result && result.ok) {
+      log(`[office] resync answered (${short}): ${result.mode}, replayed ${result.replayed},`
+        + ` watermark ${result.watermark}, sync ${result.sync}`);
+    } else {
+      log(`[office] resync answer refused (${short}): ${result && result.code}`);
+    }
+  } finally {
+    officeResyncInFlight.delete(sessionId);
+  }
+}
+
+function firstJournalSeq(records) {
+  for (const record of records) {
+    const event = record && record.event;
+    if (event && Number.isInteger(event.seq)) return event.seq;
+  }
+  return null;
 }
 
 function onTaskDone() {

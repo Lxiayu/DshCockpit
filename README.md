@@ -162,6 +162,17 @@ Harness owns the workspace. DshCockpit owns the operating layer.
 - **修复**：`git mv` 至 `src/office/runtime/validate-character-pack.js`（自身零外部依赖，仅 node:fs/path，链路一次内化即自洽）；installer 改 `require('./validate-character-pack.js')`；两个测试的路径引用同步更新；`verify-dist.js` 生产表面清单 +1（产物内必须存在）；新增 `test/office-packaging-boundary.test.js` 静态钉死——① 全仓不再有任何 `src/**` → `scripts/**`（src 外）的 require 边（唯一合法豁免：asar 根按策略必有的 `package.json`）；② installer 的校验 require 指向 src 内兄弟文件；③ 有 dist 产物时直接验 asar 内含该文件。
 - **实测**：门禁对旧树 zip 报 `missing: src/office/runtime/validate-character-pack.js`（负向断言有效），新树产物全绿（asar 3,276 条目 = 3,275 + 1）。
 
+## 🧰 开发日志 · 办公室 resync 回填修复（2026-09-24，未提交）
+
+**症状与根因**：一轮对话正常完成后，调度员一直显示「工作中·任务执行中」+ 面板「同步滞后」。根因是事件序号断档（forward gap）后 **DshCockpit 内部的 resync 回填端从未实现**：适配器缓冲跳号事件并发起 `office:runtime-resync-request`，全仓唯一"处理"只是一条诊断字符串；5 次重试耗尽 → `sync=stale`，而契约规定 sync 只改变同步状态、绝不猜测运行时/活动/绑定/终态——员工于是冻结在最后已知阶段。更早的源头：`session/follow` 重开（mux 重连/host-end/feed 重启）拿到的**开场窗口被当成增量事件**喂给适配器，窗口起始序号高于模块水位时每一次重开都可能造出跳号。
+
+**修复（三件事）**：
+- **回填端**（核心）：模块层新增公开入口 `ingestHarnessSnapshot({sessionId, records})`；`src/main.js` 在收到 resync 请求时用 `session/page` **向后**翻页重读 durable log 并真的应答。设计取舍选 **(B) 基线重启**——一手证据：0.1.5 的 `SessionPageRequest`/`SessionPage` 文档原文即 "message-aligned **backwards**-history" / "contiguous **backwards** page"，`SessionFollowRequest` 无续传游标、每次 open 都是"完整开场窗口 + 之后连续事件"（harness 对 follow 的设计语义），**没有前进读取路径**，(A) 不可行。适配器内部约束决定精确顺序：`rotateEpoch()` 重置序号状态 → 先用**裸基线快照**（sequence 0、无 facts）应答把 sync 拉回 healthy、水位归零（否则首事件建地板逻辑不触发、整窗被吸收）→ 按序重放旧水位之上的记录（已应用过的一律跳过，不双计）；重放中被拒记录（如超 64KB）会再 rotate 一次让地板吸收被拒 seq，尾部事实不丢；窗口够不着断档起点时如实记 `RESYNC_BASELINE_PARTIAL`，**没有任何静默丢弃**（诊断码 + 壳日志 + API 返回值三处可观测）。
+- **少造断档**：开场窗口整体走基线入口（模块按水位决定 continuation / baseline，continuation 时缓冲事件按 `drainBuffer` 契约落地恰好一次）；follow reconcile 改为**只在真变化时**开合（新增 mux 只读 `isStreamOpen`，host 结束/掉线才重开，重开有独立日志行），不再为"刷新"而重开。
+- **可观测性**：`[office] sync <healthy|resyncing|stale> (session-…, attempts=N, buffer=M)`、`[office] resync baseline|continuation applied (…)`、`[office] follow open/reopen/closed (…)` 全部进壳日志（此前一条都没有）；不加新 IPC 通道（`office:*` 仍 8 个）。
+
+**测试与实证**：新增 `test/office-resync-backfill.test.js`（8 例，真模块+真适配器：断档治愈、stale 后迟到应答治愈、follow 重开不造断档、缓冲恰好一次、partial baseline 与超限记录的诚实诊断、壳接线静态钉住）+ `test/runtime-mux.test.js` 的 `isStreamOpen` 真协议用例；全量套件 **1314 passed / 0 failed**（基线 1305 + 9）。端到端实证用真 harness 0.1.5-rc.2（真 DSH_HOME）+ 真 mux + 真 office 模块/页面跑真对话，**对话进行中人为关闭再重开 follow 流**（并叠加合成丢帧），双模块对照（verdict 全项 true）：修复侧——跳号窗口按 baseline 重启（`watermark 5→16, replayed 7`）、丢帧后真实 `session/page` 重读治愈（`watermark 17→22, replayed 2`）、员工正确收尾回漫游（`lastResult=completed`）、干预后再来一轮依旧干净完成，全程 `sync=healthy`；修复前接线侧——同一缺口 10 次 resync 请求无人应答 → `sync=stale` + orchestrator 冻结在 `working / 执行任务中 / transition=work`（报告症状一字不差复现）。产物 `/tmp/office-e2e/resync-{00-idle,10-working,11-restart,12-counterfactual-stale,13-backfill-healed,14-turn-completed(-b),15-second-turn}.png|json` + `resync-events.jsonl` + `resync-run-log.json`（合成输入逐条标注；不含任何 key/凭据）；根因/取舍/语义详见 `docs/strategy/2026-09-24-office-resync-backfill-fix.md`。
+
 ## 📄 许可与致谢
 
 [MIT](LICENSE) · 基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 构建。社区项目——与 DeepSeek 官方无隶属关系，也未获其背书。

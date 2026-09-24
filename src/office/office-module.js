@@ -54,6 +54,7 @@ const { createOfficeState, reduceOfficeState } = require('./runtime/state-reduce
 const { createTransitionController } = require('./runtime/transition-controller.js');
 const { resolveAnimation } = require('./runtime/animation-controller.js');
 const { createRuntimeAdapter, deriveRunProxy } = require('./runtime/runtime-adapter.js');
+const snapshotModule = require('./runtime/runtime-snapshot.js');
 const { createPrivacyRedactor } = require('./runtime/privacy-redactor.js');
 const { createOfficeLayout } = require('./runtime/office-layout.js');
 const { resolveRuntimeLayout } = require('./runtime/office-layout-compiler.js');
@@ -924,6 +925,32 @@ function createOfficeModule(options = {}) {
     recomputeGlobalSync();
   }
 
+  // 2026-09-24 resync fix: per-session sync transitions are logged as they
+  // happen (the shell log used to show NOTHING about office sync degradation —
+  // the same blind spot the renderer-latch fix covered for the view side).
+  // The adapter is the authority; this only mirrors its transitions. The
+  // attempt count survives enterStale() (which clears the live resync state)
+  // so the stale line still reports how many attempts were exhausted.
+  const lastAdapterSync = new Map(); // raw sessionId -> last logged sync value
+  const lastResyncAttempts = new Map(); // raw sessionId -> last seen attempt count
+  function noteAdapterSyncTransitions() {
+    for (const [sessionId, adapter] of adapters) {
+      const state = adapter.state();
+      // Tracked on every call: the attempt count grows inside a single
+      // 'resyncing' stretch (no transition fires between retries), so the
+      // stale line must report the LAST count, not the first.
+      if (state.resync) lastResyncAttempts.set(sessionId, state.resync.attempts);
+      if (lastAdapterSync.get(sessionId) === state.sync) continue;
+      lastAdapterSync.set(sessionId, state.sync);
+      const attempts = state.resync ? state.resync.attempts : (lastResyncAttempts.get(sessionId) || 0);
+      const detail = [];
+      if (attempts > 0) detail.push(`attempts=${attempts}`);
+      if (state.bufferDepth > 0) detail.push(`buffer=${state.bufferDepth}`);
+      log(`[office] sync ${state.sync} (${sessionId.slice(0, 8)}`
+        + (detail.length ? `, ${detail.join(', ')}` : '') + ')');
+    }
+  }
+
   function recomputeGlobalSync() {
     let next = 'healthy';
     for (const adapter of adapters.values()) {
@@ -931,6 +958,7 @@ function createOfficeModule(options = {}) {
       if (sync === 'stale') { next = 'stale'; break; }
       if (sync === 'resyncing') next = 'resyncing';
     }
+    noteAdapterSyncTransitions();
     if (next === globalSync) return;
     globalSync = next;
     for (const rec of employees.values()) reduce(rec, { type: 'sync/status', sync: next });
@@ -1802,6 +1830,12 @@ function createOfficeModule(options = {}) {
     const at = logicalMs;
 
     for (const adapter of adapters.values()) adapter.tick();
+    // The resync retry timeline lives inside the adapters: an exhausted cycle
+    // (retries unanswered → sync=stale) happens HERE, between events, so the
+    // aggregate + the per-session log line must be recomputed after the tick
+    // (2026-09-24 resync fix — otherwise a stale transition could sit
+    // unmirrored until the next unrelated event arrived).
+    recomputeGlobalSync();
 
     // result presentation expiry -> FIFO release / local resume
     for (const rec of employees.values()) {
@@ -2543,20 +2577,59 @@ function createOfficeModule(options = {}) {
   // keeps raw session/run handles aligned per event.
   let currentRawEvent = null;
 
+  // 2026-09-24 resync fix: the DshCockpit-internal resync cycle now has a
+  // REAL answerer. The adapter asks for a baseline whenever a forward gap
+  // opens; the request is recorded (bounded, latest per session) and forwarded
+  // to the shell, which owns the durable-log re-read (session/page). The shell
+  // answers through ingestHarnessSnapshot() below. Before this fix the request
+  // died as a diagnostic string, the adapter exhausted its 5 attempts and went
+  // stale — freezing the employee on its last known phase (the reported
+  // 「工作中·任务执行中 + 同步滞后」 symptom).
+  const RESYNC_REQUESTS_CAP = 32;
+  const resyncRequests = new Map(); // raw sessionId -> latest office:runtime-resync-request
+  let baselineHealing = 0; // >0 while the module answers its own requests (baseline restart)
+
+  function handleAdapterMessage(sessionId, message) {
+    const isResync = !!message && message.type === snapshotModule.RESYNC_REQUEST_TYPE;
+    noteDiagnostic(isResync ? 'RESYNC_REQUESTED' : 'RESYNC_MESSAGE');
+    if (!isResync) return;
+    while (resyncRequests.size >= RESYNC_REQUESTS_CAP) {
+      resyncRequests.delete(resyncRequests.keys().next().value);
+    }
+    resyncRequests.set(sessionId, message);
+    if (baselineHealing > 0) {
+      // The module is mid-baseline-restart for this session: it answers its
+      // own (auto-started / mid-replay) requests itself — forwarding them to
+      // the shell would only trigger a duplicate durable-log re-read.
+      return;
+    }
+    if (typeof options.onResyncRequest !== 'function') return;
+    try {
+      options.onResyncRequest({ sessionId, request: message });
+    } catch (e) {
+      log(`[office] resync request forward failed (${sessionId.slice(0, 8)}): ${e && e.message || e}`);
+    }
+  }
+
+  function ensureAdapter(sessionId) {
+    let adapter = adapters.get(sessionId);
+    if (!adapter) {
+      adapter = createRuntimeAdapter({
+        sessionId,
+        clock,
+        onEvent: (output) => handleAdapterOutput(output, currentRawEvent),
+        onMessage: (message) => handleAdapterMessage(sessionId, message),
+      });
+      adapters.set(sessionId, adapter);
+    }
+    return adapter;
+  }
+
   function ingestHarnessEvent(rawEvent) {
     if (!isPlainObject(rawEvent) || typeof rawEvent.sessionId !== 'string' || rawEvent.sessionId === '') {
       return Object.freeze({ status: 'rejected', code: 'EVENT_SHAPE_INVALID' });
     }
-    let adapter = adapters.get(rawEvent.sessionId);
-    if (!adapter) {
-      adapter = createRuntimeAdapter({
-        sessionId: rawEvent.sessionId,
-        clock,
-        onEvent: (output) => handleAdapterOutput(output, currentRawEvent),
-        onMessage: (message) => noteDiagnostic(message && message.type === 'office:runtime-resync-request' ? 'RESYNC_REQUESTED' : 'RESYNC_MESSAGE'),
-      });
-      adapters.set(rawEvent.sessionId, adapter);
-    }
+    const adapter = ensureAdapter(rawEvent.sessionId);
     currentRawEvent = rawEvent;
     const result = adapter.ingest({
       type: rawEvent.type,
@@ -2567,6 +2640,228 @@ function createOfficeModule(options = {}) {
     recomputeGlobalSync();
     pushSnapshot();
     return result;
+  }
+
+  // Normalizes session/page / session/follow records ({type:'event',
+  // event:{type,seq,time,data}}) into ascending raw events. Returns null when
+  // any record is malformed: a broken record inside the window would break the
+  // replay chain, so the whole window is refused (the adapter keeps retrying
+  // and the shell re-reads) instead of half-applying it.
+  function normalizeJournalRecords(records) {
+    if (!Array.isArray(records)) return null;
+    const out = [];
+    for (const record of records) {
+      if (!isPlainObject(record) || !isPlainObject(record.event)) return null;
+      const event = record.event;
+      if (typeof event.type !== 'string' || event.type === '') return null;
+      if (!Number.isInteger(event.seq) || event.seq < 0) return null;
+      if (typeof event.time !== 'number' || !Number.isFinite(event.time)) return null;
+      if (!isPlainObject(event.data)) return null;
+      out.push({ type: event.type, seq: event.seq, time: event.time, data: event.data });
+    }
+    out.sort((a, b) => a.seq - b.seq);
+    return out;
+  }
+
+  /**
+   * 2026-09-24 resync fix — the backfill end of the DshCockpit-internal resync
+   * cycle. `records` is a RE-READ of the durable session log (a session/follow
+   * opening window or a session/page backwards page), which the shell supplies
+   * in answer to the adapter's office:runtime-resync-request.
+   *
+   * Two shapes, decided by the re-read against the live watermark (the module
+   * owns the watermark knowledge; the shell only supplies records):
+   * - continuation: the window starts at or below watermark+1, so it fills the
+   *   gap directly. Records are ingested incrementally; the adapter's
+   *   watermark/dedupe absorbs the overlap and drainBuffer() replays the
+   *   events it had buffered for the gap. No epoch churn.
+   * - baseline restart: the window starts ABOVE watermark+1 (a follow stream
+   *   re-open whose opening window jumped the module's watermark — exactly the
+   *   reported defect), or the adapter already exhausted its retries (stale,
+   *   whose only reset is rotateEpoch). The adapter's sequence state is reset
+   *   (rotateEpoch), the rotation's own auto-started request is answered with
+   *   a bare baseline snapshot (no facts — the records carry them), and the
+   *   window is replayed from the first record above the OLD watermark
+   *   (already-applied records are never replayed — no double facts). A
+   *   mid-replay rejection (e.g. an over-cap payload) rotates once more so the
+   *   floor absorbs the rejected seq and the tail keeps its facts; the
+   *   rejection is diagnosed, never silently skipped.
+   *
+   * Never guesses state: everything replayed comes from real journal records.
+   */
+  function ingestHarnessSnapshot(request) {
+    if (!isPlainObject(request) || typeof request.sessionId !== 'string' || request.sessionId === '') {
+      return Object.freeze({ ok: false, code: 'REQUEST_INVALID' });
+    }
+    const sessionId = request.sessionId;
+    const records = normalizeJournalRecords(request.records);
+    if (records === null) return Object.freeze({ ok: false, code: 'RECORDS_INVALID' });
+    if (records.length === 0) return Object.freeze({ ok: false, code: 'RECORDS_EMPTY' });
+    // Diagnostic codes this call produced, mirrored into the bounded module
+    // diagnostics stream AND returned — the snapshot diagnostics tail is
+    // lossy, so an honest drop (superseded range, rejected record) must also
+    // be observable at the API boundary.
+    const noted = [];
+    const note = (code) => { noted.push(code); noteDiagnostic(code); };
+
+    const existing = adapters.get(sessionId);
+    if (!existing) {
+      // First window for this session: no gap is possible — the adapter's
+      // floor logic takes the first record's seq as the baseline.
+      const adapter = ensureAdapter(sessionId);
+      let accepted = 0;
+      for (const event of records) {
+        currentRawEvent = { sessionId, type: event.type, seq: event.seq, time: event.time, data: event.data };
+        const res = adapter.ingest(event);
+        if (res.status === 'accepted') accepted += 1;
+        else if (res.status !== 'duplicate') note(`RESYNC_REPLAY_${res.code}`);
+      }
+      currentRawEvent = null;
+      recomputeGlobalSync();
+      pushSnapshot();
+      return Object.freeze({
+        ok: true, mode: 'initial', replayed: accepted,
+        watermark: adapter.state().watermark, sync: adapter.state().sync,
+        diagnostics: Object.freeze([...noted]),
+      });
+    }
+
+    const before = existing.state();
+    const firstSeq = records[0].seq;
+    // The continuation route is only valid while the adapter still has a live
+    // resync cycle: sync=stale has no drain-based recovery (drainBuffer and
+    // acceptSnapshot both only clear 'resyncing'), so a stale adapter MUST take
+    // the baseline-restart route — rotateEpoch is its documented reset.
+    if (firstSeq <= before.watermark + 1 && before.sync !== 'stale') {
+      // Continuation: the re-read reaches the gap (or is entirely history).
+      // Records at or below the watermark dedupe as STALE_SEQUENCE; the first
+      // record above it is exactly watermark+1 (the window is contiguous), so
+      // the gap closes and the buffered tail drains.
+      let accepted = 0;
+      let duplicates = 0;
+      for (const event of records) {
+        currentRawEvent = { sessionId, type: event.type, seq: event.seq, time: event.time, data: event.data };
+        const res = existing.ingest(event);
+        if (res.status === 'accepted') accepted += 1;
+        else if (res.status === 'duplicate') duplicates += 1;
+        else note(`RESYNC_REPLAY_${res.code}`);
+      }
+      currentRawEvent = null;
+      recomputeGlobalSync();
+      pushSnapshot();
+      const after = existing.state();
+      log(`[office] resync continuation applied (${sessionId.slice(0, 8)}): `
+        + `watermark ${before.watermark} -> ${after.watermark}, replayed ${accepted}, `
+        + `duplicate ${duplicates}, sync ${after.sync}`);
+      return Object.freeze({
+        ok: true, mode: 'continuation', replayed: accepted, duplicate: duplicates,
+        watermark: after.watermark, sync: after.sync,
+        diagnostics: Object.freeze([...noted]),
+      });
+    }
+
+    // Baseline restart (stream-restart semantics: the re-read window is the new
+    // baseline, never an increment onto the old watermark).
+    baselineHealing += 1;
+    let rotated = null;
+    let replayed = 0;
+    let skipped = 0;
+    let rejected = 0;
+    let answerFailed = false;
+    try {
+      // rotateEpoch() resets the adapter's sequence state (watermark 0, sync
+      // resyncing) and emits exactly one office:runtime-resync-request. That
+      // request is answered HERE with a bare baseline at sequence 0 — no facts,
+      // because the records themselves carry every fact. The answer restores
+      // sync=healthy and watermark=0, which is what lets the floor logic take
+      // the first replayed record's seq as the new baseline floor.
+      const answerBare = () => {
+        const pending = resyncRequests.get(sessionId);
+        if (!pending || !rotated || pending.sessionEpoch !== rotated.sessionEpoch) {
+          // Unreachable by construction (rotateEpoch always emits one request);
+          // if it ever happens, abort the replay and let the retry cycle re-ask.
+          note('RESYNC_ANSWER_UNANSWERED');
+          answerFailed = true;
+          return false;
+        }
+        const bare = snapshotModule.createSnapshotResponse({
+          requestId: pending.requestId,
+          sessionId,
+          sessionEpoch: rotated.sessionEpoch,
+          sequence: 0,
+          facts: {},
+          eventsSince: [],
+        });
+        const merged = existing.acceptSnapshot(bare);
+        if (!merged.ok) {
+          note(`RESYNC_ANSWER_${merged.code}`);
+          answerFailed = true;
+          return false;
+        }
+        return true;
+      };
+
+      rotated = existing.rotateEpoch();
+      if (answerBare()) {
+        let index = 0;
+        while (index < records.length) {
+          const event = records[index];
+          if (event.seq <= before.watermark) {
+            // Already applied before the gap: replaying it would double-apply
+            // facts (tool tallies, usage attribution, terminal evidence).
+            skipped += 1;
+            index += 1;
+            continue;
+          }
+          currentRawEvent = { sessionId, type: event.type, seq: event.seq, time: event.time, data: event.data };
+          const res = existing.ingest(event);
+          if (res.status === 'accepted') {
+            replayed += 1;
+            index += 1;
+            continue;
+          }
+          if (res.status === 'duplicate') { index += 1; continue; }
+          // A rejected record (over-cap payload, bad shape) breaks the chain:
+          // everything after it would buffer behind the hole. Rotate once more
+          // so the floor logic absorbs the rejected seq, then replay from the
+          // NEXT record — the tail keeps its facts and sync stays healthy. The
+          // rejected record is diagnosed, never silently skipped.
+          rejected += 1;
+          note(`RESYNC_REPLAY_${res.code}`);
+          rotated = existing.rotateEpoch();
+          if (!answerBare()) break;
+          index += 1;
+        }
+      }
+      currentRawEvent = null;
+      if (firstSeq > before.watermark + 1) {
+        // The re-read could not reach the gap start (log start / page bound):
+        // the events in between are superseded by this baseline, not replayed.
+        note('RESYNC_BASELINE_PARTIAL');
+      }
+    } finally {
+      baselineHealing = Math.max(0, baselineHealing - 1);
+    }
+    recomputeGlobalSync();
+    pushSnapshot();
+    const after = existing.state();
+    if (answerFailed) {
+      log(`[office] resync baseline FAILED to answer (${sessionId.slice(0, 8)}): `
+        + `sync ${after.sync}, buffer ${after.bufferDepth} — the retry cycle re-asks`);
+      return Object.freeze({
+        ok: false, code: 'RESYNC_ANSWER_FAILED', sync: after.sync,
+        diagnostics: Object.freeze([...noted]),
+      });
+    }
+    log(`[office] resync baseline applied (${sessionId.slice(0, 8)}): `
+      + `watermark ${before.watermark} -> ${after.watermark}, replayed ${replayed}, `
+      + `skipped ${skipped}, rejected ${rejected}, sync ${after.sync}`);
+    return Object.freeze({
+      ok: true, mode: 'baseline', replayed, skipped, rejected,
+      watermark: after.watermark, sync: after.sync,
+      sessionEpoch: rotated ? rotated.sessionEpoch : null,
+      diagnostics: Object.freeze([...noted]),
+    });
   }
 
   function controlIntent(employeeId, control) {
@@ -2705,6 +3000,9 @@ function createOfficeModule(options = {}) {
     stop();
     listeners.clear();
     adapters.clear();
+    resyncRequests.clear();
+    lastAdapterSync.clear();
+    lastResyncAttempts.clear();
     turnUsage.clear();
     visibleViews.clear();
   }
@@ -2716,6 +3014,12 @@ function createOfficeModule(options = {}) {
     stop,
     state,
     ingestHarnessEvent,
+    // 2026-09-24 resync fix: the backfill end of the resync cycle. main.js
+    // answers the adapter's office:runtime-resync-request with a re-read of
+    // the durable log (session/page or a follow opening window) through this
+    // entry; the module owns the watermark decision (continuation vs baseline
+    // restart) and never guesses state the records do not carry.
+    ingestHarnessSnapshot,
     // P1 data pipeline surface (spec §4): usage injection + pending lifecycle +
     // the shared answer entry the panel and the IM channel both call.
     setUsageSnapshot,

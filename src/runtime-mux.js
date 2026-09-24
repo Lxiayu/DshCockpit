@@ -269,6 +269,15 @@ function createRuntimeMux({
     return true;
   }
 
+  /** Whether the stream is registered AND open on the CURRENT connection.
+   * False after a host end/error frame or a reconnect — the signal the caller
+   * needs to re-open (a real change) instead of re-opening every reconcile
+   * tick (a refresh, which the follow contract would punish with a fresh
+   * opening window). */
+  function isStreamOpen(streamId) {
+    return streams.has(streamId) && opened.has(streamId);
+  }
+
   function onItem(streamId, cb) {
     if (typeof cb !== 'function') return () => {};
     let stream = streams.get(streamId);
@@ -350,6 +359,7 @@ function createRuntimeMux({
     connect,
     openStream,
     closeStream,
+    isStreamOpen,
     onItem,
     onReady,
     call,
