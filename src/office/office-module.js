@@ -54,6 +54,7 @@ const { createOfficeState, reduceOfficeState } = require('./runtime/state-reduce
 const { createTransitionController } = require('./runtime/transition-controller.js');
 const { resolveAnimation } = require('./runtime/animation-controller.js');
 const { createRuntimeAdapter, deriveRunProxy } = require('./runtime/runtime-adapter.js');
+const { CLASSIFIED_SEATS: CLASSIFIED_SUBAGENT_SEATS } = require('./runtime/subagent-classifier.js');
 const snapshotModule = require('./runtime/runtime-snapshot.js');
 const { createPrivacyRedactor } = require('./runtime/privacy-redactor.js');
 const { createOfficeLayout } = require('./runtime/office-layout.js');
@@ -1267,12 +1268,45 @@ function createOfficeModule(options = {}) {
           runId: runProxy,
           nowMs: logicalMs,
         });
+        if (runProxy) runsByProxy.set(runProxy, { childSessionId: rawChildId, parentSessionId: rawSessionId });
+        // Classified seat (the shell matched bounded subagent metadata to one
+        // of the three resident WORK seats): bind the child straight to that
+        // seat — a free seat dispatches, a busy one queues FIFO. `orchestrator`
+        // is never a classified seat, so a root session and its subagents can
+        // still hold their seats concurrently.
+        if (fact.role && CLASSIFIED_SUBAGENT_SEATS.includes(fact.role)) {
+          const placed = registry.registerClassifiedSubagent({
+            sessionId: rawChildId,
+            runId: runProxy,
+            employeeId: fact.role,
+            nowMs: logicalMs,
+          });
+          if (placed.ok) {
+            const rec = employees.get(placed.employeeId);
+            if (placed.binding) {
+              onBindingCreated(placed.binding, placed.effects);
+            } else if (rec) {
+              reduce(rec, { type: 'queue/enqueue' });
+            }
+            // The root path gets its 'running' fact from the session's
+            // turn/start; a subagent has no followed child session, so the
+            // seat is put into the same running state here (exactly the reduce
+            // the root branch applies), keeping runtime/activity/binding
+            // consistent with the work transition onBindingCreated started.
+            if (rec) reduce(rec, { type: 'runtime/fact', fact: 'running', reason: null });
+            if (!placed.binding) noteLog('queued', placed.employeeId);
+            pushSnapshot();
+          } else {
+            noteDiagnostic(placed.code || 'CLASSIFIED_SUBAGENT_REJECTED');
+          }
+          break;
+        }
+        // Unclassified subagents keep the documented single collaborator FIFO.
         const enqueued = registry.registerUnclassifiedSubagent({
           sessionId: rawChildId,
           runId: runProxy,
           nowMs: logicalMs,
         });
-        if (runProxy) runsByProxy.set(runProxy, { childSessionId: rawChildId, parentSessionId: rawSessionId });
         const collaborator = employees.get(profiles.COLLABORATOR_ID);
         reduce(collaborator, { type: 'queue/enqueue' });
         noteLog('queued', profiles.COLLABORATOR_ID);

@@ -49,6 +49,9 @@ const SOURCE_PRIORITY = Object.freeze(Object.assign(Object.create(null), {
 }));
 const CONFIDENCE_BY_SOURCE = Object.freeze({ manual: 1, 'root-default': 0.9, heuristic: 0.4 });
 const ROOT_DEFAULT_EMPLOYEE = 'orchestrator';
+// The three resident WORK seats a classified subagent may take. Explicitly
+// excludes orchestrator (root-owned) and collaborator (unclassified default).
+const CLASSIFIED_WORK_SEATS = Object.freeze(['researcher', 'coder', 'reviewer']);
 // stopReason values that count as terminal evidence for subagent/end.
 const TERMINAL_STOP_REASONS = Object.freeze(['completed', 'error', 'failed', 'aborted', 'interrupted', 'cancelled']);
 // Evidence that only acknowledges delivery is never terminal evidence.
@@ -336,7 +339,69 @@ function createEmployeeRegistry({ redactor = null, clock = null, queueController
     return queue.waitingCount(collaboratorProfile.employeeId);
   }
 
-  function peekCollaboratorQueue() {
+  // A CLASSIFIED subagent is a child whose structured metadata (label/mode)
+  // named one of the three resident WORK seats. It binds straight to that seat
+  // through the SAME queue-controller contract as every other binding: a free
+  // seat dispatches immediately (one active binding per employee), a busy seat
+  // queues FIFO. The collaborator FIFO is untouched — that remains the
+  // documented destination for UNCLASSIFIED subagents only.
+  //
+  // Fail-closed: only the three resident work seats are accepted. The
+  // orchestrator seat is never handed to a child (root sessions own it), and
+  // `collaborator` is never passed here (it has its own entry point).
+  function registerClassifiedSubagent({ sessionId, runId, employeeId, nowMs } = {}) {
+    if (typeof sessionId !== 'string' || sessionId === '') return fail('SESSION_ID_REQUIRED');
+    if (!CLASSIFIED_WORK_SEATS.includes(employeeId)) {
+      return fail('NOT_A_CLASSIFIED_SEAT', { employeeId: employeeId === undefined ? null : employeeId });
+    }
+    if (hasAnyActiveBindingForSession(sessionId) || sessionKnownInQueue(sessionId)) {
+      return fail('SESSION_ALREADY_KNOWN', { sessionId });
+    }
+    const at = atOrDefault(nowMs);
+    const enqueued = queue.enqueue({
+      requestedBy: 'runtime',
+      employeeId,
+      sessionId,
+      taskSummary: '',
+      priority: 'normal',
+      nowMs: at,
+    });
+    if (!enqueued.ok) return fail(enqueued.code, { sessionId });
+    if (runId !== undefined && runId !== null && runId !== '') queuedRunIds.set(sessionId, runId);
+    if (enqueued.item.status === 'queued') {
+      // Seat busy: the queue owns the FIFO item; the intent keeps the
+      // heuristic source for the future dispatch.
+      pendingBindingIntent.set(sessionId, {
+        bindingSource: 'heuristic',
+        confidence: CONFIDENCE_BY_SOURCE.heuristic,
+      });
+      return Object.freeze({
+        ok: true,
+        queued: true,
+        employeeId,
+        queueItemId: enqueued.item.queueItemId,
+        binding: null,
+        effects: Object.freeze([]),
+      });
+    }
+    const binding = createBinding({
+      employeeId,
+      sessionId,
+      bindingSource: 'heuristic',
+      confidence: CONFIDENCE_BY_SOURCE.heuristic,
+      at,
+      taskSummary: '',
+    });
+    consumeQueuedIdentity(sessionId);
+    return Object.freeze({
+      ok: true,
+      queued: false,
+      employeeId,
+      queueItemId: enqueued.item.queueItemId,
+      binding: freezeBinding(binding),
+      effects: enqueued.effects,
+    });
+  }  function peekCollaboratorQueue() {
     const head = queue.waitingItems(collaboratorProfile.employeeId)[0];
     return head
       ? Object.freeze({ sessionId: head.sessionId, runId: null, taskSummary: head.taskSummary, enqueuedAt: head.requestedAt })
@@ -701,6 +766,7 @@ function createEmployeeRegistry({ redactor = null, clock = null, queueController
     listChildSessions: Object.freeze(listChildSessions),
     getParentOf: Object.freeze(getParentOf),
     registerUnclassifiedSubagent: Object.freeze(registerUnclassifiedSubagent),
+    registerClassifiedSubagent: Object.freeze(registerClassifiedSubagent),
     getCollaboratorQueueLength: Object.freeze(getCollaboratorQueueLength),
     peekCollaboratorQueue: Object.freeze(peekCollaboratorQueue),
     assignNextCollaboratorItem: Object.freeze(assignNextCollaboratorItem),

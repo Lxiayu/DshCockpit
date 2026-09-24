@@ -80,6 +80,7 @@ const { resolveOfficeCharacterPack } = require('./office/office-pack-resolver.js
 const { buildOfficeUsage, priceUsageAt } = require('./office/runtime/usage-snapshot.js');
 const { toolNameOfJournalData } = require('./office/runtime/tool-phrases.js');
 const { createPendingMirror } = require('./office/runtime/pending-mirror.js');
+const { createSubagentWiring } = require('./office/runtime/subagent-wiring.js');
 const { createSkillsManager, buildSkillsMarketPayload } = require('./skills');
 const { createChannelManager } = require('./channels/channel-manager');
 const { computeCockpitBounds } = require('./cockpit-bounds');
@@ -426,6 +427,24 @@ const officeFollowStreams = new Map(); // raw sessionId -> { streamId, misses }
 const officeFollowRunning = new Map(); // sessionId -> running (api-session/status edges)
 const officeFollowKnown = new Set(); // sessionIds seen via api-session/added
 const officeFollowRemoved = new Set(); // sessionIds seen via api-session/removed
+
+// ---------------------------------------------------------------------------
+// 2026-09-24 subagent-seat wiring. The translation itself lives in the pure
+// `subagent-wiring.js` (state maps + real-journal -> adapter-vocabulary rules,
+// unit-tested in test/office-subagent-wiring.test.js). The shell only supplies
+// the two side-effect seams: `emit` (into the live office module) and `log`.
+// (`subagent/start|end` is a process-local dsh-subagent lifecycle event and
+// NEVER appears in the durable journal, so the adapter branch was dead in
+// production before this wiring — see dsh-session known-event-types.js.)
+// ---------------------------------------------------------------------------
+const officeSubagentWiring = createSubagentWiring({
+  emit: (sessionId, { type, data, seq, time }) => {
+    const mod = officeModuleInstance;
+    if (!mod || typeof mod.ingestHarnessEvent !== 'function') return;
+    mod.ingestHarnessEvent({ sessionId, type, seq, time, data });
+  },
+  log: (line) => log(line),
+});
 let lastCostUpdateAt = 0;
 let latestCostSnapshot = { stats: null, key: '', data: null };
 let quickAskRunning = false;
@@ -4285,8 +4304,11 @@ function stopOfficeFollowSync() {
   officeFollowRemoved.clear();
   officeFollowKnownOrder.length = 0;
   officeFollowCursors.clear();
+  // Subagent-seat translation ledgers are per-feed: clearing them on stop keeps
+  // a later re-enable from treating stale child ids as already-started.
+  officeSubagentWiring.reset();
+  officeAssistantStreamStats.clear();
 }
-
 async function seedOfficeFollowFromSessionList() {
   const mux = runtimeMux;
   if (!mux) return;
@@ -4309,8 +4331,54 @@ async function seedOfficeFollowFromSessionList() {
   }
 }
 
-function officeFollowSyncTick() {
-  const mux = runtimeMux;
+// ---------------------------------------------------------------------------
+// C — incremental assistant stream (0.1.5 `assistantStream?: true`).
+//
+// Off by omission historically: the follow request never asked for the
+// process-local assistant presentation frames, so the office only ever saw
+// durable journal events. Turning it on adds WORD-BY-WORD progress at the
+// event layer (attempt start / chunk / end), which is what a "thinking"
+// cadence needs, at the cost of extra mux frames per active attempt.
+//
+// Policy (deliberate, switchable):
+//  - Only office follow streams ask for it; they exist only while the office
+//    runtime is enabled (`startOfficeFollowSync` is a no-op otherwise), so a
+//    user with the office off pays nothing.
+//  - The frame PAYLOAD is never forwarded into the office module: chunks carry
+//    raw model output, which the office privacy boundary forbids. The shell
+//    keeps only COUNTS plus a throttled log line, so the incremental cadence
+//    is observable without leaking text.
+//  - To disable: set OFFICE_ASSISTANT_STREAM to false — the request then omits
+//    `assistantStream` entirely (`false` is rejected by the gateway).
+const OFFICE_ASSISTANT_STREAM = true;
+const OFFICE_ASSISTANT_STREAM_LOG_EVERY = 40; // chunks between log lines
+const officeAssistantStreamStats = new Map(); // sessionId -> {chunks, attempts, ended, lastLogAt}
+
+function officeFollowRequest(sessionId) {
+  const request = { address: { kind: 'session', sessionId } };
+  if (OFFICE_ASSISTANT_STREAM) request.assistantStream = true;
+  return request;
+}
+
+function noteOfficeAssistantStreamFrame(sessionId, frame) {
+  if (!frame || typeof frame !== 'object') return;
+  let stat = officeAssistantStreamStats.get(sessionId);
+  if (!stat) { stat = { chunks: 0, attempts: 0, ended: 0 }; officeAssistantStreamStats.set(sessionId, stat); }
+  if (frame.type === 'start') {
+    stat.attempts += 1;
+    log(`[office] assistant-stream start (${sessionId.slice(0, 8)}): attempt ${stat.attempts}`);
+  } else if (frame.type === 'chunk') {
+    stat.chunks += 1;
+    if (stat.chunks === 1 || stat.chunks % OFFICE_ASSISTANT_STREAM_LOG_EVERY === 0) {
+      log(`[office] assistant-stream chunk (${sessionId.slice(0, 8)}): #${stat.chunks}`);
+    }
+  } else if (frame.type === 'end') {
+    stat.ended += 1;
+    log(`[office] assistant-stream end (${sessionId.slice(0, 8)}): ${stat.ended} ended of ${stat.attempts} attempt(s), ${stat.chunks} chunk(s)`);
+  }
+}
+
+function officeFollowSyncTick() {  const mux = runtimeMux;
   // Mux down (cookie failing, runtime restarting): the office keeps its local
   // behavior — this is a container posture, the shell must not wobble.
   if (!mux || mux.state !== 'live') return;
@@ -4326,8 +4394,10 @@ function officeFollowSyncTick() {
       officeFollowStreams.set(sessionId, { streamId, misses: 0 });
       log(`[office] follow open (${sessionId.slice(0, 8)})`);
       // Spike-verified wire shape: a flat SessionFollowRequest. `assistantStream`
-      // is z.literal(true).optional() on 0.1.5 — it must be OMITTED, not false.
-      mux.openStream(streamId, 'session/follow', { request: { address: { kind: 'session', sessionId } } });
+      // is z.literal(true).optional() on 0.1.5 — it must be OMITTED or `true`,
+      // never `false` (the gateway rejects `false`). See
+      // officeFollowRequest() for the enable/disable policy.
+      mux.openStream(streamId, 'session/follow', { request: officeFollowRequest(sessionId) });
     } else if (typeof mux.isStreamOpen === 'function' && !mux.isStreamOpen(streamId)) {
       // A REAL change (not a refresh): the host ended/errored this follow
       // stream, or a reconnect dropped it before the mux re-opened it. Re-open
@@ -4338,7 +4408,7 @@ function officeFollowSyncTick() {
       // restart the window for nothing.
       officeFollowStreams.get(sessionId).misses = 0;
       log(`[office] follow reopen (${sessionId.slice(0, 8)})`);
-      mux.openStream(streamId, 'session/follow', { request: { address: { kind: 'session', sessionId } } });
+      mux.openStream(streamId, 'session/follow', { request: officeFollowRequest(sessionId) });
     } else {
       officeFollowStreams.get(sessionId).misses = 0;
     }
@@ -4373,6 +4443,14 @@ function ingestOfficeFollowFrame(sessionId, value) {
     ingestOfficeJournalEvent(sessionId, value.event);
     return;
   }
+  if (value.type === 'assistant-stream') {
+    // C: process-local incremental assistant frames. Deliberately NOT forwarded
+    // to the office module — the chunk payload is raw model output and the
+    // office privacy boundary keeps text out. Shell-level cadence only (see
+    // noteOfficeAssistantStreamFrame).
+    noteOfficeAssistantStreamFrame(sessionId, value.frame);
+    return;
+  }
   if (value.type === 'snapshot') {
     // The opening cursor doubles as the session/page throughSeq the P3
     // detailRef fallback needs (officePageToolCallArgs).
@@ -4394,7 +4472,7 @@ function ingestOfficeFollowFrame(sessionId, value) {
       }
     }
   }
-  // assistant-stream frames never arrive (assistantStream omitted).
+  // assistant-stream frames are handled above (OFFICE_ASSISTANT_STREAM on).
 }
 
 /** Per-journal-record shell capture that must happen for BOTH delivery shapes
@@ -4491,6 +4569,15 @@ function ingestOfficeJournalEvent(sessionId, event) {
     }
     return;
   }
+  // -------------------------------------------------------------------------
+  // 2026-09-24 subagent-seat wiring (real durable journal -> adapter vocab).
+  // The translation lives in the pure subagent-wiring module; it returns true
+  // when the event was consumed (it emitted exactly one office event carrying
+  // this journal event's own seq, so the adapter's strict sequencing never sees
+  // a gap). Tracking-only records return false and fall through to the generic
+  // ingest below, which is what advances the watermark for them.
+  // -------------------------------------------------------------------------
+  if (officeSubagentWiring.handleEvent(sessionId, event)) return;
   mod.ingestHarnessEvent({ sessionId, type: event.type, seq: event.seq, time: event.time, data });
 }
 

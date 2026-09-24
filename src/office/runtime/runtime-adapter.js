@@ -61,6 +61,11 @@ const MAX_PAYLOAD_BYTES = 64 * 1024;
 const PROVEN_CONTROLS = Object.freeze(['cancel', 'interrupt', 'followup', 'steer', 'inject']);
 const UNPROVEN_CONTROLS = Object.freeze(['pause', 'resume']);
 
+// The only seats a classified subagent may take: the three resident WORK seats.
+// `orchestrator` is reserved for root sessions and `collaborator` is the
+// fail-closed default, so neither is ever assigned through a `role` field.
+const CLASSIFIED_SEAT_WHITELIST = Object.freeze(new Set(['researcher', 'coder', 'reviewer']));
+
 function isPlainObject(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const proto = Object.getPrototypeOf(value);
@@ -397,11 +402,18 @@ function createRuntimeAdapter(options = {}) {
       case 'subagent/start': {
         const runId = runProxy(raw.runId);
         if (runId) activeRuns.add(runId);
+        // `id` is the child session id. `role` is the candidate seat computed
+        // by the shell's subagent classifier from structured metadata only and
+        // whitelisted here, so an unexpected value can never invent a seat.
+        // `mode` is the catalog descriptor mode ('one-shot'|'continuable').
+        const role = CLASSIFIED_SEAT_WHITELIST.has(payload.role) ? payload.role : null;
         facts.push({
           type: 'runtime/subagent-start',
           runId,
           sessionId: coarse(payload.id),
           provider: coarse(payload.provider),
+          role,
+          mode: payload.mode === 'one-shot' || payload.mode === 'continuable' ? payload.mode : null,
         });
         break;
       }
