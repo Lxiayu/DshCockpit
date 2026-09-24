@@ -188,7 +188,9 @@ const LAYOUT_FIXTURE = JSON.parse(
 );
 
 function makeStubPIXI(options = {}) {
-  const record = { applications: [], destroyed: [] };
+  // M1: `renders` counts app.render() calls so the low-cost render profile
+  // (redraw coalescing + skip-unchanged) is measured, not assumed.
+  const record = { applications: [], destroyed: [], renders: 0 };
   function makeObject(kind) {
     const target = {
       __kind: kind,
@@ -226,6 +228,7 @@ function makeStubPIXI(options = {}) {
   const PIXI = {
     Application: class {
       constructor() { this.stage = makeObject('stage'); this.ticker = { started: false, count: 0, stop() {}, start() {} }; this.canvas = { style: {} }; this.renderer = { extract: { base64: async () => null } }; record.applications.push(this); }
+      render() { record.renders += 1; }
       async init() { if (options.failInit) { const e = new Error('init failed: ' + options.failInit); throw e; } }
       destroy(...args) { this.__destroyed = true; record.destroyed.push({ kind: 'application', args }); }
     },
@@ -272,22 +275,52 @@ async function makeViewWithMonitor({ fpsConfig, stubOptions = {} }) {
   return { view, record, fallbackElements };
 }
 
-test('renderer + monitor: sustained low fps degrades this view to static with LOW_FPS_PERSISTENT', async () => {
+test('renderer + monitor (M1 ladder): the FIRST latch steps down to the low-cost render profile, only a SECOND latch goes static', async () => {
   let nowMs = 0;
   const { view, record } = await makeViewWithMonitor({
     fpsConfig: { thresholdFps: 30, windowFrames: 30, lowWindowLimit: 5, now: () => nowMs, scheduleFrame: () => 0 },
   });
   assert.equal(view.mode, 'webgl');
   assert.equal(view.diagnosticCode, null);
-  // 6 low windows worth of frames at 20 fps
+  assert.equal(view.diagnostics().renderProfile, 'full');
+  // 6 low windows worth of frames at 20 fps → the first latch
   for (let i = 0; i < 30 * 6; i += 1) { nowMs += 50; view.fpsMonitor.frame(); }
-  assert.equal(view.fpsMonitor.degraded(), true);
+  assert.equal(view.diagnostics().lowFpsEvents, 1, 'the first latch was observed');
+  assert.equal(view.diagnostics().renderProfile, 'low-cost', 'the scene steps down instead of dying');
+  assert.equal(view.mode, 'webgl', 'the scene is STILL LIVE after the first latch');
+  assert.equal(view.diagnosticCode, null);
+  assert.equal(record.destroyed.some((d) => d.kind === 'application'), false, 'no Pixi application is destroyed on a downgrade');
+  assert.equal(view.fpsMonitor.degraded(), false, 'the downgraded profile gets a fresh measurement window');
+
+  // The low-cost profile cannot help either: the SECOND latch settles in the
+  // static diagnostic presentation, exactly like the historical contract.
+  for (let i = 0; i < 30 * 6; i += 1) { nowMs += 50; view.fpsMonitor.frame(); }
+  assert.equal(view.diagnostics().lowFpsEvents, 2);
   assert.equal(view.mode, 'static', 'degraded to static presentation');
   assert.equal(view.diagnosticCode, 'LOW_FPS_PERSISTENT');
   assert.equal(view.staticElement && view.staticElement.dataset.diagnosticCode, 'LOW_FPS_PERSISTENT');
   const app = record.applications[0];
   assert.equal(app.__destroyed, true, 'the view-owned pixi application is destroyed');
   assert.equal(view.diagnostics().mode, 'static');
+});
+
+test('M1 ladder: the low-cost profile keeps the art — no rebuild, entities and textures survive the downgrade', async () => {
+  // makeViewWithMonitor passes no packs, but the ladder must not clear what the
+  // view owns: degradeToStatic is the only stage that destroys resources.
+  let nowMs = 0;
+  const { view, record } = await makeViewWithMonitor({
+    fpsConfig: { thresholdFps: 30, windowFrames: 30, lowWindowLimit: 5, now: () => nowMs, scheduleFrame: () => 0 },
+  });
+  for (let i = 0; i < 30 * 6; i += 1) { nowMs += 50; view.fpsMonitor.frame(); }
+  assert.equal(view.diagnostics().renderProfile, 'low-cost');
+  assert.equal(record.applications.length, 1, 'the downgrade never boots a second Pixi application');
+  assert.equal(view.staticElement, null, 'no static fallback element is mounted for a downgrade');
+  assert.equal(view.diagnostics().entityCount, 0, 'the snapshot had no employees; the point is that nothing was cleared by force');
+  // A snapshot pushed after the downgrade still reaches the stage (the profile
+  // only changes how often pixels are produced).
+  view.applySnapshot({ ...SNAPSHOT, employees: [{ employeeId: 'coder', displayName: 'coder', position: { x: 0.5, y: 0.5 }, activity: 'working', animation: { resource: 'idle', frameIndex: 0 }, queueCount: 0, marker: null }] });
+  assert.equal(view.diagnostics().entityCount, 1);
+  assert.equal(view.mode, 'webgl');
 });
 
 test('renderer + monitor: normal fps never degrades and the diagnostic code stays null', async () => {
@@ -306,8 +339,13 @@ test('LOW_FPS_PERSISTENT is a classification distinct from WebGL init failure', 
     fpsConfig: { thresholdFps: 30, windowFrames: 30, lowWindowLimit: 5, now: () => nowMs, scheduleFrame: () => 0 },
   });
   const cfg = { thresholdFps: 30, windowFrames: 30, lowWindowLimit: 5, now: () => nowMs, scheduleFrame: () => 0 };
-  for (let i = 0; i < 30 * 6; i += 1) { nowMs += 50; lowFps.view.fpsMonitor.frame(); }
+  // M1: two latch rounds (low-cost profile, then static) reach the same final
+  // LOW_FPS_PERSISTENT classification.
+  for (let i = 0; i < 30 * 12; i += 1) { nowMs += 50; lowFps.view.fpsMonitor.frame(); }
   assert.equal(lowFps.view.diagnosticCode, 'LOW_FPS_PERSISTENT');
+  assert.equal(lowFps.view.diagnostics().renderProfile, 'low-cost');
+  assert.equal(lowFps.view.diagnostics().lowFpsEvents, 2);
+  assert.equal(lowFps.view.mode, 'static');
 
   const { view: webglFailed } = await makeViewWithMonitor({
     fpsConfig: cfg,
@@ -335,4 +373,200 @@ test('destroy() with an armed monitor cancels the frame loop; frames after destr
   // frames after destroy must be inert (no throw, no resurrect)
   for (let i = 0; i < 100; i += 1) { nowMs += 50; view.fpsMonitor.frame(); }
   assert.equal(view.mode, 'webgl', 'destroy() does not rewrite the recorded mode; the view is terminal via __destroyed');
+});
+
+// ---------------------------------------------------------------------------
+// M1 (windows-perf audit 2026-09-24) — the judgement rewrite.
+//
+// Old shape: thresholdFps 30 / 30-frame windows / 5 windows. A machine that
+// renders 25 fps closed a 30-frame window every 1.2s, counted 5 low windows in
+// 6.0s and the office went permanently static — on Windows (integrated GPU,
+// hi-dpi, AV resident) that is the reported "办公室卡住不动".
+// New shape: 20 fps / 3s wall-time windows / 4 windows. Counting is in wall
+// time, so a steady-but-slow machine closes one window per 3s and needs 12s of
+// sustained sub-20fps before anything happens at all — and a rate at or above
+// the threshold on average never accumulates.
+// The renderer's ladder + static floor then decide what "degrade" means
+// (handled in office-render-foreground-recovery.test.js).
+// ---------------------------------------------------------------------------
+
+const officeHtmlSource = require('node:fs').readFileSync(
+  require('node:path').join(__dirname, '..', 'src', 'office', 'office.html'), 'utf8'
+);
+
+test('M1 policy: office.html arms exactly the exported OFFICE_LOW_FPS_POLICY', () => {
+  const { OFFICE_LOW_FPS_POLICY, OFFICE_STALL_POLL_MS } = require('../src/office/render/fps-monitor.js');
+  const block = officeHtmlSource.match(/fpsMonitor:\s*\{([\s\S]*?)\}/);
+  assert.ok(block, 'office.html still arms a fpsMonitor config');
+  const literal = {};
+  for (const [, key, value] of block[1].matchAll(/(\w+):\s*(\d+)/g)) literal[key] = Number(value);
+  assert.deepEqual(literal, { ...OFFICE_LOW_FPS_POLICY }, 'the page config and the exported policy must not drift apart');
+  assert.equal(OFFICE_LOW_FPS_POLICY.stallMs, OFFICE_STALL_POLL_MS, 'the watchdog period is the policy value');
+  assert.ok(OFFICE_STALL_POLL_MS <= OFFICE_LOW_FPS_POLICY.windowMs, 'the watchdog must poll at least once per window');
+  assert.ok(OFFICE_LOW_FPS_POLICY.windowFrames / (OFFICE_LOW_FPS_POLICY.windowMs / 1000) >= 60,
+    'windowFrames is only an upper bound: it must allow >= 60 fps inside a full window');
+});
+
+// Drives a fixed presentation rate for `seconds` through a monitor with the
+// given policy and returns the time (seconds) of the first latch, or null.
+function timeToFirstLatch(policy, fps, seconds) {
+  let nowMs = 0;
+  const at = [];
+  const monitor = createFpsMonitor({ ...policy, now: () => nowMs, onDegrade: () => at.push(nowMs) });
+  const intervalMs = 1000 / fps;
+  let next = intervalMs;
+  while (next <= seconds * 1000 && at.length === 0) {
+    nowMs = next;
+    monitor.frame();
+    next += intervalMs;
+  }
+  return at.length ? at[0] / 1000 : null;
+}
+
+test('M1 behaviour table: the old 30/30/5 policy kills the scene, the new one tolerates "usable but slow"', () => {
+  const { OFFICE_LOW_FPS_POLICY } = require('../src/office/render/fps-monitor.js');
+  const OLD = { thresholdFps: 30, windowFrames: 30, lowWindowLimit: 5, windowMs: 0 };
+  const table = [];
+  for (const fps of [60, 30, 25, 20, 18, 15, 10, 9, 5]) {
+    table.push({
+      fps,
+      oldLatchS: timeToFirstLatch(OLD, fps, 60),
+      newLatchS: timeToFirstLatch(OFFICE_LOW_FPS_POLICY, fps, 60),
+    });
+  }
+  const byFps = new Map(table.map((row) => [row.fps, row]));
+  const near = (actual, expected, label) => {
+    assert.ok(actual !== null && Math.abs(actual - expected) < 0.2, `${label}: ${actual} ~= ${expected}`);
+  };
+  // 25 fps — the Windows integrated-GPU band that triggered the report: the old
+  // policy killed the scene in 6.0s, the new policy never latches at all.
+  near(byFps.get(25).oldLatchS, 6.0, 'old 25 fps');
+  assert.equal(byFps.get(25).newLatchS, null, '25 fps is "slow", not "broken"');
+  // 20 fps is exactly the threshold: the comparison is strict (<), so it lives.
+  assert.equal(byFps.get(20).newLatchS, null);
+  // 15 fps: old 10s (the audit's number), new 12.5s (4 x 3s windows of 15 fps).
+  near(byFps.get(15).oldLatchS, 10.0, 'old 15 fps');
+  near(byFps.get(15).newLatchS, 12.5, 'new 15 fps');
+  // A genuinely bad 5 fps still latches (the observer was not disabled).
+  near(byFps.get(5).newLatchS, 12.8, 'new 5 fps');
+  // And the healthy rates never latch under either policy.
+  for (const fps of [60, 30]) {
+    assert.equal(byFps.get(fps).newLatchS, null);
+    assert.equal(byFps.get(fps).oldLatchS, null);
+  }
+});
+
+test('M1 time windows: one bad second inside a 3s window cannot latch a 24 fps machine', () => {
+  const { OFFICE_LOW_FPS_POLICY } = require('../src/office/render/fps-monitor.js');
+  let nowMs = 0;
+  const latches = [];
+  const monitor = createFpsMonitor({ ...OFFICE_LOW_FPS_POLICY, now: () => nowMs, onDegrade: () => latches.push(nowMs) });
+  // 60s of 24 fps with a 1s freeze (4 fps) every 10s: a 3s window absorbs the
+  // hiccup (its average stays above 20), where a 30-frame window would have
+  // counted the freeze as a whole low window.
+  for (let t = 0; t < 60_000; t += 1_000 / 24) {
+    nowMs = t;
+    monitor.frame();
+    if (Math.floor(t / 1000) % 10 === 0 && (t % 1000) < 250) { nowMs += 200; monitor.frame(); }
+  }
+  assert.deepEqual(latches, [], 'jitter never latches the new policy');
+  assert.ok(monitor.stats().windows >= 15, 'windows really were measured');
+});
+
+test('M1 poll(): a renderer that presents NO frame still latches (the old shape could never see this)', () => {
+  const { OFFICE_LOW_FPS_POLICY } = require('../src/office/render/fps-monitor.js');
+  let nowMs = 0;
+  const latches = [];
+  const monitor = createFpsMonitor({ ...OFFICE_LOW_FPS_POLICY, now: () => nowMs, onDegrade: () => latches.push(nowMs) });
+  // No frame() call at all — only the view owner's watchdog polls.
+  for (let i = 0; i < 3; i += 1) { nowMs += 3_000; assert.equal(monitor.poll(), false); }
+  nowMs += 3_000;
+  assert.equal(monitor.poll(), true, '4 zero-frame windows = 12s of nothing presented');
+  assert.deepEqual(latches, [12_000]);
+  assert.equal(monitor.stats().lastFps, 0, '0 frames is 0 fps by construction');
+});
+
+test('M1 poll(): inert for the legacy frame-count shape and for a window that is not overdue', () => {
+  // legacy (windowMs = 0): poll() must never do anything
+  let nowMs = 0;
+  const legacy = createFpsMonitor({ thresholdFps: 30, windowFrames: 30, lowWindowLimit: 2, now: () => nowMs });
+  nowMs = 10 * 60_000;
+  assert.equal(legacy.poll(), false);
+  assert.equal(legacy.degraded(), false);
+  // time window, but only 1s into a 3s window: not overdue yet
+  let t = 0;
+  const fresh = createFpsMonitor({ thresholdFps: 20, windowFrames: 240, windowMs: 3_000, lowWindowLimit: 4, now: () => t });
+  t = 1_000;
+  assert.equal(fresh.poll(), false);
+  // drive at 60 fps until the first window closes
+  while (fresh.stats().windows === 0) { t += 16.6; fresh.frame(); }
+  assert.equal(fresh.stats().windows, 1);
+  assert.equal(fresh.poll(), false, 'the watchdog does not re-close a window that just closed');
+  assert.equal(fresh.stats().windows, 1);
+  t += 2_999;
+  assert.equal(fresh.poll(), false, 'not overdue yet');
+  t += 1; // exactly windowMs with ZERO frames in it
+  assert.equal(fresh.poll(), false, 'one low window is not a latch');
+  assert.equal(fresh.stats().windows, 2, 'an overdue window with no frames is a measured window (0 fps)');
+  assert.equal(fresh.stats().lowWindows, 1);
+  assert.equal(fresh.stats().consecutiveLowWindows, 1);
+});
+
+test('M1 stats(): window telemetry is exposed for diagnostics/probes and never affects the decision', () => {
+  const { OFFICE_LOW_FPS_POLICY } = require('../src/office/render/fps-monitor.js');
+  let nowMs = 0;
+  const monitor = createFpsMonitor({ ...OFFICE_LOW_FPS_POLICY, now: () => nowMs });
+  for (let i = 0; i < 240; i += 1) { nowMs += 1000 / 60; monitor.frame(); }
+  const stats = monitor.stats();
+  assert.equal(stats.thresholdFps, 20);
+  assert.equal(stats.windowMs, 3_000);
+  assert.equal(stats.lowWindowLimit, 4);
+  assert.equal(stats.lowWindows, 0);
+  assert.ok(stats.windows >= 1);
+  assert.ok(stats.lastFps > 20);
+  assert.equal(stats.degraded, false);
+});
+
+test('M1 low-cost profile: redraw coalescing and skip-unchanged are MEASURED (render call counts)', async () => {
+  let nowMs = 0;
+  const { view, record } = await makeViewWithMonitor({
+    fpsConfig: { thresholdFps: 30, windowFrames: 30, lowWindowLimit: 5, now: () => nowMs, scheduleFrame: () => 0 },
+  });
+  const employee = (x) => ({
+    employeeId: 'coder', displayName: '编码员', position: { x, y: 0.5 },
+    activity: 'working', animation: { resource: 'idle', frameIndex: 0 }, queueCount: 0, marker: null,
+  });
+  const snapshot = (x) => ({ ...SNAPSHOT, employees: [employee(x)] });
+
+  // Full profile: every pushed snapshot paints, even an identical one.
+  // (The boot applySnapshot of the initial snapshot already painted once.)
+  const bootRenders = record.renders;
+  assert.equal(bootRenders, 1, 'the initial snapshot painted at boot');
+  view.applySnapshot(snapshot(0.5));
+  view.applySnapshot(snapshot(0.5));
+  assert.equal(record.renders, bootRenders + 2, 'the full profile redraws on every push');
+
+  // Latch once → low-cost profile (the scene stays live).
+  for (let i = 0; i < 30 * 6; i += 1) { nowMs += 50; view.fpsMonitor.frame(); }
+  assert.equal(view.diagnostics().renderProfile, 'low-cost');
+  assert.equal(view.mode, 'webgl');
+
+  nowMs += 1_000;
+  const afterSwitch = record.renders;
+  for (let i = 0; i < 10; i += 1) view.applySnapshot(snapshot(0.5));
+  assert.equal(record.renders, afterSwitch + 1,
+    'the first push after the downgrade repaints once (to record the signature); the other nine paint nothing');
+
+  const before = record.renders;
+  nowMs += 1_000;
+  view.applySnapshot(snapshot(0.6));
+  assert.equal(record.renders, before + 1, 'a visible change paints exactly once');
+
+  // Same instant (same injected clock): 20 further changes are coalesced.
+  for (let i = 0; i < 20; i += 1) view.applySnapshot(snapshot(0.6 + i * 0.0001));
+  assert.equal(record.renders, before + 1, 'pushes inside the coalescing slot paint nothing');
+
+  nowMs += 100; // past the 33ms slot at 30 Hz
+  view.applySnapshot(snapshot(0.7));
+  assert.equal(record.renders, before + 2, 'the accumulated state paints on the next allowed slot');
 });

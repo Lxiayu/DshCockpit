@@ -275,13 +275,36 @@ function walkSessionFiles(root) {
 }
 
 /** Async walker — used by collect() so the main thread is not blocked on IO.
- * Cached per root for 5s: collect runs every 5s, so a brand-new session
- * shows up within ~10s worst case, and a quiet tick does zero directory IO. */
-const WALK_TTL_MS = 5_000;
+ *
+ * Cached per root. TTL INVARIANT (M3, 2026-09-24 windows-perf audit): the walk
+ * TTL must be >= the caller's result-cache TTL, otherwise the result cache is
+ * useless as a walk-cache shield and every real recompute re-walks the whole
+ * sessions tree. The cockpit's `collectStats` result cache is
+ * COST_CACHE_TTL_MS = 10s (src/main.js) while the 5s poll calls it every 5s:
+ * with the old 5s walk TTL the walk cache had ALWAYS expired by the time a
+ * real recompute happened, so every 10s did a full tree walk (2N readdir +
+ * 1 stat per project/session: ~900 syscalls/10s at N=300 sessions, each one
+ * through the Windows AV filter driver while the app is idle).
+ *
+ * 30s >= 10s fixes the inversion: idle ticks do zero directory IO, and
+ * turn-end accounting (the force path in collectStats) passes
+ * `forceWalk: true` so freshness on the user-visible path is NOT traded away.
+ * A brand-new session therefore shows up within ~35s worst case on the poll
+ * path; its CONTENT is not affected (per-file stat/read is separate). */
+const WALK_TTL_MS = 30_000;
 let walkCache = null; // { root, list, expiresAt }
+// Observability (M3): counts real directory walks vs cache hits so the
+// regression test (and a field probe) can prove the cache is actually warm.
+const walkStats = { walks: 0, hits: 0 };
 
-async function walkSessionFilesAsync(root) {
-  if (walkCache && walkCache.root === root && walkCache.expiresAt > Date.now()) return walkCache.list;
+async function walkSessionFilesAsync(root, opts) {
+  const nowMs = (opts && typeof opts.now === 'function') ? opts.now() : Date.now();
+  const ttlMs = (opts && Number.isFinite(opts.ttlMs) && opts.ttlMs > 0) ? opts.ttlMs : WALK_TTL_MS;
+  const force = !!(opts && opts.force);
+  if (!force && walkCache && walkCache.root === root && walkCache.expiresAt > nowMs) {
+    walkStats.hits += 1;
+    return walkCache.list;
+  }
   const out = [];
   let projects;
   try { projects = await fsp.readdir(root, { withFileTypes: true }); } catch { return out; }
@@ -299,15 +322,28 @@ async function walkSessionFilesAsync(root) {
       if (found) out.push(path.join(sesDir, found));
     }
   }
-  walkCache = { root, list: out, expiresAt: Date.now() + WALK_TTL_MS };
+  walkStats.walks += 1;
+  walkCache = { root, list: out, expiresAt: nowMs + ttlMs };
   return out;
+}
+
+/** M3 test/probe hook: real walks vs cache hits since process start. */
+function walkCacheStats() {
+  return { walks: walkStats.walks, hits: walkStats.hits, ttlMs: WALK_TTL_MS };
+}
+
+/** M3 test hook: drop the cached list (never called from production paths). */
+function resetWalkCache() {
+  walkCache = null;
 }
 
 /**
  * Collect token usage across all sessions (fully async; never blocks main thread).
  * @param {string} dshHome
- * @param {{ windows?: Array<[number, number]> }} [opts] — peak windows; when
- *   given, totals and each session's usage also carry peak/offPeak buckets.
+ * @param {{ windows?: Array<[number, number]>, forceWalk?: boolean }} [opts] —
+ *   peak windows; when given, totals and each session's usage also carry
+ *   peak/offPeak buckets. `forceWalk` skips the walk-list cache (turn-end
+ *   accounting wants the freshest session set; see walkSessionFilesAsync).
  * @returns {Promise<{ current: Totals|null, totals: Totals, sessionCount: number, sessions: Array }>}
  */
 async function collect(dshHome, opts) {
@@ -323,7 +359,10 @@ async function collect(dshHome, opts) {
   let sessionCount = 0;
   let current = null;
   let latestMtime = 0;
-  const files = await walkSessionFilesAsync(root);
+  const files = await walkSessionFilesAsync(root, {
+    force: !!(opts && opts.forceWalk),
+    ttlMs: opts && opts.walkTtlMs,
+  });
   for (const file of files) {
     const r = await parseSessionLogAsync(file, windows);
     if (!r) continue;
@@ -376,4 +415,8 @@ module.exports = {
   collect, fmt, isEmptyTotals, decodeSessionLog, decodeSessionLogAsync,
   parseSessionLogAsync, walkSessionFiles, walkSessionFilesAsync, pressureOf,
   mergeDays,
+  // M3 (windows-perf audit): the walk cache is observable so the TTL-inversion
+  // regression test can assert hits instead of re-walks, and so a probe can
+  // read the effective TTL that main.js's COST_CACHE_TTL_MS must stay <= .
+  walkCacheStats, resetWalkCache, WALK_TTL_MS,
 };

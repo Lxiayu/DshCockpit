@@ -79,6 +79,25 @@ const COLORS = Object.freeze({
 });
 
 const STATIC_FALLBACK_TEXT = '虚拟办公室渲染不可用，已切换到静态诊断模式（详情与日志仍可用）';
+// M1 (windows-perf audit 2026-09-24): the static presentation is no longer a
+// dead end for the recoverable low-frame-rate case — the renderer offers a
+// visible retry that runs the SAME bounded rebuild the automatic recovery
+// uses. These strings are part of the page-visible contract (the footer/hint
+// text tests pin the words 「重试渲染」).
+const STATIC_RETRY_LABEL = '重试渲染';
+const STATIC_RETRY_HINT = '画面因持续低帧率已降级为静态诊断。点击「重试渲染」重新启用动画渲染（本会话最多 3 次）。';
+const STATIC_RETRY_EXHAUSTED_LABEL = '重试次数已用尽';
+const STATIC_RETRY_EXHAUSTED_HINT = '本会话的手动重试已用满（3 次）。可重启应用，或在分辨率/缩放较低时重试。';
+const STATIC_RETRY_UNSUPPORTED_LABEL = '无法重试渲染';
+const STATIC_RETRY_UNSUPPORTED_HINT = '渲染器不可用（WebGL 初始化失败等硬失败），重试不会成功；日志与面板仍可用。';
+
+// M1 render profiles (the degrade ladder's stages). Stage 0 is the historical
+// behaviour; stage 1 is the low-cost profile. Read at render time, so a
+// downgrade needs no Pixi rebuild and therefore loses no texture or art.
+const RENDER_PROFILES = Object.freeze([
+  Object.freeze({ id: 'full', maxRenderHz: 0, skipUnchanged: false }),
+  Object.freeze({ id: 'low-cost', maxRenderHz: 30, skipUnchanged: true }),
+]);
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -133,6 +152,50 @@ async function createOfficeRenderer(options) {
   // was opened into the background.
   let foreground = true;
 
+  // ---- M1 (windows-perf audit 2026-09-24): low-cost RENDER PROFILE ----------
+  // The first LOW_FPS_PERSISTENT latch no longer kills the scene. The office
+  // snapshot push runs at ~62.5 Hz and every push redraws the whole scene, so
+  // on a slow machine the render work itself is what starves rAF. Stage 0 is
+  // the historical render-everything behaviour; stage 1 coalesces redraws to
+  // `maxRenderHz` (default 30) and SKIPS redraws whose visual signature did not
+  // change (the office is idle most of the time). This drops the render cost
+  // without touching the Pixi application, the textures or the art — a rebuild
+  // would lose the character/furniture textures (placeholder art), which is
+  // exactly the trade-off the user rejected in the 2026-09-24 latch-fix
+  // decision record. Only if stage 1 STILL cannot hold thresholdFps does the
+  // view fall to the static diagnostic presentation.
+  // (RENDER_PROFILES itself is module scope so tests can read the stages.)
+  let renderProfileIndex = 0;
+  let lastRenderAtMs = null;
+  let lastRenderSignature = null;
+  let pendingRenderSnapshot = null;
+  // Injectable clocks/timers so tests and evidence harnesses stay deterministic
+  // (production uses the monitor's clock and the global setTimeout).
+  const clockNow = (fpsMonitor && typeof fpsMonitor.now === 'function') ? fpsMonitor.now : () => Date.now();
+  const scheduleTimeout = (fpsMonitor && typeof fpsMonitor.setTimeout === 'function')
+    ? fpsMonitor.setTimeout
+    : (typeof setTimeout === 'function' ? (cb, ms) => setTimeout(cb, ms) : null);
+  const cancelTimeout = (fpsMonitor && typeof fpsMonitor.clearTimeout === 'function')
+    ? fpsMonitor.clearTimeout
+    : (typeof clearTimeout === 'function' ? (id) => clearTimeout(id) : null);
+  const stallPollMs = (fpsMonitor && Number(fpsMonitor.stallMs) > 0)
+    ? Number(fpsMonitor.stallMs)
+    : ((fpsMonitor && Number(fpsMonitor.windowMs) > 0) ? Number(fpsMonitor.windowMs) : 0);
+  // M1 static floor: 0 (default) keeps the last ladder stage terminal, exactly
+  // like the historical policy. The office page arms 10: a scene that still
+  // presents >= 10 fps keeps the living low-cost profile instead of losing the
+  // picture (static diagnostics are for "not presenting", not for "slow").
+  const staticFloorFps = (fpsMonitor && Number(fpsMonitor.staticFloorFps) > 0)
+    ? Number(fpsMonitor.staticFloorFps)
+    : 0;
+  let stallTimer = null;
+  let lowFpsEvents = 0;
+  let manualRetryAttempts = 0;
+  const MANUAL_RETRY_LIMIT_PER_SESSION = 3;
+  // Assigned once the `view` object exists (the static fallback element may be
+  // built before it, and its retry button must call back into the view).
+  let onStaticRetryRequest = null;
+
   // ---- init chain: webgl -> canvas -> static -------------------------------
 
   async function tryInitApplication(preference) {
@@ -159,6 +222,53 @@ async function createOfficeRenderer(options) {
     try { if (candidate) candidate.destroy(true, { children: true, texture: false }); } catch { /* not initialized */ }
   }
 
+  // M1: the static presentation gets a VISIBLE, clickable way back for the one
+  // case that can actually recover (LOW_FPS_PERSISTENT). Built only when the
+  // renderer itself owns a real DOM element (production: office.html does not
+  // pass createFallbackElement) — a caller-supplied stub element is left
+  // untouched, exactly as before.
+  let staticRetryButton = null;
+  function attachStaticRetry(el) {
+    if (!el || typeof el.appendChild !== 'function') return;
+    const doc = el.ownerDocument || (typeof document !== 'undefined' ? document : null);
+    if (!doc || typeof doc.createElement !== 'function') return;
+    if (typeof el.querySelector === 'function' && el.querySelector('.office-static-retry')) return;
+    const row = doc.createElement('div');
+    row.className = 'office-static-retry';
+    const button = doc.createElement('button');
+    button.type = 'button';
+    button.className = 'office-static-retry-btn';
+    button.textContent = STATIC_RETRY_LABEL;
+    button.addEventListener('click', () => {
+      if (typeof onStaticRetryRequest === 'function') onStaticRetryRequest();
+    });
+    const hint = doc.createElement('p');
+    hint.className = 'office-static-retry-hint';
+    hint.textContent = STATIC_RETRY_HINT;
+    row.appendChild(button);
+    row.appendChild(hint);
+    el.appendChild(row);
+    staticRetryButton = button;
+    refreshStaticRetry();
+  }
+
+  // Keeps the retry affordance honest: hidden-by-disabled for a hard failure
+  // (WEBGL_INIT_FAILED / RENDERER_UNAVAILABLE — a rebuild would fail the same
+  // way) and after the per-session manual budget is spent.
+  function refreshStaticRetry() {
+    if (!staticRetryButton) return;
+    const recoverable = diagnosticCode === 'LOW_FPS_PERSISTENT';
+    const left = MANUAL_RETRY_LIMIT_PER_SESSION - manualRetryAttempts;
+    const usable = recoverable && left > 0;
+    if ('disabled' in staticRetryButton) staticRetryButton.disabled = !usable;
+    staticRetryButton.textContent = usable ? STATIC_RETRY_LABEL
+      : (recoverable ? STATIC_RETRY_EXHAUSTED_LABEL : STATIC_RETRY_UNSUPPORTED_LABEL);
+    try {
+      staticRetryButton.title = usable ? STATIC_RETRY_HINT
+        : (recoverable ? STATIC_RETRY_EXHAUSTED_HINT : STATIC_RETRY_UNSUPPORTED_HINT);
+    } catch { /* non-DOM stub */ }
+  }
+
   function buildStaticFallback() {
     if (typeof createFallbackElement === 'function') {
       staticElement = createFallbackElement();
@@ -171,6 +281,7 @@ async function createOfficeRenderer(options) {
       staticElement.textContent = STATIC_FALLBACK_TEXT;
       if (typeof staticElement.setAttribute === 'function') staticElement.setAttribute('role', 'status');
       if (mount && staticElement.tagName === 'DIV' && mount.appendChild) mount.appendChild(staticElement);
+      attachStaticRetry(staticElement);
     }
   }
 
@@ -765,6 +876,46 @@ async function createOfficeRenderer(options) {
     try { if (typeof app.render === 'function') app.render(); } catch { /* renderer gone */ }
   }
 
+  // ---- M1: the per-snapshot render path, gated by the render profile -------
+  // Stage 0 (full) is byte-identical to the pre-2026-09-24 behaviour: sort the
+  // ground order and render on every pushed snapshot. Stage 1 (low-cost)
+  // coalesces to maxRenderHz and skips redraws whose visual signature is
+  // unchanged. Nothing here changes what the entities contain — only how often
+  // the pixels are produced — so a downgrade never costs art or state.
+  function visualSignature(snapshot) {
+    let sig = selectionId ? `sel:${selectionId};` : '';
+    const employees = snapshot && Array.isArray(snapshot.employees) ? snapshot.employees : [];
+    for (const e of employees) {
+      if (!e || !e.employeeId) continue;
+      const p = e.position || {};
+      const a = e.animation || {};
+      sig += `${e.employeeId}:${Math.round((Number(p.x) || 0) * 1000)}:${Math.round((Number(p.y) || 0) * 1000)}`
+        + `:${a.resource || ''}:${Number(a.frameIndex) || 0}:${e.activity || ''}:${Number(e.queueCount) || 0}:${e.marker ? 1 : 0};`;
+    }
+    return sig;
+  }
+
+  function renderScene(snapshot) {
+    const profile = RENDER_PROFILES[renderProfileIndex] || RENDER_PROFILES[0];
+    if (profile.skipUnchanged) {
+      const sig = visualSignature(snapshot);
+      if (sig === lastRenderSignature) return; // nothing visible changed
+    }
+    if (profile.maxRenderHz > 0) {
+      const nowMs = clockNow();
+      if (lastRenderAtMs !== null && nowMs - lastRenderAtMs < 1000 / profile.maxRenderHz) {
+        // Too soon: skip this redraw WITHOUT recording the signature, so the
+        // next push re-evaluates and paints the accumulated state. Pushes are
+        // continuous (~62.5 Hz), so the picture is at most one slot stale.
+        return;
+      }
+      lastRenderAtMs = nowMs;
+    }
+    if (mode !== 'static') sortGround();
+    if (profile.skipUnchanged) lastRenderSignature = visualSignature(snapshot);
+    renderNow();
+  }
+
   function applySnapshot(snapshot) {
     if (destroyed || !snapshot || !Array.isArray(snapshot.employees)) return;
     currentSnapshot = snapshot;
@@ -796,8 +947,9 @@ async function createOfficeRenderer(options) {
         entities.delete(id);
       }
     }
-    if (mode !== 'static') sortGround();
-    renderNow();
+    // M1: the render profile decides whether this push paints (full profile:
+    // always, exactly as before).
+    renderScene(snapshot);
   }
 
   // ---- init chain: webgl -> canvas -> static (shared by boot and recovery) --
@@ -908,19 +1060,90 @@ async function createOfficeRenderer(options) {
   function schedulePump() {
     if (destroyed || !foreground || !monitor || monitor.degraded() || pumpHandle !== null || !scheduleFrame) return;
     pumpHandle = scheduleFrame(pump);
+    armStallPoll();
   }
   function stopPump() {
     if (pumpHandle !== null && cancelFrame) {
       try { cancelFrame(pumpHandle); } catch { /* already canceled */ }
     }
     pumpHandle = null;
+    stopStallPoll();
+  }
+  // ---- M1: stall watchdog --------------------------------------------------
+  // The monitor is pure (no timers), so the view owner polls it: while the pump
+  // is armed, an overdue window is closed even when NO frame arrived. A
+  // renderer that stops presenting entirely (dead rAF pump, lost context) used
+  // to be invisible to the observer under frame-count windows; now it produces
+  // 0-fps windows and still reaches the degrade ladder. Armed only when the
+  // policy asks for it (stallMs/windowMs > 0), so legacy configs schedule
+  // nothing.
+  function armStallPoll() {
+    if (!monitor || !stallPollMs || !scheduleTimeout || stallTimer !== null) return;
+    if (destroyed || !foreground || monitor.degraded()) return;
+    stallTimer = scheduleTimeout(() => {
+      stallTimer = null;
+      if (destroyed || !foreground || !monitor || monitor.degraded()) return;
+      // poll() routes a latch through the monitor's onDegrade → handleLowFpsLatch
+      // exactly like frame() does. The return value must NOT be handled here as
+      // well: that would walk the ladder twice for one latch.
+      if (typeof monitor.poll === 'function') monitor.poll();
+      // Self-sustaining while the view is foreground: a dead rAF pump (no frame
+      // callback ever fires, so schedulePump() is never re-entered) must still
+      // be able to walk the degrade ladder.
+      if (destroyed || !foreground || !monitor || monitor.degraded()) return;
+      armStallPoll();
+    }, stallPollMs);
+  }
+  function stopStallPoll() {
+    if (stallTimer !== null && cancelTimeout) {
+      try { cancelTimeout(stallTimer); } catch { /* already gone */ }
+    }
+    stallTimer = null;
   }
   function resetMonitor() {
     // Re-arms the observer with a fresh measurement window. Only ever called
-    // at the foreground transition and after a successful recovery rebuild —
-    // the monitor never re-arms itself.
+    // at the foreground transition, after a render-profile downgrade, and after
+    // a successful recovery rebuild — the monitor never re-arms itself.
     if (monitor && typeof monitor.reset === 'function') monitor.reset();
   }
+
+  // ---- M1: the degrade ladder ---------------------------------------------
+  // A LOW_FPS_PERSISTENT latch means "this view cannot hold thresholdFps right
+  // now". Throwing the scene away (static diagnostics, no art) is the LAST
+  // resort, not the first response:
+  //   1. step down to the low-cost render profile — the full art and state are
+  //      kept, fewer pixels per second are produced (no Pixi rebuild);
+  //   2. if the low-cost profile still cannot hold the rate, settle in the
+  //      static diagnostic presentation — but ONLY if the measured rate is
+  //      below staticFloorFps. A scene that still presents ~10+ fps is "slow",
+  //      not "broken": it stays on the living low-cost profile (the footer dot
+  //      explains the downgrade and the static fallback's 「重试渲染」 remains
+  //      the manual road back).
+  // Returns the step that was taken: 'render-profile' | 'kept-low-cost' |
+  // 'static'.
+  function handleLowFpsLatch() {
+    lowFpsEvents += 1;
+    if (renderProfileIndex < RENDER_PROFILES.length - 1) {
+      renderProfileIndex = Math.min(RENDER_PROFILES.length - 1, renderProfileIndex + 1);
+      resetMonitor();   // the downgraded profile gets its own fair measurement window
+      schedulePump();
+      syncViewSurface();
+      notifyStateChange();
+      return 'render-profile';
+    }
+    const stats = monitor && typeof monitor.stats === 'function' ? monitor.stats() : null;
+    const measured = stats && typeof stats.lastFps === 'number' ? stats.lastFps : null;
+    if (staticFloorFps > 0 && measured !== null && measured >= staticFloorFps) {
+      resetMonitor();
+      schedulePump();
+      syncViewSurface();
+      notifyStateChange();
+      return 'kept-low-cost';
+    }
+    degradeToStatic('LOW_FPS_PERSISTENT');
+    return 'static';
+  }
+
   function degradeToStatic(code) {
     if (destroyed || mode === 'static') return;
     diagnosticCode = code;
@@ -955,6 +1178,9 @@ async function createOfficeRenderer(options) {
     layers = null;
     mode = 'static';
     buildStaticFallback();
+    // Hard failures are not retryable — the retry affordance must say so
+    // instead of offering an action that cannot work.
+    refreshStaticRetry();
     // Keep the exposed view surface consistent with the degraded state (the
     // view object captured these values at creation time).
     syncViewSurface();
@@ -1028,8 +1254,13 @@ async function createOfficeRenderer(options) {
       thresholdFps: fpsMonitor.thresholdFps,
       windowFrames: fpsMonitor.windowFrames,
       lowWindowLimit: fpsMonitor.lowWindowLimit,
+      // M1: 0 (absent) keeps the historical frame-count windows; the office
+      // page arms a time window (OFFICE_LOW_FPS_POLICY).
+      windowMs: fpsMonitor.windowMs,
       now: fpsMonitor.now,
-      onDegrade: () => degradeToStatic('LOW_FPS_PERSISTENT'),
+      // M1: the latch no longer goes straight to static — the ladder steps down
+      // to the low-cost render profile first and only then falls back.
+      onDegrade: () => handleLowFpsLatch(),
     });
     schedulePump();
   }
@@ -1038,6 +1269,33 @@ async function createOfficeRenderer(options) {
     for (const [id, record] of entities) {
       if (record.__selectionRing) record.__selectionRing.visible = id === selectionId;
     }
+  }
+
+  // ---- M1: user-requested retry -------------------------------------------
+  // The static presentation is not a dead end: the user gets a visible
+  // 「重试渲染」 entry (built into the fallback element) that runs the SAME
+  // bounded rebuild the automatic recovery uses. It has its OWN per-session
+  // budget (the automatic policy's 3 per session / 1 per activation is
+  // untouched) and restores the full render profile, because a user asking for
+  // the scene back wants the full-quality scene. Returns
+  // 'recovered' | 'failed' | 'exhausted' | 'none' | 'none(not-static)'.
+  function retryRendering() {
+    if (destroyed) return Promise.resolve('none');
+    if (mode !== 'static') return Promise.resolve('none');
+    if (diagnosticCode !== 'LOW_FPS_PERSISTENT') return Promise.resolve('none'); // hard failure: a rebuild cannot help
+    if (manualRetryAttempts >= MANUAL_RETRY_LIMIT_PER_SESSION) {
+      refreshStaticRetry();
+      return Promise.resolve('exhausted');
+    }
+    manualRetryAttempts += 1;
+    renderProfileIndex = 0;
+    refreshStaticRetry();
+    if (!rebuildInFlight) {
+      rebuildInFlight = rebuildRenderer()
+        .catch(() => 'failed') // never throws into the page
+        .finally(() => { rebuildInFlight = null; });
+    }
+    return rebuildInFlight;
   }
 
   const view = {
@@ -1051,6 +1309,10 @@ async function createOfficeRenderer(options) {
     // Armed FPS observer (null when the caller did not arm fpsMonitor).
     // Exposed so tests and evidence harnesses can drive injected frames.
     fpsMonitor: monitor,
+
+    // M1: the visible retry entry runs this (the fallback element's button is
+    // wired to it in attachStaticRetry).
+    retryRendering,
 
     applySnapshot,
 
@@ -1155,6 +1417,14 @@ async function createOfficeRenderer(options) {
         // 2026-09-24 latch-fix observability: the bounded-recovery budget is
         // part of the renderer state the shell log records.
         recoveryAttempts,
+        // M1 observability: the render-profile stage (the degrade ladder), the
+        // manual retry budget and the low-fps event count, plus the observer's
+        // own window telemetry. Never affects the decision.
+        renderProfile: (RENDER_PROFILES[renderProfileIndex] || RENDER_PROFILES[0]).id,
+        renderProfileIndex,
+        lowFpsEvents,
+        manualRetryAttempts,
+        fps: monitor && typeof monitor.stats === 'function' ? monitor.stats() : null,
         foreground,
         scene: { ...scene },
         devicePixelRatio: clamp(Number(devicePixelRatio) || 1, 1, 3),
@@ -1251,6 +1521,10 @@ async function createOfficeRenderer(options) {
     get __destroyed() { return destroyed; },
   };
 
+  // The static fallback's retry button (built by buildStaticFallback before the
+  // view object existed) calls back into the view's manual retry entry.
+  onStaticRetryRequest = () => { retryRendering(); };
+
   return view;
 }
 
@@ -1258,4 +1532,9 @@ module.exports = {
   createOfficeRenderer,
   computeVisibleHeight,
   STATIC_FALLBACK_TEXT,
+  STATIC_RETRY_LABEL,
+  STATIC_RETRY_HINT,
+  STATIC_RETRY_EXHAUSTED_LABEL,
+  STATIC_RETRY_UNSUPPORTED_LABEL,
+  RENDER_PROFILES,
 };

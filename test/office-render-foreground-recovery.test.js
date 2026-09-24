@@ -241,12 +241,28 @@ async function createView({ PIXI, record, raf, clock, onStateChange = null, fpsC
   });
 }
 
-// Drives the REAL monitor instance of the view to a real latch: 5 windows of
-// 30 frames at 20 fps (below the 30 fps threshold), exactly the SPEC-07
-// LOW_FPS_PERSISTENT path.
+// Drives the REAL monitor instance of the view to the static LOW_FPS_PERSISTENT
+// state: 5 windows of 30 frames at 20 fps (below the 30 fps threshold), exactly
+// the SPEC-07 LOW_FPS_PERSISTENT path. M1 ladder: from the full profile the
+// FIRST latch steps DOWN to the low-cost render profile (the scene stays live)
+// and a SECOND latch settles in the static presentation; a view that is already
+// on the low-cost profile (an automatic rebuild keeps the profile) reaches
+// static with one latch. Every test that needs "the static LOW_FPS_PERSISTENT
+// state" gets there the way production does.
 function latchForReal(view, raf, clock) {
-  pumpAt(raf, clock, 20, FPS_CONFIG.windowFrames * FPS_CONFIG.lowWindowLimit);
-  assert.equal(view.fpsMonitor.degraded(), true, 'the real monitor latched');
+  const windowsPerLatch = FPS_CONFIG.windowFrames * FPS_CONFIG.lowWindowLimit;
+  const before = view.diagnostics().lowFpsEvents;
+  let steps = 0;
+  if (view.diagnostics().renderProfile === 'full') {
+    pumpAt(raf, clock, 20, windowsPerLatch);
+    steps += 1;
+    assert.equal(view.diagnostics().lowFpsEvents, before + steps, 'the first latch happened');
+    assert.equal(view.diagnostics().renderProfile, 'low-cost', 'M1: the first latch downgrades the render profile');
+    assert.equal(view.mode, 'webgl', 'M1: the scene is still LIVE after the first latch');
+  }
+  pumpAt(raf, clock, 20, windowsPerLatch);
+  steps += 1;
+  assert.equal(view.diagnostics().lowFpsEvents, before + steps, 'the static latch happened');
   assert.equal(view.mode, 'static');
   assert.equal(view.diagnosticCode, 'LOW_FPS_PERSISTENT');
 }
@@ -288,10 +304,16 @@ test('latch regression: a detached view feeds the monitor nothing — ~3 minutes
   assert.equal(view.mode, 'webgl', 'the scene is still LIVE after ~3 minutes in the harness (was: permanently static)');
   assert.equal(view.fpsMonitor.degraded(), false, 'the low-window streak was reset at the foreground transition');
 
-  // The observer is still armed for a GENUINE foreground problem: one more
-  // consecutive low window latches, and the bounded recovery (test ② below)
-  // is the only way back.
+  // The observer is still armed for a GENUINE foreground problem: the next
+  // consecutive low window latches. M1 ladder: that first latch steps down to
+  // the low-cost render profile (the scene stays live), and a SECOND latch on
+  // the downgraded profile reaches the static presentation — the observer was
+  // not weakened, it just no longer kills the scene on one latch.
   pumpAt(raf, clock, 20, 30);
+  assert.equal(view.diagnostics().lowFpsEvents, 1);
+  assert.equal(view.diagnostics().renderProfile, 'low-cost');
+  assert.equal(view.mode, 'webgl', 'M1: one latch no longer kills the scene');
+  pumpAt(raf, clock, 20, 30 * 5);
   assert.equal(view.mode, 'static');
   assert.equal(view.diagnosticCode, 'LOW_FPS_PERSISTENT');
   view.destroy();
@@ -661,4 +683,215 @@ test('office.html: the visibility payload’s `active` flag reaches the renderer
   assert.match(html, /diagnostics\.mode !== 'webgl'/, 'any non-webgl mode (canvas fallback or static) degrades the dot');
   assert.match(html, /rendererDegradeNote = null;/, 'a successful recovery clears the footer note');
   assert.match(html, /rendererDiagnostics: \(\) => renderer\.diagnostics\(\)/, 'the evidence hook exposes the full renderer diagnostics');
+});
+
+// ---------------------------------------------------------------------------
+// ⑥ M1 (windows-perf audit 2026-09-24) — the degrade ladder, the stall
+//    watchdog, and the visible manual retry entry.
+// ---------------------------------------------------------------------------
+
+const OFFICE_POLICY = require('../src/office/render/fps-monitor.js').OFFICE_LOW_FPS_POLICY;
+
+// A minimal DOM good enough for the renderer's static fallback: the page owns
+// the real one; here we only need createElement/appendChild/addEventListener so
+// the retry entry can be built and clicked.
+function makeFakeDom() {
+  function makeElement(tag) {
+    const node = {
+      tagName: String(tag || 'div').toUpperCase(),
+      className: '',
+      textContent: '',
+      title: '',
+      type: '',
+      disabled: false,
+      dataset: {},
+      children: [],
+      listeners: {},
+      appendChild(child) { node.children.push(child); return child; },
+      setAttribute() {},
+      remove() { node.removed = true; },
+      querySelector() { return null; },
+      addEventListener(type, cb) { node.listeners[type] = cb; },
+      click() { if (node.listeners.click) node.listeners.click(); },
+    };
+    return node;
+  }
+  const doc = { createElement: (tag) => makeElement(tag) };
+  return { doc, makeElement };
+}
+
+// Injectable timers for the stall watchdog.
+function makeFakeTimers() {
+  const pending = new Map();
+  let id = 0;
+  return {
+    scheduled: 0,
+    setTimeout(cb, ms) { id += 1; pending.set(id, { cb, ms }); return id; },
+    clearTimeout(handle) { pending.delete(handle); },
+    pendingCount: () => pending.size,
+    fireAll() {
+      const entries = [...pending.entries()];
+      pending.clear();
+      for (const [, entry] of entries) entry.cb();
+    },
+  };
+}
+
+test('M1 stall watchdog: a renderer that presents NO frame walks the ladder and reaches static', async () => {
+  // The page arms the production policy, which includes stallMs. No rAF
+  // callback ever fires (a dead pump / lost context): the ONLY thing that
+  // measures is the watchdog's poll(), and it alone must reach the ladder.
+  const { PIXI, record } = makeStubPixi();
+  const raf = makeRaf();
+  const clock = makeClock();
+  const timers = makeFakeTimers();
+  const view = await createView({
+    PIXI, record, raf, clock,
+    fpsConfig: {
+      ...OFFICE_POLICY,
+      setTimeout: timers.setTimeout,
+      clearTimeout: timers.clearTimeout,
+    },
+  });
+  assert.equal(view.mode, 'webgl');
+  assert.equal(timers.pendingCount(), 1, 'the watchdog is armed while the pump is armed');
+
+  const windowMs = OFFICE_POLICY.windowMs;
+  const perLatch = OFFICE_POLICY.lowWindowLimit;
+  for (let i = 0; i < perLatch; i += 1) { clock.nowMs += windowMs; timers.fireAll(); }
+  assert.equal(view.diagnostics().lowFpsEvents, 1, 'N zero-frame windows latch the observer');
+  assert.equal(view.diagnostics().renderProfile, 'low-cost', 'the ladder steps down first');
+  assert.equal(view.mode, 'webgl', 'the scene is still live');
+  for (let i = 0; i < perLatch; i += 1) { clock.nowMs += windowMs; timers.fireAll(); }
+  assert.equal(view.diagnostics().lowFpsEvents, 2, 'one latch per ladder step (a stall poll must not double-handle)');
+  assert.equal(view.mode, 'static', '0 fps is below the static floor: the honest answer is the static diagnostic');
+  assert.equal(view.diagnosticCode, 'LOW_FPS_PERSISTENT');
+  assert.equal(timers.pendingCount(), 0, 'no watchdog survives the terminal degrade');
+  view.destroy();
+});
+
+test('M1 stall watchdog: armed only for the time-window policy, and cleared while the view is detached', async () => {
+  const { PIXI } = makeStubPixi();
+  const timers = makeFakeTimers();
+  // legacy frame-count policy: nothing to poll, nothing scheduled
+  const legacy = await createView({ PIXI, raf: makeRaf(), clock: makeClock(), fpsConfig: { ...FPS_CONFIG, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout } });
+  assert.equal(timers.pendingCount(), 0, 'the legacy shape schedules no watchdog');
+  legacy.destroy();
+
+  const view = await createView({
+    PIXI, raf: makeRaf(), clock: makeClock(),
+    fpsConfig: { ...OFFICE_POLICY, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout },
+  });
+  assert.equal(timers.pendingCount(), 1);
+  await view.setVisible(false);
+  assert.equal(timers.pendingCount(), 0, 'a detached view is not measured (the 2026-09-24 rule)');
+  await view.setVisible(true);
+  assert.equal(timers.pendingCount(), 1, 're-activation re-arms the watchdog');
+  view.destroy();
+  assert.equal(timers.pendingCount(), 0, 'destroy() clears it');
+});
+
+test('M1 static floor: a slow-but-alive scene (>= floor fps) keeps the low-cost profile instead of going static', async () => {
+  // 12 fps: below the 20 fps threshold (so it latches) but above the 10 fps
+  // floor — the picture must stay alive with the full art.
+  const { PIXI, record } = makeStubPixi();
+  const raf = makeRaf();
+  const clock = makeClock();
+  const view = await createView({
+    PIXI, record, raf, clock,
+    fpsConfig: { ...OFFICE_POLICY, now: undefined },
+  });
+  // One latch = lowWindowLimit consecutive time windows = 4 x 3s. The
+  // frame-count formula does NOT apply to the time-window policy.
+  // 13s of frames per step: 4 windows (12s) close and latch, the 5th (15s) does not.
+  const latchFrames = Math.ceil(12 * (OFFICE_POLICY.lowWindowLimit * OFFICE_POLICY.windowMs / 1000 + 1));
+  pumpAt(raf, clock, 12, latchFrames);
+  assert.equal(view.diagnostics().lowFpsEvents, 1);
+  assert.equal(view.diagnostics().renderProfile, 'low-cost');
+  pumpAt(raf, clock, 12, latchFrames);
+  assert.equal(view.diagnostics().lowFpsEvents, 2, 'the second latch happened');
+  assert.equal(view.mode, 'webgl', '12 fps >= the 10 fps static floor: "slow" is not "broken"');
+  assert.equal(view.diagnosticCode, null);
+  assert.equal(record.destroyedApplications.length, 0, 'no application was thrown away');
+  pumpAt(raf, clock, 12, latchFrames);
+  assert.equal(view.diagnostics().lowFpsEvents, 3);
+  assert.equal(view.mode, 'webgl', 'and it stays live as long as it keeps presenting ~12 fps');
+  view.destroy();
+});
+
+test('M1 manual retry: the static fallback carries a visible 重试渲染 entry that rebuilds the scene', async () => {
+  const { PIXI, record } = makeStubPixi();
+  const { doc, makeElement } = makeFakeDom();
+  const raf = makeRaf();
+  const clock = makeClock();
+  const view = await createView({
+    PIXI, record, raf, clock,
+    createFallbackElement: () => { const el = makeElement('div'); el.ownerDocument = doc; return el; },
+  });
+  latchForReal(view, raf, clock);
+  assert.equal(view.mode, 'static');
+  const fallback = view.staticElement;
+  assert.ok(fallback, 'the static element exists');
+  const row = fallback.children[0];
+  assert.ok(row, 'the retry row is part of the static presentation');
+  const button = row.children[0];
+  assert.equal(button.textContent, '重试渲染', 'the entry is labelled for the user');
+  assert.equal(button.disabled, false, 'LOW_FPS_PERSISTENT is retryable');
+  assert.match(row.children[1].textContent, /本会话最多 3 次/, 'the hint states the budget');
+
+  button.click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(view.mode, 'webgl', 'the click brought the scene back');
+  assert.equal(view.diagnosticCode, null);
+  assert.equal(record.applications.length, 2, 'exactly one rebuild');
+  assert.equal(view.diagnostics().manualRetryAttempts, 1);
+  assert.equal(view.diagnostics().recoveryAttempts, 0, 'a manual retry never consumes the automatic budget');
+  assert.equal(view.diagnostics().renderProfile, 'full', 'the user asked for the full-quality scene');
+  view.destroy();
+});
+
+test('M1 manual retry: its own 3-per-session budget, independent of the automatic policy', async () => {
+  const { PIXI, record } = makeStubPixi();
+  const raf = makeRaf();
+  const clock = makeClock();
+  const view = await createView({ PIXI, record, raf, clock });
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    latchForReal(view, raf, clock);
+    assert.equal(view.mode, 'static');
+    assert.equal(await view.retryRendering(), 'recovered', `manual attempt ${attempt}`);
+    assert.equal(view.mode, 'webgl');
+    assert.equal(view.diagnostics().manualRetryAttempts, attempt);
+    assert.equal(view.diagnostics().recoveryAttempts, 0, 'the automatic budget is untouched');
+  }
+  latchForReal(view, raf, clock);
+  assert.equal(await view.retryRendering(), 'exhausted');
+  assert.equal(view.mode, 'static', 'the 4th manual retry is refused, the static state stays stable');
+  assert.equal(record.applications.length, 4, 'the boot app + exactly 3 manual rebuilds');
+  view.destroy();
+});
+
+test('M1 manual retry: a hard WEBGL_INIT_FAILED is never offered as retryable', async () => {
+  const { PIXI } = makeStubPixi({ failInitFrom: 0 }); // every application fails to init
+  const { doc, makeElement } = makeFakeDom();
+  const view = await createView({
+    PIXI, raf: makeRaf(), clock: makeClock(),
+    createFallbackElement: () => { const el = makeElement('div'); el.ownerDocument = doc; return el; },
+  });
+  assert.equal(view.mode, 'static');
+  assert.equal(view.diagnosticCode, 'WEBGL_INIT_FAILED');
+  const button = view.staticElement.children[0].children[0];
+  assert.equal(button.disabled, true, 'a rebuild would fail exactly the same way');
+  assert.equal(button.textContent, '无法重试渲染');
+  assert.equal(await view.retryRendering(), 'none');
+  assert.equal(view.mode, 'static');
+  view.destroy();
+});
+
+test('M1 manual retry: does nothing while the scene is live', async () => {
+  const { PIXI, record } = makeStubPixi();
+  const view = await createView({ PIXI, record, raf: makeRaf(), clock: makeClock() });
+  assert.equal(view.mode, 'webgl');
+  assert.equal(await view.retryRendering(), 'none');
+  assert.equal(record.applications.length, 1);
+  view.destroy();
 });

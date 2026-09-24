@@ -346,8 +346,30 @@
         devicePixelRatio: window.devicePixelRatio || 1,
         // Runtime low-FPS degradation (SPEC-07 / Task 9 blocker B): the
         // observer counts presented frames only; the office simulation clock
-        // stays in the main process. Threshold per SPEC-09 (30 fps).
-        fpsMonitor: { thresholdFps: 30, windowFrames: 30, lowWindowLimit: 5 },
+        // stays in the main process.
+        //
+        // 2026-09-24 (M1, windows-perf audit): judgement rewritten — the window
+        // is 3 SECONDS OF WALL TIME (windowMs), not 30 frames, the threshold is
+        // 20 fps (not 30) and a latch needs 4 consecutive bad windows, so the
+        // static fallback needs ~12s of sustained sub-20fps instead of ~5s
+        // (0.5s windows) / ~10s at 15fps. This is the exact policy exported as
+        // OFFICE_LOW_FPS_POLICY in src/office/render/fps-monitor.js and pinned
+        // by test/office-low-fps-policy.test.js — change both together.
+        // windowFrames is only an upper bound on a window (>= 3s at 80 fps).
+        // stallMs arms the renderer's stall watchdog: a renderer that presents
+        // NO frame for 3s produces 0-fps windows and still reaches the ladder
+        // (under frame-count windows a frozen renderer was never caught).
+        fpsMonitor: {
+          thresholdFps: 20,
+          windowFrames: 240,
+          windowMs: 3000,
+          lowWindowLimit: 4,
+          stallMs: 3000,
+          // The static presentation is for "not presenting", not for "slow":
+          // a scene that still holds >= 10 fps keeps the living low-cost
+          // profile (with the full art) instead of losing the picture.
+          staticFloorFps: 10,
+        },
         // 2026-09-24 latch fix: renderer mode / diagnostic code changes (the
         // LOW_FPS_PERSISTENT latch and the bounded recovery attempts) flow to
         // the shell log and the footer dot — through the existing
@@ -384,6 +406,14 @@
         rendererDegradeNote = diagnostics.mode !== 'webgl'
           ? `渲染降级：${diagnostics.diagnosticCode || 'RENDERER_UNAVAILABLE'}（${diagnostics.mode} 模式）；详情与日志保持可用`
           : null;
+        // M1 (2026-09-24): a scene that stepped down to the low-cost render
+        // profile is NOT a degrade (it is live and keeps the full art) but the
+        // user should still be able to see that the shell noticed a low frame
+        // rate — and that 「重试渲染」 in the static fallback is the manual road
+        // back if the machine keeps dropping out.
+        if (!rendererDegradeNote && diagnostics.renderProfile === 'low-cost') {
+          rendererDegradeNote = `渲染降档：低开销模式（帧率持续低于 ${diagnostics.fps ? diagnostics.fps.thresholdFps : 20} fps）；画面与操作保持可用，详情走 office:diagnostics`;
+        }
         applyDegradeDot();
       }
       if (packDiagnostic) {

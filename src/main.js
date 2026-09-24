@@ -97,6 +97,7 @@ const { pickRuntimeCandidate } = require('./runtime-pick'); // H5 runtime priori
 const { detectCredentialFormatMismatch, readLogTail } = require('./crash-reason'); // H5 crash root cause
 const { createRuntimeLogTailer } = require('./runtime-log-tail'); // boot URL poller (incident-hardened)
 const { createNotificationCenter } = require('./notification-center'); // R6
+const { createShellUpdateNotifier } = require('./shell-update-notice'); // M5
 const { buildCacheEconomics, pricingFromSettings } = require('./cache-economics'); // R4
 const { createWeeklyReport } = require('./weekly-report'); // R5
 const { createCrashLoopGuard, armWatchdog, createRuntimeSupervisor } = require('./runtime-supervisor'); // A1 supervision primitives
@@ -535,6 +536,17 @@ function syncLoginItemSetting(enabled) {
  * fresh data and forces a scan. */
 let costCache = { at: 0, data: null };
 const COST_CACHE_TTL_MS = 10_000;
+// M3 (windows-perf audit): TTL INVARIANT — token-stats' session-tree walk
+// cache TTL (WALK_TTL_MS = 30s) must be >= this result-cache TTL, otherwise
+// the walk cache can never be warm when a real recompute happens and every
+// 10s re-walks the whole sessions tree (the old 5s < 10s inversion: ~900
+// readdir/stat per 10s at N=300 sessions, idle, through the Windows AV
+// filter). The force path below also passes forceWalk so turn-end accounting
+// still sees a brand-new session immediately. The check below turns a future
+// regression of that ordering into a loud startup log line instead of silence.
+if (Number(tokenStats.WALK_TTL_MS) < COST_CACHE_TTL_MS) {
+  log(`[perf] WARNING: walk TTL (${tokenStats.WALK_TTL_MS}ms) < cost cache TTL (${COST_CACHE_TTL_MS}ms) — the session-tree walk cache can never be warm (M3 regression)`);
+}
 async function collectStats(force = false) {
   const now = Date.now();
   if (!force && costCache.data && now - costCache.at < COST_CACHE_TTL_MS) {
@@ -543,9 +555,12 @@ async function collectStats(force = false) {
   }
   const t0 = Date.now();
   const windows = cost.parseWindows(settings.get().costPeakWindows) || cost.DEFAULT_WINDOWS;
+  // forceWalk only on the forced (turn-end) path; the 5s poll reuses the walk
+  // list for up to WALK_TTL_MS. See WALK_TTL_INVARIANT_HINT above.
+  const collectOpts = { windows, forceWalk: force };
   const data = sessionWorkerClient
-    ? await sessionWorkerClient.collect(dshHomeOf(), { windows })
-    : await tokenStats.collect(dshHomeOf(), { windows });
+    ? await sessionWorkerClient.collect(dshHomeOf(), collectOpts)
+    : await tokenStats.collect(dshHomeOf(), collectOpts);
   log(`[perf] collectStats ${force ? 'forced ' : ''}recompute took ${Date.now() - t0}ms`);
   if (!force) costCache = { at: now, data };
   return data;
@@ -4873,6 +4888,30 @@ async function respondToRuntime({ rpcId, value, what }) {
 // ---------------------------------------------------------------------------
 let autoUpdater = null;
 let _updaterInitTried = false;
+// ---------------------------------------------------------------------------
+// M5 (windows-perf audit): user-visible update feedback.
+// The shell-update pipeline used to answer every failure with a log line only
+// ("autoUpdater.on('error', e => log(...))"): the settings page promises
+// 「结果将通过系统通知告知」 and there is no other surface, so a failed
+// check/download was invisible — while an unsigned exe downloading itself is
+// exactly the action an AV is most likely to block (§4.2/§4.4). The policy
+// (manual checks always answer, automatic ones speak up only for a download
+// that is failing, 10 min rate limit) lives in src/shell-update-notice.js so
+// it is unit-testable; it reuses the existing notification hub and the
+// existing retry entries (tray 「检查壳更新」, settings 「立即检查壳更新」).
+let shellUpdateNotifier = null;
+function shellUpdateNotice() {
+  if (!shellUpdateNotifier) {
+    shellUpdateNotifier = createShellUpdateNotifier({
+      notify,
+      t,
+      lang,
+      log,
+      version: () => app.getVersion(),
+    });
+  }
+  return shellUpdateNotifier;
+}
 
 function initAutoUpdater() {
   if (_updaterInitTried) return;
@@ -4887,12 +4926,22 @@ function initAutoUpdater() {
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.on('update-available', (info) => {
       log(`[shell] updater: update available ${info && info.version}`);
+      shellUpdateNotice().onAvailable(info); // autoDownload=true → the download starts now
+    });
+    autoUpdater.on('update-not-available', () => {
+      log('[shell] updater: up to date');
+      shellUpdateNotice().onNotAvailable();
     });
     autoUpdater.on('update-downloaded', (info) => {
       log(`[shell] updater: downloaded ${info && info.version}`);
+      shellUpdateNotice().onDownloaded(info);
       promptInstallShellUpdate(info);
     });
-    autoUpdater.on('error', (e) => log(`[shell] updater: ${e && e.message}`));
+    autoUpdater.on('error', (e) => {
+      log(`[shell] updater: ${e && e.message}`);
+      // M5: a visible, actionable notice instead of a silent log line.
+      shellUpdateNotice().onError(e);
+    });
     log('[shell] updater initialized');
     if (settings.get().shellAutoUpdate) {
       // check shortly after boot, then every 4 hours
@@ -4937,10 +4986,15 @@ function checkShellUpdate(notifyUser) {
     if (notifyUser) notify(t(lang(), 'notify.updateFailed'), 'updater unavailable');
     return;
   }
+  // M5: the 'error'/'update-not-available' listeners need to know whether this
+  // check came from the user (tray / settings) — a manual check always answers.
+  shellUpdateNotice().beginCheck(notifyUser);
   autoUpdater.checkForUpdates().catch((e) => {
     log(`[shell] updater check failed: ${e && e.message}`);
-    if (notifyUser) notify(t(lang(), 'notify.updateFailed'), String((e && e.message) || e));
-  });
+    // The 'error' event usually fires too; the dedup window inside the notifier
+    // keeps this from double-toasting.
+    shellUpdateNotice().onError(e);
+  }).finally(() => { shellUpdateNotice().endCheck(); });
 }
 
 // ---------------------------------------------------------------------------

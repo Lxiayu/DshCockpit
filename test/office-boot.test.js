@@ -348,6 +348,14 @@ test('the corrupt saved layout surfaces through the real pipeline: broken attemp
 // parsing, traversal guard, content types, and every office-layout.v1.json
 // status code. The handler is a pure function over (request, store) — no
 // Electron is required, only the global Response.
+//
+// 2026-09-24 (M2, windows-perf audit): the handler is ASYNC — the static
+// routes read through fs/promises and answer a Response behind an async
+// cache revalidation instead of blocking the browser UI thread with
+// existsSync/statSync/readFileSync per request. Electron's protocol.handle
+// accepts Promise<Response> (electron.d.ts: "Either a `Response` or a
+// `Promise<Response>` can be returned"); the layout route already returned
+// Promises for PUT/DELETE before this change.
 // ---------------------------------------------------------------------------
 
 const { createOfficeProtocolHandler } = require('../src/office/office-protocol.js');
@@ -397,7 +405,7 @@ test('E2d protocol: prefix routes resolve managed files with the cockpit content
     [`${LOCAL}/node_modules/pixi.js/dist/pixi.min.js`, 'text/javascript; charset=utf-8', '// pixi'],
   ];
   for (const [url, contentType, body] of cases) {
-    const response = handler(protocolRequest(url));
+    const response = await handler(protocolRequest(url));
     assert.equal(response.status, 200, `${url} resolves`);
     assert.equal(response.headers.get('content-type'), contentType, `${url} content type`);
     assert.equal(await response.text(), body, `${url} body`);
@@ -405,7 +413,7 @@ test('E2d protocol: prefix routes resolve managed files with the cockpit content
   }
 });
 
-test('E2d protocol: traversal guard, missing files, directories and foreign hostnames answer 404', () => {
+test('E2d protocol: traversal guard, missing files, directories and foreign hostnames answer 404', async () => {
   const fx = protocolFixture();
   const handler = createOfficeProtocolHandler({
     officeRoot: fx.officeRoot,
@@ -424,7 +432,7 @@ test('E2d protocol: traversal guard, missing files, directories and foreign host
     `${LOCAL}/secret.txt`, // the fallback '' route is the office root — secret stays outside
   ];
   for (const url of notFound) {
-    const response = handler(protocolRequest(url));
+    const response = await handler(protocolRequest(url));
     assert.equal(response.status, 404, `${url} must be 404`);
   }
 });
@@ -442,17 +450,17 @@ function stubStore(overrides = {}) {
 test('E2d protocol: office-layout.v1.json GET/HEAD answers 200 with the saved draft and no-store headers', async () => {
   const store = stubStore();
   const handler = createOfficeProtocolHandler({ officeRoot: '/tmp', layoutStore: store });
-  const get = handler(protocolRequest(`${LOCAL}/office-layout.v1.json`));
+  const get = await handler(protocolRequest(`${LOCAL}/office-layout.v1.json`));
   assert.equal(get.status, 200);
   assert.deepEqual(JSON.parse(await get.text()), { schemaVersion: 1, items: [] });
   assert.equal(get.headers.get('cache-control'), 'no-store');
   assert.equal(get.headers.get('content-type'), 'application/json; charset=utf-8');
-  const head = handler(protocolRequest(`${LOCAL}/office-layout.v1.json`, 'HEAD'));
+  const head = await handler(protocolRequest(`${LOCAL}/office-layout.v1.json`, 'HEAD'));
   assert.equal(head.status, 200);
   const missing = createOfficeProtocolHandler({ officeRoot: '/tmp', layoutStore: stubStore({ load: { ok: false, missing: true } }) });
-  assert.equal(missing(protocolRequest(`${LOCAL}/office-layout.v1.json`)).status, 404, 'missing answers 404');
+  assert.equal((await missing(protocolRequest(`${LOCAL}/office-layout.v1.json`))).status, 404, 'missing answers 404');
   const corrupt = createOfficeProtocolHandler({ officeRoot: '/tmp', layoutStore: stubStore({ load: { ok: false, missing: false, code: 'OFFICE_LAYOUT_SAVED_CORRUPT' } }) });
-  const conflict = corrupt(protocolRequest(`${LOCAL}/office-layout.v1.json`));
+  const conflict = await corrupt(protocolRequest(`${LOCAL}/office-layout.v1.json`));
   assert.equal(conflict.status, 409, 'a corrupt saved layout is BROKEN, never folded into missing');
   assert.equal(JSON.parse(await conflict.text()).code, 'OFFICE_LAYOUT_SAVED_CORRUPT');
 });
@@ -483,11 +491,11 @@ test('E2d protocol: office-layout.v1.json PUT validates the envelope and DELETE 
   assert.equal(deleted.status, 200);
   assert.deepEqual(await deleted.json(), { ok: true });
   assert.deepEqual(store.calls[1], ['delete']);
-  const notAllowed = handler(protocolRequest(`${LOCAL}/office-layout.v1.json`, 'POST'));
+  const notAllowed = await handler(protocolRequest(`${LOCAL}/office-layout.v1.json`, 'POST'));
   assert.equal(notAllowed.status, 405);
 });
 
-test('E2d protocol: layoutStore accepts a factory and stays lazy for static routes', () => {
+test('E2d protocol: layoutStore accepts a factory and stays lazy for static routes', async () => {
   const fx = protocolFixture();
   let constructions = 0;
   const factory = () => {
@@ -502,11 +510,11 @@ test('E2d protocol: layoutStore accepts a factory and stays lazy for static rout
     layoutStore: factory,
   });
   assert.equal(constructions, 0, 'the store is never touched at handler creation');
-  assert.equal(handler(protocolRequest(`${LOCAL}/office.html`)).status, 200);
+  assert.equal((await handler(protocolRequest(`${LOCAL}/office.html`))).status, 200);
   assert.equal(constructions, 0, 'static routes never build the store');
-  assert.equal(handler(protocolRequest(`${LOCAL}/office-layout.v1.json`)).status, 200);
+  assert.equal((await handler(protocolRequest(`${LOCAL}/office-layout.v1.json`))).status, 200);
   assert.equal(constructions, 1, 'the first layout request resolves the factory');
-  assert.equal(handler(protocolRequest(`${LOCAL}/office-layout.v1.json`)).status, 200);
+  assert.equal((await handler(protocolRequest(`${LOCAL}/office-layout.v1.json`))).status, 200);
   assert.equal(constructions, 2, 'each layout request re-resolves (the cockpit memoizes inside its own factory)');
 });
 
@@ -516,16 +524,125 @@ test('E2d protocol: the REAL store round-trips saved layout bytes through the ha
   const store = createOfficeStateStore({ userDataDir: dataDir, epoch: 1, log: () => {} });
   const handler = createOfficeProtocolHandler({ officeRoot: '/tmp', layoutStore: store });
   // missing first
-  assert.equal(handler(protocolRequest(`${LOCAL}/office-layout.v1.json`)).status, 404);
+  assert.equal((await handler(protocolRequest(`${LOCAL}/office-layout.v1.json`))).status, 404);
   // PUT -> file exists on disk (office-layout.v1.json inside the data dir)
   const saved = await handler(protocolRequest(`${LOCAL}/office-layout.v1.json`, 'PUT', JSON.stringify({ schemaVersion: 1, scene: { width: 1, height: 1 }, items: [] })));
   assert.equal(saved.status, 200);
   assert.equal(fs.existsSync(path.join(dataDir, 'office-layout.v1.json')), true, 'the saved layout lands in the dedicated data dir');
   // GET reads the same draft back
-  const loaded = handler(protocolRequest(`${LOCAL}/office-layout.v1.json`));
+  const loaded = await handler(protocolRequest(`${LOCAL}/office-layout.v1.json`));
   assert.equal(loaded.status, 200);
   assert.equal(JSON.parse(await loaded.text()).schemaVersion, 1);
   // DELETE removes the file again
   await handler(protocolRequest(`${LOCAL}/office-layout.v1.json`, 'DELETE'));
   assert.equal(fs.existsSync(path.join(dataDir, 'office-layout.v1.json')), false, 'restore-default really deletes the saved file');
+});
+
+// ---------------------------------------------------------------------------
+// M2 (windows-perf audit 2026-09-24) — the office-runtime protocol handler is
+// async and caches verified bytes. First office open = ~120 requests / 21.3 MB
+// of sprites; per-request existsSync+statSync+readFileSync on the browser UI
+// thread is what a Windows AV filter turns into a "not responding" window.
+// ---------------------------------------------------------------------------
+
+test('M2 protocol: the handler answers a Promise (async contract) and the static routes never block on sync IO', async () => {
+  const fx = protocolFixture();
+  const handler = createOfficeProtocolHandler({
+    officeRoot: fx.officeRoot, officeAssetsRoot: fx.officeAssetsRoot,
+    charactersRoot: fx.charactersRoot, nodeModulesRoot: fx.nodeModulesRoot, layoutStore: {},
+  });
+  const pending = handler(protocolRequest(`${LOCAL}/office.html`));
+  assert.ok(pending instanceof Promise, 'protocol.handle accepts Promise<Response>; the handler must return one');
+  assert.equal((await pending).status, 200);
+  // A 404 path is also async (uniform contract, no sync/sync split).
+  assert.ok(handler(protocolRequest(`${LOCAL}/office-assets/missing.png`)) instanceof Promise);
+});
+
+test('M2 protocol: a repeat request is served from the cache without re-reading the file', async () => {
+  const fx = protocolFixture();
+  const handler = createOfficeProtocolHandler({
+    officeRoot: fx.officeRoot, officeAssetsRoot: fx.officeAssetsRoot,
+    charactersRoot: fx.charactersRoot, nodeModulesRoot: fx.nodeModulesRoot, layoutStore: {},
+  });
+  const url = `${LOCAL}/office-assets/prop-fixture.png`;
+  const first = await handler(protocolRequest(url));
+  assert.equal(await first.text(), 'png-bytes');
+  assert.equal(handler.cacheStats().misses, 1, 'the first request read the file');
+  assert.equal(handler.cacheStats().entries, 1);
+
+  // Make the file unreadable: stat still works (the revalidation path), read
+  // would throw. A 200 with the original bytes can only come from the cache.
+  const file = path.join(fx.officeAssetsRoot, 'prop-fixture.png');
+  const originalMode = fs.statSync(file).mode;
+  fs.chmodSync(file, 0o000);
+  try {
+    const second = await handler(protocolRequest(url));
+    assert.equal(second.status, 200, 'served from cache even though the file is unreadable');
+    assert.equal(await second.text(), 'png-bytes');
+    assert.equal(handler.cacheStats().hits, 1, 'the second request was a cache HIT');
+    assert.equal(handler.cacheStats().misses, 1, 'no second read happened');
+  } finally {
+    fs.chmodSync(file, originalMode);
+  }
+});
+
+test('M2 protocol: the cache revalidates on mtime/size and never serves a stale build asset', async () => {
+  const fx = protocolFixture();
+  const handler = createOfficeProtocolHandler({
+    officeRoot: fx.officeRoot, officeAssetsRoot: fx.officeAssetsRoot,
+    charactersRoot: fx.charactersRoot, nodeModulesRoot: fx.nodeModulesRoot, layoutStore: {},
+  });
+  const url = `${LOCAL}/office-assets/prop-fixture.png`;
+  const file = path.join(fx.officeAssetsRoot, 'prop-fixture.png');
+  assert.equal(await (await handler(protocolRequest(url))).text(), 'png-bytes');
+  // Same size, new content (the classic stale-cache trap) + a fresh mtime.
+  fs.writeFileSync(file, 'PNG-BYTES'); // same length, different bytes
+  const changed = await handler(protocolRequest(url));
+  assert.equal(await changed.text(), 'PNG-BYTES', 'a same-size rewrite must not be served from the cache');
+  assert.equal(handler.cacheStats().misses, 2);
+  // A deleted file drops its entry and answers 404 (never a ghost 200).
+  fs.rmSync(file);
+  const gone = await handler(protocolRequest(url));
+  assert.equal(gone.status, 404);
+  assert.equal(handler.cacheStats().entries, 0, 'the deleted path is evicted from the cache');
+});
+
+test('M2 protocol: the cache is bounded by entries (LRU) and the layout route is never cached', async () => {
+  const fx = protocolFixture();
+  const { CACHE_MAX_ENTRIES } = require('../src/office/office-protocol.js');
+  const handler = createOfficeProtocolHandler({
+    officeRoot: fx.officeRoot, officeAssetsRoot: fx.officeAssetsRoot,
+    charactersRoot: fx.charactersRoot, nodeModulesRoot: fx.nodeModulesRoot,
+    layoutStore: stubStore(),
+  });
+  for (let i = 0; i < CACHE_MAX_ENTRIES + 12; i += 1) {
+    fs.writeFileSync(path.join(fx.officeAssetsRoot, `sprite-${i}.png`), `sprite-${i}`);
+    const r = await handler(protocolRequest(`${LOCAL}/office-assets/sprite-${i}.png`));
+    assert.equal(r.status, 200);
+  }
+  const stats = handler.cacheStats();
+  assert.equal(stats.entries, CACHE_MAX_ENTRIES, 'the entry bound is the ceiling');
+  assert.ok(stats.evictions >= 12, 'overflow evicted the oldest entries (LRU)');
+  assert.ok(stats.bytes <= stats.maxBytes, 'the byte bound also holds');
+  // Per-user data (the saved layout) must never enter the shared asset cache.
+  await handler(protocolRequest(`${LOCAL}/office-layout.v1.json`));
+  await handler(protocolRequest(`${LOCAL}/office-layout.v1.json`));
+  assert.equal(handler.cacheStats().entries, CACHE_MAX_ENTRIES, 'store-backed responses are not cached');
+});
+
+test('M2 protocol: cache keys are resolved paths — identical relative paths under different roots never collide', async () => {
+  const fx = protocolFixture();
+  const handler = createOfficeProtocolHandler({
+    officeRoot: fx.officeRoot, officeAssetsRoot: fx.officeAssetsRoot,
+    charactersRoot: fx.charactersRoot, nodeModulesRoot: fx.nodeModulesRoot, layoutStore: {},
+  });
+  fs.writeFileSync(path.join(fx.officeRoot, 'shared.png'), 'from-office-root');
+  fs.writeFileSync(path.join(fx.charactersRoot, 'shared.png'), 'from-characters-root');
+  const a = await handler(protocolRequest(`${LOCAL}/shared.png`));
+  const b = await handler(protocolRequest(`${LOCAL}/characters/shared.png`));
+  assert.equal(await a.text(), 'from-office-root');
+  assert.equal(await b.text(), 'from-characters-root');
+  // and both keep answering correctly on the cached path
+  assert.equal(await (await handler(protocolRequest(`${LOCAL}/shared.png`))).text(), 'from-office-root');
+  assert.equal(await (await handler(protocolRequest(`${LOCAL}/characters/shared.png`))).text(), 'from-characters-root');
 });
