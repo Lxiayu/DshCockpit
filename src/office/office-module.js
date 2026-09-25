@@ -2083,7 +2083,13 @@ function createOfficeModule(options = {}) {
   }
 
   function advanceOneTick() {
-    if (isPaused()) return state(); // hidden/background: no time replay
+    // 2026-09-25（性能专项，用户实测长时间挂机发热）：窗口隐藏/最小化时**不要构建
+    // 快照**。旧实现是 `return state()`——暂停期间每个 tick（16ms）都全量装配一次
+    // （员工循环 + registry/binding 查询 + activityLog/diagnostics 尾部 + pending
+    // 排序），而调用方（start() 的 setInterval）根本不用返回值，pushSnapshot 又因
+    // logicalMs 冻结而必然 no-op：100% 纯浪费。"暂停"的语义只是"不推进时间"，
+    // 不要求产出快照；恢复可见后下一个 tick 会照常推进并推送。
+    if (isPaused()) return null;
     logicalMs += TICK_MS;
     const at = logicalMs;
 
@@ -2822,10 +2828,9 @@ function createOfficeModule(options = {}) {
   }
 
   function activeSessionIdFor(employeeId) {
-    const snapshot = registry.snapshot();
-    const binding = snapshot.bindings.find(
-      (entry) => entry.employeeId === employeeId && entry.releasedAt === null
-    );
+    // 2026-09-25（性能专项）：不再经 registry.snapshot()（整表复制+冻结）。
+    // 该函数在 state() 的每员工循环里被调用，而 state() 每 tick（16ms）都要构建一次。
+    const binding = registry.activeBindingForEmployee(employeeId);
     return binding ? binding.sessionId : null;
   }
 

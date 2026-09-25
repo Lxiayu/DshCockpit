@@ -538,13 +538,23 @@ test('M1 low-cost profile: redraw coalescing and skip-unchanged are MEASURED (re
   });
   const snapshot = (x) => ({ ...SNAPSHOT, employees: [employee(x)] });
 
-  // Full profile: every pushed snapshot paints, even an identical one.
-  // (The boot applySnapshot of the initial snapshot already painted once.)
+  // 2026-09-25（**有意更新**，性能专项）：full 档不再"每推必画"——可视签名没变
+  // 的那一推画出来是同样的像素（62.5Hz 重复重绘是实测 CPU/GPU 的主要来源之一）。
+  // full 与 low-cost 的唯一区别现在只剩"不设频率上限"。见
+  // docs/strategy/2026-09-25-v0.4.0-release-verification.md「性能专项」。
+  // （boot 的 applySnapshot 已经画过一次。）
   const bootRenders = record.renders;
   assert.equal(bootRenders, 1, 'the initial snapshot painted at boot');
+  // 这一推把实体集合从 5 人变成 1 人（其余被移除）——集合变化同样是可见变化
   view.applySnapshot(snapshot(0.5));
-  view.applySnapshot(snapshot(0.5));
-  assert.equal(record.renders, bootRenders + 2, 'the full profile redraws on every push');
+  assert.equal(record.renders, bootRenders + 1, 'a changed entity set paints once');
+  view.applySnapshot(snapshot(0.5)); // 连位置/动画都一样 → 同样的像素
+  assert.equal(record.renders, bootRenders + 1, 'full profile: an unchanged push paints nothing');
+  const beforeChange = record.renders;
+  view.applySnapshot(snapshot(0.51)); // 位置变了 → 必须画
+  assert.equal(record.renders, beforeChange + 1, 'full profile: a visible change paints exactly once');
+  view.applySnapshot(snapshot(0.51));
+  assert.equal(record.renders, beforeChange + 1, 'and a repeat of the same visible state paints nothing');
 
   // Latch once → low-cost profile (the scene stays live).
   for (let i = 0; i < 30 * 6; i += 1) { nowMs += 50; view.fpsMonitor.frame(); }

@@ -692,6 +692,18 @@ function createEmployeeRegistry({ redactor = null, clock = null, queueController
     return binding ? freezeBinding(binding) : null;
   }
 
+  /** 该员工当前**未释放**的绑定（只读引用，不复制整表）。
+   *  2026-09-25（性能专项）：`state()` 每 tick、每员工都要问一次"这个员工绑在哪个
+   *  会话"，旧路径走 `snapshot()`——复制并冻结 employees/bindings/childSessions
+   *  三张全表；62.5Hz × N 员工 = 每秒数百次全表复制与冻结。这里线性扫绑定表并直接
+   *  返回引用（遍历顺序与 snapshot().bindings 一致，语义不变）。 */
+  function activeBindingForEmployee(employeeId) {
+    for (const binding of bindingsBySession.values()) {
+      if (binding && binding.employeeId === employeeId && binding.releasedAt === null) return binding;
+    }
+    return null;
+  }
+
   function releaseCollaboratorAndAssignNext({ sessionId, evidence, outcome, resultSummary, nowMs } = {}) {
     const binding = bindingsBySession.get(sessionId);
     if (!binding || binding.releasedAt !== null || binding.employeeId !== collaboratorProfile.employeeId) {
@@ -775,6 +787,7 @@ function createEmployeeRegistry({ redactor = null, clock = null, queueController
     cancelAcknowledged: Object.freeze(cancelAcknowledged),
     releaseBinding: Object.freeze(releaseBinding),
     getBindingForSession: Object.freeze(getBindingForSession),
+    activeBindingForEmployee: Object.freeze(activeBindingForEmployee),
     listEmployees: Object.freeze(listEmployees),
     snapshot: Object.freeze(snapshot),
     // Wiring/verification handle to the SAME queue fact source; the registry

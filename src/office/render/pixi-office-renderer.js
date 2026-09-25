@@ -95,7 +95,8 @@ const STATIC_RETRY_UNSUPPORTED_HINT = '渲染器不可用（WebGL 初始化失�
 // behaviour; stage 1 is the low-cost profile. Read at render time, so a
 // downgrade needs no Pixi rebuild and therefore loses no texture or art.
 const RENDER_PROFILES = Object.freeze([
-  Object.freeze({ id: 'full', maxRenderHz: 0, skipUnchanged: false }),
+  // 2026-09-25：full 档同样跳过"可视签名未变"的重画（同像素零收益）；仍不加频率上限。
+  Object.freeze({ id: 'full', maxRenderHz: 0, skipUnchanged: true }),
   Object.freeze({ id: 'low-cost', maxRenderHz: 30, skipUnchanged: true }),
 ]);
 
@@ -168,6 +169,8 @@ async function createOfficeRenderer(options) {
   let renderProfileIndex = 0;
   let lastRenderAtMs = null;
   let lastRenderSignature = null;
+  // 2026-09-25（性能）：上次真正执行 addChild 的节点序列（节点引用，不是 id）。
+  let lastAppliedGroundNodes = null;
   let pendingRenderSnapshot = null;
   // Injectable clocks/timers so tests and evidence harnesses stay deterministic
   // (production uses the monitor's clock and the global setTimeout).
@@ -286,6 +289,8 @@ async function createOfficeRenderer(options) {
   }
 
   function buildLayers() {
+    // 新容器 = 旧节点都不在册：顺序账本必须失效（否则重建后跳过重排 → 新画布空着）
+    lastAppliedGroundNodes = null;
     stage = app.stage;
     const layerIds = layout.layers();
     layers = {};
@@ -681,11 +686,22 @@ async function createOfficeRenderer(options) {
     if (employee.marker === 'chat-ellipsis') {
       marker.text = '…';
       marker.visible = true;
-      marker.style = { fill: COLORS.markerChat, fontSize: Math.max(12, visibleHeight * 0.24) };
+      // 2026-09-25（性能）：Pixi v8 的 style setter 没有同值保护（每次都新建
+      // TextStyle → 文本重栅格化 + 纹理重上传），62.5Hz 下每个带标记的员工每秒
+      // 被重栅格化 ~62 次。只在"标记种类/字号真的变了"时写 style。
+      const markerStyleKey = `chat:${Math.max(12, Math.round(visibleHeight * 0.24))}`;
+      if (record.__markerStyleKey !== markerStyleKey) {
+        record.__markerStyleKey = markerStyleKey;
+        marker.style = { fill: COLORS.markerChat, fontSize: Math.max(12, visibleHeight * 0.24) };
+      }
     } else if (employee.marker === 'sleep-zzz') {
       marker.text = 'Zzz';
       marker.visible = true;
-      marker.style = { fill: COLORS.markerSleep, fontSize: Math.max(10, visibleHeight * 0.2) };
+      const markerStyleKey = `sleep:${Math.max(10, Math.round(visibleHeight * 0.2))}`;
+      if (record.__markerStyleKey !== markerStyleKey) {
+        record.__markerStyleKey = markerStyleKey;
+        marker.style = { fill: COLORS.markerSleep, fontSize: Math.max(10, visibleHeight * 0.2) };
+      }
     } else {
       marker.visible = false;
     }
@@ -855,7 +871,18 @@ async function createOfficeRenderer(options) {
       }
       const merged = [...characterEntries, ...furnitureEntries];
       merged.sort((a, b) => (a.key - b.key) || String(a.id).localeCompare(String(b.id)));
-      for (const entry of merged) layer.addChild(entry.node);
+      // 2026-09-25（性能）：排序结果与上次**真正挂载**的节点序列完全相同时跳过重排。
+      // Pixi 的 addChild 对已在册的子节点是"摘下再挂上"（每推 ~38 次），而静止或正常
+      // 走动时绘制顺序几乎不变（脚点只在越过别人时才改变相对次序）。用**节点引用**
+      // 比较而不是 id：恢复重建后同一 id 是新的节点对象，必须重新挂载（否则新画布空着）。
+      const applied = lastAppliedGroundNodes;
+      const sameOrder = applied !== null
+        && applied.length === merged.length
+        && merged.every((entry, index) => applied[index] === entry.node);
+      if (!sameOrder) {
+        for (const entry of merged) layer.addChild(entry.node);
+        lastAppliedGroundNodes = merged.map((entry) => entry.node);
+      }
       groundOrder = merged.map((entry) => ({ id: entry.id, kind: entry.kind, key: entry.key }));
       return merged.map((entry) => entry.id);
     }
@@ -873,25 +900,52 @@ async function createOfficeRenderer(options) {
   // state change instead of a per-frame logic loop.
   function renderNow() {
     if (destroyed || mode === 'static' || !app) return;
+    // 2026-09-25（性能专项）：视图被切到后台（harness 为当前主视图）时**不做 GPU 重绘**
+    // ——画布不在窗口里，没人看得见，而快照推送仍是 62.5Hz。状态照常写进节点
+    // （applySnapshot），回到前台时 setVisible(true) 会失效可视签名并补画一次。
+    if (!foreground) return;
     try { if (typeof app.render === 'function') app.render(); } catch { /* renderer gone */ }
   }
 
   // ---- M1: the per-snapshot render path, gated by the render profile -------
-  // Stage 0 (full) is byte-identical to the pre-2026-09-24 behaviour: sort the
-  // ground order and render on every pushed snapshot. Stage 1 (low-cost)
-  // coalesces to maxRenderHz and skips redraws whose visual signature is
-  // unchanged. Nothing here changes what the entities contain — only how often
-  // the pixels are produced — so a downgrade never costs art or state.
+  // Stage 0 (full) sorts the ground order and renders on every pushed snapshot
+  // whose VISIBLE state changed; stage 1 (low-cost) additionally coalesces to
+  // maxRenderHz. Nothing here changes what the entities contain — only how
+  // often the pixels are produced — so a downgrade never costs art or state.
+  //
+  // 2026-09-25（性能专项，用户实测长时间挂机发热）：绘制是"快照推送驱动"的
+  // ~62.5Hz，而**没有变化的那一推**同样是全量重排 + 重画（GPU 7.9% + 渲染进程
+  // 8.4% 单核，探针实测）。因此把"可视签名不变就跳过"同时用于两档，并把逐员工
+  // 签名作为单一真源（场景签名=选择态+各员工签名）。
+  //
+  // entitySignature 必须覆盖 updateEntity 真正画出来的一切：贴图帧（resource/
+  // frameIndex/fallbackReason）、缩放（presentation.heightRatio）、脚点、徽标
+  // （queueCount）、标记（marker）、气泡（bubble.text）、选环（selectionId）。
+  // 位置按 1e3 量化：亚像素移动不重画（0.001 场景单位 ≈ 1px 的千分之一）。
+  function entitySignature(employee) {
+    const p = employee.position || {};
+    const a = employee.animation || {};
+    const presentation = employee.presentation || null;
+    const heightRatio = presentation && Number.isFinite(presentation.heightRatio) && presentation.heightRatio > 0
+      ? presentation.heightRatio
+      : 1;
+    return `${Math.round((Number(p.x) || 0) * 1000)}:${Math.round((Number(p.y) || 0) * 1000)}`
+      + `:${a.resource || ''}:${Number(a.frameIndex) || 0}:${a.fallbackReason || ''}`
+      + `:${heightRatio}:${employee.marker || ''}:${Number(employee.queueCount) || 0}`
+      + `:${employee.bubble && employee.bubble.text ? employee.bubble.text : ''}`
+      + `:${selectionId === employee.employeeId ? 1 : 0}`;
+  }
+
   function visualSignature(snapshot) {
     let sig = selectionId ? `sel:${selectionId};` : '';
     const employees = snapshot && Array.isArray(snapshot.employees) ? snapshot.employees : [];
     for (const e of employees) {
       if (!e || !e.employeeId) continue;
-      const p = e.position || {};
-      const a = e.animation || {};
-      sig += `${e.employeeId}:${Math.round((Number(p.x) || 0) * 1000)}:${Math.round((Number(p.y) || 0) * 1000)}`
-        + `:${a.resource || ''}:${Number(a.frameIndex) || 0}:${e.activity || ''}:${Number(e.queueCount) || 0}:${e.marker ? 1 : 0};`;
+      sig += `${e.employeeId}:${entitySignature(e)};`;
     }
+    // 实体**集合**也要进签名：快照里消失的员工会被 destroy，但画布上还留着旧像素，
+    // 必须重画一次（否则"跳过的重画"就等于把已被移除的角色留在画面上）。
+    sig += `|ids:${[...entities.keys()].join(',')}`;
     return sig;
   }
 
@@ -933,6 +987,16 @@ async function createOfficeRenderer(options) {
       // throwing on the missing sprite.
       const existing = entities.get(employee.employeeId);
       const record = existing && existing.container ? existing : createEntity(employee.employeeId);
+      // 2026-09-25（性能）：该员工的可视签名没变（且节点齐备）时跳过 updateEntity
+      // ——shadow/ring/placeholder 的 Graphics 重建与 badge/marker/bubble 的文本
+      // 写入在 62.5Hz 下是纯浪费（探针实测每秒上千次几何重建）。位置量化相等时
+      // 仍把最新快照挂上 record：sortGround 用它的 footY 排序。
+      const sig = entitySignature(employee);
+      if (record.__sig === sig && record.container) {
+        record.__snapshot = employee;
+        continue;
+      }
+      record.__sig = sig;
       updateEntity(record, employee);
     }
     // An employee that truly left the snapshot is removed; residents never do.
@@ -988,6 +1052,9 @@ async function createOfficeRenderer(options) {
       buildFurniture({ recordMissing });
       if (mount && app.canvas && mount.appendChild) mount.appendChild(app.canvas);
       app.ticker.stop(); // rendering happens on snapshot pushes, not on a clock
+      // 2026-09-25（性能）：可视签名的跳过逻辑必须在新画布上失效——否则重建后
+      // 的第一次 applySnapshot 会因为"场景没变"而跳过重画，新画布停在空白。
+      lastRenderSignature = null;
     } else {
       buildStaticFallback();
     }
@@ -1326,6 +1393,10 @@ async function createOfficeRenderer(options) {
       // furniture nodes persist: resize only re-projects transforms/rects,
       // so sprite identity and texture references are never recreated
       if (layers) { layoutFurniture(); sortGround(); }
+      // 2026-09-25（性能）：缩放是"投影变了、快照没变"——两处跳过逻辑都必须失效：
+      // 场景可视签名（强制重画一次）与逐员工签名（强制重投影脚点/缩放/字号）。
+      lastRenderSignature = null;
+      for (const record of entities.values()) record.__sig = null;
       if (currentSnapshot) applySnapshot(currentSnapshot);
       else renderNow();
     },
@@ -1390,6 +1461,9 @@ async function createOfficeRenderer(options) {
         // Already foreground (e.g. a window focus event): never a new attempt.
         return Promise.resolve({ mode, diagnosticCode, recovery: 'none' });
       }
+      // 回前台必须补画一次：后台期间 renderNow() 被跳过（没人看得见），画布内容停在
+      // 切走那一刻；失效可视签名让下一次推送（≤16ms）重画。
+      lastRenderSignature = null;
       if (mode === 'static' && diagnosticCode === 'LOW_FPS_PERSISTENT') {
         return Promise.resolve(attemptRecovery()).then((recovery) => ({ mode, diagnosticCode, recovery }));
       }
