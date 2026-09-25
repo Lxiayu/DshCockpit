@@ -38,13 +38,13 @@
 </head>
 <body>
   <div id="rail">
-    <button id="harness" class="tile" title="会话工作台" aria-label="会话工作台">
+    <button id="harness" class="tile" data-i18n-title="office.rail.harness" data-i18n-aria="office.rail.harness">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.4 9 9 0 0 1-3.9-.9L3 21l1.9-5.1a8.3 8.3 0 0 1-.9-3.8A8.4 8.4 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5z"/>
         <path d="M8.5 11.5h.01M12.5 11.5h.01M16.5 11.5h.01"/>
       </svg>
     </button>
-    <button id="office" class="tile" title="办公室" aria-label="办公室">
+    <button id="office" class="tile" data-i18n-title="office.rail.office" data-i18n-aria="office.rail.office">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M3 21h18"/>
         <path d="M5 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/>
@@ -53,8 +53,8 @@
       </svg>
     </button>
     <div id="spacer"></div>
-    <div id="swatches" role="radiogroup" aria-label="栏位配色"></div>
-    <button id="palette" title="配色" aria-label="配色">
+    <div id="swatches" role="radiogroup" data-i18n-aria="office.rail.swatches"></div>
+    <button id="palette" data-i18n-title="office.rail.palette" data-i18n-aria="office.rail.palette">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <circle cx="12" cy="12" r="9"/>
         <circle cx="9" cy="9.5" r="1.2" fill="currentColor" stroke="none"/>
@@ -65,12 +65,27 @@
   </div>
   <script>
     'use strict';
+    // P1 English pass (2026-09-25): the rail's labels/tooltip copy resolves
+    // per language from the SHARED shell dictionary (src/i18n.js via the
+    // preload's i18n.t) — no private string copy. Language follows the shell
+    // through the same pull + push pattern as the theme (shell:get-language /
+    // shell:language).
     const api = window.officeRail;
+    const tr = (key) => {
+      const s = api && api.i18n ? api.i18n.t(lang, key) : null;
+      return !s || s === key ? '' : s;
+    };
+    function applyI18n() {
+      for (const el of document.querySelectorAll('[data-i18n-title]')) el.title = tr(el.dataset.i18nTitle);
+      for (const el of document.querySelectorAll('[data-i18n-aria]')) el.setAttribute('aria-label', tr(el.dataset.i18nAria));
+      render(); // the office tile's dynamic tooltip is copy too
+    }
     const harnessBtn = document.getElementById('harness');
     const officeBtn = document.getElementById('office');
     const paletteBtn = document.getElementById('palette');
     const swatchBox = document.getElementById('swatches');
     let activeView = 'harness';
+    let lang = 'zh';
 
     // accent choices: one tint per theme so it stays legible on both. The
     // swatch dot always shows the DARK variant (it is a colour chip, not text).
@@ -101,7 +116,8 @@
       const officeOpen = activeView === 'office';
       harnessBtn.classList.toggle('on', activeView === 'harness');
       officeBtn.classList.toggle('on', officeOpen);
-      officeBtn.title = officeOpen ? '办公室（点击返回会话）' : '办公室（点击进入）';
+      // P1 English pass: the state-dependent tooltip is dictionary copy too.
+      officeBtn.title = officeOpen ? tr('office.rail.officeBack') : tr('office.rail.officeEnter');
     }
 
     for (const accent of ACCENTS) {
@@ -131,6 +147,18 @@
     document.documentElement.dataset.theme = 'dark'; // theme.css default until the theme arrives
     api.getTheme().then((theme) => applyTheme(theme)).catch(() => {});
     api.onTheme((theme) => applyTheme(theme));
+    // P1 English pass: language pull + push (same convention as the theme).
+    // A switch re-fills the static tooltips/aria labels and the dynamic one.
+    function setLanguage(value) {
+      if (value !== 'zh' && value !== 'en') return;
+      lang = value;
+      applyI18n();
+    }
+    api.getLanguage().then(setLanguage).catch(() => {});
+    api.onLanguage(setLanguage);
+    applyI18n();
+    // the shared dictionary lands asynchronously — re-fill once it is there
+    if (api.i18n && api.i18n.loaded) api.i18n.loaded.then(() => applyI18n()).catch(() => {});
     api.getState().then((state) => {
       if (!state) return;
       activeView = state.activeView === 'office' ? 'office' : 'harness';

@@ -1135,7 +1135,10 @@ test('office.html boots the production layout from the layout source chain with 
   assert.doesNotMatch(html, /createLayoutEditor/, 'no editor instance is created on the boot path');
   assert.doesNotMatch(html, /loadModule\('\.\/layout-editor\.js'\)/, 'the editor module is never loaded');
   // invalid source drafts degrade with a stable diagnostic, not a broken page
-  assert.match(html, /布局降级：\$\{layoutDiagnostic\}/, 'the diagnostic reaches the user-visible fallback note');
+  // P1 English pass (2026-09-25): the degrade note is the
+  // office.degrade.layout dictionary template (code reaches the user-visible
+  // tooltip through it).
+  assert.match(html, /tr\('office\.degrade\.layout', \{ code: layoutDiagnostic \}\)/, 'the diagnostic reaches the user-visible fallback note');
   // the save/restore protocol route moved out with the editor save path; the
   // route semantics are pinned in the protocol tests (office-boot contract)
   assert.match(html, /layoutDiagnostic: \(\) => layoutDiagnostic/, 'the evidence hook exposes the boot diagnostic');

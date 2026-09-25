@@ -114,7 +114,10 @@ test('record: a driven turn aggregates counts, usage, duration, tools and recent
   assert.equal(record.tools.length, 1);
   assert.equal(record.tools[0].phrase, phrases.toolPhraseZhOf('bash'));
   assert.equal(record.tools[0].count, 1);
-  assert.deepEqual(Object.keys(record.tools[0]).sort(), ['count', 'phrase'], 'no raw tool name rides the row');
+  // P1 English pass: the stable office.staff.currentTool.* key rides the row
+  // (still no raw tool name — 'key' is the fixed phrase vocabulary).
+  assert.deepEqual(Object.keys(record.tools[0]).sort(), ['count', 'key', 'phrase'], 'no raw tool name rides the row');
+  assert.equal(record.tools[0].key, phrases.toolPhraseKeyOf('bash'));
   // recent kinds: the turn boundaries (进入/落座/任务起止 family)
   const kinds = record.recent.map((row) => row.kind);
   assert.ok(kinds.includes('task-started'), 'the start row is in 今日动态');
@@ -251,7 +254,10 @@ test('record: the projection keeps the module privacy boundary (no ids, no paylo
   assert.deepEqual(Object.keys(record.recent[0]).sort(), ['atMs', 'kind', 'realMs']);
   // the allowlist extension is what lets `record` ride the redacted snapshot
   const raw = read('src/office/office-module.js');
-  assert.match(raw, /'taskSeq', 'record'\]\)/, 'record is on the presentation allowlist (whitelist, not a bypass)');
+  // P1 English pass: `chatPhase` joins the allowlist — a fixed 'walking' |
+  // 'seated' | null vocabulary (the panel's chat-phase label key), never
+  // runtime text.
+  assert.match(raw, /'taskSeq', 'record', 'chatPhase'\]\)/, 'record/chatPhase are on the presentation allowlist (whitelist, not a bypass)');
 });
 
 // ---------------------------------------------------------------------------
@@ -297,7 +303,12 @@ test('recordFor: the controller exposes the record view model', async () => {
   assert.equal(vm.usage.total, 125);
   assert.equal(vm.usage.cost, 0.0123);
   assert.equal(vm.durationMs, 42000);
-  assert.deepEqual(vm.tools, [{ phrase: '执行命令', count: 4 }, { phrase: '编辑文件', count: 2 }]);
+  // P1 English pass: the VM row carries the stable key (null for fixtures
+  // without one) beside the zh fallback phrase.
+  assert.deepEqual(vm.tools, [
+    { phrase: '执行命令', key: null, count: 4 },
+    { phrase: '编辑文件', key: null, count: 2 },
+  ]);
   assert.deepEqual(vm.recent.map((r) => r.label), ['开始任务', '任务完成', '开始小憩'], 'kinds map to the coarse labels');
   assert.equal(vm.recent[0].realMs, NOW_MS);
   assert.equal(page.recordFor('nobody'), null, 'an unknown employee has no record');
@@ -368,14 +379,17 @@ test('polish ①: the pending count badge is neutral at zero (red is for >0 only
 test('polish ②: the keyboard hint lives in the list tooltip/aria label, not a visible line', () => {
   const html = read('src/office/office.html');
   assert.ok(!html.includes('<p class="hint">方向键移动焦点'), 'the didactic visible hint is gone');
-  assert.match(html, /id="employee-list"[^>]*title="方向键移动焦点，Enter 或空格选中，Esc 取消选中"/, 'the hint rides the list title');
-  assert.match(html, /id="employee-list"[^>]*aria-label="选择员工查看详情（方向键移动焦点，Enter 或空格选中，Esc 取消选中）"/, 'screen readers still get the keyboard contract');
+  // P1 English pass: the hint rides the data-i18n key (filled per language).
+  assert.match(html, /id="employee-list"[^>]*data-i18n-title="office\.panel\.staffListAria"/, 'the hint rides the list title key');
+  // P1 English pass: the aria label rides the data-i18n key (filled per language).
+  assert.match(html, /id="employee-list"[^>]*data-i18n-aria="office\.panel\.staffListAria"/, 'screen readers still get the keyboard contract');
 });
 
 test('polish ③: the overview line is compressed (the constant 在岗 count is gone)', () => {
   const html = read('src/office/office.html');
   assert.ok(!html.includes('在岗 ${overview.presentCount}'), 'the constant present-count line is removed');
-  assert.match(html, /`执行任务 \$\{overview\.runningCount\} · 排队 \$\{overview\.queuedCount\}`/, 'the compressed one-liner keeps the two real counts');
+  // P1 English pass: the one-liner is the office.overview.summary template.
+  assert.match(html, /tr\('office\.overview\.summary', \{ r: overview\.runningCount, q: overview\.queuedCount \}\)/, 'the compressed one-liner keeps the two real counts');
   assert.match(html, /presence[\s\S]{0,80}恒为|恒为 'present'/, 'the reason is documented in the source');
   const css = read('src/office/office.css');
   assert.match(css, /#overview-summary\s*\{[^}]*color:\s*var\(--text-dim\)/s, 'the compressed line is dimmed (weight moves to the usage block)');
@@ -406,7 +420,8 @@ test('P4-R1 axis: the agent preset shows verbatim; the sandbox mode is stated as
   assert.match(model.impact, /沙箱模式：harness 未投影/, 'no sandbox inference from the agent preset');
   assert.ok(!/未知/.test(model.impact), 'the unprojected note is not an "unknown" relabel');
   const html = read('src/office/office.html');
-  assert.match(html, /PENDING_MODAL_TXT\.agentPreset/, 'the modal row term is the agent-preset label');
+  // P1 English pass: the row term resolves through the dictionary key map.
+  assert.match(html, /MT\('agentPreset'\)/, 'the modal row term is the agent-preset label');
   assert.ok(!html.includes('PENDING_MODAL_TXT.preset,'), 'the old 权限预设 row term is gone');
   assert.ok(!/权限预设/.test(html) && !/权限预设/.test(read('src/i18n.js')), 'no 权限预设 label remains');
   // an absent agent preset omits the row instead of showing 未知
@@ -513,7 +528,8 @@ test('office.html renders the record block inside the details block (five-block 
   assert.match(html, /id="record-usage"/, 'the usage row exists');
   assert.match(html, /id="record-tools"/, 'the tools row exists');
   assert.match(html, /id="record-recent"/, 'the recent timeline exists');
-  assert.match(html, /id="record-empty"[^>]*>今日暂无工作记录</, 'the empty state is honest');
+  // P1 English pass: the empty state rides the data-i18n key.
+  assert.match(html, /id="record-empty"[^>]*data-i18n="office\.record\.empty"/, 'the empty state is honest');
   // the record sits between the queue line and the action buttons
   const detailsIdx = html.indexOf('id="details-queue"');
   const recordIdx = html.indexOf('id="details-record"');

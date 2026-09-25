@@ -17,9 +17,13 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 test('rail page is a 44px icon strip: two SVG tiles + the accent palette', () => {
   const html = read('src/office-rail.html');
   assert.match(html, /id="harness"/, 'the harness button exists');
-  assert.match(html, /会话/, 'harness labelled in Chinese');
+  // P1 English pass (2026-09-25): the rail labels resolve per language from
+  // the shared dictionary (office.rail.harness / office.rail.office) — the
+  // page itself must not carry any CJK literal (see
+  // test/office-pages-english.test.js, the static guard).
+  assert.match(html, /data-i18n-title="office\.rail\.harness"/, 'harness labelled through the dictionary key');
   assert.match(html, /id="office"/, 'the office button exists');
-  assert.match(html, /办公室/, 'office labelled in Chinese');
+  assert.match(html, /data-i18n-title="office\.rail\.office"/, 'office labelled through the dictionary key');
   // icons are inline SVG on currentColor (emoji cannot follow the theme)
   const svgs = html.match(/<svg /g) || [];
   assert.ok(svgs.length >= 3, `inline SVG icons for both entries and the palette (${svgs.length})`);

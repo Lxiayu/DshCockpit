@@ -66,7 +66,7 @@ const { SETTINGS_BOUNDS: PERSISTED_SETTINGS_BOUNDS } = require('./runtime/office
 // pure office runtime modules so the panel, the pending cards and main.js
 // share one implementation.
 const { classifyRisk, RISK_ORDER } = require('./runtime/approval-risk.js');
-const { toolPhraseZhOf, questionSummaryZh } = require('./runtime/tool-phrases.js');
+const { toolPhraseZhOf, toolPhraseKeyOf, questionSummaryZh } = require('./runtime/tool-phrases.js');
 // P4 (spec §3 block 5 / §8 P4 行): the selected employee's 今日工作记录 aggregates
 // the module's own real sources (activity log, per-turn usage attribution, tool
 // facts) scoped to a real calendar day. The day key comes from the SAME pure
@@ -2364,7 +2364,15 @@ function createOfficeModule(options = {}) {
   // attribution numbers, fixed zh tool phrases and controlled activity-log
   // kinds with timestamps. It carries NO session id, task text, tool name or
   // arguments (the 常用工具 row shows the phrase family, not the raw tool name).
-  const PRESENTATION_ALLOWLIST = Object.freeze(['displayName', 'role', 'taskLabel', 'marker', 'bubble', 'toolPhrase', 'taskSeq', 'record']);
+  // P1 English pass (2026-09-25): `chatPhase` is the FIXED chat-pair phase
+  // vocabulary ('walking' | 'seated') that lets the panel show 「前往闲聊」
+  // during the walk and 「闲聊」 only once BOTH members are seated — the exact
+  // moment canvas bubbles appear (语义对齐: the badge must never announce a
+  // conversation that is not on screen yet). `phraseKey` rides the pending
+  // items: the fixed office.staff.currentTool.* key behind `summary`, so the
+  // panel can render the summary in the current language without re-deriving
+  // anything from the raw tool name.
+  const PRESENTATION_ALLOWLIST = Object.freeze(['displayName', 'role', 'taskLabel', 'marker', 'bubble', 'toolPhrase', 'toolPhraseKey', 'taskSeq', 'record', 'chatPhase']);
 
   // P1 pending items (spec §4). Every field is either app-controlled
   // vocabulary (kind / risk / toolName / summary / detailRef / employeeId), a
@@ -2374,7 +2382,7 @@ function createOfficeModule(options = {}) {
   // or tool arguments — task text structurally never enters an item. The
   // projection mirrors the employees presentation allowlist above.
   const PENDING_ALLOWLIST = Object.freeze([
-    'id', 'kind', 'employeeId', 'toolName', 'summary', 'detailRef', 'risk',
+    'id', 'kind', 'employeeId', 'toolName', 'summary', 'summaryKey', 'detailRef', 'risk',
     'createdAtMs', 'eventId', 'clientId',
   ]);
 
@@ -2429,8 +2437,11 @@ function createOfficeModule(options = {}) {
       // De-identified 常用工具 rows: the fixed zh phrase family + count only —
       // the raw tool NAME (e.g. 'bash') is deliberately not projected, the
       // phrase is the presentation vocabulary the staff rows already use.
+      // `key` is the stable office.staff.currentTool.* label key (P1 English
+      // pass): the page renders the phrase per language from the key, the zh
+      // phrase stays the fallback.
       tools: [...record.tools.entries()]
-        .map(([toolName, count]) => ({ phrase: toolPhraseZhOf(toolName), count }))
+        .map(([toolName, count]) => ({ phrase: toolPhraseZhOf(toolName), key: toolPhraseKeyOf(toolName), count }))
         .sort((a, b) => b.count - a.count || a.phrase.localeCompare(b.phrase))
         .slice(0, DAY_RECORD_TOOL_ROWS_CAP),
       recent: recent.slice(-DAY_RECORD_RECENT_CAP),
@@ -2597,6 +2608,18 @@ function createOfficeModule(options = {}) {
         presence: 'present',
         runtime: rec.state.runtime,
         activity: activityFor(rec),
+        // P1 语义对齐 (2026-09-25, user-reported): the reducer's
+        // activity:'chatting' covers the WHOLE pair episode (walk + talk), but
+        // the canvas bubbles only appear once BOTH members stand at their chat
+        // seats. The fixed-vocabulary phase ('walking' | 'seated' | null) lets
+        // the panel show 「前往闲聊/Heading to chat」 during the walk and
+        // 「闲聊/Chatting」 only when the conversation is actually on screen —
+        // the panel can never disagree with the picture again.
+        chatPhase: pair && (pair.a === rec.employeeId || pair.b === rec.employeeId)
+          ? ((rec.state.movement === 'stationary' && rec.currentNodeId === (pair.a === rec.employeeId ? pair.seatA : pair.seatB))
+            ? 'seated'
+            : 'walking')
+          : null,
         movement: rec.state.movement,
         control: rec.state.control,
         sync: globalSync,
@@ -2615,6 +2638,11 @@ function createOfficeModule(options = {}) {
         // P2 staff row: the current tool as the shared zh phrase (tool-phrases
         // module → §6 i18n family; '其他' for unknown tools) and the
         // de-identified task title counter. Both are presentation fields.
+        // P1 English pass: `toolPhraseKey` is the stable office.staff.
+        // currentTool.* key behind the phrase — the page renders per language
+        // from the key (the module owns the vocabulary; office-page.js stays
+        // require-free).
+        toolPhraseKey: rec.toolKind ? toolPhraseKeyOf(rec.toolKind) : null,
         toolPhrase: rec.toolKind ? toolPhraseZhOf(rec.toolKind) : null,
         taskSeq: rec.taskSeq || 0,
         // P4 (spec §3 block 5): the selected employee's 今日工作记录 (null when
@@ -2758,8 +2786,11 @@ function createOfficeModule(options = {}) {
       toolName,
       // 一句话摘要（工具名/意图，spec §4）: the tool phrase, never runtime text.
       // Question summaries state the intent only — the question body is task
-      // text and must never reach the snapshot.
+      // text and must never reach the snapshot. `summaryKey` is the fixed
+      // office.staff.currentTool.* key behind the phrase (stable label key for
+      // the panel's per-language rendering).
       summary: kind === 'question' ? questionSummaryZh() : toolPhraseZhOf(toolName),
+      summaryKey: toolPhraseKeyOf(toolName),
       detailRef: PENDING_DETAIL_REF,
       // §5 判据输入: toolName + preset (+ the sandbox-widening flag main.js
       // derives from the harness escalation reason). The command-shape seams

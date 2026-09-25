@@ -41,7 +41,7 @@ const http = require('node:http');
 const { SettingsStore } = require('./settings-store');
 const { RuntimeManager, isRuntimeSupported } = require('./runtime-manager');
 const { createRuntimeStateController } = require('./runtime-state');
-const { t, resolveLanguage } = require('./i18n');
+const { t, resolveLanguage, STRINGS } = require('./i18n');
 const { backupNow, backupInfo } = require('./backup');
 const tokenStats = require('./token-stats');
 const { createSessionWorkerClient } = require('./session-worker-client');
@@ -1210,6 +1210,18 @@ function broadcastTheme() {
   try { windowManager.broadcastToShellViews('shell:theme', t); } catch { /* not created yet */ }
 }
 
+// P1 English pass (2026-09-25): push the RESOLVED language ('zh' | 'en') to
+// every open shell window and shell view whenever the language setting
+// changes — the same broadcast pattern as the theme. The office page, the left
+// rail and the cockpit HUD re-localize live (no reopen needed).
+function broadcastLanguage() {
+  const value = lang();
+  for (const w of BrowserWindow.getAllWindows()) {
+    w.webContents.send('shell:language', value);
+  }
+  try { windowManager.broadcastToShellViews('shell:language', value); } catch { /* not created yet */ }
+}
+
 nativeTheme.on('theme-changed', () => broadcastTheme());
 
 // ---------------------------------------------------------------------------
@@ -1672,6 +1684,8 @@ function registerIpc() {
     // log only the changed keys, never values (M12: no prompts/secrets in logs)
     log(`[shell] settings saved keys: ${Object.keys(safePartial).join(', ')}`);
     broadcastTheme(); // a saved themeMode override may change every window
+    // P1 English pass: a saved language override re-localizes every live view
+    if (saved.language !== before.language) broadcastLanguage();
     updateTray();
     if (remote && (saved.remoteControl !== before.remoteControl || saved.remotePort !== before.remotePort || saved.remoteCompat !== before.remoteCompat)) {
       applyRemoteSettings(saved);
@@ -1711,6 +1725,16 @@ function registerIpc() {
     return result;
   });
   ipcMain.handle('shell:get-theme', () => resolvedTheme());
+  // P1 English pass: the resolved shell language ('zh' | 'en') for the office
+  // page / left rail (same pull-then-push pattern as the theme). 'system'
+  // resolves through the OS locale exactly like the tray does.
+  ipcMain.handle('shell:get-language', () => lang());
+  // The SHARED dictionary itself (src/i18n.js — the same tables the tray,
+  // notifications and settings page render from) for the SANDBOXED office
+  // preloads: a sandboxed renderer cannot require repo files, so the office
+  // page / rail pull the tables once and translate locally. Single source of
+  // truth stays src/i18n.js; nothing is duplicated.
+  ipcMain.handle('shell:get-i18n', () => ({ zh: STRINGS.zh, en: STRINGS.en }));
   ipcMain.handle('shell:pick-folder', async (_e, kind) => {
     const res = await dialog.showOpenDialog(pickDialogParent(), {
       properties: ['openDirectory', 'createDirectory'],
@@ -2171,6 +2195,7 @@ function registerIpc() {
     settings.patch({ language: value });
     invalidateCockpitSnapshot();
     broadcastTheme();
+    broadcastLanguage(); // P1 English pass: the office page / rail follow live too
     broadcastCockpitSnapshot();
     return { ok: true, language: value };
   });

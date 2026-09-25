@@ -86,11 +86,15 @@ test('office pending: the widening flag reaches classifyRisk through notePending
     sandboxWidening: true, rpcId: 'evt-wide', atMs: NOW_MS + 1,
   });
   assert.equal(widening.item.risk, 'high', 'the harness escalation ask is the §5 high row ④ — the modal path');
-  // the snapshot item shape is unchanged (no raw reason/session text rides along)
+  // the snapshot item shape is unchanged (no raw reason/session text rides
+  // along). P1 English pass adds ONE fixed-vocabulary field: `summaryKey`, the
+  // office.staff.currentTool.* key behind the summary phrase (stable label key
+  // for the panel's per-language rendering — never runtime text).
   assert.deepEqual(Object.keys(widening.item).sort(), [
     'clientId', 'createdAtMs', 'detailRef', 'employeeId', 'eventId', 'id', 'kind',
-    'risk', 'summary', 'toolName',
+    'risk', 'summary', 'summaryKey', 'toolName',
   ]);
+  assert.equal(widening.item.summaryKey, 'command');
 });
 
 // ---------------------------------------------------------------------------
@@ -437,8 +441,10 @@ test('office.html carries the P3 inbox actions and the danger modal', () => {
   // ③ cards: inline approve/reject + the danger entry + the question entry
   assert.ok(html.includes("answerPendingCard(item, 'allowed-once')"), 'the inline approve button answers allowed-once');
   assert.ok(html.includes("answerPendingCard(item, 'rejected')"), 'the inline reject button answers rejected');
-  assert.ok(html.includes("review.textContent = '查看并批准'"), 'high-risk cards open the modal instead of one-clicking');
-  assert.ok(html.includes("review.textContent = '查看并回答'"), 'question cards open the form');
+  // P1 English pass (2026-09-25): button copy resolves through the shared
+  // dictionary (office.pending.review / office.pending.reviewAnswer).
+  assert.ok(html.includes("review.textContent = tr('office.pending.review')"), 'high-risk cards open the modal instead of one-clicking');
+  assert.ok(html.includes("review.textContent = tr('office.pending.reviewAnswer')"), 'question cards open the form');
   // the modal answers with the harness vocabulary only — NEVER "always allow"
   assert.ok(html.includes("answerPendingCard(pendingModalItem, 'allowed-once')"), '仅本次批准 = allowed-once');
   assert.ok(html.includes("answerPendingCard(pendingModalItem, 'rejected')"), '拒绝 = rejected');

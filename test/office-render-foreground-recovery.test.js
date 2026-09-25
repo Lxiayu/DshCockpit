@@ -679,7 +679,9 @@ test('office.html: the visibility payload’s `active` flag reaches the renderer
   assert.match(html, /visibility\(\{ visible: [^\n]*active: officeActive \}\)/, 'window events keep carrying the active flag');
   assert.match(html, /page\.handleVisibility\(\{ visible: document\.visibilityState === 'visible', active: officeActive \}\)/, 'renderer state changes are reported through the controller');
   assert.match(html, /onStateChange: \(\) => \{ syncRendererDegradeNote\(\); reportRendererState\(\); \}/, 'renderer mode changes update the dot and the shell report');
-  assert.match(html, /渲染降级：\$\{diagnostics\.diagnosticCode \|\| 'RENDERER_UNAVAILABLE'\}/, 'the footer dot names the SPECIFIC stable code');
+  // P1 English pass (2026-09-25): the note is the office.degrade.renderer
+  // dictionary template; the SPECIFIC stable code rides the {code} var.
+  assert.match(html, /tr\('office\.degrade\.renderer', \{ code: diagnostics\.diagnosticCode \|\| 'RENDERER_UNAVAILABLE', mode: diagnostics\.mode \}\)/, 'the footer dot names the SPECIFIC stable code');
   assert.match(html, /diagnostics\.mode !== 'webgl'/, 'any non-webgl mode (canvas fallback or static) degrades the dot');
   assert.match(html, /rendererDegradeNote = null;/, 'a successful recovery clears the footer note');
   assert.match(html, /rendererDiagnostics: \(\) => renderer\.diagnostics\(\)/, 'the evidence hook exposes the full renderer diagnostics');

@@ -333,9 +333,12 @@ test('office pending: approval request writes the exact §4 contract item', () =
   assert.equal(res.ok, true);
   assert.equal(res.status, 'added');
   const [item] = mod.state().pending;
+  // P1 English pass (2026-09-25): `summaryKey` joins the contract — the fixed
+  // office.staff.currentTool.* key behind the summary phrase (stable label key
+  // for the panel's per-language rendering; still no runtime text).
   assert.deepEqual(Object.keys(item).sort(), [
     'clientId', 'createdAtMs', 'detailRef', 'employeeId', 'eventId', 'id', 'kind',
-    'risk', 'summary', 'toolName',
+    'risk', 'summary', 'summaryKey', 'toolName',
   ]);
   assert.equal(item.id, 'evt-approval-1');
   assert.equal(item.eventId, 'evt-approval-1');

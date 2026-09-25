@@ -37,6 +37,16 @@
 // snapshot projection (day-scoped counts, the per-turn usage attribution, the
 // tool-phrase tally and the recent activity kinds) — plus formatClock(), the
 // local wall-clock renderer the record rows and the timeline now share.
+//
+// P1 English pass (2026-09-25): every display-text field of the view models is
+// produced through an injected `localize(key, fallback, vars)` function — the
+// page builds one over the SHARED src/i18n.js dictionary (office.* families)
+// and the current shell language. Every text field also carries its STABLE
+// label key (`statusKey` / `nameKey` / `roleKey` / dim-field `key` / log
+// `kind` / record-tools `key` / pending `summaryKey`), so the page can render
+// per language without re-deriving anything. Without a localize function the
+// historical zh tables below are the verbatim fallback — that keeps the
+// existing consumers (and their tests) byte-identical.
 
 const ACTIVITY_LABELS = Object.freeze({
   roaming: '漫游中',
@@ -47,6 +57,9 @@ const ACTIVITY_LABELS = Object.freeze({
   thinking: '思考中',
   waiting: '等待中',
   celebrating: '庆祝中',
+  // 配对成立、双双入座前的走位中间态（与模块快照 chatPhase:'walking' 对应）:
+  // 面板在入座前不得宣布「交流中/闲聊」——那时画面还没有气泡。
+  'chat-walking': '前往交流',
 });
 
 const RUNTIME_LABELS = Object.freeze({
@@ -63,6 +76,10 @@ const SYNC_LABELS = Object.freeze({
   stale: '同步滞后',
   resyncing: '正在重新同步',
 });
+
+// snapshot sync state → office.sync.* dictionary key (the dictionary spells
+// them ok / late / reconnecting).
+const SYNC_KEY_OF = Object.freeze({ healthy: 'ok', stale: 'late', resyncing: 'reconnecting' });
 
 const BINDING_SOURCE_LABELS = Object.freeze({
   manual: '手动绑定',
@@ -101,7 +118,8 @@ const OUTCOME_LABELS = Object.freeze({
 
 // P2 staff status badges (spec §3 block 2): short office-semantics labels.
 // The coarse activities map to 工作/巡游/闲聊/小憩; anything unknown falls
-// back to the activity label above.
+// back to the activity label above. 'chat-walking' is the intermediate phase
+// keyed off the snapshot's chatPhase:'walking' — the walk TO the chat seats.
 const STAFF_STATUS_LABELS = Object.freeze({
   working: '工作',
   roaming: '巡游',
@@ -111,16 +129,23 @@ const STAFF_STATUS_LABELS = Object.freeze({
   thinking: '思考',
   waiting: '等待',
   celebrating: '庆祝',
+  'chat-walking': '前往闲聊',
 });
 
 // P2 usage block (spec §3 block 1 / §6 i18n): the zh texts mirror the shell
 // dictionary keys office.usage.* (the page keeps its historical zh-only
 // convention — the shared tool phrase already rides the snapshot through the
 // same family). pricingBasis markers are the §4 contract vocabulary.
+// P1 English pass: the snapshot marker `api-key` maps to the dictionary's
+// camelCase key `office.usage.basis.apiKey` (the §4 marker keeps its
+// historical hyphen; the dictionary predates it).
 const USAGE_BASIS_LABELS = Object.freeze({
   'api-key': '按 API Key 用量估算（本地速率）',
   subscription: '订阅套餐（金额仅供参考）',
 });
+
+// §4 pricing-basis marker → office.usage.basis.* dictionary key.
+const BASIS_KEY_OF = Object.freeze({ 'api-key': 'apiKey', subscription: 'subscription' });
 
 // P3 待你处理 (spec §3 block 3 / §5 / §6): the danger modal + the inline
 // approve/reject actions. The page keeps its historical zh-only convention;
@@ -189,10 +214,18 @@ const RECORD_TEXT = Object.freeze({
   sessionNote: '本次办公室会话内的记录（未提供真实时钟，不标注为「今日」）',
 });
 
-/** Compact token count: 千 / 万 (百万 rides 万), original value on hover. */
-function formatCount(value) {
+/** Compact token count: 千 / 万 (百万 rides 万), original value on hover.
+ * `lang` ('zh' | 'en') picks the unit family — the English panel shows K/M/B
+ * instead of the zh 万/亿 units. The default keeps the historical zh form. */
+function formatCount(value, lang = 'zh') {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return '0';
+  if (lang === 'en') {
+    if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+    if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+    if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+    return String(Math.round(n));
+  }
   if (n >= 1e8) return `${(n / 1e8).toFixed(2)} 亿`;
   if (n >= 1e5) return `${(n / 1e4).toFixed(0)} 万`;
   if (n >= 1e4) return `${(n / 1e4).toFixed(1)} 万`;
@@ -235,8 +268,34 @@ function formatClock(realMs, fallbackAtMs) {
   return new Date(n).toISOString().slice(11, 19);
 }
 
-function activityLabel(activity) {
-  return ACTIVITY_LABELS[activity] || '在岗';
+/** P1 English pass: resolve display text through the injected localize
+ * function (the page builds one over src/i18n.js + the current language).
+ * Without one (legacy consumers / tests), the zh fallback is interpolated
+ * verbatim — the historical presentation. */
+function pickText(localize, key, fallback, vars) {
+  if (typeof localize !== 'function') {
+    let s = String(fallback);
+    if (vars) {
+      for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, String(v));
+    }
+    return s;
+  }
+  const out = localize(key, fallback, vars);
+  return out === undefined || out === null ? fallback : out;
+}
+
+/** The stable activity key for a snapshot employee. A chatting employee in
+ * chatPhase 'walking' (pair formed, NOT both seated yet) keys to the
+ * intermediate 'chat-walking' label — the panel and the picture (bubbles)
+ * must never disagree about whether a conversation is happening. */
+function activityKeyOf(employee) {
+  if (employee.activity === 'chatting' && employee.chatPhase === 'walking') return 'chat-walking';
+  return employee.activity || 'present';
+}
+
+function activityText(employee, localize) {
+  const key = activityKeyOf(employee);
+  return pickText(localize, `office.activity.${key}`, ACTIVITY_LABELS[key] || '在岗');
 }
 
 /** P3: the danger-modal (and question-form) view model, built from the pending
@@ -246,8 +305,13 @@ function activityLabel(activity) {
  * command/question text comes from the main-process detail resolver, which
  * normalizes it through the module allowlist; nothing here invents data: when
  * the harness exposed no tool arguments the model says so instead of
- * fabricating a command. */
-function buildPendingModalModel({ item, detail }) {
+ * fabricating a command.
+ *
+ * P1 English pass: the fixed modal copy resolves through `localize` over the
+ * office.pending.modal.* dictionary family (zh fallback = PENDING_MODAL_TEXT);
+ * harness-verbatim content (steps / command / question text) is NEVER
+ * localized or rewritten. */
+function buildPendingModalModel({ item, detail, localize = null } = {}) {
   const d = detail && typeof detail === 'object' ? detail : null;
   const approval = !item || item.kind !== 'question';
   const hasCommand = !!(d && typeof d.command === 'string' && d.command !== '');
@@ -256,30 +320,38 @@ function buildPendingModalModel({ item, detail }) {
   if (approval) {
     steps.push(d && typeof d.reason === 'string' && d.reason !== ''
       ? d.reason
-      : `${(item && item.toolName) || 'harness'} 工具的执行请求`);
+      : pickText(localize, 'office.pending.modal.stepsFallback', `${(item && item.toolName) || 'harness'} 工具的执行请求`, { tool: (item && item.toolName) || 'harness' }));
   }
   let impact;
   if (d && typeof d.requestedSandboxMode === 'string' && d.requestedSandboxMode) {
     // The ONE place the sandbox axis is observable: a real widening request
     // names the target mode in its reason.
-    impact = PENDING_MODAL_TEXT.escalate(d.requestedSandboxMode);
+    impact = pickText(
+      localize,
+      'office.pending.modal.escalate',
+      PENDING_MODAL_TEXT.escalate(d.requestedSandboxMode),
+      { mode: d.requestedSandboxMode }
+    );
   } else {
     // P4-R1: the agent preset is NOT a sandbox tier (different axis; see the
     // PENDING_MODAL_TEXT header). Guessing one from it is exactly the inaccuracy
     // this correction removes — the panel states that the sandbox mode is not
     // projected instead.
-    impact = PENDING_MODAL_TEXT.sandboxUnprojected;
+    impact = pickText(localize, 'office.pending.modal.sandbox.unprojected', PENDING_MODAL_TEXT.sandboxUnprojected);
   }
   const targetPath = d && typeof d.targetPath === 'string' && d.targetPath !== '' ? d.targetPath : null;
   return {
     approval,
     risk: item ? item.risk : null,
-    title: approval ? PENDING_MODAL_TEXT.title : PENDING_MODAL_TEXT.questionTitle,
+    title: approval
+      ? pickText(localize, 'office.pending.modal.title', PENDING_MODAL_TEXT.title)
+      : pickText(localize, 'office.pending.modal.question', PENDING_MODAL_TEXT.questionTitle),
     toolName: item ? item.toolName : null,
     summary: item ? item.summary : null,
     // P4-R1: the AGENT composition preset (agent-presets axis, e.g. `standard`)
-    // — shown verbatim as 「Agent 预设」; NOT a sandbox tier, never mapped to
-    // one. Null when the session carries no agent preset (the row is omitted).
+    // — shown verbatim under the 「Agent 预设」 row; NOT a sandbox tier, never
+    // mapped to one. Null when the session carries no agent preset (the row is
+    // omitted).
     agentPreset: d && typeof d.preset === 'string' && d.preset !== '' ? d.preset : null,
     steps,
     impact,
@@ -289,13 +361,13 @@ function buildPendingModalModel({ item, detail }) {
     commandSource: d && typeof d.commandSource === 'string' ? d.commandSource : null,
     targetPath,
     noToolArguments,
-    noArgsNote: noToolArguments ? PENDING_MODAL_TEXT.noArgs : null,
-    noAlwaysNote: approval ? PENDING_MODAL_TEXT.noAlways : null,
-    blockedNote: PENDING_MODAL_TEXT.blocked,
+    noArgsNote: noToolArguments ? pickText(localize, 'office.pending.modal.noArgs', PENDING_MODAL_TEXT.noArgs) : null,
+    noAlwaysNote: approval ? pickText(localize, 'office.pending.modal.noAlways', PENDING_MODAL_TEXT.noAlways) : null,
+    blockedNote: pickText(localize, 'office.pending.modal.blocked', PENDING_MODAL_TEXT.blocked),
     // 可否撤销: the harness seam carries no undo information (no such field in
     // the approval request), so the modal states that plainly rather than
     // guessing — the safe reading is "treat as irreversible".
-    reversibleNote: PENDING_MODAL_TEXT.reversibleUnknown,
+    reversibleNote: pickText(localize, 'office.pending.modal.reversible.unknown', PENDING_MODAL_TEXT.reversibleUnknown),
     questions: !approval && d && Array.isArray(d.questions) ? d.questions : null,
   };
 }
@@ -322,7 +394,7 @@ function buildPendingModalModel({ item, detail }) {
  *     module's privacy boundary (same rule as the rest of the snapshot);
  *   - "效率/趋势" charts — derived from no first-hand source in this module.
  */
-function buildRecordViewModel(record) {
+function buildRecordViewModel(record, localize = null) {
   if (!record || typeof record !== 'object') return null;
   const usage = record.usage && typeof record.usage === 'object' ? record.usage : null;
   return {
@@ -341,12 +413,21 @@ function buildRecordViewModel(record) {
         }
       : null,
     durationMs: Number.isFinite(Number(record.durationMs)) ? Number(record.durationMs) : 0,
+    // `key` is the stable office.staff.currentTool.* label key that rode the
+    // module projection; `phrase` resolves per language (zh fallback = the
+    // snapshot phrase). No raw tool name ever rides the row.
     tools: (Array.isArray(record.tools) ? record.tools : [])
       .filter((row) => row && typeof row.phrase === 'string' && row.phrase !== '')
-      .map((row) => ({ phrase: row.phrase, count: Number(row.count) || 0 })),
+      .map((row) => ({
+        phrase: pickText(localize, typeof row.key === 'string' && row.key !== ''
+          ? `office.staff.currentTool.${row.key}`
+          : 'office.staff.currentTool.other', row.phrase),
+        key: typeof row.key === 'string' ? row.key : null,
+        count: Number(row.count) || 0,
+      })),
     recent: (Array.isArray(record.recent) ? record.recent : []).map((row) => ({
       kind: typeof row.kind === 'string' ? row.kind : '',
-      label: ACTIVITY_LOG_LABELS[row.kind] || row.kind || '—',
+      label: pickText(localize, `office.log.${row.kind}`, ACTIVITY_LOG_LABELS[row.kind] || row.kind || '—'),
       atMs: Number.isFinite(Number(row.atMs)) ? Number(row.atMs) : 0,
       realMs: Number.isFinite(Number(row.realMs)) ? Number(row.realMs) : null,
     })),
@@ -355,43 +436,69 @@ function buildRecordViewModel(record) {
 
 // Builds the details view model. `employee` is one snapshot employee entry;
 // every field read below is on the whitelist. Nothing else is copied.
-function buildDetailsViewModel(employee) {
+// P1 English pass: every fixed label rides `localize` (zh fallback) and the VM
+// carries the stable keys (`office.employee.<id>` / `office.role.<id>` names
+// and roles, `office.details.*` dim fields, `office.outcome.*` results) so the
+// page renders per language. Nothing here is derived from runtime text.
+function buildDetailsViewModel(employee, localize = null) {
   const markerIsChat = employee.marker === 'chat-ellipsis';
   let primaryText = null;
   let primaryAccessibleLabel = null;
   if (employee.taskLabel) {
-    primaryText = employee.taskLabel;
-    primaryAccessibleLabel = '正在执行任务';
+    primaryText = pickText(localize, 'office.details.taskActive', employee.taskLabel);
+    primaryAccessibleLabel = pickText(localize, 'office.details.taskActiveA11y', '正在执行任务');
   } else if (markerIsChat) {
     primaryText = '…';
-    primaryAccessibleLabel = employee.markerLabel || '正在交流';
+    primaryAccessibleLabel = employee.markerLabel
+      || pickText(localize, 'office.details.chattingA11y', '正在交流');
   } else if (employee.lastResult) {
-    const outcome = OUTCOME_LABELS[employee.lastResult.outcome] || '已结束';
-    primaryText = `最近结果：${outcome}`;
+    const outcomeKey = employee.lastResult.outcome;
+    const outcome = pickText(
+      localize,
+      `office.outcome.${outcomeKey}`,
+      OUTCOME_LABELS[outcomeKey] || '已结束'
+    );
+    primaryText = pickText(localize, 'office.details.lastResult', '最近结果：{outcome}', { outcome });
     primaryAccessibleLabel = primaryText;
   } else {
-    primaryText = activityLabel(employee.activity);
+    primaryText = activityText(employee, localize);
     primaryAccessibleLabel = primaryText;
   }
 
   const dimFields = [];
-  dimFields.push({ label: '状态', value: `${activityLabel(employee.activity)} · ${RUNTIME_LABELS[employee.runtime] || employee.runtime}`, size: 'dim' });
-  if (employee.lastTool) dimFields.push({ label: '最近工具', value: employee.lastTool, size: 'dim' });
   dimFields.push({
-    label: '绑定',
-    value: employee.binding ? `${BINDING_SOURCE_LABELS[employee.binding.source] || employee.binding.source}（置信 ${(employee.binding.confidence ?? 0).toFixed(2)}）` : '未绑定',
+    key: 'office.details.status',
+    label: pickText(localize, 'office.details.status', '状态'),
+    value: `${activityText(employee, localize)} · ${pickText(localize, `office.runtime.${employee.runtime}`, RUNTIME_LABELS[employee.runtime] || employee.runtime)}`,
     size: 'dim',
   });
-  dimFields.push({ label: '同步', value: SYNC_LABELS[employee.sync] || employee.sync, size: 'dim' });
-  dimFields.push({ label: '控制', value: CONTROL_LABELS[employee.control] || employee.control, size: 'dim' });
+  if (employee.lastTool) dimFields.push({ key: 'office.details.lastTool', label: pickText(localize, 'office.details.lastTool', '最近工具'), value: employee.lastTool, size: 'dim' });
+  dimFields.push({
+    key: 'office.details.binding',
+    label: pickText(localize, 'office.details.binding', '绑定'),
+    value: employee.binding
+      ? pickText(localize, 'office.details.bindingValue', '{source}（置信 {n}）', {
+          source: pickText(localize, `office.binding.${employee.binding.source}`, BINDING_SOURCE_LABELS[employee.binding.source] || employee.binding.source),
+          n: (employee.binding.confidence ?? 0).toFixed(2),
+        })
+      : pickText(localize, 'office.details.unbound', '未绑定'),
+    size: 'dim',
+  });
+  dimFields.push({ key: 'office.details.sync', label: pickText(localize, 'office.details.sync', '同步'), value: pickText(localize, `office.sync.${SYNC_KEY_OF[employee.sync] || employee.sync}`, SYNC_LABELS[employee.sync] || employee.sync), size: 'dim' });
+  dimFields.push({ key: 'office.details.control', label: pickText(localize, 'office.details.control', '控制'), value: pickText(localize, `office.control.${employee.control}`, CONTROL_LABELS[employee.control] || employee.control), size: 'dim' });
   if (employee.lastResult) {
-    dimFields.push({ label: '结果时间', value: `第 ${Math.round((employee.lastResult.atMs || 0) / 1000)}s`, size: 'dim' });
+    dimFields.push({
+      key: 'office.details.resultAt',
+      label: pickText(localize, 'office.details.resultAt', '结果时间'),
+      value: `第 ${Math.round((employee.lastResult.atMs || 0) / 1000)}s`,
+      size: 'dim',
+    });
   }
 
   return {
     employeeId: employee.employeeId,
-    name: { text: employee.displayName, size: 'large' },
-    roleDot: { text: employee.role, dot: true },
+    name: { text: employee.displayName, key: `office.employee.${employee.employeeId}`, size: 'large' },
+    roleDot: { text: employee.role, key: `office.role.${employee.employeeId}`, dot: true },
     primary: { text: primaryText, size: 'prominent', accessibleLabel: primaryAccessibleLabel },
     dimFields,
     waiting: (employee.waiting || []).map((item) => ({ position: item.position })),
@@ -399,7 +506,7 @@ function buildDetailsViewModel(employee) {
   };
 }
 
-function createOfficePageController({ bridge, onSnapshot = null, reducedMotion = false, renderer = null } = {}) {
+function createOfficePageController({ bridge, onSnapshot = null, reducedMotion = false, renderer = null, localize = null } = {}) {
   if (!bridge || typeof bridge.getState !== 'function') {
     throw new TypeError('createOfficePageController requires a bridge with getState()');
   }
@@ -408,6 +515,13 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
   let focusIndex = 0;
   let selectedId = null;
   let motionReduced = !!reducedMotion;
+
+  // P1 English pass: the injected localize function (key, fallback, vars) over
+  // the shared dictionary + current language. Null keeps the historical
+  // zh-only presentation (legacy consumers / tests). The page re-reads the
+  // CURRENT language on every call, so a live language switch re-localizes the
+  // panel on the next ~10Hz render without rebuilding the controller.
+  const L = (key, fallback, vars) => pickText(localize, key, fallback, vars);
 
   // 2026-09-24 latch fix: the view's renderer state as the module/shell log
   // needs it — mode, stable diagnostic code and the bounded-recovery attempt
@@ -473,14 +587,14 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
 
     detailsFor(employeeId) {
       const employee = employeeById(employeeId);
-      return employee ? buildDetailsViewModel(employee) : null;
+      return employee ? buildDetailsViewModel(employee, localize) : null;
     },
 
     /** P4 (spec §3 block 5): the selected employee's 今日工作记录 view model
      * (null when the snapshot carries no record for them). */
     recordFor(employeeId) {
       const employee = employeeById(employeeId);
-      return employee ? buildRecordViewModel(employee.record) : null;
+      return employee ? buildRecordViewModel(employee.record, localize) : null;
     },
 
     // Keyboard model over the fixed employee order: arrows move a roving
@@ -536,7 +650,9 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
         realMs: Number.isFinite(entry.realMs) ? entry.realMs : null,
         employeeId: entry.employeeId,
         kind: entry.kind,
-        label: ACTIVITY_LOG_LABELS[entry.kind] || entry.kind,
+        // The stable kind is the label key (office.log.<kind>); the zh table
+        // stays the fallback.
+        label: L(`office.log.${entry.kind}`, ACTIVITY_LOG_LABELS[entry.kind] || entry.kind),
         // P2 per-turn attribution: present only when the turn carried a
         // provider usage record (module-stamped; null otherwise — never
         // estimated). Numbers only; the money is the same local-rate
@@ -567,7 +683,7 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
         budgetLimit: usage.budget.limit,
         budgetUsed: usage.budget.used,
         pricingBasis: usage.pricingBasis,
-        pricingBasisLabel: USAGE_BASIS_LABELS[usage.pricingBasis] || USAGE_BASIS_LABELS['api-key'],
+        pricingBasisLabel: L(`office.usage.basis.${BASIS_KEY_OF[usage.pricingBasis] || usage.pricingBasis}`, USAGE_BASIS_LABELS[usage.pricingBasis] || USAGE_BASIS_LABELS['api-key']),
         staleAt: usage.staleAt,
       };
     },
@@ -575,22 +691,36 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
     // P2 §3 block 2: one view-model row per employee (snapshot whitelist
     // fields only). `needsYou` is the count of live pending items addressed
     // to this employee (the "需要你" badge).
+    // P1 English pass: `statusKey` is the STABLE badge key (chatting employees
+    // in chatPhase 'walking' key to the intermediate 'chat-walking' — 闲聊 only
+    // once both members are seated, matching when bubbles appear); the name /
+    // role keys are the fixed employee vocabulary (office.employee.* /
+    // office.role.*); the task title and queue badge resolve per language.
     staffRows() {
       const pending = snapshot && Array.isArray(snapshot.pending) ? snapshot.pending : [];
       return employees().map((employee) => {
         const bound = !!employee.binding;
+        const statusKey = activityKeyOf(employee);
         return {
           employeeId: employee.employeeId,
+          nameKey: `office.employee.${employee.employeeId}`,
+          roleKey: `office.role.${employee.employeeId}`,
           displayName: employee.displayName,
           role: employee.role,
-          statusLabel: STAFF_STATUS_LABELS[employee.activity] || activityLabel(employee.activity),
-          statusKey: employee.activity,
+          statusKey,
+          statusLabel: L(`office.status.${statusKey}`, STAFF_STATUS_LABELS[statusKey] || activityText(employee, localize)),
           // De-identified title: a per-employee task counter (任务 #N),
           // visible only while a task is bound. Never runtime text.
-          taskTitle: bound && employee.taskSeq > 0 ? `任务 #${employee.taskSeq}` : null,
+          taskTitle: bound && employee.taskSeq > 0 ? L('office.staff.taskTitle', '任务 #{n}', { n: employee.taskSeq }) : null,
           // Current tool phrase (shared tool-phrases module via the
-          // snapshot); shown only while a task is bound.
-          toolPhrase: bound && employee.toolPhrase ? employee.toolPhrase : null,
+          // snapshot); shown only while a task is bound. The stable
+          // office.staff.currentTool.* key rides the snapshot (toolPhraseKey,
+          // module-computed) so the phrase renders per language.
+          toolPhrase: bound && employee.toolPhrase
+            ? L(employee.toolPhraseKey
+                ? `office.staff.currentTool.${employee.toolPhraseKey}`
+                : 'office.staff.currentTool.other', employee.toolPhrase)
+            : null,
           queueCount: employee.queueCount || 0,
           needsYou: pending.filter((item) => item.employeeId === employee.employeeId).length,
           selected: employee.employeeId === selectedId,
@@ -612,6 +742,10 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
           employeeId: item.employeeId,
           toolName: item.toolName,
           summary: item.summary,
+          // P1 English pass: the stable office.staff.currentTool.* key behind
+          // the fixed summary phrase (module-projected); the page renders the
+          // summary per language from it. Null for fixture items without one.
+          summaryKey: typeof item.summaryKey === 'string' ? item.summaryKey : null,
           risk: item.risk,
           createdAtMs: item.createdAtMs,
         })),
@@ -640,7 +774,7 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
 
     /** P3: the danger-modal / question-form view model for one pending card. */
     pendingModalModel(item, detail) {
-      return buildPendingModalModel({ item, detail });
+      return buildPendingModalModel({ item, detail, localize });
     },
 
     accessibleLabelFor(employeeId) {
@@ -648,14 +782,20 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
       if (!employee) return { label: '' };
       // P2: the de-identified task title and the current tool phrase ride the
       // label (both are snapshot presentation fields — no runtime text).
+      // P1 English pass: labels resolve per language; the list separator is a
+      // dictionary key too (zh '，' vs en ', ').
       const parts = [
-        employee.displayName,
-        activityLabel(employee.activity),
-        employee.binding && employee.taskSeq > 0 ? `任务 ${employee.taskSeq}` : null,
-        employee.binding && employee.toolPhrase ? employee.toolPhrase : null,
-        employee.queueCount > 0 ? `排队 ${employee.queueCount}` : null,
+        L(`office.employee.${employee.employeeId}`, employee.displayName),
+        activityText(employee, localize),
+        employee.binding && employee.taskSeq > 0 ? L('office.staff.taskA11y', '任务 {n}', { n: employee.taskSeq }) : null,
+        employee.binding && employee.toolPhrase
+          ? L(employee.toolPhraseKey
+              ? `office.staff.currentTool.${employee.toolPhraseKey}`
+              : 'office.staff.currentTool.other', employee.toolPhrase)
+          : null,
+        employee.queueCount > 0 ? L('office.staff.queue', '排队 {n}', { n: employee.queueCount }) : null,
       ].filter(Boolean);
-      return { label: `${parts.join('，')}` };
+      return { label: `${parts.join(L('office.panel.listSep', '，'))}` };
     },
 
     capabilities: () => (snapshot ? snapshot.capabilities : null),

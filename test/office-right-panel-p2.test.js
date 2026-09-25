@@ -469,7 +469,9 @@ test('office.html renders the six-block panel in spec §3 order', () => {
   }
   // ③ count badge + empty state (P3 adds the inline actions)
   assert.ok(html.includes('id="pending-count"'), 'the inbox count badge exists');
-  assert.ok(html.includes('暂无待处理 ✓'), 'the inbox empty state is the spec text');
+  // P1 English pass (2026-09-25): the page's static copy moved into the
+  // shared dictionary — the empty state rides the data-i18n key now.
+  assert.ok(html.includes('data-i18n="office.pending.empty"'), 'the inbox empty state rides the dictionary key');
   // ④ per-turn attribution + the 更多 expansion (20 -> 100)
   assert.ok(html.includes('id="timeline-more"'), 'the timeline expansion control exists');
   assert.ok(html.includes('const TIMELINE_PAGE_SIZE = 20;'), 'default 20 rows');
@@ -489,7 +491,8 @@ test('office.html drops the development-period texts (spec §2)', () => {
   assert.ok(!html.includes('note.textContent = `角色包降级'), 'the pack diagnostic is no longer a visible paragraph');
   assert.ok(!html.includes('note.textContent = `布局降级'), 'the layout diagnostic is no longer a visible paragraph');
   assert.ok(!html.includes('note.textContent = `渲染降级'), 'the render diagnostic is no longer a visible paragraph');
-  assert.ok(html.includes('详情走 office:diagnostics'), 'the tooltip points at the diagnostics channel');
+  // P1 English pass: the degrade suffix is dictionary copy (office.degrade.detailsSuffix).
+  assert.ok(html.includes("tr('office.degrade.detailsSuffix')"), 'the tooltip points at the diagnostics channel');
   // the layout editor entry is no longer a header action (P5 deletes it)
   assert.ok(!html.includes("document.getElementById('office-overview').appendChild"),
     'nothing is appended to the header anymore');

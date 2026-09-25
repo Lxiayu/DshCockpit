@@ -17,6 +17,14 @@
 // bridge. This adds no new business channel.
 
 const { contextBridge, ipcRenderer } = require('electron');
+// P1 English pass (2026-09-25): the office pages render panel copy per
+// language from the SHARED shell dictionary (src/i18n.js — the same tables
+// the tray/settings/notifications use). A SANDBOXED preload cannot require
+// repo files, so the tables are pulled once from the main process
+// (shell:get-i18n — the single source stays src/i18n.js) and t() reproduces
+// i18n.js's translate/fallback logic over them. The shell language channel
+// follows the same pattern as theme following (shell:get-theme / shell:theme);
+// the module-facing surface stays exactly the eight pinned office ones.
 
 // Mirror of office-module.js OFFICE_IPC_CHANNELS (kept literal so the preload
 // never imports main-process modules).
@@ -63,6 +71,7 @@ function invokeAllowed(channel, payload) {
 
 const visibilityListeners = new Set();
 const stateListeners = new Set();
+const languageListeners = new Set();
 ipcRenderer.on('office:visibility', (_event, payload) => {
   for (const listener of visibilityListeners) {
     try { listener(payload); } catch { /* listener errors never break the page */ }
@@ -74,6 +83,27 @@ ipcRenderer.on('office:state', (_event, snapshot) => {
     try { listener(snapshot); } catch { /* listener errors never break the page */ }
   }
 });
+// P1: resolved-language pushes ('zh' | 'en') — same convention as shell:theme.
+ipcRenderer.on('shell:language', (_event, value) => {
+  for (const listener of languageListeners) {
+    try { listener(value); } catch { /* listener errors never break the page */ }
+  }
+});
+
+// The shared dictionary tables (pulled once; the tables are runtime-static —
+// a language switch only changes which column t() reads).
+let I18N_TABLES = { zh: {}, en: {} };
+const i18nTablesReady = ipcRenderer.invoke('shell:get-i18n')
+  .then((tables) => { I18N_TABLES = tables; return tables; })
+  .catch(() => I18N_TABLES); // a failed pull degrades to the key fallback
+// Same translate/fallback contract as src/i18n.js t(): lang -> en -> key.
+function translate(lang, key, vars) {
+  let s = (I18N_TABLES[lang] && I18N_TABLES[lang][key]) || I18N_TABLES.en[key] || key;
+  if (vars) {
+    for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, String(v));
+  }
+  return s;
+}
 
 contextBridge.exposeInMainWorld('officeBridge', {
   getState: () => invokeAllowed('office:state', {}),
@@ -113,5 +143,15 @@ contextBridge.exposeInMainWorld('officeBridge', {
     };
     ipcRenderer.on('shell:theme', themeListener);
     return () => ipcRenderer.removeListener('shell:theme', themeListener);
+  },
+  // P1 English pass: the shared shell dictionary + the resolved shell language
+  // (shell:get-language pull + shell:language push), mirroring getTheme /
+  // onTheme. `loaded` resolves once the shared tables landed; t() translates
+  // from that single source — the office pages never carry a private copy.
+  i18n: { t: translate, loaded: i18nTablesReady },
+  getLanguage: () => ipcRenderer.invoke('shell:get-language'),
+  onLanguage: (listener) => {
+    if (typeof listener === 'function') languageListeners.add(listener);
+    return () => languageListeners.delete(listener);
   },
 });
