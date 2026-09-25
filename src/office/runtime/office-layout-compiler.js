@@ -382,14 +382,78 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
   // band below the last desk row. Two roaming nodes give the wing real
   // routes; the compiler tests pin the extension as isometric + exactly
   // {roam-8, roam-9} and the two edges below.
+  //
+  // M4.1h (2026-09-24 巡游/休息区): the two-node wing gave the whale-girls a
+  // place to VANISH INTO but not a place to BE — 90% of the leftward plans died
+  // on the single roam-9↔roam-6 gateway, and the furniture band (island / water
+  // bar / coffee machine / rice cooker, then the sofa row, water cooler and
+  // plant) had ZERO reachable waypoints, so "休息" always happened in place.
+  // The extension is now the left column itself:
+  //   * a vertical aisle column at x = 0.27 (LEFT_WING_COLUMN_X) with four new
+  //     walkable spots whose y levels are derived from the compiled furniture
+  //     rows — 0.36 (below the reserve/kitchen band), then evenly spaced down to
+  //     roam-8 — so every one of them stands beside a furniture cluster in the
+  //     open floor, never inside a prop;
+  //   * `resting` + `rest-area` tags on the three column nodes that are next to
+  //     a real resting surface (water cooler / sofa row / kitchen band), which
+  //     is what turns the director's `/rest-area/` pool and the scheduler's
+  //     `resting` target search into REAL walks to the break area;
+  //   * a SECOND gateway across the left desk column: the only crossing the
+  //     穿模 sampler accepts is the bottom aisle, and the deepest chair bottom
+  //     (desk-5/6, y≈0.9403) plus the mover capsule (0.04) plus a margin is the
+  //     highest level that clears both chairs — a walkway at exactly that level
+  //     (seat level for the transit node) lets a walker reach roam-9 through
+  //     roam-4 as well as through the legacy roam-6 gateway. The old gateway
+  //     stays (it is the shorter way), so one occupied node no longer strands
+  //     the whole wing.
   const LEFT_WING_FOOTPRINT = Object.freeze({ width: 0.05, height: 0.05 });
+  const LEFT_WING_COLUMN_X = 0.27;
+  const LEFT_WING_TAGS = Object.freeze(['roaming', 'rest-area']);
+  const LEFT_WING_REST_TAGS = Object.freeze(['roaming', 'rest-area', 'resting']);
+  // The second gateway's two transit nodes are NOT roaming targets: they exist
+  // to be WALKED THROUGH (a target pool that included them would park bodies on
+  // the only bypass). `transit` is inert to every candidate filter in the
+  // runtime — the movement contract only needs the node to exist and its edges
+  // to carry the behavior.
+  const LEFT_WING_TRANSIT_TAGS = Object.freeze(['transit']);
   const LEFT_WING_NODES = Object.freeze([
-    Object.freeze({ id: 'roam-8', position: null, footprint: LEFT_WING_FOOTPRINT, tags: Object.freeze(['roaming']), capacity: 2, safeRadius: 0.03 }),
-    Object.freeze({ id: 'roam-9', position: null, footprint: LEFT_WING_FOOTPRINT, tags: Object.freeze(['roaming']), capacity: 2, safeRadius: 0.03 }),
+    // The two corner/bend nodes of the wing carry NO roaming target: they are
+    // the wing's cut vertices (every column path goes through roam-8, gateway 1
+    // through roam-9), and a dweller parked on one of them sealed the whole
+    // wing off (measured: whole left pool unreachable in 65% of the left-intent
+    // decisions). Transit-only tags keep bodies passing THROUGH, never parking.
+    Object.freeze({ id: 'roam-8', position: null, footprint: LEFT_WING_FOOTPRINT, tags: LEFT_WING_TRANSIT_TAGS, capacity: 2, safeRadius: 0.03 }),
+    Object.freeze({ id: 'roam-9', position: null, footprint: LEFT_WING_FOOTPRINT, tags: LEFT_WING_TRANSIT_TAGS, capacity: 2, safeRadius: 0.03 }),
+    Object.freeze({ id: 'roam-10', position: null, footprint: LEFT_WING_FOOTPRINT, tags: LEFT_WING_TAGS, capacity: 2, safeRadius: 0.03 }),
+    Object.freeze({ id: 'roam-11', position: null, footprint: LEFT_WING_FOOTPRINT, tags: LEFT_WING_REST_TAGS, capacity: 2, safeRadius: 0.03 }),
+    Object.freeze({ id: 'roam-12', position: null, footprint: LEFT_WING_FOOTPRINT, tags: LEFT_WING_REST_TAGS, capacity: 2, safeRadius: 0.03 }),
+    Object.freeze({ id: 'roam-13', position: null, footprint: LEFT_WING_FOOTPRINT, tags: LEFT_WING_REST_TAGS, capacity: 2, safeRadius: 0.03 }),
+    // the second gateway's bottom-aisle transit node (x = 0.47 — the free span
+    // just left of the left desk column's front chair)
+    Object.freeze({ id: 'roam-14', position: null, footprint: LEFT_WING_FOOTPRINT, tags: LEFT_WING_TRANSIT_TAGS, capacity: 2, safeRadius: 0.03 }),
+    // two more column spots so the six left targets are spread along the aisle
+    Object.freeze({ id: 'roam-15', position: null, footprint: LEFT_WING_FOOTPRINT, tags: LEFT_WING_TAGS, capacity: 2, safeRadius: 0.03 }),
+    Object.freeze({ id: 'roam-16', position: null, footprint: LEFT_WING_FOOTPRINT, tags: LEFT_WING_TAGS, capacity: 2, safeRadius: 0.03 }),
   ]);
   const LEFT_WING_EDGES = Object.freeze([
     Object.freeze({ from: 'roam-8', to: 'roam-9', behaviors: Object.freeze(['roaming']), bidirectional: true }),
+    // gateway 1 (legacy): the bottom-band crossing into the corner node
     Object.freeze({ from: 'roam-9', to: 'roam-6', behaviors: Object.freeze(['roaming']), bidirectional: true }),
+    // gateway 2 (M4.1h): roam-4 → roam-14 → roam-8. It reaches the COLUMN
+    // WITHOUT passing roam-9, which is the wing's cut vertex — a body parked on
+    // roam-9 used to make every left node unreachable (measured: 65% of the
+    // left-intent decisions found the whole pool blocked). Two hops with ONE
+    // transit vertex is also the minimum-blocking shape: every extra vertex is
+    // another body that can strand the wing.
+    Object.freeze({ from: 'roam-4', to: 'roam-14', behaviors: Object.freeze(['roaming']), bidirectional: true }),
+    Object.freeze({ from: 'roam-14', to: 'roam-8', behaviors: Object.freeze(['roaming']), bidirectional: true }),
+    // the left column itself
+    Object.freeze({ from: 'roam-8', to: 'roam-10', behaviors: Object.freeze(['roaming']), bidirectional: true }),
+    Object.freeze({ from: 'roam-10', to: 'roam-11', behaviors: Object.freeze(['roaming']), bidirectional: true }),
+    Object.freeze({ from: 'roam-11', to: 'roam-15', behaviors: Object.freeze(['roaming']), bidirectional: true }),
+    Object.freeze({ from: 'roam-15', to: 'roam-12', behaviors: Object.freeze(['roaming']), bidirectional: true }),
+    Object.freeze({ from: 'roam-12', to: 'roam-16', behaviors: Object.freeze(['roaming']), bidirectional: true }),
+    Object.freeze({ from: 'roam-16', to: 'roam-13', behaviors: Object.freeze(['roaming']), bidirectional: true }),
   ]);
 
   const topoNodes = [...topology.nodes, ...LEFT_WING_NODES];
@@ -406,19 +470,26 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
   // 边带 'chatting'——发起者与搭档都必须恰好站在 chat 座位邻点，配对是
   // 位置彩票。flat 编译给链边与 roam↔roam 走廊边补上 'chatting'（聊天走
   // 位视觉上与漫游走位完全相同），任何位置的两位空闲同事都能走到水 cooler。
-  const FLAT_CHAIN_BEHAVIORS = Object.freeze(['roaming', 'task', 'sleeping', 'chatting']);
-  const FLAT_CORRIDOR_BEHAVIORS = Object.freeze(['roaming', 'task', 'sleeping', 'chatting']);
+  // M4.1h: 同一手法给链边/走廊边/chat 边补上 'resting'——左翼休息节点上线后，
+  // "去休息区休息"必须能从任何工位/走廊位置规划出真实路线（否则 resting 的
+  // 目标搜索在 flat 图上永远不可达，又退回原地休息）。
+  const FLAT_CHAIN_BEHAVIORS = Object.freeze(['roaming', 'task', 'sleeping', 'chatting', 'resting']);
+  const FLAT_CORRIDOR_BEHAVIORS = Object.freeze(['roaming', 'task', 'sleeping', 'chatting', 'resting']);
+  const FLAT_CHAT_BEHAVIORS = Object.freeze(['roaming', 'chatting', 'resting']);
   const isChainEdge = (edge) => [edge.from, edge.to]
     .some((id) => /^desk-[1-6]-(?:approach|leave)$/.test(id));
   const hasSeatEndpoint = (edge) => [edge.from, edge.to]
     .some((id) => /^desk-[1-6]$/.test(id));
   const isCorridorEdge = (edge) => [edge.from, edge.to]
     .every((id) => /^roam-/.test(id));
+  const isChatEdge = (edge) => [edge.from, edge.to]
+    .some((id) => /^chat-/.test(id));
   const flatEdges = [...topology.edges, ...LEFT_WING_EDGES]
     .filter((edge) => isChainEdge(edge) || !hasSeatEndpoint(edge))
     .map((edge) => {
       if (isChainEdge(edge)) return { ...edge, behaviors: [...FLAT_CHAIN_BEHAVIORS] };
       if (isCorridorEdge(edge)) return { ...edge, behaviors: [...FLAT_CORRIDOR_BEHAVIORS] };
+      if (isChatEdge(edge)) return { ...edge, behaviors: [...FLAT_CHAT_BEHAVIORS] };
       return edge;
     });
   const topoEdges = flatEdges;
@@ -674,6 +745,25 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
     'roam-6': { x: centerX(corridorX - 0.043), y: centerY(bottomY) },
     'roam-4': { x: centerX(rightCorridorX), y: centerY(bottomY) },
   };
+
+  // M4.1h left column + second gateway (see LEFT_WING_NODES above). The y
+  // levels are DERIVED, never hand-picked: the column starts just below the
+  // reserve/kitchen band (reserve.y + reserve.height + a placement margin) and
+  // spaces the four new spots evenly down to the existing left-wing pair; the
+  // transit node sits at the highest level that still clears the deepest chair
+  // bottom by the mover capsule plus a margin — the only crossing the 穿模
+  // sampler accepts across the left desk column.
+  const leftColumnTopY = (0.02 + 0.32) + PLACEMENT_CLEAR_RATIO;
+  const leftColumnBottomY = corridorIdeals['roam-8'].y / scene.height;
+  const leftColumnStepY = (leftColumnBottomY - leftColumnTopY) / 6;
+  const bottomGateY = Math.min(0.99, Math.max(...chairBottoms) + MOVER_RADIUS_RATIO + 0.008);
+  corridorIdeals['roam-13'] = { x: centerX(LEFT_WING_COLUMN_X), y: centerY(leftColumnTopY) };
+  corridorIdeals['roam-16'] = { x: centerX(LEFT_WING_COLUMN_X), y: centerY(leftColumnTopY + leftColumnStepY) };
+  corridorIdeals['roam-12'] = { x: centerX(LEFT_WING_COLUMN_X), y: centerY(leftColumnTopY + leftColumnStepY * 2) };
+  corridorIdeals['roam-15'] = { x: centerX(LEFT_WING_COLUMN_X), y: centerY(leftColumnTopY + leftColumnStepY * 3) };
+  corridorIdeals['roam-11'] = { x: centerX(LEFT_WING_COLUMN_X), y: centerY(leftColumnTopY + leftColumnStepY * 4) };
+  corridorIdeals['roam-10'] = { x: centerX(LEFT_WING_COLUMN_X), y: centerY(leftColumnTopY + leftColumnStepY * 5) };
+  corridorIdeals['roam-14'] = { x: centerX(0.47), y: centerY(bottomGateY) };
 
   // M4.1f: approach/leave 的理想点从“座位正下方固定偏移”改为“中央走廊内、
   // 贴近本工位背板一侧”。座位正下方落在自家椅矩形里，placeNode 对全家具

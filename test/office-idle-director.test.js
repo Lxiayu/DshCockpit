@@ -163,17 +163,23 @@ test('every activity blocked (or zero weight) degrades to roaming, never a stall
 test('left rest area resolves from the real layout graphs', () => {
   const flatGraph = flatLayoutGraph();
   const flat = director.resolveLeftAreaNodeIds(flatGraph);
-  // the compiled flat layout: the left wing plus the left half of the corridor
-  // — every node left of the corridor's mid x
-  assert.deepEqual(flat, ['roam-6', 'roam-7', 'roam-8', 'roam-9'],
-    'the compiled flat layout left area resolves (wing + corridor-left)');
-  const flatBoundary = director.corridorBoundaryX(flatGraph);
+  // M4.1h: the compiled flat layout DECLARES its break area (rest-area tags on
+  // the six left-column nodes), and an explicit declaration REPLACES the
+  // geometric guess — the geometric rule survives for layouts that declare
+  // nothing (the canonical isometric fixture below). roam-6/roam-7 were only in
+  // the old pool through that guess: they sit right of the left half.
+  assert.deepEqual(flat, ['roam-10', 'roam-11', 'roam-12', 'roam-13', 'roam-15', 'roam-16'],
+    'the compiled flat layout break area is the six tagged left-column nodes');
   for (const id of flat) {
     const node = flatGraph.nodes.find((entry) => entry.id === id);
-    assert.ok(node.position.x < flatBoundary, `${id} is left of the corridor mid`);
+    assert.ok(node.position.x < 0.5, `${id} is in the left half`);
   }
   assert.equal(director.leftPreferenceActive(flatGraph), true,
-    'the flat layout left area is a minority of the roaming pool: the preference applies');
+    'the flat layout break area always gets the preference (the old minority-share cliff is gone)');
+  // the old cliff: a left pool that grew past half of the roaming candidates
+  // used to switch the preference OFF. It is now unconditionally on.
+  assert.equal(director.leftPreferenceActive(canonicalLayoutGraph()), true,
+    'the preference no longer depends on the left/right share of the pool');
 
   const canonicalGraph = canonicalLayoutGraph();
   const canonical = director.resolveLeftAreaNodeIds(canonicalGraph);
@@ -194,12 +200,22 @@ test('left rest area resolves from the real layout graphs', () => {
   assert.deepEqual(test, ['quiet-room', 'roam-1'], 'the synthetic graph resolves its left nodes');
 });
 
-test('an explicit rest-area tag wins over geometry', () => {
+test('an explicit rest-area declaration replaces the geometric guess', () => {
   const graph = makeGraph();
   graph.nodes.push({ id: 'couch-spot', position: { x: 0.9, y: 0.1 }, tags: ['roaming', 'rest-area'], capacity: 1, safeRadius: 0.02 });
   const left = director.resolveLeftAreaNodeIds(graph);
-  assert.ok(left.includes('couch-spot'), 'an explicitly tagged rest-area node joins the pool');
-  assert.ok(left.includes('quiet-room'), 'geometric left nodes still resolve');
+  // M4.1h: an explicit declaration WINS ENTIRELY (it used to be unioned with the
+  // geometric left). The union made a declared layout mix in nodes that are not
+  // in the break area at all — on the compiled flat layout it dragged the
+  // bottom-aisle transit node into the "left" target pool.
+  assert.deepEqual(left, ['couch-spot'], 'an explicitly declared break area is exactly those nodes');
+  // restAreaTaggedNodeIds is the strict, tag-only pool the break-area promises
+  // (the longer roam hold) are keyed on, so a synthetic graph never inherits
+  // them by accident.
+  assert.deepEqual(director.restAreaTaggedNodeIds(graph), ['couch-spot']);
+  // a layout with NO declaration keeps the geometric rule (iso + graph)
+  assert.deepEqual(director.restAreaTaggedNodeIds(makeGraph()), []);
+  assert.ok(director.resolveLeftAreaNodeIds(makeGraph()).includes('quiet-room'));
 });
 
 test('corridorBoundaryX is the mid x of the roaming ring', () => {
@@ -209,9 +225,14 @@ test('corridorBoundaryX is the mid x of the roaming ring', () => {
     .filter((node) => node.tags.includes('roaming') && !node.id.startsWith('desk-'))
     .map((node) => node.position.x)
     .sort((a, b) => a - b);
-  assert.equal(flat, roamXs[Math.floor(roamXs.length / 2)], 'the boundary is the ring median');
-  // desk/workstation nodes (approach/leave are roaming-tagged) are excluded
-  assert.equal(flatGraph.nodes.filter((node) => node.tags.includes('roaming') && !node.id.startsWith('desk-')).length, 9);
+  const expected = roamXs.length % 2 === 1
+    ? roamXs[(roamXs.length - 1) / 2]
+    : (roamXs[roamXs.length / 2 - 1] + roamXs[roamXs.length / 2]) / 2;
+  assert.equal(flat, expected, 'the boundary is the ring median');
+  // desk/workstation nodes (approach/leave are roaming-tagged) and the M4.1h
+  // transit-only wing nodes (roam-8/roam-9/roam-14 — they carry no `roaming`
+  // tag, so their x never votes on the boundary) are excluded
+  assert.equal(flatGraph.nodes.filter((node) => node.tags.includes('roaming') && !node.id.startsWith('desk-')).length, 13);
   // no roaming nodes at all: pure geometry fallback (median of node xs)
   const noRoam = { nodes: [{ id: 'a', position: { x: 0.1 }, tags: ['desk'] }, { id: 'b', position: { x: 0.4 }, tags: ['desk'] }, { id: 'c', position: { x: 0.9 }, tags: ['desk'] }], edges: [] };
   assert.equal(director.corridorBoundaryX(noRoam), 0.4);

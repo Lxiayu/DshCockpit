@@ -1065,12 +1065,20 @@ test('M4.1d: a chat pair speaks, expires, ends and cools down', () => {
     topics: { greeting: [{ id: 'g-01', text: '咕噜~测试台词', weight: 1 }] },
     limits: { bubbleMs: 3200, maxConcurrent: 2, cooldownMs: 30000 },
   };
-  // Chat formation is probabilistic and the trajectory is chaotic — any
-  // routing change reshuffles it. Scan a few seeds and take the first that
-  // forms a pair (if the product ever stops forming chats, EVERY seed fails
-  // and the assertion fires loudly).
+  // Chat formation, the WALK to the reserved seats and the seating are all
+  // probabilistic, and the trajectory is chaotic — any routing change reshuffles
+  // it. M4.1h note: the scan criterion is now "the pair formed AND got seated"
+  // (its previous "formed" alone could accept a seed whose pair was cut off
+  // mid-walk by corridor traffic and never reached a seat, which made this test
+  // a lottery over the trajectory rather than a check of the chain). It still
+  // fails loudly if NO seed completes the chain — see the assertion below.
+  const scanSeeds = [
+    'm41d-chat-c', 'm41d-chat-a', 'm41d-chat-d', 'm41d-chat-e', 'm41d-chat-f', 'm41d-chat-g',
+    'm41d-chat-h', 'm41d-chat-i', 'm41d-chat-j', 'm41d-chat-k',
+  ];
   let module = null;
-  for (const seed of ['m41d-chat-c', 'm41d-chat-a', 'm41d-chat-d', 'm41d-chat-e', 'm41d-chat-f', 'm41d-chat-g']) {
+  let formedAny = false;
+  for (const seed of scanSeeds) {
     const candidate = officeModule.createOfficeModule({
       pack: PACK,
       layout: FLAT_LAYOUT_FIXTURE,
@@ -1078,12 +1086,17 @@ test('M4.1d: a chat pair speaks, expires, ends and cools down', () => {
       config: { sleepAfterMs: 24 * 60 * 60 * 1000, resultPresentationMs: 300, workstationAnchorSegmentMs: 160 },
       dialogue: { base: corpus },
     });
-    if (tickUntil(candidate, (state) => state.employees.some((employee) => employee.marker === 'chat-ellipsis'), 60000)) {
+    if (!tickUntil(candidate, (state) => state.employees.some((employee) => employee.marker === 'chat-ellipsis'), 60000)) {
+      continue;
+    }
+    formedAny = true;
+    if (tickUntil(candidate, (state) => state.employees.some((employee) => employee.bubble && employee.bubble.text), 120000)) {
       module = candidate;
       break;
     }
   }
-  assert.ok(module, 'a chat pair formed (no seed formed one)');
+  assert.ok(formedAny, 'a chat pair formed in some seed');
+  assert.ok(module, 'a chat pair reached its seats and spoke in some seed');
 
   // episode = a transition from "pair not showing" to "pair showing"
   const episodes = [];

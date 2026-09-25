@@ -188,7 +188,17 @@ function pathReservationReachesNode(node, reservation) {
   return false;
 }
 
-function isNodeBlockedByReservation(graph, nodeId, reservations, nowMs, exceptOwner) {
+// M4.1h r3: `priority` is the corridor-passage relaxation, graded 1..2.
+// 1 = ignore a peer BODY standing on a path node (occupancy): a walker's own
+//     destination blocks everyone behind it, so one parked body made the whole
+//     left wing read "unreachable" and 70% of preferred-left decisions were
+//     dropped. The runtime occupant gate still refuses to clip into the body.
+// 2 = additionally ignore a peer's PATH reservation (the node it is walking
+//     toward). Measured: level 2 for every left intent saturates the wing
+//     (pooled 0.516) and halves the chat seeds' bubbles, so it is reserved for
+//     the under-served walkers the corridor priority exists for.
+// A parked peer's NODE reservation is never ignored: capacity is enforced.
+function isNodeBlockedByReservation(graph, nodeId, reservations, nowMs, exceptOwner, priority = 0) {
   const node = graph.nodes.find((candidate) => candidate.id === nodeId);
   if (!node) return null;
   for (const reservation of reservations) {
@@ -209,7 +219,10 @@ function isNodeBlockedByReservation(graph, nodeId, reservations, nowMs, exceptOw
       if (distance <= radius) return reservation;
       continue;
     }
-    if (pathReservationReachesNode(node, reservation)) return reservation;
+    if (pathReservationReachesNode(node, reservation)) {
+      if (priority >= 2) continue;
+      return reservation;
+    }
   }
   return null;
 }
@@ -234,7 +247,17 @@ function createMovementController({ graph, config, clock } = {}) {
     return route.join('>');
   }
 
-  function findRoute({ fromNodeId, toNodeId, behavior, reservations, nowMs, employeeId, occupiedNodeIds = null } = {}) {
+  // M4.1h r3: `priority` = "corridor passage priority", graded 0/1/2 (see
+  // isNodeBlockedByReservation). A walker on a promised left-rest mission may
+  // PLAN through same-capacity bodies / a moving peer's route instead of
+  // standing at the gateway because one peer happens to occupy the first chain
+  // node. Planning is all this skips: the runtime occupant gate still refuses
+  // to step into a body (no clipping), and the caller's acquireReservation
+  // still enforces node CAPACITY, so a genuinely full target is never planned.
+  // Without it the left wing measured 70% of
+  // preferred-left decisions "blocked" with no reachable candidate even though
+  // the corridor would have cleared a moment later.
+  function findRoute({ fromNodeId, toNodeId, behavior, reservations, nowMs, employeeId, occupiedNodeIds = null, priority = false } = {}) {
     const at = nowMs !== undefined ? nowMs : now();
     const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
     const from = nodesById.get(fromNodeId);
@@ -273,11 +296,11 @@ function createMovementController({ graph, config, clock } = {}) {
           if (!edge.allowed || visited.has(edge.to)) continue;
           const node = nodesById.get(edge.to);
           if (!node) continue;
-          if (occupied.has(edge.to) && edge.to !== fromNodeId) continue;
+          if (priority < 1 && occupied.has(edge.to) && edge.to !== fromNodeId) continue;
           // Reservation checks apply to EVERY entered node, including the
           // route target: a full-capacity or protected target must force an
           // alternate route or UNREACHABLE, never a planned intrusion.
-          const blocked = isNodeBlockedByReservation(graph, edge.to, reservations || [], at, employeeId);
+          const blocked = isNodeBlockedByReservation(graph, edge.to, reservations || [], at, employeeId, priority);
           if (blocked) continue;
           visited.add(edge.to);
           parent.set(edge.to, currentId);
@@ -436,6 +459,16 @@ function createMovementController({ graph, config, clock } = {}) {
       if (employeeId !== undefined && occupant.id === employeeId) continue;
       const radius = (occupant.radius !== undefined && occupant.radius !== null ? occupant.radius : OCCUPANT_SOCIAL_RADIUS);
       if (radius <= 0) continue;
+      // M4.1h: a body the mover is ALREADY overlapping (two residents legally
+      // parked on one capacity-2 node) must not veto the step AWAY from it —
+      // the movement segment starts inside that body's circle, so the social
+      // gate held both of them there for as long as they stood together
+      // (measured: a chat pair co-located on roam-2 could not separate, so the
+      // pair never reached its seats and the conversation silently expired).
+      // Only the departure is freed: every other occupant keeps the full gate,
+      // and the step still cannot END inside anyone (the target is checked by
+      // its own arrival radius).
+      if (screenDistance(from, occupant.position, scene) <= ARRIVAL_TOLERANCE * minSceneDimension(scene)) continue;
       const distancePx = pointSegmentDistancePx(toPx(occupant.position, scene), toPx(from, scene), toPx(to, scene));
       if (distancePx <= radius * minSceneDimension(scene)) {
         return Object.freeze({

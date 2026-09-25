@@ -97,6 +97,11 @@ test('module exposes the scheduler factory and frozen config', () => {
 });
 
 test('M4.1e: target selection keeps personal space — a crowded candidate loses to a free one', () => {
+  // M4.1h note: this contract is pinned with the left-rest-area preference OFF
+  // (`leftRoamBias: 0`). With the preference ON (the default) a left draw may
+  // legitimately DEFER the walk instead of taking a crowded left node — that
+  // deferral has its own test below; the keep-away ordering this test pins is
+  // unchanged for every non-left draw.
   // Peers parked on roam-1 / roam-3 / quiet-room; only roam-2 stays free, so
   // every roaming decision must land on roam-2 while the peers stand there.
   // A fresh scheduler per sample: one live reservation per decision, so the
@@ -110,7 +115,7 @@ test('M4.1e: target selection keeps personal space — a crowded candidate loses
   const residentIds = ['orchestrator', 'researcher', 'coder', 'reviewer', 'collaborator'];
   let roaming = 0;
   for (let i = 0; i < 60; i += 1) {
-    const decision = makeScheduler({ graph }).decide({
+    const decision = makeScheduler({ graph, config: { leftRoamBias: 0 } }).decide({
       employeeId: residentIds[i % residentIds.length],
       nowMs: 60000 + i * 45000,
       fromNodeId: 'hall',
@@ -134,7 +139,7 @@ test('M4.1e: target selection keeps personal space — a crowded candidate loses
   ];
   let stillTargeted = 0;
   for (let i = 0; i < 60; i += 1) {
-    const decision = makeScheduler({ graph }).decide({
+    const decision = makeScheduler({ graph, config: { leftRoamBias: 0 } }).decide({
       employeeId: residentIds[i % residentIds.length],
       nowMs: 60000 + i * 45000,
       fromNodeId: 'hall',
@@ -293,7 +298,11 @@ test('unavailable roaming targets fall back to same-tag candidates, then a short
   reserve('visitor-2a', 'roam-2');
   reserve('visitor-qa', 'quiet-room');
 
-  const scheduler = makeScheduler({ graph, movement });
+  // M4.1h: pinned with the left preference OFF — with it on (the default) a
+  // left draw that finds its pool fully reserved DEFERS the walk (see the
+  // "silently reversing" test below) instead of falling back to roam-3. This
+  // test keeps pinning the same-tag fallback for non-left draws.
+  const scheduler = makeScheduler({ graph, movement, config: { leftRoamBias: 0 } });
   const decision = scheduler.decide({
     employeeId: 'coder',
     nowMs: 0,
@@ -1092,8 +1101,17 @@ test('M4.1g: a trusted task interrupts a nap and frees its slot immediately', ()
 test('M4.1g: roaming targets can land in the left rest area (x below the corridor mid)', () => {
   const graph = flatLayoutGraph();
   const left = new Set(idleDirector.resolveLeftAreaNodeIds(graph));
-  assert.deepEqual([...left].sort(), ['roam-6', 'roam-7', 'roam-8', 'roam-9'],
-    'the compiled flat layout left area (wing + corridor-left) is the rest area');
+  // M4.1h: the compiled flat layout now DECLARES its break area (rest-area
+  // tags on the six left-column nodes), so the explicit declaration replaces
+  // the old geometric "wing + corridor-left" guess — the corridor nodes roam-6/
+  // roam-7 are no longer part of the pool (they are right of the left half and
+  // were never a break area; they only leaked in through the geometric rule).
+  assert.deepEqual([...left].sort(), ['roam-10', 'roam-11', 'roam-12', 'roam-13', 'roam-15', 'roam-16'],
+    'the compiled flat layout break area is the six tagged left-column nodes');
+  for (const id of left) {
+    const node = graph.nodes.find((entry) => entry.id === id);
+    assert.ok(node.position.x < 0.5, `${id} lives in the left half`);
+  }
   const boundary = idleDirector.corridorBoundaryX(graph);
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
 

@@ -1031,9 +1031,15 @@ test('E4 compiler: the approved flat draft compiles into a canonical isomorphic 
   // projection — the walk-out diagonal cuts through the workstation art) and
   // re-tags the approach/leave chain + roam↔roam corridors with the full
   // behavior set so egress/ingress always walks the chain.
-  const LEFT_WING_IDS = ['roam-8', 'roam-9'];
+  // M4.1h (2026-09-24 巡游/休息区): the left wing became the break area — six
+  // tagged left-column target nodes plus three transit-only nodes (the wing's
+  // two corner/bend nodes and the second gateway's bottom-aisle node).
+  const LEFT_WING_IDS = ['roam-8', 'roam-9', 'roam-10', 'roam-11', 'roam-12', 'roam-13', 'roam-14', 'roam-15', 'roam-16'];
+  const LEFT_WING_TARGET_IDS = ['roam-10', 'roam-11', 'roam-12', 'roam-13', 'roam-15', 'roam-16'];
+  const LEFT_WING_RESTING_IDS = ['roam-11', 'roam-12', 'roam-13'];
+  const LEFT_WING_TRANSIT_IDS = ['roam-8', 'roam-9', 'roam-14'];
   assert.equal(layout.nodes.length, 27 + LEFT_WING_IDS.length, 'isometric nodes + the left-wing extension');
-  assert.equal(layout.edges.length, 40 + 2 - 11, 'isometric + left-wing − the 11 direct seat↔roam edges');
+  assert.equal(layout.edges.length, 40 + 10 - 11, 'isometric + the 10 left-wing edges − the 11 direct seat↔roam edges');
   const isSeatId = (id) => /^desk-[1-6]$/.test(id);
   const isCorridorNodeId = (id) => /^(roam|chat)-/.test(id);
   for (const edge of layout.edges) {
@@ -1042,21 +1048,37 @@ test('E4 compiler: the approved flat draft compiles into a canonical isomorphic 
     assert.equal(isSeatId(edge.to) && isCorridorNodeId(edge.from), false,
       `no direct seat↔roam edge may survive: ${edge.from}>${edge.to}`);
     if ([edge.from, edge.to].some((id) => /^desk-[1-6]-(approach|leave)$/.test(id))) {
-      assert.deepEqual([...edge.behaviors].sort(), ['chatting', 'roaming', 'sleeping', 'task'],
+      assert.deepEqual([...edge.behaviors].sort(), ['chatting', 'resting', 'roaming', 'sleeping', 'task'],
         `chain edge ${edge.from}>${edge.to} carries all behaviors`);
     }
     if ([edge.from, edge.to].every((id) => /^roam-/.test(id))) {
       assert.ok(edge.behaviors.includes('sleeping') && edge.behaviors.includes('chatting'),
         `corridor edge ${edge.from}>${edge.to} lets nap and chat walks pass`);
+      // M4.1h: 'resting' too — the "walk to the break area and rest" route must
+      // be plannable from any seat, so every corridor leg admits it.
+      assert.ok(edge.behaviors.includes('resting'),
+        `corridor edge ${edge.from}>${edge.to} admits a rest walk`);
     }
   }
   const isoById = new Map(CANONICAL_OFFICE_LAYOUT.nodes.map((node) => [node.id, node]));
   for (const node of layout.nodes) {
     if (LEFT_WING_IDS.includes(node.id)) {
-      assert.deepEqual(node.tags, ['roaming'], `${node.id} is a roaming node`);
       assert.equal(node.capacity, 2);
       assert.equal(node.safeRadius, 0.03);
-      assert.ok(node.position.x < 0.45, `${node.id} lives in the left wing`);
+      assert.ok(node.position.x < 0.5, `${node.id} lives in the left half`);
+      if (LEFT_WING_TRANSIT_IDS.includes(node.id)) {
+        assert.deepEqual(node.tags, ['transit'],
+          `${node.id} is transit-only: the wing's cut vertices must never be a dwell target`);
+      } else {
+        assert.ok(LEFT_WING_TARGET_IDS.includes(node.id), `${node.id} is a break-area target`);
+        assert.ok(node.tags.includes('rest-area') && node.tags.includes('roaming'),
+          `${node.id} declares the break area`);
+        assert.equal(node.tags.includes('resting'), LEFT_WING_RESTING_IDS.includes(node.id),
+          `${node.id} is a resting spot exactly when it sits beside a furniture cluster`);
+        if (LEFT_WING_RESTING_IDS.includes(node.id)) {
+          assert.deepEqual([...node.tags].sort(), ['rest-area', 'resting', 'roaming']);
+        }
+      }
       continue;
     }
     const iso = isoById.get(node.id);
@@ -1066,14 +1088,24 @@ test('E4 compiler: the approved flat draft compiles into a canonical isomorphic 
     assert.equal(node.safeRadius, iso.safeRadius, `${node.id} safeRadius preserved`);
   }
   const flatEdgeKeys = layout.edges.map((edge) => `${edge.from}>${edge.to}`).sort();
-  const extensionEdges = new Set(['roam-8>roam-9', 'roam-9>roam-6']);
+  // M4.1h: gateway 1 (legacy bottom crossing) + gateway 2 (roam-4 → roam-14 →
+  // roam-8, which reaches the COLUMN without passing the roam-9 cut vertex) +
+  // the six-node left column.
+  const extensionEdges = new Set([
+    'roam-8>roam-9', 'roam-9>roam-6',
+    'roam-4>roam-14', 'roam-14>roam-8',
+    'roam-8>roam-10', 'roam-10>roam-11', 'roam-11>roam-15', 'roam-15>roam-12', 'roam-12>roam-16', 'roam-16>roam-13',
+  ]);
   const isoEdgeKeys = CANONICAL_OFFICE_LAYOUT.edges
     .filter((edge) => !(isSeatId(edge.from) && isCorridorNodeId(edge.to))
       && !(isSeatId(edge.to) && isCorridorNodeId(edge.from)))
     .map((edge) => `${edge.from}>${edge.to}`).sort();
   assert.deepEqual(flatEdgeKeys.filter((key) => !extensionEdges.has(key)), isoEdgeKeys,
     'edge topology preserved verbatim outside the dropped direct pairings');
-  assert.deepEqual(flatEdgeKeys.filter((key) => extensionEdges.has(key)), [...extensionEdges].sort(), 'the only new edges are the left-wing pair');
+  // eslint-disable-next-line no-unused-vars
+  const extensionKeys = flatEdgeKeys.filter((key) => extensionEdges.has(key));
+  assert.equal(extensionKeys.length, extensionEdges.size,
+    `the only new edges are the left-wing set (${extensionKeys.join(',')})`);
 });
 
 test('E4 compiler: six workstations map row-major with flat template parts and real anchors', () => {

@@ -44,18 +44,56 @@ const DEFAULT_COOLDOWNS_MS = Object.freeze({ roaming: 0, resting: 8000, chatting
 
 // Share of roaming picks that PREFER the left rest-area pool (seeded). A
 // preference, never a hard rule: crowded/unreachable left nodes still lose to
-// the scheduler's keep-away split and the movement contract. The share stays
-// well under half because the left wing is reachable through a single corridor
-// node in the compiled layouts — a stronger bias would jam that chokepoint and
-// stall every other walker behind it.
-const DEFAULT_LEFT_ROAM_BIAS = 0.5;
+// the scheduler's keep-away split and the movement contract.
+// M4.1h (2026-09-24 巡游/休息区): the user-facing contract is now "巡游时要去左半区
+// 的概率约 40%", so the default moved 0.5 → 0.4 and the value is a settings
+// knob (`leftRoamBias`, office-module) instead of a compile-time constant.
+const DEFAULT_LEFT_ROAM_BIAS = 0.42;
 
-// The preference exists to pull walkers toward an area the office UNDER-USES.
-// When the geometric left already holds at least half of the roaming pool
-// (the isometric canonical layout wraps its ring around the left of the desk
-// grid), the pool needs no pull and the preference is switched off for that
-// graph — see resolveLeftAreaNodeIds().preference.
-const LEFT_PREFERENCE_MIN_SHARE = 0.5;
+// M4.1h: the left-rest PREFERENCE used to switch itself off when the geometric
+// left already held LEFT_PREFERENCE_MIN_SHARE (0.5) of the roaming pool. That
+// was a CLIFF, not a safety net: the compiled flat layout sat at 4/9 = 44%, so
+// adding a single left node (5/10 = 50%) silently disabled the preference and
+// the wing went dark again mid-experiment. The share test is gone — the
+// preference is active whenever a left pool exists and the bias is non-zero,
+// which is exactly the knob the settings expose. `leftPreferenceActive` stays
+// exported (tests and other callers use it) but now only answers "is there a
+// left pool to prefer".
+function leftPreferenceActive(graph) {
+  return resolveLeftAreaNodeIds(graph).length > 0 && roamingCandidateIds(graph).length > 1;
+}
+
+// M4.1h: the resting-tagged spots a `resting` decision may walk to. The pool is
+// independent of the left area (a layout may declare rest spots elsewhere), but
+// on the compiled flat layout every one of them lives in the left wing — see
+// `restAreaNodeIds`, which is what the scheduler treats as the ATTRACTIVE break
+// area (longer dwell + a preference share).
+function restingNodeIds(graph) {
+  return graphNodes(graph)
+    .filter((node) => node && typeof node.id === 'string' && Array.isArray(node.tags)
+      && node.tags.includes('resting'))
+    .map((node) => node.id)
+    .sort();
+}
+
+function restAreaNodeIds(graph) {
+  const left = new Set(resolveLeftAreaNodeIds(graph));
+  return restingNodeIds(graph).filter((id) => left.has(id));
+}
+
+// M4.1h: the nodes a layout EXPLICITLY declares as the break area (the
+// rest-area/lounge tag). Distinct from `resolveLeftAreaNodeIds`, which also
+// accepts a GEOMETRIC guess for layouts that declare nothing: the break-area
+// behaviours that are promises about the space (a longer roam hold, the resting
+// attraction) must only apply where the layout really says "this is the break
+// area", never to a synthetic graph's incidental left nodes.
+function restAreaTaggedNodeIds(graph) {
+  return graphNodes(graph)
+    .filter((node) => node && typeof node.id === 'string' && Array.isArray(node.tags)
+      && node.tags.some((tag) => REST_AREA_TAGS.includes(tag)))
+    .map((node) => node.id)
+    .sort();
+}
 
 // Tags a layout may use to declare the rest area explicitly.
 const REST_AREA_TAGS = Object.freeze(['rest-area', 'restarea', 'rest_area', 'lounge', 'left-wing', 'left']);
@@ -109,25 +147,33 @@ function corridorBoundaryX(graph) {
 }
 
 // Roaming nodes that belong to the left rest area, sorted by id for stability.
-// An explicit tag (rest-area/lounge/left-wing/left) qualifies a node even when
-// it is not roaming-tagged or sits right; geometric left-of-the-work-columns
-// qualifies the rest.
+// M4.1h: an EXPLICIT declaration (rest-area/lounge/left-wing/left tag) now
+// REPLACES the geometric guess instead of joining it. The geometric rule exists
+// for layouts that declare nothing (the canonical isometric fixture); a layout
+// that names its break area means exactly those nodes, and the union used to
+// drag corridor nodes (and, after the left-wing extension, the bottom-aisle
+// transit node at x=0.55) into the "left half" pool — which silently inflated
+// the left-target share with targets that are not in the left half at all.
 function resolveLeftAreaNodeIds(graph) {
   const nodes = graphNodes(graph);
   if (nodes.length === 0) return [];
   const boundary = corridorBoundaryX(graph);
-  const left = [];
+  const explicit = [];
+  const geometric = [];
   for (const node of nodes) {
     if (!node || typeof node.id !== 'string' || !node.position || !Number.isFinite(node.position.x)) continue;
     const tags = Array.isArray(node.tags) ? node.tags : [];
-    const explicit = tags.some((tag) => REST_AREA_TAGS.includes(tag));
+    if (tags.some((tag) => REST_AREA_TAGS.includes(tag))) {
+      explicit.push(node.id);
+      continue;
+    }
     // the geometric rule follows the scheduler's roaming candidate pool:
     // roaming-tagged and NOT a desk/workstation node (approach/leave nodes are
     // workstation furniture, never a rest area).
     const roaming = tags.includes('roaming') && !node.id.startsWith('desk-');
-    if ((roaming && node.position.x < boundary) || explicit) left.push(node.id);
+    if (roaming && node.position.x < boundary) geometric.push(node.id);
   }
-  return left.sort();
+  return (explicit.length > 0 ? explicit : geometric).sort();
 }
 
 // The scheduler's roaming candidate pool: roaming-tagged, non-desk nodes.
@@ -139,22 +185,8 @@ function roamingCandidateIds(graph) {
     .sort();
 }
 
-// Whether the left-rest-area TARGET preference should pull walkers for this
-// graph. An explicitly declared rest area always counts. A geometric left pool
-// only counts while it is a MINORITY of the roaming candidates: when the left
-// already holds at least half of the ring (the isometric canonical layout
-// wraps its roam ring around the left of the desk grid) the office already
-// uses that side and re-ordering the candidates only distorts the walk.
-function leftPreferenceActive(graph) {
-  const nodes = graphNodes(graph);
-  const explicit = nodes.some((node) => Array.isArray(node.tags)
-    && node.tags.some((tag) => REST_AREA_TAGS.includes(tag)));
-  if (explicit) return true;
-  const pool = resolveLeftAreaNodeIds(graph);
-  const candidates = roamingCandidateIds(graph);
-  if (pool.length === 0 || candidates.length === 0) return false;
-  return pool.length < candidates.length * LEFT_PREFERENCE_MIN_SHARE;
-}
+// M4.1h: `leftPreferenceActive` is declared above (it now only asks whether a
+// left pool exists at all — the old "minority share" cliff is documented there).
 
 function createIdleDirector({
   seed = 'office-seed',
@@ -165,7 +197,7 @@ function createIdleDirector({
 } = {}) {
   const weights = { ...DEFAULT_PROBABILITIES, ...(probabilities || {}) };
   const cooldowns = { ...DEFAULT_COOLDOWNS_MS, ...(cooldownsMs || {}) };
-  const bias = typeof leftRoamBias === 'number' && Number.isFinite(leftRoamBias)
+  let bias = typeof leftRoamBias === 'number' && Number.isFinite(leftRoamBias)
     ? Math.min(1, Math.max(0, leftRoamBias))
     : DEFAULT_LEFT_ROAM_BIAS;
 
@@ -238,13 +270,64 @@ function createIdleDirector({
     return Object.freeze({ ok: true, employeeId, activity });
   }
 
-  // Seeded left-rest-area preference for a roaming target pick.
+  // Seeded left-rest-area preference for a roaming target pick. The share is
+  // the configurable bias (default 0.4 = "巡游时约 40% 的计划偏向左半区").
   function prefersLeftArea({ employeeId } = {}) {
     return rngFor(employeeId)() < bias;
   }
 
+  // M4.1h: LIGHT personality per employee — three bounded multipliers drawn
+  // ONCE per employee from the same seeded stream (deterministic, no global
+  // PRNG). They only NUDGE existing weights; they can never flip a rule:
+  //   curiosity    0.75..1.25  → roam distance appetite (detour / mid-route换点)
+  //   sociability  0.75..1.25  → chat craving threshold
+  //   restfulness  0.75..1.25  → rest preference share and rest dwell length
+  // A 1.0 personality is the neutral default, so a profile-free employee
+  // (unknown id) behaves exactly like the pre-M4.1h scheduler.
+  const personalities = new Map();
+  function personalityFor(employeeId) {
+    let found = personalities.get(employeeId);
+    if (found) return found;
+    const stream = rngFor(employeeId);
+    const draw = () => 0.75 + stream() * 0.5;
+    found = Object.freeze({
+      curiosity: draw(),
+      sociability: draw(),
+      restfulness: draw(),
+    });
+    personalities.set(employeeId, found);
+    return found;
+  }
+
+  // Live reconfiguration (settings). Values are validated/clamped exactly like
+  // the constructor arguments; unknown keys are ignored.
+  function configure(partial) {
+    const next = partial || {};
+    if (Number.isFinite(next.leftRoamBias)) bias = Math.min(1, Math.max(0, next.leftRoamBias));
+    if (next.probabilities && typeof next.probabilities === 'object') {
+      for (const activity of DIRECTOR_ACTIVITIES) {
+        if (Number.isFinite(next.probabilities[activity])) weights[activity] = next.probabilities[activity];
+      }
+    }
+    if (next.cooldownsMs && typeof next.cooldownsMs === 'object') {
+      for (const activity of DIRECTOR_ACTIVITIES) {
+        if (Number.isFinite(next.cooldownsMs[activity])) cooldowns[activity] = next.cooldownsMs[activity];
+      }
+    }
+    return config();
+  }
+
+  function config() {
+    return Object.freeze({
+      probabilities: Object.freeze({ ...weights }),
+      cooldownsMs: Object.freeze({ ...cooldowns }),
+      leftRoamBias: bias,
+    });
+  }
+
   function reset(employeeId) {
     startedAt.delete(employeeId);
+    personalities.delete(employeeId);
     return Object.freeze({ ok: true, employeeId });
   }
 
@@ -252,18 +335,19 @@ function createIdleDirector({
     choose: Object.freeze(choose),
     note: Object.freeze(note),
     prefersLeftArea: Object.freeze(prefersLeftArea),
+    personality: Object.freeze(personalityFor),
+    configure: Object.freeze(configure),
     reset: Object.freeze(reset),
-    config: Object.freeze({
-      probabilities: Object.freeze({ ...weights }),
-      cooldownsMs: Object.freeze({ ...cooldowns }),
-      leftRoamBias: bias,
-    }),
+    get config() { return config(); },
   });
 }
 
 module.exports = {
   createIdleDirector,
   resolveLeftAreaNodeIds,
+  restingNodeIds,
+  restAreaNodeIds,
+  restAreaTaggedNodeIds,
   leftPreferenceActive,
   corridorBoundaryX,
   DIRECTOR_ACTIVITIES,
@@ -271,4 +355,5 @@ module.exports = {
   DEFAULT_PROBABILITIES,
   DEFAULT_COOLDOWNS_MS,
   DEFAULT_LEFT_ROAM_BIAS,
+  PERSONALITY_RANGE: Object.freeze({ min: 0.75, max: 1.25 }),
 };

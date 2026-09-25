@@ -501,7 +501,7 @@
       },
       "safeRadius": 0.03,
       "tags": [
-        "roaming"
+        "transit"
       ],
       "capacity": 2
     },
@@ -517,7 +517,128 @@
       },
       "safeRadius": 0.03,
       "tags": [
-        "roaming"
+        "transit"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-10",
+      "position": {
+        "x": 0.27,
+        "y": 0.7599146163819559
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming",
+        "rest-area"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-11",
+      "position": {
+        "x": 0.27,
+        "y": 0.6849316931055647
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming",
+        "rest-area",
+        "resting"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-12",
+      "position": {
+        "x": 0.27,
+        "y": 0.5349658465527823
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming",
+        "rest-area",
+        "resting"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-13",
+      "position": {
+        "x": 0.27,
+        "y": 0.38500000000000006
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming",
+        "rest-area",
+        "resting"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-14",
+      "position": {
+        "x": 0.4699999999999999,
+        "y": 0.9857142857142858
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "transit"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-15",
+      "position": {
+        "x": 0.27,
+        "y": 0.6099487698291737
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming",
+        "rest-area"
+      ],
+      "capacity": 2
+    },
+    {
+      "id": "roam-16",
+      "position": {
+        "x": 0.27,
+        "y": 0.4599829232763912
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming",
+        "rest-area"
       ],
       "capacity": 2
     }
@@ -530,7 +651,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -541,7 +663,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -552,7 +675,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -563,7 +687,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -574,7 +699,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -585,7 +711,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -596,7 +723,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -607,7 +735,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -616,7 +745,8 @@
       "to": "chat-a",
       "behaviors": [
         "roaming",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -625,7 +755,8 @@
       "to": "chat-b",
       "behaviors": [
         "roaming",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -634,7 +765,8 @@
       "to": "chat-b",
       "behaviors": [
         "roaming",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -645,7 +777,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -656,7 +789,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -667,7 +801,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -678,7 +813,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -689,7 +825,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -700,7 +837,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -711,7 +849,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -722,7 +861,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -733,7 +873,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -744,7 +885,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -755,7 +897,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -766,7 +909,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -777,7 +921,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -788,7 +933,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -799,7 +945,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -810,7 +957,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -821,7 +969,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -832,7 +981,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -843,7 +993,8 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     },
@@ -854,7 +1005,104 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting"
+        "chatting",
+        "resting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-4",
+      "to": "roam-14",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting",
+        "resting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-14",
+      "to": "roam-8",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting",
+        "resting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-8",
+      "to": "roam-10",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting",
+        "resting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-10",
+      "to": "roam-11",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting",
+        "resting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-11",
+      "to": "roam-15",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting",
+        "resting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-15",
+      "to": "roam-12",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting",
+        "resting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-12",
+      "to": "roam-16",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting",
+        "resting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-16",
+      "to": "roam-13",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting",
+        "resting"
       ],
       "bidirectional": true
     }

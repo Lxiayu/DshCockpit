@@ -47,7 +47,7 @@ const path = require('node:path');
 
 const profiles = require('./runtime/employee-profile.js');
 const { createMovementController } = require('./runtime/movement-controller.js');
-const { createBehaviorScheduler } = require('./runtime/behavior-scheduler.js');
+const { createBehaviorScheduler, DEFAULT_CONFIG: SCHEDULER_DEFAULTS } = require('./runtime/behavior-scheduler.js');
 const { createDialogueEngine } = require('./runtime/dialogue-engine.js');
 const { createEmployeeRegistry } = require('./runtime/employee-registry.js');
 const { createOfficeState, reduceOfficeState } = require('./runtime/state-reducer.js');
@@ -94,6 +94,16 @@ const PUSH_INTERVAL_MS = TICK_MS;
 const NAP_WALK_WAIT_MAX_MS = 6000;
 const ROUTE_RETRY_DELAY_MS = 250;
 const ROUTE_RETRY_BUDGET_MS = 10000;
+// M4.1h: the congestion patience ladder. A task-bound walker keeps the original
+// 700ms (a task must reach its desk promptly). A ROAMER walking to the left rest
+// area is on a ~20-30s mission across the whole floor: abandoning it after 700ms
+// of congestion sent the furthest seats (desk-1/desk-2 on the top row) back to
+// the right half over and over — measured: the top-row residents never got past
+// 9% left-roaming time while the bottom-row seats reached 68%. The longer
+// patience is the "耐心预算" the assessment asked for, applied to the module's
+// own ladder, and it stays bounded (a stale route is still dropped).
+const ROAM_MISSION_PATIENCE_MS = 2000;
+const ROAM_MISSION_REPLAN_MS = 1500;
 const ACTIVITY_LOG_LIMIT = 200;
 const DIAGNOSTICS_LIMIT = 100;
 const SNAPSHOT_LOG_TAIL = 50;
@@ -175,6 +185,54 @@ const DEFAULT_SETTINGS = Object.freeze({
   // Task 4 internal pacing for the anchor interpolation segments
   // (approach-to-seat / seat-to-approach). Reduced motion forces 0.
   workstationAnchorSegmentMs: 600,
+  // ---- M4.1h (2026-09-24 巡游/休息区): the roaming / rest-area knobs ----------
+  // The user-facing contract is "巡游时在左半区的时间占比 40%~50%" and "任务来了
+  // 立刻回工位". These are the documented controls for that behavior; the
+  // defaults are mirrored from the scheduler's DEFAULT_CONFIG so the settings
+  // schema can never drift from the behavior constants. They are session-scoped
+  // (applied live at the next decision, like chatDurationMs) and are NOT part of
+  // the persisted settings set (office-persistence bounds) — see the assessment
+  // doc "已实施" section.
+  leftRoamBias: 0.42,
+  leftRetryAttempts: 2,
+  leftRetryMs: 1500,
+  restAreaAttraction: 0.6,
+  restAreaDwellMs: 12000,
+  restDwellMs: 6000,
+  leftRoamDwellMs: 18000,
+  midRouteRerouteChance: 0.12,
+  detourChance: 0.15,
+  personality: true,
+  leftFairnessWindowMs: 180000,
+  leftFairnessMaxShare: 0.5,
+  leftFairnessMinDecisions: 6,
+  leftCrowdLimit: 3,
+  leftAfterVisitCooldownMs: 0,
+  // M4.1h round 2 (2026-09-24 个体公平性): the per-employee left-time budget
+  // that keeps EVERY whale-girl inside a personal band over the long window
+  // (window ≈ 60 min of decayed roaming time) while the office aggregate stays
+  // in 40%..50%. Defaults mirror the scheduler constants (load-time drift check).
+  leftQuotaEnabled: true,
+  leftQuotaWindowMs: 480000,
+  leftQuotaFloor: 0.30,
+  leftQuotaCeiling: 1,
+  leftQuotaMinRoamMs: 60000,
+  leftQuotaCatchUpChance: 0.9,
+  leftQuotaAggregateFloor: 0.4,
+  leftQuotaClaimTtlMs: 90000,
+  // M4.1h r3: left intents are planned with corridor passage priority (see
+  // behavior-scheduler.leftCorridorPriority). DEFAULT true.
+  leftCorridorPriority: true,
+  // Widen that priority from under-served walkers to EVERY left mission.
+  // DEFAULT false (measured: widening saturates the wing, pooled share 0.516).
+  leftCorridorPriorityAll: false,
+  // Opt-in runtime half of the corridor priority: a left mission may release an
+  // ORDINARY roam leg ahead of it at the moment it is blocked (never a task or
+  // a chat pair). DEFAULT false — see hasWalkPriority.
+  leftWalkPriority: false,
+  // M4.1h r2: cooldown after a corridor yield breaks a chat pair (see
+  // behavior-scheduler preemptLocal). DEFAULT 0 = OFF (opt-in livelock guard).
+  chatBreakCooldownMs: 0,
 });
 
 const SETTINGS_SCHEMA = Object.freeze({
@@ -185,6 +243,35 @@ const SETTINGS_SCHEMA = Object.freeze({
   sleepAfterMs: { type: 'int', min: 60000, max: 24 * 60 * 60 * 1000 },
   chatDurationMs: { type: 'int', min: 3000, max: 10 * 60 * 1000 },
   privacyMode: { type: 'enum', values: ['redacted', 'full'] },
+  // M4.1h roaming / rest-area knobs (see DEFAULT_SETTINGS).
+  leftRoamBias: { type: 'number', min: 0, max: 1 },
+  leftRetryAttempts: { type: 'int', min: 0, max: 10 },
+  leftRetryMs: { type: 'int', min: 100, max: 10000 },
+  restAreaAttraction: { type: 'number', min: 0, max: 1 },
+  restAreaDwellMs: { type: 'int', min: 2000, max: 120000 },
+  restDwellMs: { type: 'int', min: 2000, max: 120000 },
+  leftRoamDwellMs: { type: 'int', min: 2000, max: 120000 },
+  midRouteRerouteChance: { type: 'number', min: 0, max: 0.5 },
+  detourChance: { type: 'number', min: 0, max: 0.5 },
+  personality: { type: 'boolean' },
+  leftFairnessWindowMs: { type: 'int', min: 10000, max: 600000 },
+  leftFairnessMaxShare: { type: 'number', min: 0.1, max: 1 },
+  leftFairnessMinDecisions: { type: 'int', min: 1, max: 40 },
+  leftCrowdLimit: { type: 'int', min: 0, max: 5 },
+  leftAfterVisitCooldownMs: { type: 'int', min: 0, max: 300000 },
+  // M4.1h r2 per-employee fairness budget (see DEFAULT_SETTINGS).
+  leftQuotaEnabled: { type: 'boolean' },
+  leftQuotaWindowMs: { type: 'int', min: 60000, max: 3600000 },
+  leftQuotaFloor: { type: 'number', min: 0, max: 0.5 },
+  leftQuotaCeiling: { type: 'number', min: 0.2, max: 1 },
+  leftQuotaMinRoamMs: { type: 'int', min: 5000, max: 600000 },
+  leftQuotaCatchUpChance: { type: 'number', min: 0, max: 1 },
+  leftQuotaAggregateFloor: { type: 'number', min: 0, max: 0.6 },
+  leftQuotaClaimTtlMs: { type: 'int', min: 10000, max: 600000 },
+  leftCorridorPriority: { type: 'boolean' },
+  leftCorridorPriorityAll: { type: 'boolean' },
+  leftWalkPriority: { type: 'boolean' },
+  chatBreakCooldownMs: { type: 'int', min: 0, max: 60000 },
 });
 
 // One-way legacy alias mapping (Task 7 IPC payload -> SPEC-08 contract). The
@@ -234,6 +321,46 @@ function resolveLeaveNodeId({ nodes, fromPosition, scene, isReachable } = {}) {
     }
   }
   return best;
+}
+
+// M4.1h: the settings keys that are forwarded to the behavior scheduler (as
+// creation config AND as live `configure()` updates). Kept as one list so a new
+// knob can never be wired into only one of the two paths.
+const SCHEDULER_TUNING_KEYS = Object.freeze([
+  'leftRoamBias',
+  'leftRetryAttempts',
+  'leftRetryMs',
+  'restAreaAttraction',
+  'restAreaDwellMs',
+  'restDwellMs',
+  'leftRoamDwellMs',
+  'midRouteRerouteChance',
+  'detourChance',
+  'personality',
+  'leftFairnessWindowMs',
+  'leftFairnessMaxShare',
+  'leftFairnessMinDecisions',
+  'leftCrowdLimit',
+  'leftAfterVisitCooldownMs',
+  'leftQuotaEnabled',
+  'leftQuotaWindowMs',
+  'leftQuotaFloor',
+  'leftQuotaCeiling',
+  'leftQuotaMinRoamMs',
+  'leftQuotaCatchUpChance',
+  'leftQuotaAggregateFloor',
+  'leftQuotaClaimTtlMs',
+  'leftCorridorPriority',
+  'leftCorridorPriorityAll',
+  'chatBreakCooldownMs',
+]);
+// The schema defaults are asserted against the scheduler's own DEFAULT_CONFIG
+// at module load: a drift between the two is a programming error, not a
+// runtime surprise (the same guard style main.js uses for its perf invariants).
+for (const key of SCHEDULER_TUNING_KEYS) {
+  if (SCHEDULER_DEFAULTS[key] !== DEFAULT_SETTINGS[key]) {
+    throw new Error(`office settings drift: ${key} default ${DEFAULT_SETTINGS[key]} != scheduler ${SCHEDULER_DEFAULTS[key]}`);
+  }
 }
 
 function isPlainObject(value) {
@@ -328,6 +455,12 @@ function createOfficeModule(options = {}) {
       ...(Number.isInteger(cfg.maxSleepers) && cfg.maxSleepers > 0 ? { maxSleepers: cfg.maxSleepers } : {}),
       ...(Number.isFinite(cfg.sleepDurationMs) && cfg.sleepDurationMs > 0 ? { sleepDurationMs: cfg.sleepDurationMs } : {}),
       ...(Number.isFinite(cfg.sleepRefractoryMs) && cfg.sleepRefractoryMs >= 0 ? { sleepRefractoryMs: cfg.sleepRefractoryMs } : {}),
+      // M4.1h: the roaming / rest-area knobs travel as one object so the
+      // settings keys and the scheduler's DEFAULT_CONFIG keys stay in lockstep.
+      ...SCHEDULER_TUNING_KEYS.reduce((acc, key) => {
+        if (cfg[key] !== undefined) acc[key] = cfg[key];
+        return acc;
+      }, {}),
     },
     employeeIds: [...EMPLOYEE_IDS],
   });
@@ -355,6 +488,10 @@ function createOfficeModule(options = {}) {
     : null;
   // speaker rotation per pair key: members alternate across consecutive picks
   const dialogueTurns = new Map();
+  // M4.1h r2: identity of the CURRENT conversation, so a new conversation can
+  // clear the corpus per-pair cooldown (see the bubble block).
+  let dialogueConversationKey = null;
+  let dialogueConversationStartedAt = null;
   let redactor = createPrivacyRedactor({ mode: settings.privacyMode });
 
   const nodesById = new Map(layout.nodes().map((node) => [node.id, node]));
@@ -853,8 +990,8 @@ function createOfficeModule(options = {}) {
       });
       rec.routeBlockedBy = blockers.map((b) => `${b.owner}:${b.purpose}`).join(',') || null;
     }
-    if (!acquired.ok && isTaskBound(rec)) {
-      // M4.1a priority: a task route outranks ROAM traffic — release the roam
+    if (!acquired.ok && hasWalkPriority(rec)) {
+      // M4.1h priority: a task route outranks ROAM traffic — release the roam
       // legs this leg conflicts with and retry once. Roamers re-acquire per
       // leg immediately when still clear, so nothing is starved.
       const conflicts = movementLib.findConflictingReservations({
@@ -863,10 +1000,17 @@ function createOfficeModule(options = {}) {
         scene,
         employeeId: rec.employeeId,
       });
+      // M4.1h r3: a left-rest mission is a weaker claim than a task or a chat
+      // pair (both carry a hard deadline), so its priority may clear only
+      // ORDINARY roam traffic — never a chat pair walking to its reserved seats
+      // (measured: releasing those halves the chat seeds' bubbles).
+      const leftMissionOnly = !isTaskBound(rec)
+        && !(rec.state.activity === 'chatting' && !!rec.route);
       let released = false;
       for (const conflicting of conflicts) {
         const ownerRec = employees.get(conflicting.owner);
         if (ownerRec && ownerRec.pathReservation && conflicting.id === ownerRec.pathReservation.id && !isTaskBound(ownerRec)) {
+          if (leftMissionOnly && ownerRec.state.activity !== 'roaming') continue;
           releasePathReservation(ownerRec);
           released = true;
         }
@@ -898,8 +1042,60 @@ function createOfficeModule(options = {}) {
     return acquired.ok;
   }
 
-  function isTaskBound(rec) {
-    // any phase in which the employee is WALKING for a task: the outbound
+  // M4.1h: which local walkers may claim the corridor ahead of ordinary roam
+  // traffic. A task route always could. The M4.1h left-roam traffic made the
+  // corridor busy enough that a CHAT pair regularly failed to reach its
+  // reserved seats before chatDurationMs expired (measured: bubble ticks per
+  // 120s seed window fell 40-100% versus the pre-M4.1h build on the same
+  // seeds), and a chat is a 15s appointment with two reserved seats — it earns
+  // the same priority. The yield reason stays honest ('corridor-congestion'
+  // for a chat, 'task-priority' only for a task).
+  function hasWalkPriority(rec) {
+    return isTaskBound(rec)
+      || (rec.state.activity === 'chatting' && !!rec.route)
+      // M4.1h r3: a left-rest mission carrying corridor priority may also clear
+      // ORDINARY roam traffic ahead of it (never a task or a chat pair — see the
+      // release-scope guard in tryAcquirePathReservation). Off by default:
+      // measurement showed the planning-side priority (scheduler
+      // leftCorridorPriority) plus the existing 2s mission patience/yield
+      // already lift the left floor, while releasing peers' legs at runtime on
+      // top of that cost the chat seeds' bubbles. Kept as an opt-in knob.
+      || (settings.leftWalkPriority === true
+        && !!rec.route
+        && scheduler.hasLeftCorridorPriority(rec.employeeId));
+  }
+
+  // M4.1h: re-plan a blocked CHAT walk to the pair's own reserved seat.
+  function replanChatRoute(rec, at) {
+    const pair = scheduler.activeChatPair();
+    if (!pair || (pair.a !== rec.employeeId && pair.b !== rec.employeeId)) return false;
+    const seatId = pair.a === rec.employeeId ? pair.seatA : pair.seatB;
+    if (typeof seatId !== 'string' || !nodesById.has(seatId)) return false;
+    const fromNodeId = nearestNodeId(rec.position);
+    const route = movement.findRoute({
+      fromNodeId,
+      toNodeId: seatId,
+      behavior: 'chatting',
+      reservations: scheduler.reservations(),
+      nowMs: at,
+      employeeId: rec.employeeId,
+    });
+    if (!Array.isArray(route)) return false;
+    rec.replanChatAt = (rec.replanChatAt || 0) + 1;
+    planRoute(rec, route, seatId, at);
+    return true;
+  }
+
+  // M4.1h: is this walker's CURRENT target inside the left rest area? (The
+  // scheduler owns the pool; the module only reads it to pick a patience.)
+  function isLeftAreaTarget(rec) {
+    const leftIds = scheduler.leftAreaNodeIds;
+    if (!Array.isArray(leftIds) || leftIds.length === 0) return false;
+    if (typeof rec.targetNodeId === 'string' && leftIds.includes(rec.targetNodeId)) return true;
+    return false;
+  }
+
+  function isTaskBound(rec) {    // any phase in which the employee is WALKING for a task: the outbound
     // move (task-start) AND the walk-out leave (task-end) — omitting either
     // lets roam legs deadlock a task route forever.
     const transition = rec.transition;
@@ -1740,7 +1936,10 @@ function createOfficeModule(options = {}) {
     if (rec.state.movement === 'moving') reduce(rec, { type: 'movement/status', movement: 'stationary' });
     ensureParkClaim(rec, at);
     if (rec.blockedSinceMs === null) rec.blockedSinceMs = at;
-    const patienceMs = 700;
+    // M4.1h: a roam mission to the left rest area gets the longer patience (see
+    // ROAM_MISSION_PATIENCE_MS); tasks and ordinary roam traffic keep 700ms.
+    const onMission = !isTaskBound(rec) && (isLeftAreaTarget(rec) || rec.state.activity === 'chatting');
+    const patienceMs = onMission ? ROAM_MISSION_PATIENCE_MS : 700;
     const blockerRec = blockedByOwner ? employees.get(blockedByOwner) : null;
     if (blockerRec && blockerRec !== rec
         && !isTaskBound(blockerRec)
@@ -1760,10 +1959,17 @@ function createOfficeModule(options = {}) {
         blockerRec.marker = null;
       } catch { /* scheduler stays optional */ }
     }
-    const replanMs = 1000;
+    const replanMs = onMission ? ROAM_MISSION_REPLAN_MS : 1000;
     if (!isTaskBound(rec) && at - rec.blockedSinceMs >= patienceMs
         && at - (rec.replanAskedAt || 0) >= replanMs) {
       rec.replanAskedAt = at;
+      // M4.1h: a CHAT pair member must be able to recover its walk to the
+      // reserved seat. Dropping the route was terminal for it — the scheduler's
+      // next decision for a pair member is always 'continue' (the pair owns
+      // both members), so nothing ever planned a new chat route and the pair
+      // simply stood where the block caught it until chatDurationMs expired.
+      // Re-planning here is the missing end of the M4.1d chain.
+      if (rec.state.activity === 'chatting' && replanChatRoute(rec, at)) return;
       if (rec.state.activity === 'sleeping' && rec.route) {
         // M4.1g: a resident walking to its own desk to nap waits (bounded) for
         // the corridor to clear instead of abandoning the nap on the first
@@ -1848,6 +2054,24 @@ function createOfficeModule(options = {}) {
         rec.currentNodeId = nextNodeId;
         releasePathReservation(rec);
         tryAcquirePathReservation(rec, at);
+        // M4.1h "允许中途换点": at a real waypoint (never mid-leg — a straight
+        // step from mid-air would cut across the furniture) a local walker may
+        // drop the rest of its route and let the next decision pick a fresh
+        // target. Task-bound walkers are exempt: their route is protected.
+        if (!isTaskBound(rec) && rec.state.activity === 'roaming' && Array.isArray(rec.route)) {
+          const abandoned = scheduler.maybeAbandonRoute({
+            employeeId: rec.employeeId,
+            atMs: at,
+            hopsRemaining: rec.route.length - 1 - rec.routeIndex,
+          });
+          if (abandoned && abandoned.abandon === true) {
+            rec.route = null;
+            rec.routeIndex = 0;
+            rec.targetNodeId = null;
+            releasePathReservation(rec);
+            rec.debugRetargets = (rec.debugRetargets || 0) + 1;
+          }
+        }
       } else {
         arriveAtNode(rec, nextNodeId, at);
       }
@@ -1985,6 +2209,28 @@ function createOfficeModule(options = {}) {
       if (rec.bubble && (!inPair || rec.bubble.untilMs <= at)) rec.bubble = null;
     }
     if (!chatPair) dialogueTurns.clear(); // no active pair: alternation state must not leak into the next conversation
+    // M4.1h r2 bubble visibility fix. The corpus per-pair cooldown (30 s in the
+    // shipped corpus) is a gate BETWEEN conversations, but the module only had
+    // the ALTERNATION counter to decide "inside a conversation" — so the FIRST
+    // line of every conversation was gated, and because a pair re-forms every
+    // ~20 s (chatDurationMs 15 s + scheduler chat cooldown 5 s) the cooldown
+    // outlived the whole conversation: a real, seated 15 s conversation emitted
+    // ZERO bubbles (measured: 6 seeds / 30 min, bubble ticks 41891 vs 68942
+    // with the gate removed — every seated tick carries a bubble). A NEW
+    // conversation now starts with a clean slate; the gap between two
+    // conversations of the same pair is the scheduler's chatCooldownMs, which
+    // is enforced before the pair can even re-form.
+    if (dialogueEngine && chatPair) {
+      const pairKey = [chatPair.a, chatPair.b].sort().join('|');
+      if (dialogueConversationKey !== pairKey || dialogueConversationStartedAt !== chatPair.startedAt) {
+        dialogueConversationKey = pairKey;
+        dialogueConversationStartedAt = chatPair.startedAt;
+        if (typeof dialogueEngine.clearCooldown === 'function') dialogueEngine.clearCooldown(pairKey);
+      }
+    } else {
+      dialogueConversationKey = null;
+      dialogueConversationStartedAt = null;
+    }
     if (dialogueEngine && chatPair) {
       const a = employees.get(chatPair.a);
       const b = employees.get(chatPair.b);
@@ -3008,6 +3254,16 @@ function createOfficeModule(options = {}) {
       // presentations are never rewritten.
       noteDiagnostic('SETTINGS_APPLY_NEXT_DECISION');
     }
+    // M4.1h: the roaming / rest-area knobs are live too — they are read through
+    // the scheduler's `knob()` at every decision, so a settings change lands on
+    // the next decision without rebuilding the scheduler.
+    if (SCHEDULER_TUNING_KEYS.some((key) => normalized[key] !== undefined)) {
+      scheduler.configure(SCHEDULER_TUNING_KEYS.reduce((acc, key) => {
+        if (normalized[key] !== undefined) acc[key] = normalized[key];
+        return acc;
+      }, {}));
+      noteDiagnostic('SETTINGS_APPLY_NEXT_DECISION');
+    }
     return Object.freeze({ ok: true, settings: getSettings() });
   }
 
@@ -3089,6 +3345,7 @@ function createOfficeModule(options = {}) {
       hasWorkstation: !!rec.workstationReservation,
       pathSegments: rec.pathReservation && Array.isArray(rec.pathReservation.segments) ? rec.pathReservation.segments.length : 0,
       currentNodeId: rec.currentNodeId || null,
+      targetNodeId: rec.targetNodeId || null,
       preTaskNodeId: rec.preTaskNodeId || null,
       routeBlockedBy: rec.routeBlockedBy || null,
       routeLen: rec.route ? rec.route.length : 0,
@@ -3101,7 +3358,15 @@ function createOfficeModule(options = {}) {
       stepBlockedBy: rec.debugStepBlockedBy || null,
       waitDetail: rec.debugWaitDetail || null,
       yieldAskedAt: rec.yieldAskedAt || null,
+      // M4.1h: how many times this walker dropped a live roam route at an
+      // intermediate waypoint and re-targeted ("允许中途换点").
+      retargets: rec.debugRetargets || 0,
     })),
+    // M4.1h r2: the per-employee left-time budget (read-only observability for
+    // the fairness regression test / headless harness). Never an IPC channel.
+    debugQuota: () => (scheduler.quotaSnapshot ? scheduler.quotaSnapshot() : null),
+    // M4.1h r3: why left draws were skipped (gate counters). Read-only.
+    debugLeftDraw: () => (scheduler.leftDebug ? scheduler.leftDebug() : null),
   });
 }
 
