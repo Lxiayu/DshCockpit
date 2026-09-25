@@ -42,24 +42,31 @@ const LABEL_CHAR_CAP = 240;
 // Fixed precedence order. Every entry: [seat, [ascii keywords...], [cjk
 // keywords...]]. The FIRST entry with any match wins (so reviewer beats
 // coder beats researcher on an ambiguous label like "review the code").
+//
+// 2026-09-25 扩充（保守、词边界、仍不读任务正文）：补齐实测/排障中常见的
+// 无方向歧义 label 词——review 的 check/检查、code 的 migrate/optimize（迁移/
+// 优化）、research 的 triage（排查/定位）。方向有歧义的词一律不加（如
+// test/testing："write tests" 是编码、"run tests" 是质检；summary/summarize
+// 被既有 fail-closed 契约显式钉在 collaborator；中文无词边界更无法区分），
+// fail-closed 到 collaborator 的既有契约不变。
 const RULES = Object.freeze([
   Object.freeze({
     seat: 'reviewer',
     rule: 'review',
-    ascii: ['review', 'reviewer', 'reviewing', 'audit', 'verify', 'verification', 'inspect', 'inspection', 'critique', 'qa', 'validation', 'validate'],
-    cjk: ['评审', '审核', '审查', '复核', '校验', '检验', '验收'],
+    ascii: ['review', 'reviewer', 'reviewing', 'audit', 'verify', 'verification', 'inspect', 'inspection', 'critique', 'qa', 'validation', 'validate', 'check', 'checking'],
+    cjk: ['评审', '审核', '审查', '复核', '校验', '检验', '验收', '检查'],
   }),
   Object.freeze({
     seat: 'coder',
     rule: 'code',
-    ascii: ['code', 'coder', 'coding', 'implement', 'implementation', 'implementing', 'refactor', 'refactoring', 'fix', 'bugfix', 'patch', 'develop', 'developer', 'build', 'script', 'compile', 'debug'],
-    cjk: ['编码', '代码', '实现', '编写', '修复', '重构', '编译', '调试', '脚本', '开发'],
+    ascii: ['code', 'coder', 'coding', 'implement', 'implementation', 'implementing', 'refactor', 'refactoring', 'fix', 'bugfix', 'patch', 'develop', 'developer', 'build', 'script', 'compile', 'debug', 'migrate', 'migration', 'migrating', 'optimize', 'optimization', 'optimizing', 'optimise', 'optimisation', 'optimising'],
+    cjk: ['编码', '代码', '实现', '编写', '修复', '重构', '编译', '调试', '脚本', '开发', '迁移', '优化'],
   }),
   Object.freeze({
     seat: 'researcher',
     rule: 'research',
-    ascii: ['research', 'researcher', 'investigate', 'investigation', 'explore', 'exploration', 'survey', 'gather', 'collect', 'analysis', 'analyze', 'analyse', 'search'],
-    cjk: ['调研', '研究', '调查', '检索', '搜集', '收集', '资料', '分析', '查找', '探索'],
+    ascii: ['research', 'researcher', 'investigate', 'investigation', 'explore', 'exploration', 'survey', 'gather', 'collect', 'analysis', 'analyze', 'analyse', 'search', 'triage'],
+    cjk: ['调研', '研究', '调查', '检索', '搜集', '收集', '资料', '分析', '查找', '探索', '排查', '定位'],
   }),
 ]);
 

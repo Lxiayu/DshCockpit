@@ -62,6 +62,18 @@ function settlementStopReason(summary) {
   return null;
 }
 
+// 2026-09-25 排查可观测性：壳日志里每个子代理座位事件都要一行可读记录
+// （"这次任务到底派没派子代理、分到哪个座位"一眼可见）。label 是模型生成的
+// 结构化元数据（分类器的同一输入），写日志前压成单行并截断，保证日志行边界。
+const LOG_LABEL_CAP = 80;
+
+function boundedLogLabel(value) {
+  if (typeof value !== 'string') return '-';
+  const singleLine = value.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();
+  if (singleLine === '') return '-';
+  return singleLine.length > LOG_LABEL_CAP ? `${singleLine.slice(0, LOG_LABEL_CAP)}…` : singleLine;
+}
+
 function coarseString(value) {
   return typeof value === 'string' && value !== '' ? value : null;
 }
@@ -110,8 +122,9 @@ function createSubagentWiring(options = {}) {
       // so start/end still pair deterministically through deriveRunProxy.
       data: { id: childId, runId: childId, mode: mode || null, role },
     });
-    log(`[office] subagent start (${childId.slice(0, 8)}) role=${role || 'collaborator'}`
-      + ` mode=${mode || 'unknown'}`);
+    log(`[office] subagent start id=${childId.slice(0, 8)} seat=${role || 'collaborator'}`
+      + ` mode=${mode || 'unknown'} label="${boundedLogLabel(label)}"`
+      + (phase ? ` phase="${boundedLogLabel(phase)}"` : ''));
     return true;
   }
 
@@ -124,7 +137,7 @@ function createSubagentWiring(options = {}) {
       time,
       data: { id: childId, runId: childId, stopReason },
     });
-    log(`[office] subagent end (${childId.slice(0, 8)}) reason=${stopReason || 'unknown'} via=${source}`);
+    log(`[office] subagent end id=${childId.slice(0, 8)} reason=${stopReason || 'unknown'} via=${source}`);
     return true;
   }
 

@@ -105,6 +105,10 @@ const ROUTE_RETRY_BUDGET_MS = 10000;
 const ROAM_MISSION_PATIENCE_MS = 2000;
 const ROAM_MISSION_REPLAN_MS = 1500;
 const ACTIVITY_LOG_LIMIT = 200;
+// 2026-09-25 收尾状态修复：绑定释放点（result 提交 / 取消释放）之后员工不得
+// 再停在任务态 activity——这四个值都来自 runtime 事实而非本地行为，释放后
+// 必须回到 LOCAL_ACTIVITIES（roaming/chatting/resting/sleeping）之一。
+const TASK_ACTIVITIES = Object.freeze(['working', 'thinking', 'waiting', 'celebrating']);
 const DIAGNOSTICS_LIMIT = 100;
 const SNAPSHOT_LOG_TAIL = 50;
 const SNAPSHOT_DIAGNOSTICS_TAIL = 20;
@@ -1385,6 +1389,24 @@ function createOfficeModule(options = {}) {
       case 'runtime/fact': {
         if (!rawSessionId) return;
         if (fact.fact === 'running' || fact.fact === 'attention') {
+          // 2026-09-25 收尾状态修复（用户实测"任务结束后员工不回状态"）：上一轮
+          // 的 result 呈现窗口（pendingTerminal/resultUntilMs）还挂着时，同一座
+          // 位又来了一条 running/attention——同一会话的下一个 turn（长稳实测里
+          // 是子代理 settlement 触发的父会话续 turn）。旧时序里这条 running 把
+          // activity 拉回 working、绑定却仍停在 releasing，随后过期的呈现_timer
+          // 在新 turn 中途释放绑定（transition/complete 因 runtime=running 被减
+          // 少器拒绝），座位就此卡在 working/未绑定，且该 turn 的 turn/end 因
+          // "无活动绑定"被整体丢弃（实测卡约 50s，movement 还是 moving）。这里
+          // 先走既有提交路径把过期呈现收尾（释放绑定 + transition/complete 回本
+          // 地行为——此刻 runtime 仍是 completed/failed，减少器接受），再让新
+          // turn 通过 ensureRootBinding 全新绑定。release 的 effects 若带出排队
+          // 任务（另一会话在等座），dispatch 在此生效，随后的 running 事实按
+          // "座位忙"正常排队，不会双重绑定。
+          const supersededHandle = currentRootHandle(rawSessionId);
+          if (supersededHandle) {
+            const supersededBinding = registry.getBindingForSession(supersededHandle);
+            if (supersededBinding) supersedeStalePresentation(employees.get(supersededBinding.employeeId));
+          }
           const binding = ensureRootBinding(rawSessionId);
           if (!binding) return;
           const rec = employees.get(binding.employeeId);
@@ -1489,6 +1511,10 @@ function createOfficeModule(options = {}) {
             // seat is put into the same running state here (exactly the reduce
             // the root branch applies), keeping runtime/activity/binding
             // consistent with the work transition onBindingCreated started.
+            // 2026-09-25 收尾状态修复：这条强制 running 与 applyFact 共用同一
+            // 过期呈现收口——上一任子代理的呈现窗口还挂着时先收尾（其 release
+            // 的 effects 正好把排队中的本任子代理派上座），再落 running。
+            if (rec) supersedeStalePresentation(rec);
             if (rec) reduce(rec, { type: 'runtime/fact', fact: 'running', reason: null });
             if (!placed.binding) noteLog('queued', placed.employeeId);
             pushSnapshot();
@@ -1580,8 +1606,38 @@ function createOfficeModule(options = {}) {
     }
   }
 
+  // 2026-09-25 收尾状态修复的共用收口：一个座位的上一轮 result 呈现窗口还挂着
+  // （pendingTerminal/resultUntilMs 未消费）而新的 running 事实又要落到它时，
+  // 必须先把过期呈现按既有提交路径收尾（releaseBinding + transition/complete，
+  // 此刻 runtime 仍是 completed/failed，减少器接受），否则过期 _timer 会在新
+  // turn 中途释放绑定、把座位钉死在 working/未绑定。applyFact（父座位与被
+  // follow 的子会话座位共用）与 classified 子代理派座两条路都走这里。
+  function supersedeStalePresentation(rec) {
+    if (rec && rec.pendingTerminal && rec.resultUntilMs !== null) {
+      noteLog('result-superseded', rec.employeeId, { by: 'new-turn' });
+      commitReleasedTerminal(rec, logicalMs);
+    }
+  }
+
   function beginResultPresentation(rec, { outcome, evidence, sessionId, release }) {
     if (!rec || rec.pendingTerminal) return;
+    // 2026-09-25 修复（celebrating × moving 并存，长稳实测 09:31:10 采样）：
+    // 一个在走回工位途中就结束的短 turn（实测：settlement ack 轮）会让 result
+    // 呈现叠在 task-start 的移动相位上——移动循环在 result 相位仍在推进旧
+    // route，于是出现"边走边庆祝"。这里就地停走（清 route/segment、释放路径
+    // 预留、movement 归位 stationary），在员工站立处呈现结果；commit 路径对
+    // reachedSeat=false 本就降级为直接清理（无幻影起立），契约不变。
+    if (rec.transition && rec.transition.kind === 'task-start') {
+      rec.route = null;
+      rec.routeIndex = 0;
+      rec.targetNodeId = null;
+      releasePathReservation(rec);
+      rec.segment = null;
+      rec.arrivedNodeId = null;
+      if (rec.state.movement !== 'stationary') {
+        reduce(rec, { type: 'movement/status', movement: 'stationary' });
+      }
+    }
     rec.pendingTerminal = { outcome, evidence, release, sessionId: sessionId || null };
     const ended = transitionCtl.beginTaskEnd({ outcome, task: {}, nowMs: logicalMs, previous: rec.transition });
     rec.transition = ended.transition;
@@ -1632,6 +1688,16 @@ function createOfficeModule(options = {}) {
       }
       if (rec.state.binding === 'releasing') reduce(rec, { type: 'binding/released' });
       reduce(rec, { type: 'runtime/fact', fact: 'idle' });
+      // 2026-09-25 修复（bound=False ⇒ activity 不得停在任务态）：取消路径的
+      // 旧实现只落 runtime=idle，不触碰 activity——任务中被取消的员工会以
+      // working 的样子站到下一个 tick 才被 decide 循环救回。host 侧直接中止时
+      // 没有 shell 侧的 cancel 请求，减少器的 CANCEL_EVIDENCE_WITHOUT_REQUEST
+      // 权威规则会让 binding 停在 bound（快照的绑定来自 registry，已释放），
+      // 所以这里不看 reducer 的 binding，只看 runtime 已 idle → local/activity
+      // 必然被接受，同步归位漫游。
+      if (TASK_ACTIVITIES.includes(rec.state.activity)) {
+        reduce(rec, { type: 'local/activity', activity: 'roaming', reason: 'task-released' });
+      }
       scheduler.markTaskReleased({ employeeId: rec.employeeId, nowMs: logicalMs });
       releasePathReservation(rec);
       // P2: the cancelled turn's provider usage still belongs to its rows.
@@ -2851,7 +2917,13 @@ function createOfficeModule(options = {}) {
     if (rec.transition && rec.transition.kind === 'task-end' && rec.transition.phase === 'result') {
       return rec.transition.outcome === 'failed' ? 'working' : 'celebrating';
     }
-    if (rec.transition) return 'working';
+    // 2026-09-25 收尾状态修复（长稳实测"一边走动一边显示工作中"）：task-start
+    // 的移动/落座/工作相位是"工作中"没错；但 task-end 的 stand/leave 相位发生
+    // 在绑定释放之后——reducer 的 transition/complete 已把 activity 归位
+    // roaming，旧映射却把"任何 transition"都盖成 working，于是每个任务结束后
+    // 起身/走回的几秒里面板都是"工作中/未绑定"。离场相位回落到 reducer 的
+    // 本地行为。
+    if (rec.transition && rec.transition.kind === 'task-start') return 'working';
     return rec.state.activity;
   }
 
