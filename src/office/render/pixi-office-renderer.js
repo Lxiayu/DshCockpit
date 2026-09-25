@@ -171,6 +171,9 @@ async function createOfficeRenderer(options) {
   let lastRenderSignature = null;
   // 2026-09-25（性能）：上次真正执行 addChild 的节点序列（节点引用，不是 id）。
   let lastAppliedGroundNodes = null;
+  // 2026-09-25：真实执行的 GPU 重绘总次数（renderNow 里 app.render 实际跑过的次数）。
+  // 只增不减，diagnostics().paintCount 暴露——"可视变化才重画"契约的可测计数。
+  let paintCount = 0;
   let pendingRenderSnapshot = null;
   // Injectable clocks/timers so tests and evidence harnesses stay deterministic
   // (production uses the monitor's clock and the global setTimeout).
@@ -750,9 +753,6 @@ async function createOfficeRenderer(options) {
           record,
         }))
     );
-    // addChild moves an existing child to the top, so re-adding in sorted
-    // order reorders the layer in place without recreating anything.
-    for (const entry of ordered) layer.addChild(entry.record.container);
 
     // M4.1c: interleave the sortY furniture of the SAME container by its
     // bottom edge (screen px), so the world reads as one painter's-algorithm
@@ -869,29 +869,47 @@ async function createOfficeRenderer(options) {
           break;
         }
       }
-      const merged = [...characterEntries, ...furnitureEntries];
-      merged.sort((a, b) => (a.key - b.key) || String(a.id).localeCompare(String(b.id)));
       // 2026-09-25（性能）：排序结果与上次**真正挂载**的节点序列完全相同时跳过重排。
-      // Pixi 的 addChild 对已在册的子节点是"摘下再挂上"（每推 ~38 次），而静止或正常
+      // Pixi 的 addChild 对已在册的节点是"摘下再挂上"（每推 ~38 次），而静止或正常
       // 走动时绘制顺序几乎不变（脚点只在越过别人时才改变相对次序）。用**节点引用**
       // 比较而不是 id：恢复重建后同一 id 是新的节点对象，必须重新挂载（否则新画布空着）。
-      const applied = lastAppliedGroundNodes;
-      const sameOrder = applied !== null
-        && applied.length === merged.length
-        && merged.every((entry, index) => applied[index] === entry.node);
-      if (!sameOrder) {
-        for (const entry of merged) layer.addChild(entry.node);
-        lastAppliedGroundNodes = merged.map((entry) => entry.node);
-      }
-      groundOrder = merged.map((entry) => ({ id: entry.id, kind: entry.kind, key: entry.key }));
+      const merged = [...characterEntries, ...furnitureEntries];
+      merged.sort((a, b) => (a.key - b.key) || String(a.id).localeCompare(String(b.id)));
+      applyGroundOrder(layer, merged);
       return merged.map((entry) => entry.id);
     }
-    groundOrder = ordered.map((entry) => ({
+    // 无可排序家具的草稿：角色-only 终序（与旧行为一致——脚点序）。
+    const charactersOnly = ordered.map((entry) => ({
+      key: (entry.record.__snapshot ? entry.record.__snapshot.position.y : 0) * scene.height,
+      node: entry.record.container,
       id: entry.id,
       kind: 'character',
-      key: (entry.record.__snapshot ? entry.record.__snapshot.position.y : 0) * scene.height,
     }));
+    applyGroundOrder(layer, charactersOnly);
     return ordered.map((entry) => entry.id);
+  }
+
+  // 2026-09-25 回归修复（用户实测：启动/落座时角色与椅子重叠部分闪烁）：
+  // 地面层的**唯一**重挂入口。旧实现把"角色-only 的 addChild 前置循环"无条件跑一遍
+  // （把所有角色摘下挂到层顶=家具之上），再由 merged 循环恢复穿插序；性能优化给
+  // merged 循环加"序未变就跳过"后，这个前置循环的副作用失去了恢复步骤——只要
+  // 计算序与账本一致（大多数推送），角色就被留在**所有家具之上**，直到某次真正
+  // 越序才短暂恢复，于是角色↔椅子/桌子的遮挡来回翻（闪烁）。修法：先算出**最终**
+  // 序（merged 或角色-only），再和真实挂载账本（节点引用）比对，有且仅有差异时
+  // 才重挂一次——层的实际 children 序从此恒等于计算序，账本永远不会再"说谎"。
+  function applyGroundOrder(layer, finalEntries) {
+    const applied = lastAppliedGroundNodes;
+    const sameOrder = applied !== null
+      && applied.length === finalEntries.length
+      && finalEntries.every((entry, index) => applied[index] === entry.node);
+    if (!sameOrder) {
+      // addChild moves an existing child to the top, so re-adding in sorted
+      // order reorders the layer in place without recreating anything.
+      for (const entry of finalEntries) layer.addChild(entry.node);
+      lastAppliedGroundNodes = finalEntries.map((entry) => entry.node);
+    }
+    groundOrder = finalEntries.map((entry) => ({ id: entry.id, kind: entry.kind, key: entry.key }));
+    return sameOrder;
   }
 
   // On-demand presentation: snapshot pushes mutate the stage and each push
@@ -904,6 +922,9 @@ async function createOfficeRenderer(options) {
     // ——画布不在窗口里，没人看得见，而快照推送仍是 62.5Hz。状态照常写进节点
     // （applySnapshot），回到前台时 setVisible(true) 会失效可视签名并补画一次。
     if (!foreground) return;
+    // 真实 GPU 重绘计数（diagnostics().paintCount）：回归测试用它断言"静态场景零重绘"
+    // 与"可视变化必重画"，探针用它做修复前后的性能对照。
+    paintCount += 1;
     try { if (typeof app.render === 'function') app.render(); } catch { /* renderer gone */ }
   }
 
@@ -1493,6 +1514,8 @@ async function createOfficeRenderer(options) {
         // 2026-09-24 latch-fix observability: the bounded-recovery budget is
         // part of the renderer state the shell log records.
         recoveryAttempts,
+        // 2026-09-25：累计真实重绘次数（"静态场景零重绘"回归判据 + 性能对照口径）。
+        paintCount,
         // M1 observability: the render-profile stage (the degrade ladder), the
         // manual retry budget and the low-fps event count, plus the observer's
         // own window telemetry. Never affects the decision.

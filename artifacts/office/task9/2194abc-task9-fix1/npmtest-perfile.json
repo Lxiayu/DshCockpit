@@ -187,6 +187,12 @@
       "durationMs": 65
     },
     {
+      "file": "test/office-follow-address.test.js",
+      "exitCode": 0,
+      "durationMs": 52,
+      "note": "ledger 回填：5537171 新增文件在 2194abc 轮生成时被遗漏；本轮以真实单文件运行补录（exit 0，11/11 绿，见 office-evidence 渲染回归-20260925/perfile-follow.log）"
+    },
+    {
       "file": "test/office-fps-monitor.test.js",
       "exitCode": 0,
       "durationMs": 61
@@ -197,9 +203,24 @@
       "durationMs": 61
     },
     {
+      "file": "test/office-idle-director.test.js",
+      "exitCode": 0,
+      "durationMs": 55
+    },
+    {
+      "file": "test/office-layout-schema.test.js",
+      "exitCode": 0,
+      "durationMs": 52
+    },
+    {
       "file": "test/office-movement-controller.test.js",
       "exitCode": 0,
       "durationMs": 63
+    },
+    {
+      "file": "test/office-packaging-boundary.test.js",
+      "exitCode": 0,
+      "durationMs": 60
     },
     {
       "file": "test/office-persistence.test.js",
@@ -238,9 +259,45 @@
       "status": "passed"
     },
     {
+      "file": "test/office-render-foreground-recovery.test.js",
+      "exitCode": 0,
+      "durationMs": 78
+    },
+    {
+      "file": "test/office-render-regression.test.js",
+      "exitCode": 0,
+      "durationMs": 644,
+      "note": "ledger 回填：渲染回归新增钉子；真实单文件运行补录（exit 0，6/6 绿）"
+    },
+    {
       "file": "test/office-renderer.test.js",
       "exitCode": 0,
       "durationMs": 66
+    },
+    {
+      "file": "test/office-resync-backfill.test.js",
+      "exitCode": 0,
+      "durationMs": 1734
+    },
+    {
+      "file": "test/office-right-panel-p1.test.js",
+      "exitCode": 0,
+      "durationMs": 76
+    },
+    {
+      "file": "test/office-right-panel-p2.test.js",
+      "exitCode": 0,
+      "durationMs": 87
+    },
+    {
+      "file": "test/office-right-panel-p3.test.js",
+      "exitCode": 0,
+      "durationMs": 75
+    },
+    {
+      "file": "test/office-right-panel-p4.test.js",
+      "exitCode": 0,
+      "durationMs": 113
     },
     {
       "file": "test/office-runtime-adapter.test.js",
@@ -258,6 +315,21 @@
       "durationMs": 60
     },
     {
+      "file": "test/office-subagent-classifier.test.js",
+      "exitCode": 0,
+      "durationMs": 52
+    },
+    {
+      "file": "test/office-subagent-seats.test.js",
+      "exitCode": 0,
+      "durationMs": 88
+    },
+    {
+      "file": "test/office-subagent-wiring.test.js",
+      "exitCode": 0,
+      "durationMs": 55
+    },
+    {
       "file": "test/office-transition-controller.test.js",
       "exitCode": 0,
       "durationMs": 59
@@ -271,6 +343,11 @@
       "file": "test/office-ui.test.js",
       "exitCode": 0,
       "durationMs": 208
+    },
+    {
+      "file": "test/office-wander-restarea.test.js",
+      "exitCode": 0,
+      "durationMs": 9991
     },
     {
       "file": "test/plugin-flow.test.js",
@@ -306,6 +383,16 @@
       "file": "test/runtime-auth.test.js",
       "exitCode": 0,
       "durationMs": 64
+    },
+    {
+      "file": "test/runtime-hardening.test.js",
+      "exitCode": 0,
+      "durationMs": 54
+    },
+    {
+      "file": "test/runtime-health.test.js",
+      "exitCode": 0,
+      "durationMs": 52
     },
     {
       "file": "test/runtime-log-tail.test.js",
@@ -366,6 +453,11 @@
       "file": "test/settings-ui.test.js",
       "exitCode": 0,
       "durationMs": 72
+    },
+    {
+      "file": "test/shell-update-notice.test.js",
+      "exitCode": 0,
+      "durationMs": 53
     },
     {
       "file": "test/skills.test.js",
