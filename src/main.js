@@ -81,6 +81,7 @@ const { buildOfficeUsage, priceUsageAt } = require('./office/runtime/usage-snaps
 const { toolNameOfJournalData } = require('./office/runtime/tool-phrases.js');
 const { createPendingMirror } = require('./office/runtime/pending-mirror.js');
 const { createSubagentWiring } = require('./office/runtime/subagent-wiring.js');
+const { createFollowAddressBook } = require('./office/runtime/follow-address.js');
 const { createSkillsManager, buildSkillsMarketPayload } = require('./skills');
 const { createChannelManager } = require('./channels/channel-manager');
 const { computeCockpitBounds } = require('./cockpit-bounds');
@@ -440,6 +441,16 @@ const officeFollowRemoved = new Set(); // sessionIds seen via api-session/remove
 // ---------------------------------------------------------------------------
 const officeSubagentWiring = createSubagentWiring({
   emit: (sessionId, { type, data, seq, time }) => {
+    // 2026-09-25 长稳实测缺陷：子代理会话不能用根地址开 follow（运行时 0.1.5
+    // 直接拒：session/agent-busy "subagent Sessions require their durable parent
+    // address"），于是壳把它当"流被 host 结束"每 5s 重开一次、每次都报错。
+    // 父侧 journal 的 subagent/start 正好带来可寻址身份（parent + mode），
+    // 在这里顺手记进地址簿；子会话的 follow/page 走 subagent 地址。
+    if (type === 'subagent/start' && data && typeof data.id === 'string') {
+      if (officeFollowAddresses.noteChildAddress(data.id, sessionId, data.mode)) {
+        officeFollowUnfollowable.delete(data.id); // 地址已可寻址：解除"停止重试"标记
+      }
+    }
     const mod = officeModuleInstance;
     if (!mod || typeof mod.ingestHarnessEvent !== 'function') return;
     mod.ingestHarnessEvent({ sessionId, type, seq, time, data });
@@ -4228,6 +4239,13 @@ function windowHidden() {
 const OFFICE_FOLLOW_INTERVAL_MS = 5_000;
 const OFFICE_FOLLOW_GRACE_TICKS = 2; // close a stream only after 2 idle ticks
 const OFFICE_FOLLOW_KNOWN_CAP = 32; // bound the added-session memory
+// 2026-09-25: bounded reopen retries per follow stream. The host ends (not
+// re-opens) a stream whose address it rejects, so without a bound a rejected
+// address turns into an unbounded 5s error/reopen loop (measured in the soak:
+// every subagent child session). N reopens with ZERO delivered frames is the
+// signature of an unusable address.
+const OFFICE_FOLLOW_MAX_REOPENS = 3;
+const officeFollowUnfollowable = new Set(); // sessionIds we stopped following (bounded by OFFICE_FOLLOW_KNOWN_CAP)
 // 2026-09-24 resync fix: the durable-log re-read that answers one
 // office:runtime-resync-request. session/page is a BACKWARDS page
 // (first-hand: SessionPageRequest "One message-aligned backwards-history
@@ -4239,6 +4257,16 @@ const OFFICE_RESYNC_PAGE_MESSAGES = 200;
 const OFFICE_RESYNC_MAX_PAGES = 8;
 const officeResyncInFlight = new Set(); // sessionIds with a re-read running
 const officeFollowKnownOrder = [];
+// 2026-09-25: follow/page 的地址簿（根会话 vs 子代理会话）。子会话的 parent+mode
+// 由父侧 journal 的 subagent/start 带出（见 officeSubagentWiring.emit），会话列表
+// 的 summary（origin/parentSessionId）只作为"这是子会话"的早期信号——mode 未知时
+// 地址簿返回 null，tick 会跳过它而不是拿注定被拒的根地址去打运行时。
+const officeFollowAddresses = createFollowAddressBook({ cap: OFFICE_FOLLOW_KNOWN_CAP * 2 });
+
+/** 该会话的 follow/page 地址；null = 已知子会话但还不可寻址（跳过）。 */
+function officeFollowAddressOf(sessionId) {
+  return officeFollowAddresses.addressOf(sessionId);
+}
 
 function noteOfficeSessionStatus(sessionId, running) {
   if (typeof sessionId !== 'string' || !sessionId) return;
@@ -4248,6 +4276,12 @@ function noteOfficeSessionStatus(sessionId, running) {
 function noteOfficeSessionAdded(summary) {
   const sessionId = summary && typeof summary.sessionId === 'string' ? summary.sessionId : '';
   if (!sessionId) return;
+  // 子会话的早期信号：list 行在 header.origin / header.parentSession 存在时才带
+  // 这两个字段（运行时 types/list.js listFields）。带上就记账，让 tick 在拿到
+  // mode 之前先别开流。
+  const childOf = summary && typeof summary.parentSessionId === 'string' ? summary.parentSessionId
+    : (summary && summary.origin === 'subagent' && typeof summary.parentSession === 'string' ? summary.parentSession : '');
+  if (childOf) officeFollowAddresses.noteChildSession(sessionId, childOf);
   officeFollowRemoved.delete(sessionId);
   if (!officeFollowKnown.has(sessionId)) {
     officeFollowKnown.add(sessionId);
@@ -4264,6 +4298,7 @@ function noteOfficeSessionRemoved(sessionId) {
   officeFollowRemoved.add(sessionId);
   officeFollowRunning.delete(sessionId);
   officeFollowCursors.delete(sessionId);
+  officeFollowAddresses.forget(sessionId);
 }
 
 /** Raw root sessionIds the office currently has an ACTIVE binding for.
@@ -4309,6 +4344,7 @@ function startOfficeFollowSync() {
 
 function stopOfficeFollowSync() {
   if (officeFollowTimer) { clearInterval(officeFollowTimer); officeFollowTimer = null; }
+  officeFollowUnfollowable.clear();
   const mux = runtimeMux;
   for (const [, entry] of officeFollowStreams) {
     try { if (mux) mux.closeStream(entry.streamId); } catch { /* ignore */ }
@@ -4322,6 +4358,9 @@ function stopOfficeFollowSync() {
   // Subagent-seat translation ledgers are per-feed: clearing them on stop keeps
   // a later re-enable from treating stale child ids as already-started.
   officeSubagentWiring.reset();
+  // Follow addresses are per-feed too (they only exist to address this feed's
+  // streams); a re-enable re-learns them from the parent journals.
+  officeFollowAddresses.forgetAll();
   officeAssistantStreamStats.clear();
 }
 async function seedOfficeFollowFromSessionList() {
@@ -4369,8 +4408,15 @@ const OFFICE_ASSISTANT_STREAM = true;
 const OFFICE_ASSISTANT_STREAM_LOG_EVERY = 40; // chunks between log lines
 const officeAssistantStreamStats = new Map(); // sessionId -> {chunks, attempts, ended, lastLogAt}
 
+/** session/follow 的请求体。地址来自地址簿：
+ *  - 根会话 `{kind:'session'}`；
+ *  - 子代理会话 `{kind:'subagent', parentSessionId, childSessionId, mode}`（0.1.5 的
+ *    validateAddress 拒绝根地址寻址子会话）；
+ *  - 已知子会话但 mode 未知 → null：调用方跳过（等父侧 journal 把 mode 带出来）。 */
 function officeFollowRequest(sessionId) {
-  const request = { address: { kind: 'session', sessionId } };
+  const address = officeFollowAddressOf(sessionId);
+  if (!address) return null;
+  const request = { address };
   if (OFFICE_ASSISTANT_STREAM) request.assistantStream = true;
   return request;
 }
@@ -4403,16 +4449,25 @@ function officeFollowSyncTick() {  const mux = runtimeMux;
   if (officePresetResyncDue()) seedOfficeFollowFromSessionList();
   const desired = officeDesiredFollowIds();
   for (const sessionId of desired) {
+    if (officeFollowUnfollowable.has(sessionId)) continue; // 已判不可寻址：不再重试
+    // 地址：根会话 / 子代理会话（parent+mode）/ null（已知子会话但 mode 未知）。
+    // null 必须"跳过"，不能退回根地址——0.1.5 会以 session/agent-busy 拒掉它。
+    const request = officeFollowRequest(sessionId);
+    if (!request) continue;
     const streamId = `session-follow-${sessionId}`;
     if (!officeFollowStreams.has(sessionId)) {
-      mux.onItem(streamId, (value) => ingestOfficeFollowFrame(sessionId, value));
-      officeFollowStreams.set(sessionId, { streamId, misses: 0 });
+      mux.onItem(streamId, (value) => {
+        const live = officeFollowStreams.get(sessionId);
+        if (live) live.frames += 1;
+        ingestOfficeFollowFrame(sessionId, value);
+      });
+      officeFollowStreams.set(sessionId, { streamId, misses: 0, reopens: 0, frames: 0 });
       log(`[office] follow open (${sessionId.slice(0, 8)})`);
       // Spike-verified wire shape: a flat SessionFollowRequest. `assistantStream`
       // is z.literal(true).optional() on 0.1.5 — it must be OMITTED or `true`,
       // never `false` (the gateway rejects `false`). See
       // officeFollowRequest() for the enable/disable policy.
-      mux.openStream(streamId, 'session/follow', { request: officeFollowRequest(sessionId) });
+      mux.openStream(streamId, 'session/follow', { request });
     } else if (typeof mux.isStreamOpen === 'function' && !mux.isStreamOpen(streamId)) {
       // A REAL change (not a refresh): the host ended/errored this follow
       // stream, or a reconnect dropped it before the mux re-opened it. Re-open
@@ -4421,9 +4476,23 @@ function officeFollowSyncTick() {  const mux = runtimeMux;
       // forward gap. A stream that is merely already open is NEVER re-opened:
       // session/follow has no resume cursor, so every needless open would
       // restart the window for nothing.
-      officeFollowStreams.get(sessionId).misses = 0;
+      const entry = officeFollowStreams.get(sessionId);
+      entry.misses = 0;
+      entry.reopens += 1;
+      // 2026-09-25 长稳实测：地址一旦不被运行时接受（典型：子代理会话被用根地址
+      // 寻址 → session/agent-busy），host 会立刻结束流，"重开"于是退化成每 5s
+      // 一次的错误风暴。有界重试：连开 N 次而**一帧都没收到** → 判该会话不可寻址，
+      // 停止重试并留一条诊断（可见、可查；不再刷屏）。
+      if (entry.reopens >= OFFICE_FOLLOW_MAX_REOPENS && entry.frames === 0) {
+        officeFollowUnfollowable.add(sessionId);
+        log(`[office] follow unfollowable (${sessionId.slice(0, 8)}): `
+          + `${entry.reopens} reopens, 0 frames — stopped retrying`);
+        try { mux.closeStream(entry.streamId); } catch { /* ignore */ }
+        officeFollowStreams.delete(sessionId);
+        continue;
+      }
       log(`[office] follow reopen (${sessionId.slice(0, 8)})`);
-      mux.openStream(streamId, 'session/follow', { request: officeFollowRequest(sessionId) });
+      mux.openStream(streamId, 'session/follow', { request });
     } else {
       officeFollowStreams.get(sessionId).misses = 0;
     }
@@ -4636,7 +4705,9 @@ async function officeAnswerResync(sessionId, request) {
     for (let page = 0; page < OFFICE_RESYNC_MAX_PAGES; page += 1) {
       const args = {
         request: {
-          address: { kind: 'session', sessionId },
+          // 子代理会话的 page 地址与 follow 同源（同一份地址簿）：0.1.5 的
+          // validateAddress 对 session/page 与 session/follow 是同一套规则。
+          address: officeFollowAddressOf(sessionId) || { kind: 'session', sessionId },
           throughSeq,
           maxMessages: OFFICE_RESYNC_PAGE_MESSAGES,
         },
