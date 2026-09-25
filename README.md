@@ -8,7 +8,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)](#)
-[![Tests](https://img.shields.io/badge/tests-471%20passing-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-1393%20passing-brightgreen)](#)
 [![upstream](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Lxiayu/DshCockpit/master/docs/compat/badge.json)](docs/compat/)
 [![Powered by](https://img.shields.io/badge/powered%20by-DeepSeek%20Harness-4D6BFE)](https://github.com/deepseek-ai/deepseek-harness)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
@@ -65,6 +65,10 @@ DshCockpit 把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harnes
 
 还有：模型管理（6 家预设 + Ollama 本地模型）、插件与技能市场（安装前可预览）、双语界面、深浅主题。
 
+### 4 · 虚拟办公室（v0.4.0 起）
+
+五名员工（调度员 + 研究员/工程/评审/协作者）在办公室里由 harness 的**真实事件**驱动：开工走向工位、工具调用落到设施、子代理各自上工、交付或出错都有确定的收尾。右栏把「今日用量 / 员工行 / 待你处理 / 时间线 / 详情」集中呈现——审批与提问可以直接在这里批复，高危请求走危险模态（展示真实命令原文、无「总是允许」）。办公室是默认视图，切到会话工作台时它在后台照常活着（仿真不冻结）；气泡与面板只吃事实，提示词、代码与模型输出原文不进办公室。
+
 ### 横向对比
 
 | | 裸 `dsh web` | 一般桌面壳 | **DshCockpit** |
@@ -120,10 +124,11 @@ npm install && npm start
 - macOS 包尚未签名公证（需要上面那行 `xattr`）；Windows 可能因同样原因触发 SmartScreen
 - 单人维护的项目；主要在作者自己的机器上实战验证
 - Windows 是主要开发目标；macOS arm64 由 CI 构建并冒烟测试（Intel 包暂停发布，可在 Apple Silicon 上自行交叉构建），但真实环境里程较少
+- 虚拟办公室是 v0.4.0 新增：本机 macOS 上做了 4 小时连续长稳（真对话 + 反复切视图），**Windows 真机与高分屏场景待验证**；巡游的左半区占比在 60 分钟聚合上仍贴 40% 下沿，个体下限已列入发版后专项
 
 ## 🤝 贡献
 
-欢迎 PR！请先跑 `npm test`（1422 项测试）。架构见 [`DESIGN.md`](DESIGN.md)，产品理念见 [`PHILOSOPHY.md`](PHILOSOPHY.md)，功能清单见 [`FEATURES.md`](FEATURES.md)，竞争路线图见 [`ROADMAP.md`](ROADMAP.md)。
+欢迎 PR！请先跑 `npm test`（1393 项测试）。架构见 [`DESIGN.md`](DESIGN.md)，产品理念见 [`PHILOSOPHY.md`](PHILOSOPHY.md)，功能清单见 [`FEATURES.md`](FEATURES.md)，竞争路线图见 [`ROADMAP.md`](ROADMAP.md)。
 
 <details>
 <summary><b>操作层原则（产品理念）</b></summary>
@@ -135,43 +140,20 @@ Harness owns the workspace. DshCockpit owns the operating layer.
 完整理念见 [`PHILOSOPHY.md`](PHILOSOPHY.md)。
 </details>
 
-## 🧰 开发日志 · P5（2026-09-23，未提交）
+## 🧰 更新日志 · v0.4.0（虚拟办公室，2026-09-25）
 
-**P5 第一步：B-1 外提 + 摘编辑器 UI**（顺序铁律：先外提验证切片，再摘 UI，物理删除与排包是第二步）
+v0.4.0 把 harness 的真实事件流接进了一座**虚拟办公室**（默认视图，左栏一键切回会话工作台）：员工走位/上工/交付都由真事件驱动，右栏六块信息架构（今日用量 / 员工行 / 待你处理 / 时间线 / 详情 / 页脚）把成本、审批与工作记录集中呈现；审批与提问可直接在办公室里批复（高危走危险模态、展示真实命令原文、无「总是允许」）。隐私红线：提示词、代码、路径原文与模型输出都不进办公室。
 
-- **B-1 外提**：`src/office/layout-editor.js`（52KB 编辑器内核）里生产启动链唯一需要的 schema-v1 验证切片（`parseDraft` / `validateDraftSchema` / `ASSET_BY_ID` / 层默认表 / 稳定错误码）**移动**到新模块 `src/office/layout-schema.js`——零 DOM/Electron/Pixi/fs 依赖的纯模块，唯一 require 是 `layout-assets.js` 目录。编辑器改为 require 它（单一真源），编辑器本体留在仓库等第二步处理。
-- **生产 boot 不再加载编辑器**：`office.html` 原来在任何界面动作前 `loadModule('./layout-editor.js')` 并造一次性 editor 实例取 `validateDraftSchema`；现在直接加载 `layout-schema.js` 并注入自由函数 `validateDraftSchema` 给 `office-boot.resolveProductionLayoutDraft`。saved > bundled 优先级与坏草稿拒绝行为逐字不变（`test/office-layout-schema.test.js` 用**真校验器**钉住整条链：有效 saved 胜出、损坏/不可解析 saved 回退 bundled 并报 `OFFICE_LAYOUT_SAVED_INVALID`、全失败 fail-closed）。真壳探针实测：boot 全程**零次**请求 `layout-editor.js`，`layout-schema.js` 正常加载。
-- **摘掉编辑器 UI 与入口**：`office.html` 删除编辑器 DOM 块（palette/toolbar/inspector/align-bar/shelf/canvas/layer-panel）、1218 行连续接线（指针/框选/快捷键/检查器/保存导入/图层面板）、页脚「布局编辑」chip 与 `?editor=1` 自动打开；`office.css` 删除约 61 条编辑器规则与 chip 样式（保留混排其中的 `.checkbox` 与两个生产媒体查询）。页面侧只服务该 UI 的代码（keyup/快捷键分支/resize 编辑器分支/证据钩子四条）随之清理。
-- **测试同批更新**（有意更新，不是放宽）：删除 28 个钉住编辑器 UI 的测试（随编辑器搬往工作台）；改写 boot 链测试指向 `layout-schema`；新增静态断言钉住「编辑器已不存在」（`office.html` 无 `layout-editor` DOM/模块加载/chip/`布局编辑`，`office.css` 无编辑器选择器）；`test/office-right-panel-p2.test.js` 原「编辑器 DOM 未动」断言反转为不存在断言。
-- **渲染证据**：`/tmp/office-e2e/p5-no-editor.png`（+ `p5-no-editor-live.png`、`p5-no-editor.json`）——无任何编辑器代码参与，office 页正常 boot（webgl、canvas 960×630、bundled-flat 布局链、五名员工在岗），右栏 P1–P4 各块齐全，页脚已无「布局编辑」入口。
-- **未动**：`resources/office/layout-editor/**`（生产家具素材源，名字骗人）、`resources/characters/**`、仿真/动画逻辑、`office:*` 通道数（8 个）；编辑器独立成页（B-2）与排包排除（A-1/A-6）属第二步。
+同一版里修掉两个用户实测顽疾，并补上 0.1.5 兼容层：
 
-**P5 第二步：排包闸门 + 主仓创作块清出 + 真包冒烟**（顺序铁律收尾：先排包（产物层），再物理清出（仓库层），最后真包验证）
+- **渲染锁死**（切到工作台一段时间后办公室画面已死）：低帧判据改时间窗（3s 窗、持续 12s <20fps 才动作），切走不测量、回前台重置；降级阶梯改为先降画质档、末档才静止，并有界恢复 + 手动「重试渲染」。
+- **同步断档**（对话结束后员工卡在「工作中」）：`session/page` 反向重读补发端补齐，模块按 continuation / 基线重启落地；follow 重开不再把开场窗口当增量（造断档的源头）。
+- **子代理会话寻址**（0.4.0 长稳实测新增）：0.1.5 拒绝用根地址 follow 子代理会话（`session/agent-busy: subagent Sessions require their durable parent address`），旧实现因此每 5s 重开一次、每次报错。现在按 `{kind:'subagent', parentSessionId, childSessionId, mode}` 寻址，并加了「连开 N 次零帧即停」的有界守卫（`src/office/runtime/follow-address.js`）。
+- **0.1.5 兼容层**：斜杠端点 RPC + Cookie 鉴权 + `remote.mux` 事件面 + `$events/result` 审批回执；更新挡板放开（矩阵外版本可装/可降级/可回滚）；`rc` 渠道不再把 alpha 当候选。
+- **Windows 性能必修四项**、**巡游/休息区改造**（聚合左半区占比 12/30 分钟 0.469/0.430，抢占延迟最坏 1008ms→240ms）、**排包精简**（asar 创作块 52→0，−6.3%）。
 
-- **排包（A-1）**：`electron-builder.js` `files` 白名单新增排除——`src/workbench/**`、`src/office/layout-editor.js`、`playground.{html,page.js,css}`、`fixtures/character-pack/**`、`fixtures/events.json` / `waypoints.json`，并对 `content/**`、`photo/**`、`artifacts/**`、`test/**`、`docs/**` 与全部创作脚本显式钉死（白名单本就排除，防止未来放宽回流）。**同名陷阱已注释钉住**：`resources/office/layout-editor/`（extraResources 里的生产家具素材，24 张方向图）严禁按名字排除。
-- **负向断言（A-6）**：`scripts/verify-dist.js` 增加 asar 直读能力（镜像 `@electron/asar` 的 header pickle 格式，零新依赖）与三道闸门——① 创作块条目必须为 0（编辑器/工作台/playground/夹具/gen-*/content/photo/artifacts/test/docs）；② 生产表面必须在（`office.html`/`office-boot.js`/`layout-assets.js`/`layout-schema.js`/三个布局夹具/`render/**`/`runtime/**`（含内化的 `runtime/validate-character-pack.js`）/`pixi.min.js` 等 18 项）；③ asar 条目数 ≤ 预算 3603（实测 3275 + 10% 余量）。另加正向着色：`resources/office/layout-editor/*.png`、`flat/*.png`、`characters/deepseek-default/manifest.json`、`dialogue/*.json` 必在产物内。验证覆盖全部轨道（`build.js` 出货前恒触发：win zip/win-unpacked、mac zip/.app、以及无平台参数的 `npm run build`；zip 与 .app 两种内部布局已分别实测），且只门禁本次版本产物。基线上实测：改配置前跑 verify 报 FAIL（抓到 52 个创作块条目），改后全绿。**实测还抓到过一类真实缺陷**：dist/ 里残留的**同版本陈旧 zip** 会被如实判失败（防止把旧树产物当新包发布）。
-- **物理清出**（38 个文件，均逐一核实 s1 同路径对应物后删除）：`src/workbench` 外壳 7 文件 + `lib/{asset-validator,content-validator}.js`（63,050 + 23,474 B——其余 6 个 lib 被**保留的** `scripts/office-assets/normalize-*.js` 反向依赖，故留）、`src/office/layout-editor.js`（44,932 B）、playground 三件（42,755 B）、`fixtures/{events,waypoints}.json`（2,803 B）；`scripts/` 15 个工具（launchers×2、gen-*×5、apply-walk/asset-gap/flat-gen×3、publish/export×2、acceptance run/evidence/view-evidence×3）；`test/fixtures` 5 个验收探针模板（~83 KB）、`test/office-{playground,gen-frames,asset-gap-report}.test.js` 三个工具测试文件。`package.json` 的两个 dev 脚本随 launcher 删除。**`photo/` 4 个预览图按铁律保留**：s1 的 `photo/` 虽是 1.7 GB 超集，但这 4 个文件（二维码 + 3 张界面预览）在 s1 无同路径对应物，且 README/README.en 直接引用。
-- **测试手术**（有意更新，不是放宽；套件 1422 → **1286，−136 精确对上账**）：删 3 个工具测试文件（26+15+9）、`office-ui.test.js` 删 7 个（M2b 探针契约 + E4/E5a/E5a-R1/E5a-R2 四个真壳 + M0 launcher/shell 两个工作台契约）、`office-asset-runtime.test.js` 删 78 个（编辑器内核测试群 + M0/M1 发布内核段，其数据源 `content/**` 已随工具清出）、`office-layout-schema.test.js` 删 1 个（"编辑器 require schema 单一真源"随编辑器删除）。两处混合测试**改指不断言**：E4.6 归档白名单与 E3a flat-draft schema 校验从 `editor.load` 改指 `layout-schema.parseDraft/validateDraftSchema`。`office-asset-pack.test.js` 的 E5a-R1 grep-lock 去掉已删除的 `test/fixtures` 扫描根（`src/office` 覆盖不变）。**为保全覆盖面而保留**的项：`test/fixtures/` 里 4 个 draft/provenance 夹具（生产编译器/resolver 测试模块级依赖，误删后已从 git 恢复）、`src/workbench/lib` 6 个发布内核（被保留的 office-assets 脚本依赖）、`scripts/office-assets/**`（生产 `character-pack-installer.js` 的校验真源 + 测试入边）、`scripts/office-{harness-probe,pixi-smoke}.js`（`office-compatibility.test.js` 模块级依赖）、`content/**`（dialogue 一致性守卫 `M4.1d` 读它）、`artifacts/**`（release-gate 读它）、`src/office/fixtures/character-pack/**`（6 个生产测试模块级载入作夹具数据 + main.js 冻结 playground 路径引用——均排除出包但留存仓库）。
-- **真包冒烟**：`node scripts/build.js --mac dir`（verify 门禁全绿）→ `scripts/e2e-smoke.js` 冷启动打包产物 HTTP 200（exit 0）→ 带 `DSH_DESKTOP_OPEN_OFFICE=1` 真启动 `.app`，办公室视图全屏渲染（`[office] layout source: bundled-flat` → `[office] prewarmed pack + layout`），两轮截图（间隔 9 秒，行走姿势有差异证明场景是活的）：`/tmp/office-e2e/p5-b-office.png`、`p5-b-office-walk.png`，机读事实 `/tmp/office-e2e/p5-b-smoke.json`（asar 3,276 条目 / 创作块 0 / 生产表面 18 项齐全 / layout-editor 24 图 + characters 在产物内 / 截图像素多样性约 3.9 万色）。**收尾后重跑仍六项全过**。另注：本地 `npm run build`（zip 轨）会带 owner 占位符的 app-update.yml，e2e-smoke 的 updater 守卫会按设计拦下——本地冒烟用 `--mac dir` 轨（不含 feed），真实发布坐标由 CI 环境变量注入。
-- **产物对比**：app.asar 3,327 → **3,275 条目**（−52），30,912,799 → **28,960,440 B**（−1.86 MiB，−6.3%）；`src/` 174 → 159 文件 / 4,406,229 → 4,229,215 B（−177,014 B）；整包 `DshCockpit.app` 472M → 470M（大头是 runtime 139M + extraResources 38M，均不动）。`extraResources`（office 26M / characters 12M / dialogue）**零变化**。
-- **s1 零改动**：`git -C /Users/xia/program/dsh/DshCockpit-s1 status --porcelain` 为空、HEAD 仍为 `4e314e4`。主仓删除的每一项在 s1 均有同路径对应物（38/38；`layout-editor.js` 与 `e5a-r2` 探针模板在 s1 为 P5-1 之前的原版，能力是主仓现存版的超集）。按铁律"凡 s1 无对应物一律不删"保留的项：`photo/` 4 个预览图（README 直接引用、s1 无同路径文件）、`src/office/fixtures/character-pack/**`（6 个生产测试模块级载入作夹具数据 + main.js 冻结 playground 路径引用）、`content/**`（dialogue 一致性守卫读它）、`artifacts/**`（release-gate 读它）、`src/workbench/lib` 6 个发布内核（被保留的 office-assets 脚本 + 保留测试依赖）、`test/fixtures/` 4 个 draft/provenance 夹具（生产编译器/resolver 测试模块级依赖）。
+用户可见的发版说明见 GitHub Release 正文；逐项根因、取舍与实测证据的权威记录见各 commit 消息与 `docs/strategy/`（后者不进 git）。
 
-**P5 收尾：修打包自洽缺陷（内化角色包校验器）**
-
-- **缺陷**：`src/office/runtime/character-pack-installer.js`（产品代码）模块级 require `../../../scripts/office-assets/validate-character-pack.js`，而 `files` 白名单只含 `src/**`——**打包产物内这条 require 指向不存在的文件**（dev 下能跑、真包里必 MODULE_NOT_FOUND；此前零运行时影响只因该 installer 尚无生产加载方）。
-- **修复**：`git mv` 至 `src/office/runtime/validate-character-pack.js`（自身零外部依赖，仅 node:fs/path，链路一次内化即自洽）；installer 改 `require('./validate-character-pack.js')`；两个测试的路径引用同步更新；`verify-dist.js` 生产表面清单 +1（产物内必须存在）；新增 `test/office-packaging-boundary.test.js` 静态钉死——① 全仓不再有任何 `src/**` → `scripts/**`（src 外）的 require 边（唯一合法豁免：asar 根按策略必有的 `package.json`）；② installer 的校验 require 指向 src 内兄弟文件；③ 有 dist 产物时直接验 asar 内含该文件。
-- **实测**：门禁对旧树 zip 报 `missing: src/office/runtime/validate-character-pack.js`（负向断言有效），新树产物全绿（asar 3,276 条目 = 3,275 + 1）。
-
-## 🧰 开发日志 · 办公室 resync 回填修复（2026-09-24，未提交）
-
-**症状与根因**：一轮对话正常完成后，调度员一直显示「工作中·任务执行中」+ 面板「同步滞后」。根因是事件序号断档（forward gap）后 **DshCockpit 内部的 resync 回填端从未实现**：适配器缓冲跳号事件并发起 `office:runtime-resync-request`，全仓唯一"处理"只是一条诊断字符串；5 次重试耗尽 → `sync=stale`，而契约规定 sync 只改变同步状态、绝不猜测运行时/活动/绑定/终态——员工于是冻结在最后已知阶段。更早的源头：`session/follow` 重开（mux 重连/host-end/feed 重启）拿到的**开场窗口被当成增量事件**喂给适配器，窗口起始序号高于模块水位时每一次重开都可能造出跳号。
-
-**修复（三件事）**：
-- **回填端**（核心）：模块层新增公开入口 `ingestHarnessSnapshot({sessionId, records})`；`src/main.js` 在收到 resync 请求时用 `session/page` **向后**翻页重读 durable log 并真的应答。设计取舍选 **(B) 基线重启**——一手证据：0.1.5 的 `SessionPageRequest`/`SessionPage` 文档原文即 "message-aligned **backwards**-history" / "contiguous **backwards** page"，`SessionFollowRequest` 无续传游标、每次 open 都是"完整开场窗口 + 之后连续事件"（harness 对 follow 的设计语义），**没有前进读取路径**，(A) 不可行。适配器内部约束决定精确顺序：`rotateEpoch()` 重置序号状态 → 先用**裸基线快照**（sequence 0、无 facts）应答把 sync 拉回 healthy、水位归零（否则首事件建地板逻辑不触发、整窗被吸收）→ 按序重放旧水位之上的记录（已应用过的一律跳过，不双计）；重放中被拒记录（如超 64KB）会再 rotate 一次让地板吸收被拒 seq，尾部事实不丢；窗口够不着断档起点时如实记 `RESYNC_BASELINE_PARTIAL`，**没有任何静默丢弃**（诊断码 + 壳日志 + API 返回值三处可观测）。
-- **少造断档**：开场窗口整体走基线入口（模块按水位决定 continuation / baseline，continuation 时缓冲事件按 `drainBuffer` 契约落地恰好一次）；follow reconcile 改为**只在真变化时**开合（新增 mux 只读 `isStreamOpen`，host 结束/掉线才重开，重开有独立日志行），不再为"刷新"而重开。
-- **可观测性**：`[office] sync <healthy|resyncing|stale> (session-…, attempts=N, buffer=M)`、`[office] resync baseline|continuation applied (…)`、`[office] follow open/reopen/closed (…)` 全部进壳日志（此前一条都没有）；不加新 IPC 通道（`office:*` 仍 8 个）。
-
-**测试与实证**：新增 `test/office-resync-backfill.test.js`（8 例，真模块+真适配器：断档治愈、stale 后迟到应答治愈、follow 重开不造断档、缓冲恰好一次、partial baseline 与超限记录的诚实诊断、壳接线静态钉住）+ `test/runtime-mux.test.js` 的 `isStreamOpen` 真协议用例；全量套件 **1314 passed / 0 failed**（基线 1305 + 9）。端到端实证用真 harness 0.1.5-rc.2（真 DSH_HOME）+ 真 mux + 真 office 模块/页面跑真对话，**对话进行中人为关闭再重开 follow 流**（并叠加合成丢帧），双模块对照（verdict 全项 true）：修复侧——跳号窗口按 baseline 重启（`watermark 5→16, replayed 7`）、丢帧后真实 `session/page` 重读治愈（`watermark 17→22, replayed 2`）、员工正确收尾回漫游（`lastResult=completed`）、干预后再来一轮依旧干净完成，全程 `sync=healthy`；修复前接线侧——同一缺口 10 次 resync 请求无人应答 → `sync=stale` + orchestrator 冻结在 `working / 执行任务中 / transition=work`（报告症状一字不差复现）。产物 `/tmp/office-e2e/resync-{00-idle,10-working,11-restart,12-counterfactual-stale,13-backfill-healed,14-turn-completed(-b),15-second-turn}.png|json` + `resync-events.jsonl` + `resync-run-log.json`（合成输入逐条标注；不含任何 key/凭据）；根因/取舍/语义详见 `docs/strategy/2026-09-24-office-resync-backfill-fix.md`。
 
 ## 📄 许可与致谢
 
