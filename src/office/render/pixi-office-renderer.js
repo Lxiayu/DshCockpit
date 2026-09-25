@@ -1156,14 +1156,16 @@ async function createOfficeRenderer(options) {
       }
     }
     entities.clear();
-    for (const texture of textures.values()) {
-      try { if (typeof texture.destroy === 'function') texture.destroy(true); } catch { /* already gone */ }
-    }
-    textures.clear();
-    for (const texture of officeTextureMap.values()) {
-      try { if (typeof texture.destroy === 'function') texture.destroy(true); } catch { /* already gone */ }
-    }
-    officeTextureMap.clear();
+    // 2026-09-25（用户实测：点「重新渲染」后办公室变成灰块/无贴图场景）：
+    // 注入的美术贴图**不能在这里释放**。`textures`（角色帧）与 `officeTextureMap`
+    // （家具素材）由办公室页面在 boot 时一次性加载并注入本视图，页面从不重建它们；
+    // 而 degradeToStatic 之后可能发生有界恢复重建、或用户点「重试渲染」——两条路径
+    // 都要靠这两张 map 重新贴图。旧实现在这里把两张 map 里的 texture 逐个 destroy
+    // 再 clear，于是恢复出来的场景只剩占位图（家具 32 件全灰块、角色空贴图）。
+    // 复现：latch 到 static → retryRendering → officeTextureCount 15→0、
+    // texturedFurniture 32→0、placeholderFurniture 0→32（真壳探针，见
+    // docs/strategy/2026-09-25-v0.4.0-release-verification.md）。
+    // 真正的释放点是 destroy()（视图销毁）——那里的语义不变。
     if (app) {
       // Pixi's destroy() leaves the canvas in the DOM (removeView defaults to
       // false). Detach it here so a later bounded-recovery rebuild mounts
