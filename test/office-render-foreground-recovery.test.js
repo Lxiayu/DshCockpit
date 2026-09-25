@@ -676,8 +676,10 @@ test('office.html: the visibility payload’s `active` flag reaches the renderer
   assert.match(html, /createOfficePageController\(\{\s*\n\s*bridge,\s*\n\s*renderer,/s, 'the page controller receives the renderer');
   assert.match(html, /let officeActive = true;/, 'the office opens as the active main view');
   assert.match(html, /bridge\.onVisibilityPush\(\(payload\) => \{\s*\n\s*officeActive = !![^\n]*payload\.active/, 'the push payload updates the active flag');
-  assert.match(html, /visibility\(\{ visible: [^\n]*active: officeActive \}\)/, 'window events keep carrying the active flag');
-  assert.match(html, /page\.handleVisibility\(\{ visible: document\.visibilityState === 'visible', active: officeActive \}\)/, 'renderer state changes are reported through the controller');
+  // 2026-09-25 唤醒自愈：visibility 载荷还携带 `presenting`（powerMonitor 的锁屏/
+  // 挂起信号）——`active` 断言随之收紧，不是放宽。
+  assert.match(html, /visibility\(\{ visible: [^\n]*active: officeActive, presenting: officePresenting \}\)/, 'window events keep carrying the active flag (+ the presenting flag)');
+  assert.match(html, /page\.handleVisibility\(\{ visible: document\.visibilityState === 'visible', active: officeActive, presenting: officePresenting \}\)/, 'renderer state changes are reported through the controller');
   assert.match(html, /onStateChange: \(\) => \{ syncRendererDegradeNote\(\); reportRendererState\(\); \}/, 'renderer mode changes update the dot and the shell report');
   // P1 English pass (2026-09-25): the note is the office.degrade.renderer
   // dictionary template; the SPECIFIC stable code rides the {code} var.

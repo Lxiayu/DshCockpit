@@ -57,6 +57,12 @@ function createWindowManager(deps) {
   // switching back is instant and the office keeps living in the background.
   let officeShellOnVisibility = null;
   let officeShellVisibleFlag = 'false|false';
+  // 2026-09-25 唤醒自愈：main 进程 powerMonitor（lock-screen/unlock-screen/
+  // suspend/resume，src/office/power-presentation.js）把「屏幕未在呈现」聚合到
+  // 这一个布尔。它参与 office:visibility 推送载荷（`presenting` 字段）与去重
+  // 签名——页面用它在锁屏期间停掉渲染判据（节流帧不计入低帧率）、在唤醒沿
+  // 自动自愈。没有新 IPC 通道。
+  let officePresentationSuspended = false;
 
   function officeShellViewId() {
     return officeShellView ? 'office-shell-1' : null;
@@ -70,15 +76,25 @@ function createWindowManager(deps) {
     const windowVisible = !!(mainWindow && !mainWindow.isDestroyed()
       && mainWindow.isVisible() && !mainWindow.isMinimized());
     const active = !!(officeShellView && activeMainView === 'office');
-    const signature = `${windowVisible}|${active}`;
+    const presenting = !officePresentationSuspended;
+    const signature = `${windowVisible}|${active}|${presenting}`;
     if (signature === officeShellVisibleFlag) return;
     officeShellVisibleFlag = signature;
     if (typeof officeShellOnVisibility === 'function') {
       try { officeShellOnVisibility(officeShellViewId(), windowVisible); } catch { /* module errors never break the view */ }
     }
     if (officeShellView) {
-      try { officeShellView.webContents.send('office:visibility', { viewId: officeShellViewId(), visible: windowVisible, active }); } catch { /* closing */ }
+      try { officeShellView.webContents.send('office:visibility', { viewId: officeShellViewId(), visible: windowVisible, active, presenting }); } catch { /* closing */ }
     }
+  }
+
+  // 2026-09-25 唤醒自愈：powerMonitor 信号的唯一入口（src/office/power-presentation.js
+  // 把事件映射到这里）。同值调用是 no-op，状态变化才推一次 office:visibility。
+  function setOfficePresentationSuspended(suspended) {
+    const next = !!suspended;
+    if (next === officePresentationSuspended) return;
+    officePresentationSuspended = next;
+    notifyOfficeShellVisibility();
   }
 
   function showOfficeShellView({ url, onVisibility = null } = {}) {
@@ -649,6 +665,7 @@ function createWindowManager(deps) {
     setCockpitMode, moveCockpitOffset,
     broadcastToOfficeViews, officeViewCount, closeOfficeShellView,
     showOfficeShellView, hideOfficeShellView, isOfficeViewActive,
+    setOfficePresentationSuspended,
     broadcastToOfficeRail, broadcastToShellViews,
     syncShellViews, getActiveMainView: () => activeMainView,
     onRuntimeHealthy, hasTray,

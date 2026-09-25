@@ -52,6 +52,16 @@
 //     recoverable LOW_FPS_PERSISTENT case. WEBGL_INIT_FAILED /
 //     RENDERER_UNAVAILABLE are hard failures: a rebuild would just fail again,
 //     so they are never retried.
+//   - PRESENTATION GATE (2026-09-25 wake self-heal): the observer only measures
+//     while the screen actually presents this view (`setPresenting`). Lock /
+//     display-sleep / suspend throttles the page to ~1.3 fps (soak-measured);
+//     those frames are an environment fact, not a renderer defect — the pump
+//     and the stall watchdog stop while `presenting=false`, the in-flight
+//     window is discarded on wake, and the recovery budget is never consumed
+//     in that state. The wake edge (presenting false→true) AUTO-HEALS a
+//     LOW_FPS_PERSISTENT static view with one bounded rebuild (same
+//     attemptRecovery path, same session cap, hard failures still never
+//     retried) — no view switch or manual retry needed.
 
 const { createFpsMonitor } = require('./fps-monitor.js');
 // Task E4: the shared catalog declares contentBbox (opaque-art bounds) and
@@ -152,6 +162,14 @@ async function createOfficeRenderer(options) {
   // active view; the first office:visibility push corrects this if the view
   // was opened into the background.
   let foreground = true;
+  // 2026-09-25 唤醒自愈：`presenting` =「屏幕正在把本视图呈现给人看」。生产信号：
+  // main 进程 powerMonitor（lock-screen/unlock-screen/suspend/resume，经
+  // src/office/power-presentation.js）→ window-manager → office:visibility 载荷的
+  // `presenting` 字段 → 页面 → setPresenting()。默认 true：从未收到推送的调用方
+  // （旧测试/旧页面）保持历史行为。锁屏/息屏/挂起期间 Chromium 把页面节流到
+  // ~1.3fps（长稳实测）——那是环境事实，不是渲染缺陷：观察器在此期间停表
+  // （泵停 + 看门狗停），恢复预算不消耗，唤醒沿丢弃在途窗口并自动自愈。
+  let presenting = true;
 
   // ---- M1 (windows-perf audit 2026-09-24): low-cost RENDER PROFILE ----------
   // The first LOW_FPS_PERSISTENT latch no longer kills the scene. The office
@@ -1141,12 +1159,12 @@ async function createOfficeRenderer(options) {
   }
   function pump() {
     pumpHandle = null;
-    if (destroyed || !foreground || !monitor || monitor.degraded()) return;
+    if (destroyed || !foreground || !presenting || !monitor || monitor.degraded()) return;
     monitor.frame();
     schedulePump();
   }
   function schedulePump() {
-    if (destroyed || !foreground || !monitor || monitor.degraded() || pumpHandle !== null || !scheduleFrame) return;
+    if (destroyed || !foreground || !presenting || !monitor || monitor.degraded() || pumpHandle !== null || !scheduleFrame) return;
     pumpHandle = scheduleFrame(pump);
     armStallPoll();
   }
@@ -1167,10 +1185,10 @@ async function createOfficeRenderer(options) {
   // nothing.
   function armStallPoll() {
     if (!monitor || !stallPollMs || !scheduleTimeout || stallTimer !== null) return;
-    if (destroyed || !foreground || monitor.degraded()) return;
+    if (destroyed || !foreground || !presenting || monitor.degraded()) return;
     stallTimer = scheduleTimeout(() => {
       stallTimer = null;
-      if (destroyed || !foreground || !monitor || monitor.degraded()) return;
+      if (destroyed || !foreground || !presenting || !monitor || monitor.degraded()) return;
       // poll() routes a latch through the monitor's onDegrade → handleLowFpsLatch
       // exactly like frame() does. The return value must NOT be handled here as
       // well: that would walk the ladder twice for one latch.
@@ -1485,6 +1503,39 @@ async function createOfficeRenderer(options) {
       // 回前台必须补画一次：后台期间 renderNow() 被跳过（没人看得见），画布内容停在
       // 切走那一刻；失效可视签名让下一次推送（≤16ms）重画。
       lastRenderSignature = null;
+      // 2026-09-25 唤醒自愈：屏幕未呈现（锁屏/息屏/挂起）期间不尝试恢复、不重arm
+      // 泵——恢复预算不得在无人观看时消耗；唤醒沿（setPresenting(true)）接管这两
+      // 件事（丢弃在途窗口 + 自愈/重arm）。
+      if (mode === 'static' && diagnosticCode === 'LOW_FPS_PERSISTENT' && presenting) {
+        return Promise.resolve(attemptRecovery()).then((recovery) => ({ mode, diagnosticCode, recovery }));
+      }
+      resetMonitor();
+      if (presenting) schedulePump();
+      return Promise.resolve({ mode, diagnosticCode, recovery: 'none' });
+    },
+
+    // 2026-09-25 唤醒自愈：`presenting` 表示「屏幕正在呈现本视图」（office:visibility
+    // 载荷的 `presenting` 字段，main 进程 powerMonitor 信号的下游）。
+    //   false -> 泵停 + 看门狗停：观察器在锁屏/息屏/挂起期间什么也不计量（节流帧
+    //     是环境事实，不是渲染缺陷），恢复预算也不消耗。在途测量窗口保持打开，
+    //     唤醒时由 resetMonitor() 丢弃。
+    //   true  -> 唤醒/重新呈现（false→true 沿）：若视图正停在 LOW_FPS_PERSISTENT
+    //     静态诊断，自动尝试一次有界重建——复用 attemptRecovery（每次唤醒至多
+    //     1 次、会话上限 3、硬失败 WEBGL_INIT_FAILED/RENDERER_UNAVAILABLE 永不
+    //     重试，与前台恢复共用同一份预算与路径），用户无需切视图或点「重试渲染」；
+    //     否则丢弃节流期的在途窗口并重arm泵。重复的同值调用是 no-op（一次唤醒
+    //     只有一个下行沿，unlock-screen 与 resume 同时到达也只算一次）。
+    // 返回 { mode, diagnosticCode, recovery }，与 setVisible 同形，不 reject。
+    setPresenting(value) {
+      const next = !!value;
+      if (destroyed || next === presenting) {
+        return Promise.resolve({ mode, diagnosticCode, recovery: 'none' });
+      }
+      presenting = next;
+      if (!next) {
+        stopPump();
+        return Promise.resolve({ mode, diagnosticCode, recovery: 'none' });
+      }
       if (mode === 'static' && diagnosticCode === 'LOW_FPS_PERSISTENT') {
         return Promise.resolve(attemptRecovery()).then((recovery) => ({ mode, diagnosticCode, recovery }));
       }
@@ -1523,6 +1574,8 @@ async function createOfficeRenderer(options) {
         renderProfileIndex,
         lowFpsEvents,
         manualRetryAttempts,
+        // 2026-09-25 唤醒自愈：呈现门控的当前值（探针/证据用它核对「锁屏期间停表」）。
+        presenting,
         fps: monitor && typeof monitor.stats === 'function' ? monitor.stats() : null,
         foreground,
         scene: { ...scene },

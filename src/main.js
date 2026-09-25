@@ -15,7 +15,7 @@
 //   DSH_DESKTOP_USER_DATA
 'use strict';
 
-const { app, BrowserWindow, WebContentsView, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut, safeStorage, nativeTheme, clipboard, protocol } = require('electron');
+const { app, BrowserWindow, WebContentsView, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut, safeStorage, nativeTheme, clipboard, protocol, powerMonitor } = require('electron');
 
 // H-test: DSH_DESKTOP_NO_KEYCHAIN=1 keeps unattended runs unattended. Ad-hoc
 // rebuilds change the code signature on every build, and macOS Keychain ACLs
@@ -105,6 +105,8 @@ const { createCrashLoopGuard, armWatchdog, createRuntimeSupervisor } = require('
 const { createTrayMenu } = require('./tray-menu'); // A1 tray extraction
 const { createAuxWindows } = require('./aux-windows'); // A1 aux window extraction
 const { createWindowManager } = require('./window-manager'); // A1 step 5
+// 2026-09-25 唤醒自愈：powerMonitor 会话信号 → office 呈现门控（可注入，单测覆盖）。
+const { wireOfficePresentationSignals } = require('./office/power-presentation.js');
 const { registerFeatureIpc } = require('./ipc-features'); // A1 feature IPC
 
 if (process.env.DSH_DESKTOP_USER_DATA) {
@@ -5324,6 +5326,25 @@ if (!gotLock) {
     // 会话工作台，切走后办公室继续在后台活着（仿真不冻结）。
     // `DSH_DESKTOP_OPEN_OFFICE=0` 回到"会话工作台优先"（调试 / 灰度回退用）；
     // `=1` 与默认同义，保留给开发与证据运行显式声明。
+    // 2026-09-25 唤醒自愈（P1，长稳缺陷「显示器唤醒/解锁后画面不自愈」）：
+    // powerMonitor 的锁屏/息屏挂起/系统挂起信号（lock-screen / unlock-screen /
+    // suspend / resume）→ window-manager.setOfficePresentationSuspended →
+    // 既有 office:visibility 推送载荷的 presenting 字段。presenting=false 期间
+    // 办公室渲染判据停表（锁屏节流帧不计入低帧率、恢复预算不消耗），唤醒沿
+    // 自动尝试一次有界恢复——语义见 docs/strategy/2026-09-24-office-render-latch-fix.md
+    // 的「2026-09-25 增补」。不新增 IPC 通道（office:* 仍恰好 8 个）。
+    // 平台边界：只息屏不锁屏在 Electron 公开 API 里没有可靠事件，不覆盖（探针侧
+    // 用 ioreg/pmset 自判，scripts/office-soak.js presentedNow）。
+    wireOfficePresentationSignals({
+      powerMonitor,
+      onSuspendedChanged: (suspended) => windowManager.setOfficePresentationSuspended(suspended),
+      log,
+      // 证据探针（DSH_OFFICE_POWER_PROBE=<file>，默认关闭）：轮询文件内容
+      // locked/unlocked，驱动与真 powerMonitor 事件完全相同的处理函数——证据
+      // 运行不能真的锁用户的屏幕（解锁需要口令）。同值轮询按去重规则静默。
+      probeFile: process.env.DSH_OFFICE_POWER_PROBE || null,
+      readFileSync: (file) => fs.readFileSync(file, 'utf8'),
+    });
     if (officeRuntimeEnabled() && process.env.DSH_DESKTOP_OPEN_OFFICE !== '0') openOfficeView();
 
     // token widget: one collect per tick shared by the widget and the cost

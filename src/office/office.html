@@ -1319,20 +1319,27 @@
       // recovery: a detached view still presents frames at background rate,
       // and feeding those used to latch LOW_FPS_PERSISTENT permanently.
       let officeActive = true; // the office opens as the active main view
+      // 2026-09-25 唤醒自愈: presenting =「屏幕正在呈现」（main 进程 powerMonitor
+      // 的 lock-screen/unlock-screen/suspend/resume 信号，经 office:visibility
+      // 推送载荷的 presenting 字段下发）。为 false 期间渲染判据停表（锁屏节流帧
+      // 不计入低帧率、恢复预算不消耗）；唤醒沿自动自愈。未收到过推送前按 true
+      // 处理（与历史行为一致）。
+      let officePresenting = true;
       const visibility = (payload) => page.handleVisibility(payload);
-      document.addEventListener('visibilitychange', () => visibility({ visible: document.visibilityState === 'visible', active: officeActive }));
-      window.addEventListener('blur', () => visibility({ visible: false, active: officeActive }));
-      window.addEventListener('focus', () => visibility({ visible: true, active: officeActive }));
+      document.addEventListener('visibilitychange', () => visibility({ visible: document.visibilityState === 'visible', active: officeActive, presenting: officePresenting }));
+      window.addEventListener('blur', () => visibility({ visible: false, active: officeActive, presenting: officePresenting }));
+      window.addEventListener('focus', () => visibility({ visible: true, active: officeActive, presenting: officePresenting }));
       bridge.onVisibilityPush((payload) => {
         officeActive = !!(payload && payload.active);
-        visibility({ visible: !!(payload && payload.visible), active: officeActive });
+        officePresenting = !(payload && payload.presenting === false);
+        visibility({ visible: !!(payload && payload.visible), active: officeActive, presenting: officePresenting });
       });
       // Forwards the view's renderer state to the module (shell log +
       // office:diagnostics) — on every renderer state change (latch, recovery
       // attempts) and on every activation/visibility event, so the change is
       // never more than one event behind.
       function reportRendererState() {
-        page.handleVisibility({ visible: document.visibilityState === 'visible', active: officeActive });
+        page.handleVisibility({ visible: document.visibilityState === 'visible', active: officeActive, presenting: officePresenting });
       }
 
       function resize() {

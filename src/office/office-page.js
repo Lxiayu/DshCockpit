@@ -830,6 +830,16 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
         // rejects, but the page does not await it either way.
         try { Promise.resolve(renderer.setVisible(payload.active)).catch(() => {}); } catch { /* renderer errors never break the page */ }
       }
+      // 2026-09-25 唤醒自愈: the push payload's `presenting` flag (the
+      // main-process powerMonitor lock/sleep/suspend signals, window-manager
+      // relayed) drives the renderer's measurement gate AND the wake
+      // auto-heal: while false the observer measures nothing and consumes no
+      // budget; the false→true edge attempts one bounded rebuild if the view
+      // sits in the LOW_FPS_PERSISTENT static diagnostic. Absent (legacy
+      // callers) touches nothing — the same backward-compat rule as `active`.
+      if (typeof payload.presenting === 'boolean' && renderer && typeof renderer.setPresenting === 'function') {
+        try { Promise.resolve(renderer.setPresenting(payload.presenting)).catch(() => {}); } catch { /* renderer errors never break the page */ }
+      }
       if (typeof bridge.notifyVisibility === 'function') {
         bridge.notifyVisibility(windowVisible, rendererStateOf());
       }
