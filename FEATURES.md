@@ -66,7 +66,7 @@
 
 ## 📦 工程化
 
-- **469 项单元测试**（node --test）、日志轮转、存储管理（占用可视化 + 一键清理）、崩溃诊断记录；
+- **1393 项单元测试**（node --test）、日志轮转、存储管理（占用可视化 + 一键清理）、崩溃诊断记录；
 - Windows NSIS 安装包 + macOS dmg 配置；GitHub Releases 即更新源（`npm run publish:win` 一键发布）；
 - 快捷键保留：`Ctrl+,` 设置 / `Ctrl+K` 会话搜索 / `Ctrl+R` 重载 / `Ctrl+Shift+I` 开发者工具 / `Ctrl+Shift+O` 浏览器打开。
 
