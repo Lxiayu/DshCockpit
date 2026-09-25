@@ -100,3 +100,17 @@ test('main process registers the switching IPC, the flag default and the rail st
   assert.match(main, /\[office\] prewarmed pack \+ layout/, 'startup prewarm present');
   assert.match(main, /productionPackCache = result\.pack/, 'the pack loader is memoized for the prewarm');
 });
+
+// ---------------------------------------------------------------------------
+// M6 P5.2 / rev2 P1-2（用户拍板）：默认视图 = office
+// ---------------------------------------------------------------------------
+
+test('办公室是启动默认视图，左栏切回会话工作台（DSH_DESKTOP_OPEN_OFFICE=0 回退）', () => {
+  const src = read('src/main.js');
+  assert.match(src, /if \(officeRuntimeEnabled\(\) && process\.env\.DSH_DESKTOP_OPEN_OFFICE !== '0'\) openOfficeView\(\);/,
+    'boot opens the office view by default (M6 P5.2 拍板：默认视图 = office)');
+  assert.doesNotMatch(src, /if \(process\.env\.DSH_DESKTOP_OPEN_OFFICE === '1'\) openOfficeView\(\);/,
+    'the env-var-only call is gone — it left the flagship view behind a click');
+  // 切回 harness 是真实状态变化（rail 的 switchView 落在这里）
+  assert.match(read('src/window-manager.js'), /activeMainView = 'harness';/, 'the harness view is reachable from the rail');
+});

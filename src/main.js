@@ -5294,10 +5294,12 @@ if (!gotLock) {
     // Dev-only Office Animation Playground (SPEC-06): opt-in via env; the
     // playground stays off by default (officePlaygroundEnabled=false).
     if (process.env.DSH_DESKTOP_OPEN_PLAYGROUND === '1') openOfficePlayground();
-    // Office runtime view (SPEC-07): M4 直启动 keeps it ON by default and the
-    // left rail is the normal entry; this env opens a view at launch for
-    // development/evidence runs.
-    if (process.env.DSH_DESKTOP_OPEN_OFFICE === '1') openOfficeView();
+    // Office runtime view (SPEC-07) — **默认视图 = 办公室**（用户拍板：M6 P5.2
+    // "默认视图 = office"、rev2 P1-2 "启动自动 openOfficeView()"）。左栏一键切回
+    // 会话工作台，切走后办公室继续在后台活着（仿真不冻结）。
+    // `DSH_DESKTOP_OPEN_OFFICE=0` 回到"会话工作台优先"（调试 / 灰度回退用）；
+    // `=1` 与默认同义，保留给开发与证据运行显式声明。
+    if (officeRuntimeEnabled() && process.env.DSH_DESKTOP_OPEN_OFFICE !== '0') openOfficeView();
 
     // token widget: one collect per tick shared by the widget and the cost
     // center (M7: avoid double full scans every 5s).
