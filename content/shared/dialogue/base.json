@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "description": "基础语料库：跨角色通用短句，按 topic 分组。运行时按上下文（pair 状态/相位/事件）选取最匹配的 topic。",
+  "topics": {
+    "greeting": [
+      { "id": "g-01", "text": "早", "weight": 3 },
+      { "id": "g-02", "text": "来了？", "weight": 2 },
+      { "id": "g-03", "text": "哟", "weight": 1, "if": { "timeOfDay": "morning" } },
+      { "id": "g-04", "text": "辛苦", "weight": 2, "if": { "peerActivity": "working" } }
+    ],
+    "task-start": [
+      { "id": "ts-01", "text": "开工了", "weight": 2 },
+      { "id": "ts-02", "text": "这个任务有点意思", "weight": 1 },
+      { "id": "ts-03", "text": "交给我吧", "weight": 2 }
+    ],
+    "task-done": [
+      { "id": "td-01", "text": "搞定了", "weight": 3 },
+      { "id": "td-02", "text": "下一个", "weight": 2 },
+      { "id": "td-03", "text": "还行", "weight": 1 }
+    ],
+    "task-fail": [
+      { "id": "tf-01", "text": "再试一次", "weight": 2 },
+      { "id": "tf-02", "text": "这次不行", "weight": 1 },
+      { "id": "tf-03", "text": "问题出在哪", "weight": 2 }
+    ],
+    "pantry": [
+      { "id": "p-01", "text": "米缸还有半缸", "weight": 2 },
+      { "id": "p-02", "text": "咖啡机又坏了", "weight": 1, "if": { "nearProp": "coffee" } },
+      { "id": "p-03", "text": "水吧台刚补货", "weight": 1 }
+    ],
+    "roaming": [
+      { "id": "r-01", "text": "走两步", "weight": 2 },
+      { "id": "r-02", "text": "伸个懒腰", "weight": 1 },
+      { "id": "r-03", "text": "思路卡了", "weight": 2 }
+    ]
+  },
+  "limits": { "bubbleMs": 3200, "maxConcurrent": 2, "cooldownMs": 30000 }
+}

@@ -1,0 +1,3078 @@
+{
+  "anchor": {
+    "x": 178,
+    "y": 296
+  },
+  "frames": {
+    "assets/animations/walk/right/walk-right-01.png": {
+      "detection": {
+        "anchorDeltaPx": 12,
+        "candidates": [
+          {
+            "componentSize": 19782,
+            "lowestRowY": 247,
+            "medianX": 118
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 12,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 118,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 60,
+        "y": 49
+      }
+    },
+    "assets/animations/walk/right/walk-right-02.png": {
+      "detection": {
+        "anchorDeltaPx": 21,
+        "candidates": [
+          {
+            "componentSize": 18948,
+            "lowestRowY": 247,
+            "medianX": 109
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 21,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 109,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 69,
+        "y": 49
+      }
+    },
+    "assets/animations/walk/right/walk-right-03.png": {
+      "detection": {
+        "anchorDeltaPx": 21,
+        "candidates": [
+          {
+            "componentSize": 19777,
+            "lowestRowY": 249,
+            "medianX": 109
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 21,
+          "dy": -1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 109,
+        "y": 249
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 69,
+        "y": 47
+      }
+    },
+    "assets/animations/walk/right/walk-right-c02.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 173,
+        "x": 34,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/right/walk-right-passing-01.png": {
+      "detection": {
+        "anchorDeltaPx": 0,
+        "candidates": [
+          {
+            "componentSize": 498302,
+            "lowestRowY": 1217,
+            "medianX": 678
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "normalizedScale": 0.21694915254237288,
+        "note": "E5a passing frame: uniform LANCZOS scale + integer translation over the read-only source",
+        "selectedRule": "alpha16-bounds",
+        "translation": {
+          "dx": 29,
+          "dy": 33
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 678,
+        "y": 1217
+      },
+      "sourceCanvas": {
+        "height": 1254,
+        "width": 1254
+      },
+      "sourceScale": 0.21694915254237288,
+      "visibleBounds": {
+        "height": 257,
+        "width": 177,
+        "x": 55,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/right/walk-right-c04.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 179,
+        "x": 29,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/right/walk-right-c01.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 174,
+        "x": 30,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/right/walk-right-c05.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 176,
+        "x": 78,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/right/walk-right-04.png": {
+      "detection": {
+        "anchorDeltaPx": 42,
+        "candidates": [
+          {
+            "componentSize": 21287,
+            "lowestRowY": 250,
+            "medianX": 172
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -42,
+          "dy": -2
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 172,
+        "y": 250
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 6,
+        "y": 46
+      }
+    },
+    "assets/animations/walk/left/walk-left-01.png": {
+      "detection": {
+        "anchorDeltaPx": 11,
+        "candidates": [
+          {
+            "componentSize": 20799,
+            "lowestRowY": 247,
+            "medianX": 141
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -11,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 141,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 37,
+        "y": 49
+      }
+    },
+    "assets/animations/walk/left/walk-left-02.png": {
+      "detection": {
+        "anchorDeltaPx": 2,
+        "candidates": [
+          {
+            "componentSize": 20166,
+            "lowestRowY": 247,
+            "medianX": 132
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -2,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 132,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 46,
+        "y": 49
+      }
+    },
+    "assets/animations/walk/left/walk-left-03.png": {
+      "detection": {
+        "anchorDeltaPx": 3,
+        "candidates": [
+          {
+            "componentSize": 20247,
+            "lowestRowY": 247,
+            "medianX": 133
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -3,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 133,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 45,
+        "y": 49
+      }
+    },
+    "assets/animations/walk/left/walk-left-c02.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 173,
+        "x": 145,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/left/walk-left-passing-01.png": {
+      "detection": {
+        "anchorDeltaPx": 0,
+        "candidates": [
+          {
+            "componentSize": 498302,
+            "lowestRowY": 1217,
+            "medianX": 576
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "normalizedScale": 0.21694915254237288,
+        "note": "E5a passing frame: uniform LANCZOS scale + integer translation over the read-only source",
+        "selectedRule": "alpha16-bounds",
+        "translation": {
+          "dx": 56,
+          "dy": 33
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 576,
+        "y": 1217
+      },
+      "sourceCanvas": {
+        "height": 1254,
+        "width": 1254
+      },
+      "sourceScale": 0.21694915254237288,
+      "visibleBounds": {
+        "height": 257,
+        "width": 177,
+        "x": 125,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/left/walk-left-c04.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 179,
+        "x": 144,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/left/walk-left-c01.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 174,
+        "x": 148,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/left/walk-left-c05.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 176,
+        "x": 98,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/left/walk-left-04.png": {
+      "detection": {
+        "anchorDeltaPx": 10,
+        "candidates": [
+          {
+            "componentSize": 21415,
+            "lowestRowY": 246,
+            "medianX": 140
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -10,
+          "dy": 2
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 140,
+        "y": 246
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 38,
+        "y": 50
+      }
+    },
+    "assets/animations/side/none/side-back.png": {
+      "detection": {
+        "anchorDeltaPx": 6,
+        "candidates": [
+          {
+            "componentSize": 23282,
+            "lowestRowY": 247,
+            "medianX": 136
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -6,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 136,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 42,
+        "y": 49
+      }
+    },
+    "assets/animations/side/none/side-left.png": {
+      "detection": {
+        "anchorDeltaPx": 18,
+        "candidates": [
+          {
+            "componentSize": 18723,
+            "lowestRowY": 248,
+            "medianX": 112
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 18,
+          "dy": 0
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 112,
+        "y": 248
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 66,
+        "y": 48
+      }
+    },
+    "assets/animations/side/none/side-right.png": {
+      "detection": {
+        "anchorDeltaPx": 12,
+        "candidates": [
+          {
+            "componentSize": 17575,
+            "lowestRowY": 248,
+            "medianX": 142
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -12,
+          "dy": 0
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 142,
+        "y": 248
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 36,
+        "y": 48
+      }
+    },
+    "assets/animations/walk/down/walk-down-01.png": {
+      "detection": {
+        "anchorDeltaPx": 1,
+        "candidates": [
+          {
+            "componentSize": 23485,
+            "lowestRowY": 249,
+            "medianX": 130
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 0,
+          "dy": -1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 130,
+        "y": 249
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 48,
+        "y": 47
+      }
+    },
+    "assets/animations/walk/down/walk-down-02.png": {
+      "detection": {
+        "anchorDeltaPx": 14,
+        "candidates": [
+          {
+            "componentSize": 23325,
+            "lowestRowY": 248,
+            "medianX": 116
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 14,
+          "dy": 0
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 116,
+        "y": 248
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 62,
+        "y": 48
+      }
+    },
+    "assets/animations/walk/down/walk-down-03.png": {
+      "detection": {
+        "anchorDeltaPx": 1,
+        "candidates": [
+          {
+            "componentSize": 23380,
+            "lowestRowY": 249,
+            "medianX": 130
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 0,
+          "dy": -1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 130,
+        "y": 249
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 48,
+        "y": 47
+      }
+    },
+    "assets/animations/walk/down/walk-down-04.png": {
+      "detection": {
+        "anchorDeltaPx": 2,
+        "candidates": [
+          {
+            "componentSize": 23592,
+            "lowestRowY": 250,
+            "medianX": 128
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 2,
+          "dy": -2
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 128,
+        "y": 250
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 50,
+        "y": 46
+      }
+    },
+    "assets/animations/walk/up/walk-up-01.png": {
+      "detection": {
+        "anchorDeltaPx": 10,
+        "candidates": [
+          {
+            "componentSize": 23373,
+            "lowestRowY": 249,
+            "medianX": 120
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 10,
+          "dy": -1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 120,
+        "y": 249
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 58,
+        "y": 47
+      }
+    },
+    "assets/animations/walk/up/walk-up-02.png": {
+      "detection": {
+        "anchorDeltaPx": 8,
+        "candidates": [
+          {
+            "componentSize": 23150,
+            "lowestRowY": 248,
+            "medianX": 138
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -8,
+          "dy": 0
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 138,
+        "y": 248
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 40,
+        "y": 48
+      }
+    },
+    "assets/animations/walk/up/walk-up-03.png": {
+      "detection": {
+        "anchorDeltaPx": 10,
+        "candidates": [
+          {
+            "componentSize": 21843,
+            "lowestRowY": 249,
+            "medianX": 120
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 10,
+          "dy": -1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 120,
+        "y": 249
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 58,
+        "y": 47
+      }
+    },
+    "assets/animations/walk/up/walk-up-04.png": {
+      "detection": {
+        "anchorDeltaPx": 4,
+        "candidates": [
+          {
+            "componentSize": 22572,
+            "lowestRowY": 248,
+            "medianX": 134
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -4,
+          "dy": 0
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 134,
+        "y": 248
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 44,
+        "y": 48
+      }
+    },
+    "assets/expressions/error.png": {
+      "detection": {
+        "anchorDeltaPx": 6,
+        "candidates": [
+          {
+            "componentSize": 23415,
+            "lowestRowY": 247,
+            "medianX": 136
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -6,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 136,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 42,
+        "y": 49
+      }
+    },
+    "assets/expressions/finished.png": {
+      "detection": {
+        "anchorDeltaPx": 1,
+        "candidates": [
+          {
+            "componentSize": 23782,
+            "lowestRowY": 247,
+            "medianX": 130
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 0,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 130,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 48,
+        "y": 49
+      }
+    },
+    "assets/expressions/idle.png": {
+      "detection": {
+        "anchorDeltaPx": 3,
+        "candidates": [
+          {
+            "componentSize": 23756,
+            "lowestRowY": 248,
+            "medianX": 133
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": -3,
+          "dy": 0
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 133,
+        "y": 248
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 45,
+        "y": 48
+      }
+    },
+    "assets/expressions/offline.png": {
+      "detection": {
+        "anchorDeltaPx": 16,
+        "candidates": [
+          {
+            "componentSize": 28120,
+            "lowestRowY": 234,
+            "medianX": 114
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 16,
+          "dy": 14
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 114,
+        "y": 234
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 64,
+        "y": 62
+      }
+    },
+    "assets/expressions/warning.png": {
+      "detection": {
+        "anchorDeltaPx": 1,
+        "candidates": [
+          {
+            "componentSize": 23724,
+            "lowestRowY": 247,
+            "medianX": 130
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 0,
+          "dy": 1
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 130,
+        "y": 247
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 48,
+        "y": 49
+      }
+    },
+    "assets/expressions/working.png": {
+      "detection": {
+        "anchorDeltaPx": 20,
+        "candidates": [
+          {
+            "componentSize": 39919,
+            "lowestRowY": 255,
+            "medianX": 110
+          }
+        ],
+        "contactRule": "single-lowest-row-median",
+        "selectedRule": "alpha128-body-bounds",
+        "translation": {
+          "dx": 20,
+          "dy": -7
+        },
+        "verifiedDeltaPx": 0
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 110,
+        "y": 255
+      },
+      "sourceCanvas": {
+        "height": 256,
+        "width": 256
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 256,
+        "x": 68,
+        "y": 41
+      }
+    },
+    "assets/animations/working/back/working-back-04.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 255,
+        "width": 210,
+        "x": 108,
+        "y": 42
+      }
+    },
+    "assets/animations/working/back/working-back-05.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 209,
+        "x": 108,
+        "y": 42
+      }
+    },
+    "assets/animations/working/back/working-back-06.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 210,
+        "x": 104,
+        "y": 41
+      }
+    },
+    "assets/animations/working/back/working-back-01.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation, art untouched",
+        "scaleRule": "uniform-height-match",
+        "selectedRule": "alpha128-body-bounds",
+        "sourceBounds": {
+          "h": 1119,
+          "w": 930,
+          "x": 222,
+          "y": 67
+        },
+        "translation": {
+          "dx": 66,
+          "dy": 26
+        },
+        "verified": {
+          "footLine": 295,
+          "visibleHeight": 254,
+          "visibleWidth": 212
+        }
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 493,
+        "y": 1185
+      },
+      "sourceCanvas": {
+        "height": 1254,
+        "width": 1254
+      },
+      "sourceScale": 0.22788203753351208,
+      "visibleBounds": {
+        "height": 254,
+        "width": 212,
+        "x": 117,
+        "y": 42
+      }
+    },
+    "assets/animations/working/back/working-back-02.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation, art untouched",
+        "scaleRule": "uniform-height-match",
+        "selectedRule": "alpha128-body-bounds",
+        "sourceBounds": {
+          "h": 1205,
+          "w": 985,
+          "x": 208,
+          "y": 15
+        },
+        "translation": {
+          "dx": 99,
+          "dy": 38
+        },
+        "verified": {
+          "footLine": 295,
+          "visibleHeight": 256,
+          "visibleWidth": 209
+        }
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 374,
+        "y": 1219
+      },
+      "sourceCanvas": {
+        "height": 1254,
+        "width": 1254
+      },
+      "sourceScale": 0.21161825726141079,
+      "visibleBounds": {
+        "height": 256,
+        "width": 209,
+        "x": 143,
+        "y": 41
+      }
+    },
+    "assets/animations/working/back/working-back-03.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation, art untouched",
+        "scaleRule": "uniform-height-match",
+        "selectedRule": "alpha128-body-bounds",
+        "sourceBounds": {
+          "h": 1108,
+          "w": 881,
+          "x": 239,
+          "y": 65
+        },
+        "translation": {
+          "dx": 45,
+          "dy": 26
+        },
+        "verified": {
+          "footLine": 295,
+          "visibleHeight": 255,
+          "visibleWidth": 203
+        }
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 579.5,
+        "y": 1172
+      },
+      "sourceCanvas": {
+        "height": 1254,
+        "width": 1254
+      },
+      "sourceScale": 0.23014440433212996,
+      "visibleBounds": {
+        "height": 255,
+        "width": 203,
+        "x": 100,
+        "y": 41
+      }
+    },
+    "assets/expressions/sleeping.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 216,
+        "x": 109,
+        "y": 40
+      }
+    },
+    "assets/expressions/idle-blink.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 195,
+        "x": 85,
+        "y": 40
+      }
+    },
+    "assets/expressions/idle-lunch.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 248,
+        "x": 51,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/left/walk-left-b01.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 167,
+        "x": 127,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/left/walk-left-b02.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 173,
+        "x": 119,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/left/walk-left-b03.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 174,
+        "x": 109,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/left/walk-left-b04.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 172,
+        "x": 101,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/left/walk-left-b05.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 165,
+        "x": 92,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/left/walk-left-b06.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 163,
+        "x": 137,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/left/walk-left-b07.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 167,
+        "x": 139,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/left/walk-left-b08.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 170,
+        "x": 136,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/left/walk-left-b09.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 175,
+        "x": 123,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/left/walk-left-b10.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 177,
+        "x": 115,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/left/walk-left-b11.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 175,
+        "x": 103,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/left/walk-left-b12.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 168,
+        "x": 143,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/left/walk-left-b13.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 161,
+        "x": 135,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/left/walk-left-b14.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 161,
+        "x": 130,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/left/walk-left-b15.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 165,
+        "x": 130,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/right/walk-right-b01.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 172,
+        "x": 78,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/right/walk-right-b02.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 171,
+        "x": 92,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/right/walk-right-b03.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 165,
+        "x": 43,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/right/walk-right-b04.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 162,
+        "x": 46,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/right/walk-right-b05.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 164,
+        "x": 49,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/right/walk-right-b06.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 168,
+        "x": 56,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/right/walk-right-b07.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 172,
+        "x": 63,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/right/walk-right-b08.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 175,
+        "x": 73,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/right/walk-right-b09.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 175,
+        "x": 85,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/right/walk-right-b10.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 169,
+        "x": 43,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/right/walk-right-b11.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 161,
+        "x": 60,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/right/walk-right-b12.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 161,
+        "x": 58,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/right/walk-right-b13.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 162,
+        "x": 61,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/right/walk-right-b14.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 166,
+        "x": 65,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/right/walk-right-b15.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 171,
+        "x": 72,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/up/walk-up-b01.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 198,
+        "x": 61,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/up/walk-up-b02.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 201,
+        "x": 61,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/up/walk-up-b03.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 207,
+        "x": 59,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/up/walk-up-b04.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 206,
+        "x": 61,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/up/walk-up-b05.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 200,
+        "x": 79,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/up/walk-up-b06.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 198,
+        "x": 77,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/up/walk-up-b07.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 197,
+        "x": 71,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/up/walk-up-b08.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 195,
+        "x": 71,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/up/walk-up-b09.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 196,
+        "x": 72,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/up/walk-up-b10.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 201,
+        "x": 71,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/up/walk-up-b11.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 203,
+        "x": 73,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/up/walk-up-b12.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 199,
+        "x": 79,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/up/walk-up-b13.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 295
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 199,
+        "x": 78,
+        "y": 40
+      }
+    },
+    "assets/animations/walk/up/walk-up-b14.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 198,
+        "x": 61,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/down/walk-down-b01.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 179,
+        "x": 103,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/down/walk-down-b02.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 183,
+        "x": 104,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/down/walk-down-b03.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 191,
+        "x": 101,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/down/walk-down-b04.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 200,
+        "x": 100,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/down/walk-down-b05.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 205,
+        "x": 97,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/down/walk-down-b06.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 202,
+        "x": 97,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/down/walk-down-b07.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 192,
+        "x": 100,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/down/walk-down-b08.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 257,
+        "width": 185,
+        "x": 105,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/down/walk-down-b09.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 182,
+        "x": 108,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/down/walk-down-b10.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 182,
+        "x": 107,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/down/walk-down-b11.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 184,
+        "x": 100,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/down/walk-down-b12.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 188,
+        "x": 90,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/down/walk-down-b13.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 188,
+        "x": 89,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/down/walk-down-b14.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 185,
+        "x": 89,
+        "y": 41
+      }
+    },
+    "assets/animations/walk/down/walk-down-b15.png": {
+      "detection": {
+        "contactRule": "single-lowest-row-median",
+        "note": "M1 workbench import: uniform scale + integer translation (normalizer.js)",
+        "selectedRule": "workbench-normalized-import"
+      },
+      "outputAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceAnchor": {
+        "x": 178,
+        "y": 296
+      },
+      "sourceCanvas": {
+        "height": 352,
+        "width": 352
+      },
+      "sourceScale": 1,
+      "visibleBounds": {
+        "height": 256,
+        "width": 180,
+        "x": 94,
+        "y": 41
+      }
+    }
+  },
+  "outputCanvas": {
+    "height": 352,
+    "width": 352
+  },
+  "outputScale": 1.375,
+  "schemaVersion": 1,
+  "sourceCanvas": {
+    "height": 256,
+    "width": 256
+  },
+  "visibleBounds": {
+    "height": 277,
+    "width": 319,
+    "x": 6,
+    "y": 41
+  }
+}

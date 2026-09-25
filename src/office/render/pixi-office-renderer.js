@@ -1,0 +1,1616 @@
+'use strict';
+
+// src/office/render/pixi-office-renderer.js — Task 7 / SPEC-07.
+//
+// Pixi renderer for the flat 2D orthographic office. It is a PURE projection
+// of Office snapshots: it never imports Harness/IPC/Electron, never subscribes
+// to events, never advances the simulation. Every visible change enters through
+// `applySnapshot(snapshot)` — the snapshot/derived view model produced by the
+// main-process office module. User intent (selection) leaves through the
+// return value of `hitTest` and is expressed by the page over office:* IPC.
+//
+// Contracts (SPEC-07 / decisions 33/34/43):
+// - ONE Pixi Application per view; fixed layer order Background -> Back
+//   Furniture -> Ground Entities -> Front Occluders -> Effects/Labels
+// - ONE persistent Container + Sprite per employee for the whole view
+//   lifetime: position/texture/animation updates swap content in place and
+//   never destroy/recreate nodes
+// - foot anchor: the node's logical position IS the foot point; sprite.x/y
+//   place the frame's outputAnchor exactly on it. No CSS/offset compensation.
+// - shared visible height clamp(64px, sceneHeight * 0.11, 180px) for every
+//   employee and state; resize reprojects only (logical data lives in the
+//   snapshot, the renderer just re-multiplies)
+// - ground entities re-sort stably by (footY, layer, entityType, id) via the
+//   layout accessor
+// - placeholder furniture (desk backs/fronts/chairs) is deterministic Pixi
+//   Graphics drawn from the fixture geometry — diagnostic placeholders, not
+//   final art. Front occluders are fixture-declared.
+// - init failure chain: WebGL -> Canvas -> static diagnostic presentation
+//   (stable code `WEBGL_INIT_FAILED`), never a thrown error into the shell
+// - pause()/resume() only stop/start the Pixi render ticker; there is no
+//   renderer-owned logic ticker (the main process owns the single clock)
+// - destroy() releases THIS view's owned textures and application; two views
+//   never share mutable Pixi resources
+// - runtime FPS observer (Task 9 blocker B / SPEC-07, corrected 2026-09-24):
+//   when the caller arms `fpsMonitor`, a presentation-rate observer counts
+//   rendered frames and degrades THIS view to the static diagnostic
+//   presentation with the stable code `LOW_FPS_PERSISTENT` after sustained
+//   sub-threshold windows. The observer never advances movement/animation and
+//   never creates a simulation ticker.
+//   - FOREGROUND GATING (2026-09-24 latch fix): the frame pump only runs while
+//     this view is the foreground/active main view (`setVisible(true)`).
+//     A detached view (syncShellViews() removeChildView while the harness is
+//     active) still presents frames — its rAF pump keeps running because
+//     backgroundThrottling is false — but only at ~1.3-7.9 fps; feeding those
+//     to the monitor used to latch LOW_FPS_PERSISTENT after ~2 minutes in the
+//     harness and permanently kill the scene. setVisible(false) stops the
+//     pump (rendering itself is snapshot-push driven and unaffected); the
+//     transition back to foreground RESETS the monitor window so detached-rate
+//     frames can never mix into a foreground window.
+//   - BOUNDED RECOVERY (2026-09-24, SPEC-07 contract correction): one rebuild
+//     attempt per re-activation, at most 3 per session, and ONLY for the
+//     recoverable LOW_FPS_PERSISTENT case. WEBGL_INIT_FAILED /
+//     RENDERER_UNAVAILABLE are hard failures: a rebuild would just fail again,
+//     so they are never retried.
+
+const { createFpsMonitor } = require('./fps-monitor.js');
+// Task E4: the shared catalog declares contentBbox (opaque-art bounds) and
+// the draft depth for the flat furniture — the renderer consumes both.
+const { layoutAssetById } = require('../layout-assets.js');
+
+const DEFAULT_BACKGROUND = 0xe8eaec;
+const COLORS = Object.freeze({
+  floor: 0xf2f3f4,
+  floorLine: 0xdfe2e5,
+  reserveZone: 0xd8dde1,
+  zoneOutline: 0xb9c0c6,
+  deskWood: 0xb8bec3,
+  deskTop: 0xd3d7da,
+  deskFront: 0xaeb5ba,
+  chair: 0x9da5ab,
+  plant: 0x7f9b86,
+  shelf: 0xa5adb2,
+  shadow: 0x8f989e,
+  selection: 0x1677a8,
+  badge: 0xd18b16,
+  badgeText: 0xffffff,
+  markerChat: 0x6b7780,
+  markerSleep: 0x5e819b,
+});
+
+const STATIC_FALLBACK_TEXT = '虚拟办公室渲染不可用，已切换到静态诊断模式（详情与日志仍可用）';
+// M1 (windows-perf audit 2026-09-24): the static presentation is no longer a
+// dead end for the recoverable low-frame-rate case — the renderer offers a
+// visible retry that runs the SAME bounded rebuild the automatic recovery
+// uses. These strings are part of the page-visible contract (the footer/hint
+// text tests pin the words 「重试渲染」).
+const STATIC_RETRY_LABEL = '重试渲染';
+const STATIC_RETRY_HINT = '画面因持续低帧率已降级为静态诊断。点击「重试渲染」重新启用动画渲染（本会话最多 3 次）。';
+const STATIC_RETRY_EXHAUSTED_LABEL = '重试次数已用尽';
+const STATIC_RETRY_EXHAUSTED_HINT = '本会话的手动重试已用满（3 次）。可重启应用，或在分辨率/缩放较低时重试。';
+const STATIC_RETRY_UNSUPPORTED_LABEL = '无法重试渲染';
+const STATIC_RETRY_UNSUPPORTED_HINT = '渲染器不可用（WebGL 初始化失败等硬失败），重试不会成功；日志与面板仍可用。';
+
+// M1 render profiles (the degrade ladder's stages). Stage 0 is the historical
+// behaviour; stage 1 is the low-cost profile. Read at render time, so a
+// downgrade needs no Pixi rebuild and therefore loses no texture or art.
+const RENDER_PROFILES = Object.freeze([
+  // 2026-09-25：full 档同样跳过"可视签名未变"的重画（同像素零收益）；仍不加频率上限。
+  Object.freeze({ id: 'full', maxRenderHz: 0, skipUnchanged: true }),
+  Object.freeze({ id: 'low-cost', maxRenderHz: 30, skipUnchanged: true }),
+]);
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function computeVisibleHeight(sceneHeight) {
+  return clamp(Math.round(sceneHeight * 0.11 * 100) / 100, 64, 180);
+}
+
+async function createOfficeRenderer(options) {
+  const {
+    PIXI = null,
+    layout = null,
+    pack = null,
+    textures = new Map(),
+    officeTextures = new Map(),
+    officeTextureErrors = [],
+    texturedWorkstations = [],
+    scene: initialScene = { width: 1280, height: 840 },
+    snapshot: initialSnapshot = null,
+    mount = null,
+    createFallbackElement = null,
+    devicePixelRatio = 1,
+    fpsMonitor = null,
+    // 2026-09-24: invoked whenever the renderer mode / diagnostic code changes
+    // (LOW_FPS_PERSISTENT latch, bounded-recovery rebuild attempts, hard
+    // failures), so the page can forward the state to the shell log and the
+    // footer degrade dot. View-owner plumbing only — never called from the
+    // simulation path.
+    onStateChange = null,
+  } = options || {};
+
+  if (!layout || typeof layout.waypointGraph !== 'function') {
+    throw new TypeError('createOfficeRenderer requires a validated office layout');
+  }
+
+  let scene = { width: initialScene.width, height: initialScene.height };
+  let mode = 'static';
+  let diagnosticCode = null;
+  let app = null;
+  let stage = null;
+  let layers = null;
+  let staticElement = null;
+  let destroyed = false;
+  let paused = false;
+  let selectionId = null;
+  let currentSnapshot = initialSnapshot;
+  const entities = new Map(); // employeeId -> entity record (persistent)
+  // 2026-09-24 latch fix: the frame pump runs only while this view is the
+  // foreground (active main-area) view. Production creates the office as the
+  // active view; the first office:visibility push corrects this if the view
+  // was opened into the background.
+  let foreground = true;
+
+  // ---- M1 (windows-perf audit 2026-09-24): low-cost RENDER PROFILE ----------
+  // The first LOW_FPS_PERSISTENT latch no longer kills the scene. The office
+  // snapshot push runs at ~62.5 Hz and every push redraws the whole scene, so
+  // on a slow machine the render work itself is what starves rAF. Stage 0 is
+  // the historical render-everything behaviour; stage 1 coalesces redraws to
+  // `maxRenderHz` (default 30) and SKIPS redraws whose visual signature did not
+  // change (the office is idle most of the time). This drops the render cost
+  // without touching the Pixi application, the textures or the art — a rebuild
+  // would lose the character/furniture textures (placeholder art), which is
+  // exactly the trade-off the user rejected in the 2026-09-24 latch-fix
+  // decision record. Only if stage 1 STILL cannot hold thresholdFps does the
+  // view fall to the static diagnostic presentation.
+  // (RENDER_PROFILES itself is module scope so tests can read the stages.)
+  let renderProfileIndex = 0;
+  let lastRenderAtMs = null;
+  let lastRenderSignature = null;
+  // 2026-09-25（性能）：上次真正执行 addChild 的节点序列（节点引用，不是 id）。
+  let lastAppliedGroundNodes = null;
+  let pendingRenderSnapshot = null;
+  // Injectable clocks/timers so tests and evidence harnesses stay deterministic
+  // (production uses the monitor's clock and the global setTimeout).
+  const clockNow = (fpsMonitor && typeof fpsMonitor.now === 'function') ? fpsMonitor.now : () => Date.now();
+  const scheduleTimeout = (fpsMonitor && typeof fpsMonitor.setTimeout === 'function')
+    ? fpsMonitor.setTimeout
+    : (typeof setTimeout === 'function' ? (cb, ms) => setTimeout(cb, ms) : null);
+  const cancelTimeout = (fpsMonitor && typeof fpsMonitor.clearTimeout === 'function')
+    ? fpsMonitor.clearTimeout
+    : (typeof clearTimeout === 'function' ? (id) => clearTimeout(id) : null);
+  const stallPollMs = (fpsMonitor && Number(fpsMonitor.stallMs) > 0)
+    ? Number(fpsMonitor.stallMs)
+    : ((fpsMonitor && Number(fpsMonitor.windowMs) > 0) ? Number(fpsMonitor.windowMs) : 0);
+  // M1 static floor: 0 (default) keeps the last ladder stage terminal, exactly
+  // like the historical policy. The office page arms 10: a scene that still
+  // presents >= 10 fps keeps the living low-cost profile instead of losing the
+  // picture (static diagnostics are for "not presenting", not for "slow").
+  const staticFloorFps = (fpsMonitor && Number(fpsMonitor.staticFloorFps) > 0)
+    ? Number(fpsMonitor.staticFloorFps)
+    : 0;
+  let stallTimer = null;
+  let lowFpsEvents = 0;
+  let manualRetryAttempts = 0;
+  const MANUAL_RETRY_LIMIT_PER_SESSION = 3;
+  // Assigned once the `view` object exists (the static fallback element may be
+  // built before it, and its retry button must call back into the view).
+  let onStaticRetryRequest = null;
+
+  // ---- init chain: webgl -> canvas -> static -------------------------------
+
+  async function tryInitApplication(preference) {
+    const candidate = new PIXI.Application();
+    try {
+      await candidate.init({
+        width: scene.width,
+        height: scene.height,
+        background: DEFAULT_BACKGROUND,
+        backgroundAlpha: 1,
+        antialias: true,
+        preference,
+        preserveDrawingBuffer: true,
+        resolution: clamp(Number(devicePixelRatio) || 1, 1, 3),
+        autoDensity: true,
+      });
+      return { ok: true, app: candidate };
+    } catch (error) {
+      return { ok: false, app: candidate, error };
+    }
+  }
+
+  function discardFailedApplication(candidate) {
+    try { if (candidate) candidate.destroy(true, { children: true, texture: false }); } catch { /* not initialized */ }
+  }
+
+  // M1: the static presentation gets a VISIBLE, clickable way back for the one
+  // case that can actually recover (LOW_FPS_PERSISTENT). Built only when the
+  // renderer itself owns a real DOM element (production: office.html does not
+  // pass createFallbackElement) — a caller-supplied stub element is left
+  // untouched, exactly as before.
+  let staticRetryButton = null;
+  function attachStaticRetry(el) {
+    if (!el || typeof el.appendChild !== 'function') return;
+    const doc = el.ownerDocument || (typeof document !== 'undefined' ? document : null);
+    if (!doc || typeof doc.createElement !== 'function') return;
+    if (typeof el.querySelector === 'function' && el.querySelector('.office-static-retry')) return;
+    const row = doc.createElement('div');
+    row.className = 'office-static-retry';
+    const button = doc.createElement('button');
+    button.type = 'button';
+    button.className = 'office-static-retry-btn';
+    button.textContent = STATIC_RETRY_LABEL;
+    button.addEventListener('click', () => {
+      if (typeof onStaticRetryRequest === 'function') onStaticRetryRequest();
+    });
+    const hint = doc.createElement('p');
+    hint.className = 'office-static-retry-hint';
+    hint.textContent = STATIC_RETRY_HINT;
+    row.appendChild(button);
+    row.appendChild(hint);
+    el.appendChild(row);
+    staticRetryButton = button;
+    refreshStaticRetry();
+  }
+
+  // Keeps the retry affordance honest: hidden-by-disabled for a hard failure
+  // (WEBGL_INIT_FAILED / RENDERER_UNAVAILABLE — a rebuild would fail the same
+  // way) and after the per-session manual budget is spent.
+  function refreshStaticRetry() {
+    if (!staticRetryButton) return;
+    const recoverable = diagnosticCode === 'LOW_FPS_PERSISTENT';
+    const left = MANUAL_RETRY_LIMIT_PER_SESSION - manualRetryAttempts;
+    const usable = recoverable && left > 0;
+    if ('disabled' in staticRetryButton) staticRetryButton.disabled = !usable;
+    staticRetryButton.textContent = usable ? STATIC_RETRY_LABEL
+      : (recoverable ? STATIC_RETRY_EXHAUSTED_LABEL : STATIC_RETRY_UNSUPPORTED_LABEL);
+    try {
+      staticRetryButton.title = usable ? STATIC_RETRY_HINT
+        : (recoverable ? STATIC_RETRY_EXHAUSTED_HINT : STATIC_RETRY_UNSUPPORTED_HINT);
+    } catch { /* non-DOM stub */ }
+  }
+
+  function buildStaticFallback() {
+    if (typeof createFallbackElement === 'function') {
+      staticElement = createFallbackElement();
+    } else if (mount && typeof document !== 'undefined') {
+      staticElement = document.createElement('div');
+    }
+    if (staticElement) {
+      staticElement.className = 'office-static-fallback';
+      if (staticElement.dataset) staticElement.dataset.diagnosticCode = diagnosticCode;
+      staticElement.textContent = STATIC_FALLBACK_TEXT;
+      if (typeof staticElement.setAttribute === 'function') staticElement.setAttribute('role', 'status');
+      if (mount && staticElement.tagName === 'DIV' && mount.appendChild) mount.appendChild(staticElement);
+      attachStaticRetry(staticElement);
+    }
+  }
+
+  function buildLayers() {
+    // 新容器 = 旧节点都不在册：顺序账本必须失效（否则重建后跳过重排 → 新画布空着）
+    lastAppliedGroundNodes = null;
+    stage = app.stage;
+    const layerIds = layout.layers();
+    layers = {};
+    for (const layerId of layerIds) {
+      const container = new PIXI.Container();
+      container.__layerId = layerId;
+      layers[layerId] = container;
+      stage.addChild(container);
+    }
+    // camelCase aliases for page code readability (same containers)
+    const alias = {
+      background: 'background',
+      backFurniture: 'back-furniture',
+      groundEntities: 'ground-entities',
+      frontOccluders: 'front-occluders',
+      effectsLabels: 'effects-labels',
+    };
+    for (const [key, kebab] of Object.entries(alias)) {
+      if (layers[kebab]) layers[key] = layers[kebab];
+    }
+  }
+
+  // ---- furniture (Task 3: managed textures + reversible placeholders) ------
+  //
+  // Canonical workstations declare their furniture as fixture items with a
+  // managed layout-assets assetId. Calibrated workstations (texturedWorksta
+  // tions — golden scope is desk-1 only until visual approval) render their
+  // parts as textured sprites fitted to the fixture part rect; everything
+  // else keeps the deterministic Graphics placeholder path. Furniture nodes
+  // are built ONCE per view and only re-project on resize, so sprite
+  // identity is stable for the whole view lifetime. Paint roles are explicit:
+  // 'main' desk body under 'back' monitor/chair, both behind ground
+  // entities; 'front' occluders live on the front-occluders layer above.
+  // Each view owns its officeTextures map — destroying this view releases
+  // exactly these textures and never touches another view's resources.
+
+  const officeTextureMap = officeTextures instanceof Map ? officeTextures : new Map();
+  const loaderErrors = Array.isArray(officeTextureErrors) ? officeTextureErrors : [];
+  const calibratedDesks = Array.isArray(texturedWorkstations) ? texturedWorkstations : [];
+  const ROLE_ORDER = Object.freeze({ main: 0, back: 1 });
+  const furnitureRecords = new Map(); // furnitureId -> record (persistent nodes)
+  const officeTextureMissing = [];
+
+  function furnitureRole(item) {
+    if (item.layer === 'front-occluders') return 'front';
+    if (item.kind === 'desk-back') return 'main';
+    return 'back';
+  }
+
+  // The managed assetId for a furniture item whose sprite should come from
+  // the shared officeTextures map. Workstation parts keep the golden
+  // calibration gate (uncalibrated desks stay reversible placeholders); flat
+  // items (props and flat furniture) always resolve from the catalog.
+  function wantedAssetFor(item) {
+    if (!item.assetId || !layoutAssetById(item.assetId)) return null;
+    const match = /^(desk-[1-6])-/.exec(item.id || '');
+    if (match) return calibratedDesks.includes(match[1]) ? item.assetId : null;
+    return item.assetId;
+  }
+
+  function drawFurnitureGraphics(graphics, item) {
+    for (const [partName, rect] of Object.entries(item.parts || {})) {
+      const x = rect.x * scene.width;
+      const y = rect.y * scene.height;
+      const w = rect.width * scene.width;
+      const h = rect.height * scene.height;
+      if (item.kind === 'zone-marker') {
+        graphics.rect(x, y, w, h).fill({ color: COLORS.reserveZone, alpha: 0.5 });
+        graphics.rect(x, y, w, h).stroke({ width: 1, color: COLORS.zoneOutline, alpha: 0.8 });
+      } else if (partName === 'front') {
+        graphics.roundRect(x, y, w, h, 3).fill({ color: COLORS.deskFront });
+      } else if (item.kind === 'desk-back') {
+        graphics.roundRect(x, y, w, h, 3).fill({ color: COLORS.deskTop });
+      } else if (item.kind === 'chair') {
+        graphics.roundRect(x, y, w, h, 4).fill({ color: COLORS.chair });
+      } else if (item.kind === 'plant') {
+        graphics.circle(x + w / 2, y + h / 2, Math.min(w, h) / 2).fill({ color: COLORS.plant });
+      } else if (item.kind === 'shelf') {
+        graphics.rect(x, y, w, h).fill({ color: COLORS.shelf });
+      } else {
+        graphics.rect(x, y, w, h).fill({ color: COLORS.deskWood });
+      }
+    }
+  }
+
+  function buildFurniture({ recordMissing = true } = {}) {
+    const floor = new PIXI.Graphics();
+    floor.__furnitureId = 'floor-band';
+    layers.background.addChild(floor);
+    furnitureRecords.set('floor-band', { item: { id: 'floor-band', layer: 'background' }, node: floor, kind: 'floor' });
+
+    // Explicit role order inside back-furniture: desk bodies (main) first,
+    // then monitors/chairs (back). Within a role, flat items order by the
+    // draft depth (layer 升序) with the fixture array order as tie-break;
+    // the isometric fixture has no depth and keeps its array order. Fixture
+    // order breaks ties within a role.
+    const items = layout.furniture().map((item, index) => ({ item, index }));
+    items.sort((a, b) => {
+      const rank = (entry) => (entry.item.layer === 'front-occluders' ? 2 : ROLE_ORDER[furnitureRole(entry.item)]);
+      if (rank(a) !== rank(b)) return rank(a) - rank(b);
+      const depthA = typeof a.item.depth === 'number' ? a.item.depth : null;
+      const depthB = typeof b.item.depth === 'number' ? b.item.depth : null;
+      if (depthA !== null && depthB !== null && depthA !== depthB) return depthA - depthB;
+      return a.index - b.index;
+    });
+    for (const { item } of items) {
+      const layer = layers[item.layer];
+      if (!layer) continue;
+      const partEntries = Object.entries(item.parts || {});
+      if (partEntries.length === 0) continue;
+      const wantedAssetId = wantedAssetFor(item);
+      const texture = wantedAssetId ? officeTextureMap.get(wantedAssetId) : null;
+      if (texture && texture.width > 0 && texture.height > 0) {
+        const sprite = new PIXI.Sprite(texture);
+        sprite.__furnitureId = item.id;
+        sprite.__furnitureRole = furnitureRole(item);
+        sprite.anchor.set(0.5, 0.5);
+        if (item.kind === 'monitor' && item.assetId === 'prop-monitor-back-right-top') {
+          // Task 6b: a very light screen outline so the light-gray isometric
+          // monitor stays discernible on the light office background (no dark
+          // theme). Flat monitor art brings its own contrast — no outline.
+          const outline = new PIXI.Graphics();
+          outline.__role = 'monitor-contrast';
+          outline.rect(150, 190, 725, 660).stroke({ width: 8, color: 0x74818c, alpha: 0.45 });
+          sprite.addChild(outline);
+        }
+        // M4.1c: flat furniture (sortY) joins the ONE geometric pass with the
+        // characters, ordered by its bottom edge — a walker in the corridor
+        // (larger footY) draws over desks/chairs, while a seated body is
+        // occluded by whatever stands in front of it. Everything else keeps
+        // its explicit declared layer.
+        const sortable = item.sortY === true;
+        (sortable ? layers['ground-entities'] : layer).addChild(sprite);
+        // Golden-workstation occlusion: the textured front panel mirrors the
+        // desk body's rect so the desk reads as ONE piece while the front
+        // copy still paints above characters (fixture-declared occluder).
+        const mirrorId = /-front$/.test(item.id) ? `${item.id.replace(/-front$/, '')}-back` : null;
+        const mirror = mirrorId ? furnitureRecords.get(mirrorId) : null;
+        furnitureRecords.set(item.id, {
+          item,
+          node: sprite,
+          kind: 'sprite',
+          rect: partEntries[0][1],
+          mirrorRect: mirror && mirror.rect ? mirror.rect : null,
+          sortable,
+        });
+      } else {
+        const graphics = new PIXI.Graphics();
+        graphics.__furnitureId = item.id;
+        graphics.__furnitureRole = furnitureRole(item);
+        // M4.1c: a sortY item keeps its place in the geometric pass even when
+        // its texture is missing — occlusion must not depend on whether art
+        // loaded. Placeholders without sortY stay on their declared layer.
+        const sortable = item.sortY === true;
+        (sortable ? layers['ground-entities'] : layer).addChild(graphics);
+        furnitureRecords.set(item.id, {
+          item,
+          node: graphics,
+          kind: 'graphics',
+          rect: partEntries[0][1],
+          mirrorRect: null,
+          sortable,
+        });
+        if (wantedAssetId && recordMissing) {
+          const reason = texture
+            ? 'TEXTURE_INVALID'
+            : (loaderErrors.find((entry) => entry.assetId === wantedAssetId) || {}).reason || 'TEXTURE_NOT_PROVIDED';
+          officeTextureMissing.push({
+            furnitureId: item.id,
+            assetId: wantedAssetId,
+            code: 'OFFICE_TEXTURE_MISSING',
+            reason,
+          });
+        }
+      }
+    }
+    layoutFurniture();
+    // Establish the geometric pass at BUILD time so occlusion never depends on
+    // when the first snapshot push arrives.
+    sortGround();
+  }
+
+  // Re-projects every persistent furniture node to the live scene size.
+  // Sprites only get transform updates; Graphics redraw their rects in place.
+  function layoutFurniture() {
+    for (const record of furnitureRecords.values()) {
+      if (record.kind === 'floor') {
+        const bandY = scene.height * 0.32;
+        record.node.clear();
+        record.node.rect(0, bandY, scene.width, scene.height - bandY).fill({ color: COLORS.floorLine, alpha: 0.35 });
+      } else if (record.kind === 'sprite') {
+        const rect = record.mirrorRect || record.rect;
+        const texture = record.node.texture;
+        const asset = layoutAssetById(record.item.assetId);
+        const bbox = asset && asset.contentBbox;
+        if (bbox) {
+          // Task E4 contentBbox viewport fit (mirrors the editor's art-box
+          // contract): the OPAQUE ART fills the fixture rect exactly — the
+          // sprite is scaled by the art width and shifted so the bbox center
+          // lands on the rect center. The compiler derives the rect from the
+          // same bbox, so the aspect always matches (no squash).
+          const artScale = (rect.width * scene.width) / (bbox.w * texture.width);
+          record.node.scale.set(artScale, artScale);
+          record.node.x = (rect.x + rect.width / 2) * scene.width - (bbox.x + bbox.w / 2 - 0.5) * texture.width * artScale;
+          record.node.y = (rect.y + rect.height / 2) * scene.height - (bbox.y + bbox.h / 2 - 0.5) * texture.height * artScale;
+        } else {
+          // Uniform scale fitted on the part rect's width, texture center on
+          // the rect center: the part keeps its natural aspect (no squash) and
+          // stays centered on its declared footprint. Height derives from the
+          // texture aspect, mirroring the approved draft composition.
+          const scale = (rect.width * scene.width) / texture.width;
+          record.node.scale.set(scale, scale);
+          record.node.x = (rect.x + rect.width / 2) * scene.width;
+          record.node.y = (rect.y + rect.height / 2) * scene.height;
+        }
+      } else if (record.kind === 'graphics') {
+        record.node.clear();
+        drawFurnitureGraphics(record.node, record.item);
+      }
+    }
+  }
+
+  // ---- entity lifecycle (persistent nodes) ---------------------------------
+
+  function frameGeometryFor(employee) {
+    const animation = employee.animation || {};
+    const resource = animation.resource || 'idle';
+    const frameIndex = animation.frameIndex || 0;
+    if (pack && typeof pack.frameGeometry === 'function' && animation.resource) {
+      try {
+        const frame = pack.frameGeometry(resource, frameIndex);
+        if (frame && frame.file) {
+          return { file: frame.file, anchor: frame.outputAnchor, fallbackReason: animation.fallbackReason || null };
+        }
+      } catch { /* fall through to placeholder */ }
+    }
+    return { file: null, anchor: { x: 16, y: 30 }, fallbackReason: animation.fallbackReason || (pack ? 'TEXTURE_MISSING' : 'PACK_MISSING') };
+  }
+
+  function createEntity(employeeId) {
+    const record = {
+      employeeId,
+      __snapshot: null,
+      __layout: { visibleHeight: computeVisibleHeight(scene.height), scale: 1 },
+      __frameAnchor: { x: 0, y: 0 },
+      __fallbackReason: null,
+      __placeholder: false,
+    };
+    if (mode !== 'static') {
+      const container = new PIXI.Container();
+      container.__employeeId = employeeId;
+
+      const shadow = new PIXI.Graphics();
+      shadow.__role = 'shadow';
+
+      const placeholder = new PIXI.Graphics();
+      placeholder.__role = 'placeholder-body';
+
+      // Real Pixi rejects a null texture at render time; EMPTY is the safe
+      // placeholder until the first frame texture is assigned.
+      const emptyTexture = PIXI.Texture && PIXI.Texture.EMPTY ? PIXI.Texture.EMPTY : null;
+      const sprite = new PIXI.Sprite(emptyTexture);
+      sprite.anchor.set(0, 0);
+      sprite.__role = 'character';
+
+      const ring = new PIXI.Graphics();
+      ring.__role = 'selection-ring';
+      ring.visible = false;
+
+      container.addChild(shadow, placeholder, sprite);
+      // Task 9: the selection ring is INTERACTION OVERLAY — it lives on the
+      // topmost layer (with the badge/marker) so desk-front occluders can
+      // never paint over the selection state. Coordinates are stage-absolute
+      // (the container never moves), so no placement math changes.
+      layers['effects-labels'].addChild(ring);
+      layers['ground-entities'].addChild(container);
+
+      // Persistent Effects/labels nodes: they live on the top layer and follow
+      // the entity every update (queue badge, non-text activity marker).
+      const badge = new PIXI.Text('0');
+      badge.__role = 'queue-badge';
+      badge.anchor = badge.anchor || {}; badge.anchor = { set(v) { this.__v = v; } };
+      badge.visible = false;
+      const marker = new PIXI.Text('');
+      marker.__role = 'activity-marker';
+      marker.anchor = marker.anchor || {}; marker.anchor = { set(v) { this.__v = v; } };
+      marker.visible = false;
+      layers['effects-labels'].addChild(badge, marker);
+
+      // E5c dialogue bubble: rounded-rect speech bubble on the top layer,
+      // visible only when the employee carries bubble text. Positioned above
+      // the character's head in updateEntity; follows the entity like badge.
+      const bubbleBg = new PIXI.Graphics();
+      bubbleBg.__role = 'dialogue-bubble-bg';
+      const bubbleText = new PIXI.Text('');
+      bubbleText.__role = 'dialogue-bubble-text';
+      bubbleText.style = { fontFamily: 'sans-serif', fontSize: 14, fill: 0x333344, wordWrap: true, wordWrapWidth: 180, breakWords: true };
+      bubbleText.visible = false;
+      layers['effects-labels'].addChild(bubbleBg, bubbleText);
+      record.__bubbleBg = bubbleBg;
+      record.__bubbleText = bubbleText;
+
+      record.container = container;
+      record.__sprite = sprite;
+      record.__placeholderG = placeholder;
+      record.__shadow = shadow;
+      record.__selectionRing = ring;
+      record.__badge = badge;
+      record.__marker = marker;
+      record.__footPx = { x: 0, y: 0 };
+    }
+    entities.set(employeeId, record);
+    return record;
+  }
+
+  function updateEntity(record, employee) {
+    record.__snapshot = employee;
+    if (mode === 'static') return;
+
+    // Task E5a-R2: the editor-composed character height. The snapshot carries
+    // a height RATIO over the linear default (see office-module's mapping:
+    // ratio = DRAFT_WIDTHS.character × composedScale × unionH / packCanvas
+    // / (refH × 0.11)); both the default and the composed height scale
+    // linearly with the live scene height, so multiplying here keeps the
+    // composed size at every window size. The final height clamps to the
+    // SPEC-02 band [64, 180] — extreme drafts can never render a giant or a
+    // dot (draft scales outside roughly [0.85, 2.38] at 840 hit the clamps).
+    const presentation = employee.presentation || null;
+    const heightRatio = presentation && Number.isFinite(presentation.heightRatio) && presentation.heightRatio > 0
+      ? presentation.heightRatio
+      : 1;
+    const visibleHeight = clamp(computeVisibleHeight(scene.height) * heightRatio, 64, 180);
+    const geometryBounds = pack && pack.geometry ? pack.geometry.visibleBounds.height : 64;
+    const scale = visibleHeight / geometryBounds;
+    const frame = frameGeometryFor(employee);
+    const footX = employee.position.x * scene.width;
+    const footY = employee.position.y * scene.height;
+    record.__layout = { visibleHeight, scale };
+    record.__frameAnchor = { ...frame.anchor };
+    record.__fallbackReason = frame.fallbackReason;
+    record.__footPx = { x: footX, y: footY };
+
+    const emptyTexture = PIXI && PIXI.Texture && PIXI.Texture.EMPTY ? PIXI.Texture.EMPTY : null;
+    const texture = frame.file ? textures.get(frame.file) || emptyTexture : emptyTexture;
+    const sprite = record.__sprite;
+    const placeholder = record.__placeholderG;
+    if (frame.file && texture && texture !== emptyTexture) {
+      if (sprite.texture !== texture) sprite.texture = texture;
+      sprite.scale.set(scale);
+      sprite.x = footX - frame.anchor.x * scale;
+      sprite.y = footY - frame.anchor.y * scale;
+      sprite.visible = true;
+      placeholder.visible = false;
+      record.__placeholder = false;
+    } else {
+      // Placeholder body: deterministic silhouette, foot-anchored like real
+      // art. The sprite keeps the exact anchor math so the projection contract
+      // holds with or without textures.
+      sprite.visible = false;
+      placeholder.clear();
+      const w = visibleHeight * 0.42;
+      const h = visibleHeight;
+      placeholder.roundRect(footX - w / 2, footY - h, w, h, w * 0.3).fill({ color: COLORS.chair, alpha: 0.9 });
+      placeholder.circle(footX, footY - h * 0.82, w * 0.26).fill({ color: COLORS.markerChat, alpha: 0.9 });
+      placeholder.visible = true;
+      record.__placeholder = true;
+      sprite.scale.set(scale);
+      sprite.x = footX - frame.anchor.x * scale;
+      sprite.y = footY - frame.anchor.y * scale;
+    }
+
+    const shadow = record.__shadow;
+    shadow.clear();
+    shadow.circle(footX, footY, Math.max(6, visibleHeight * 0.16)).fill({ color: COLORS.shadow, alpha: 0.35 });
+
+    const ring = record.__selectionRing;
+    ring.clear();
+    if (selectionId === record.employeeId) {
+      ring.circle(footX, footY, Math.max(14, visibleHeight * 0.3)).stroke({ width: 2, color: COLORS.selection, alpha: 0.95 });
+      ring.visible = true;
+    } else {
+      ring.visible = false;
+    }
+
+    const badge = record.__badge;
+    const count = employee.queueCount || 0;
+    badge.text = String(count);
+    badge.visible = count > 0;
+    badge.x = footX + Math.max(14, visibleHeight * 0.26);
+    badge.y = footY - visibleHeight - 10;
+
+    const marker = record.__marker;
+    if (employee.marker === 'chat-ellipsis') {
+      marker.text = '…';
+      marker.visible = true;
+      // 2026-09-25（性能）：Pixi v8 的 style setter 没有同值保护（每次都新建
+      // TextStyle → 文本重栅格化 + 纹理重上传），62.5Hz 下每个带标记的员工每秒
+      // 被重栅格化 ~62 次。只在"标记种类/字号真的变了"时写 style。
+      const markerStyleKey = `chat:${Math.max(12, Math.round(visibleHeight * 0.24))}`;
+      if (record.__markerStyleKey !== markerStyleKey) {
+        record.__markerStyleKey = markerStyleKey;
+        marker.style = { fill: COLORS.markerChat, fontSize: Math.max(12, visibleHeight * 0.24) };
+      }
+    } else if (employee.marker === 'sleep-zzz') {
+      marker.text = 'Zzz';
+      marker.visible = true;
+      const markerStyleKey = `sleep:${Math.max(10, Math.round(visibleHeight * 0.2))}`;
+      if (record.__markerStyleKey !== markerStyleKey) {
+        record.__markerStyleKey = markerStyleKey;
+        marker.style = { fill: COLORS.markerSleep, fontSize: Math.max(10, visibleHeight * 0.2) };
+      }
+    } else {
+      marker.visible = false;
+    }
+    marker.x = footX;
+    marker.y = footY - visibleHeight - 12;
+
+    // E5c dialogue bubble: rounded-rect speech bubble above the character's
+    // head, visible only when the snapshot carries bubble text. The bg
+    // Graphics and Text follow the entity like badge/marker.
+    const bbBg = record.__bubbleBg;
+    const bbText = record.__bubbleText;
+    if (employee.bubble && employee.bubble.text) {
+      bbText.text = employee.bubble.text;
+      const btw = Math.max(bbText.width, 40);
+      const bth = Math.max(bbText.height, 22);
+      const bx = footX - btw / 2;
+      const by = footY - visibleHeight - bth - 10;
+      bbBg.clear();
+      bbBg.roundRect(bx - 6, by - 6, btw + 12, bth + 12, 6)
+        .fill({ color: 0xffffff, alpha: 0.94 })
+        .stroke({ width: 1, color: 0x9ab0be });
+      bbBg.visible = true;
+      bbText.x = bx; bbText.y = by;
+      bbText.visible = true;
+    } else {
+      bbText.visible = false;
+      bbBg.visible = false;
+    }
+  }
+
+  // The ACTUAL paint order of the merged ground pass, cached for tests and
+  // real-shell probes: [{ id, kind, key }] with keys in scene px (bottom edge
+  // for furniture, foot y for characters).
+  let groundOrder = [];
+
+  function sortGround() {
+    const layer = layers['ground-entities'];
+    const ordered = layout.sortGroundEntities(
+      [...entities.values()]
+        .filter((record) => record.container)
+        .map((record) => ({
+          footY: record.__snapshot ? record.__snapshot.position.y : 0,
+          layer: 0,
+          entityType: 'employee',
+          id: record.employeeId,
+          record,
+        }))
+    );
+    // addChild moves an existing child to the top, so re-adding in sorted
+    // order reorders the layer in place without recreating anything.
+    for (const entry of ordered) layer.addChild(entry.record.container);
+
+    // M4.1c: interleave the sortY furniture of the SAME container by its
+    // bottom edge (screen px), so the world reads as one painter's-algorithm
+    // pass: farther (smaller bottom edge) first, nearest last. Characters are
+    // placed by footY in the same units.
+    const furnitureEntries = [];
+    for (const record of furnitureRecords.values()) {
+      if (!record.sortable || !record.rect) continue;
+      if (record.kind !== 'sprite' && record.kind !== 'graphics') continue;
+      const rect = record.mirrorRect || record.rect;
+      furnitureEntries.push({
+        key: (rect.y + rect.height) * scene.height,
+        node: record.node,
+        id: record.item.id,
+        kind: 'furniture',
+        item: record.item,
+        rect,
+      });
+    }
+    // 2026-09-22 fix（用户报的图层 bug）：坐在支撑面上的物件（岛台上的电饭煲/米饭碗、
+    // 茶几上的电话机…）底边在支撑物底边**之上**，纯底边排序会让支撑物盖住它们。
+    // 做法：把这类物件重挂到"最近的下方支撑物的**实际绘制键** + 0.5"。
+    // 必须迭代到不动点：支撑物自己也可能被重挂（茶几→水吧），只跑一遍会让先处理的
+    // 子物件又落回支撑物之下。键只增不减，因此必然收敛（上限取条目数轮）。
+    for (let round = 0; round < furnitureEntries.length; round += 1) {
+      let changed = false;
+      const rekeyOrder = [...furnitureEntries].sort((a, b) => (a.key - b.key) || String(a.id).localeCompare(String(b.id)));
+      for (const entry of rekeyOrder) {
+        // 只对"道具"（kind:'prop'）做重挂：桌子本体/显示器/椅子不与支撑物叠加，
+        // 把它们也纳入会破坏"走廊行人压在工位之上"（角色与家具的穿插契约）。
+        if (!entry.item || entry.item.kind !== 'prop') continue;
+        const footX = entry.rect.x + entry.rect.width / 2;
+        const footY = entry.rect.y + entry.rect.height;
+        let support = null;
+        for (const candidate of furnitureEntries) {
+          if (candidate === entry) continue;
+          const cRect = candidate.rect;
+          if (candidate.key <= entry.key + 0.5) continue;                  // 支撑物必须画在更近处（键更大）
+          if (footX < cRect.x || footX > cRect.x + cRect.width) continue;  // 落点需在其水平跨度内
+          if (footY < cRect.y - 0.02) continue;                           // 支撑面需在落点之下（允许 2% 场景高余量）
+          if (footY > cRect.y + cRect.height) continue;                    // 落点不能低于支撑物底边
+          if (!support || candidate.key < support.key) support = candidate;
+        }
+        if (support) {
+          const next = support.key + 0.5;
+          if (next > entry.key + 0.25) { entry.key = next; changed = true; }
+        }
+      }
+      if (!changed) break;
+    }
+
+    if (furnitureEntries.length > 0) {
+      // M4.1h（2026-09-22，用户实测截图反馈）："他工位的桌子图层比鲸鱼娘的图层要高"——
+      // 坐在自己工位上的角色被桌体盖住（生产场景 960×630 下中间排 desk-4 整张桌子把
+      // 角色压住，其余工位也只差 2~4px）。根因：坐姿角色的排序键是脚点（座位锚点），
+      // 而锚点恰好落在桌体底边附近，纯底边排序等于抛硬币。修法与上面 prop 的"支撑物
+      // +0.5"同一机制，对象从道具扩展到坐姿角色：脚点落在工位带内的角色按她工位的
+      // 堆叠键重挂。工位带 = 桌体的 x 跨度 ×（桌体顶边 → 椅子底边）；堆叠键 = 桌体/
+      // 显示器/桌面上家具的底边最大值。只升不降，且必须仍低于椅子键：
+      //   - 桌体/显示器在她下面 → 不再被桌面盖住，且保证 ≥0.5px 的稳定余量；
+      //   - 椅子底边在堆叠键之下约 60px → 椅背照旧遮住她的下半身（"seated bodies
+      //     sit behind" 契约不破坏；重挂键取 min(堆叠键+0.5, 椅子键-0.5)，草稿把
+      //     椅子放得再高也恒 < 椅子键，契约在任何草稿下都成立）；
+      //   - 走廊行人脚点在椅底更下方（或根本不在工位带内）→ 键不变，仍盖住整张工位
+      //     （"the corridor walker draws AFTER the desk" 契约不破坏）；
+      //   - 从桌后绕行的角色脚点在桌体顶边之上 → 不在工位带内 → 键不变，仍被桌子
+      //     盖住（绕到桌后的读法不变）。
+      const stationStacks = new Map(); // prefix -> { back, monitor, chair, stackKey }
+      for (const entry of furnitureEntries) {
+        const match = /-([a-z]+)$/.exec(entry.id || '');
+        if (!match || (match[1] !== 'back' && match[1] !== 'monitor' && match[1] !== 'chair')) continue;
+        const prefix = entry.id.slice(0, match.index);
+        if (!stationStacks.has(prefix)) stationStacks.set(prefix, { back: null, monitor: null, chair: null, stackKey: -Infinity });
+        stationStacks.get(prefix)[match[1]] = entry;
+      }
+      for (const station of stationStacks.values()) {
+        // 缺桌体或椅子的工位不判带（椅子是坐姿遮挡契约的一端，缺了就不重挂）。
+        if (!station.back || !station.chair) continue;
+        station.stackKey = Math.max(
+          station.back.key,
+          station.monitor ? station.monitor.key : -Infinity
+        );
+        // 工位带内、最终排在桌体之后的其它家具（例如被上面 prop 规则重挂到桌体的
+        // 道具）也属于这个工位的堆叠：坐姿角色坐在整组构图前面，只让椅子压她。
+        for (const other of furnitureEntries) {
+          if (other === station.back || other === station.monitor || other === station.chair) continue;
+          if (other.key <= station.stackKey || other.key >= station.chair.key) continue;
+          const centerX = other.rect.x + other.rect.width / 2;
+          if (centerX < station.back.rect.x || centerX > station.back.rect.x + station.back.rect.width) continue;
+          station.stackKey = other.key;
+        }
+      }
+      const characterEntries = ordered.map((entry) => ({
+        key: (entry.record.__snapshot ? entry.record.__snapshot.position.y : 0) * scene.height,
+        node: entry.record.container,
+        id: entry.id,
+        kind: 'character',
+        record: entry.record,
+      }));
+      for (const entry of characterEntries) {
+        const point = entry.record.__snapshot ? entry.record.__snapshot.position : null;
+        if (!point) continue;
+        for (const station of stationStacks.values()) {
+          const back = station.back.rect;
+          const chair = station.chair.rect;
+          if (point.x < back.x || point.x > back.x + back.width) continue;      // 水平落在桌体跨度内
+          if (point.y < back.y || point.y > chair.y + chair.height) continue;   // 桌体顶边 ~ 椅子底边
+          // 重挂键 = min(堆叠键 + 0.5, 椅子键 - 0.5)：正常工位（椅子底边在堆叠键
+          // 之下约 60px）取堆叠键 + 0.5；草稿若把椅子放得太高（椅子键 - 0.5 反而更
+          // 小）就贴着椅子底下取，仍然 > 堆叠键里她原本被盖住的键、且恒 < 椅子键
+          // （"seated bodies sit behind" 契约不被任何草稿破坏）。只升不降。
+          const target = Math.min(station.stackKey + 0.5, station.chair.key - 0.5);
+          if (target > entry.key) entry.key = target;
+          break;
+        }
+      }
+      const merged = [...characterEntries, ...furnitureEntries];
+      merged.sort((a, b) => (a.key - b.key) || String(a.id).localeCompare(String(b.id)));
+      // 2026-09-25（性能）：排序结果与上次**真正挂载**的节点序列完全相同时跳过重排。
+      // Pixi 的 addChild 对已在册的子节点是"摘下再挂上"（每推 ~38 次），而静止或正常
+      // 走动时绘制顺序几乎不变（脚点只在越过别人时才改变相对次序）。用**节点引用**
+      // 比较而不是 id：恢复重建后同一 id 是新的节点对象，必须重新挂载（否则新画布空着）。
+      const applied = lastAppliedGroundNodes;
+      const sameOrder = applied !== null
+        && applied.length === merged.length
+        && merged.every((entry, index) => applied[index] === entry.node);
+      if (!sameOrder) {
+        for (const entry of merged) layer.addChild(entry.node);
+        lastAppliedGroundNodes = merged.map((entry) => entry.node);
+      }
+      groundOrder = merged.map((entry) => ({ id: entry.id, kind: entry.kind, key: entry.key }));
+      return merged.map((entry) => entry.id);
+    }
+    groundOrder = ordered.map((entry) => ({
+      id: entry.id,
+      kind: 'character',
+      key: (entry.record.__snapshot ? entry.record.__snapshot.position.y : 0) * scene.height,
+    }));
+    return ordered.map((entry) => entry.id);
+  }
+
+  // On-demand presentation: snapshot pushes mutate the stage and each push
+  // renders once. This avoids any dependency on requestAnimationFrame timing
+  // (hidden/background windows throttle rAF) and keeps a single render per
+  // state change instead of a per-frame logic loop.
+  function renderNow() {
+    if (destroyed || mode === 'static' || !app) return;
+    // 2026-09-25（性能专项）：视图被切到后台（harness 为当前主视图）时**不做 GPU 重绘**
+    // ——画布不在窗口里，没人看得见，而快照推送仍是 62.5Hz。状态照常写进节点
+    // （applySnapshot），回到前台时 setVisible(true) 会失效可视签名并补画一次。
+    if (!foreground) return;
+    try { if (typeof app.render === 'function') app.render(); } catch { /* renderer gone */ }
+  }
+
+  // ---- M1: the per-snapshot render path, gated by the render profile -------
+  // Stage 0 (full) sorts the ground order and renders on every pushed snapshot
+  // whose VISIBLE state changed; stage 1 (low-cost) additionally coalesces to
+  // maxRenderHz. Nothing here changes what the entities contain — only how
+  // often the pixels are produced — so a downgrade never costs art or state.
+  //
+  // 2026-09-25（性能专项，用户实测长时间挂机发热）：绘制是"快照推送驱动"的
+  // ~62.5Hz，而**没有变化的那一推**同样是全量重排 + 重画（GPU 7.9% + 渲染进程
+  // 8.4% 单核，探针实测）。因此把"可视签名不变就跳过"同时用于两档，并把逐员工
+  // 签名作为单一真源（场景签名=选择态+各员工签名）。
+  //
+  // entitySignature 必须覆盖 updateEntity 真正画出来的一切：贴图帧（resource/
+  // frameIndex/fallbackReason）、缩放（presentation.heightRatio）、脚点、徽标
+  // （queueCount）、标记（marker）、气泡（bubble.text）、选环（selectionId）。
+  // 位置按 1e3 量化：亚像素移动不重画（0.001 场景单位 ≈ 1px 的千分之一）。
+  function entitySignature(employee) {
+    const p = employee.position || {};
+    const a = employee.animation || {};
+    const presentation = employee.presentation || null;
+    const heightRatio = presentation && Number.isFinite(presentation.heightRatio) && presentation.heightRatio > 0
+      ? presentation.heightRatio
+      : 1;
+    return `${Math.round((Number(p.x) || 0) * 1000)}:${Math.round((Number(p.y) || 0) * 1000)}`
+      + `:${a.resource || ''}:${Number(a.frameIndex) || 0}:${a.fallbackReason || ''}`
+      + `:${heightRatio}:${employee.marker || ''}:${Number(employee.queueCount) || 0}`
+      + `:${employee.bubble && employee.bubble.text ? employee.bubble.text : ''}`
+      + `:${selectionId === employee.employeeId ? 1 : 0}`;
+  }
+
+  function visualSignature(snapshot) {
+    let sig = selectionId ? `sel:${selectionId};` : '';
+    const employees = snapshot && Array.isArray(snapshot.employees) ? snapshot.employees : [];
+    for (const e of employees) {
+      if (!e || !e.employeeId) continue;
+      sig += `${e.employeeId}:${entitySignature(e)};`;
+    }
+    // 实体**集合**也要进签名：快照里消失的员工会被 destroy，但画布上还留着旧像素，
+    // 必须重画一次（否则"跳过的重画"就等于把已被移除的角色留在画面上）。
+    sig += `|ids:${[...entities.keys()].join(',')}`;
+    return sig;
+  }
+
+  function renderScene(snapshot) {
+    const profile = RENDER_PROFILES[renderProfileIndex] || RENDER_PROFILES[0];
+    if (profile.skipUnchanged) {
+      const sig = visualSignature(snapshot);
+      if (sig === lastRenderSignature) return; // nothing visible changed
+    }
+    if (profile.maxRenderHz > 0) {
+      const nowMs = clockNow();
+      if (lastRenderAtMs !== null && nowMs - lastRenderAtMs < 1000 / profile.maxRenderHz) {
+        // Too soon: skip this redraw WITHOUT recording the signature, so the
+        // next push re-evaluates and paints the accumulated state. Pushes are
+        // continuous (~62.5 Hz), so the picture is at most one slot stale.
+        return;
+      }
+      lastRenderAtMs = nowMs;
+    }
+    if (mode !== 'static') sortGround();
+    if (profile.skipUnchanged) lastRenderSignature = visualSignature(snapshot);
+    renderNow();
+  }
+
+  function applySnapshot(snapshot) {
+    if (destroyed || !snapshot || !Array.isArray(snapshot.employees)) return;
+    currentSnapshot = snapshot;
+    if (snapshot.scene && Number.isFinite(snapshot.scene.referenceWidth)) {
+      // logical reference size only; projection keeps using the live scene
+    }
+    const seen = new Set();
+    for (const employee of snapshot.employees) {
+      if (!employee || !employee.employeeId) continue;
+      seen.add(employee.employeeId);
+      // 2026-09-24 latch fix: a snapshot that lands while the view is static
+      // (the office:state pushes keep flowing during a bounded-recovery
+      // rebuild's init await) creates records WITHOUT Pixi nodes. Such a
+      // record can never be updated in place — rebuild its nodes instead of
+      // throwing on the missing sprite.
+      const existing = entities.get(employee.employeeId);
+      const record = existing && existing.container ? existing : createEntity(employee.employeeId);
+      // 2026-09-25（性能）：该员工的可视签名没变（且节点齐备）时跳过 updateEntity
+      // ——shadow/ring/placeholder 的 Graphics 重建与 badge/marker/bubble 的文本
+      // 写入在 62.5Hz 下是纯浪费（探针实测每秒上千次几何重建）。位置量化相等时
+      // 仍把最新快照挂上 record：sortGround 用它的 footY 排序。
+      const sig = entitySignature(employee);
+      if (record.__sig === sig && record.container) {
+        record.__snapshot = employee;
+        continue;
+      }
+      record.__sig = sig;
+      updateEntity(record, employee);
+    }
+    // An employee that truly left the snapshot is removed; residents never do.
+    for (const [id, record] of [...entities]) {
+      if (!seen.has(id)) {
+        if (record.container) {
+          record.container.destroy({ children: true });
+          record.__badge.destroy();
+          record.__marker.destroy();
+          record.__selectionRing.destroy();
+        }
+        entities.delete(id);
+      }
+    }
+    // M1: the render profile decides whether this push paints (full profile:
+    // always, exactly as before).
+    renderScene(snapshot);
+  }
+
+  // ---- init chain: webgl -> canvas -> static (shared by boot and recovery) --
+  // Returns the live mode ('webgl' | 'canvas' | 'static'); leaves `app`,
+  // `stage`, `layers` and `diagnosticCode` consistent with it. `recordMissing`
+  // is false on the recovery rebuild: the furniture texture load diagnostics
+  // were already reported at boot and must not be duplicated.
+  async function initApplication({ recordMissing = true } = {}) {
+    if (!PIXI || typeof PIXI.Application !== 'function') {
+      diagnosticCode = 'RENDERER_UNAVAILABLE';
+      mode = 'static';
+      buildStaticFallback();
+      return mode;
+    }
+    const webgl = await tryInitApplication('webgl');
+    if (destroyed) { discardFailedApplication(webgl.app); return 'static'; }
+    if (webgl.ok) {
+      app = webgl.app;
+      mode = 'webgl';
+    } else {
+      diagnosticCode = 'WEBGL_INIT_FAILED';
+      discardFailedApplication(webgl.app);
+      const canvas = await tryInitApplication('canvas');
+      if (destroyed) { discardFailedApplication(canvas.app); return 'static'; }
+      if (canvas.ok) {
+        app = canvas.app;
+        mode = 'canvas';
+      } else {
+        discardFailedApplication(canvas.app);
+        app = null;
+        mode = 'static';
+      }
+    }
+    if (mode !== 'static') {
+      buildLayers();
+      buildFurniture({ recordMissing });
+      if (mount && app.canvas && mount.appendChild) mount.appendChild(app.canvas);
+      app.ticker.stop(); // rendering happens on snapshot pushes, not on a clock
+      // 2026-09-25（性能）：可视签名的跳过逻辑必须在新画布上失效——否则重建后
+      // 的第一次 applySnapshot 会因为"场景没变"而跳过重画，新画布停在空白。
+      lastRenderSignature = null;
+    } else {
+      buildStaticFallback();
+    }
+    return mode;
+  }
+
+  // Keeps the exposed view object in sync with the live renderer state (the
+  // view captured these values at creation time).
+  function syncViewSurface() {
+    if (typeof view === 'object' && view) {
+      view.mode = mode;
+      view.diagnosticCode = diagnosticCode;
+      view.staticElement = staticElement;
+      view.app = app;
+      view.stage = stage;
+      view.layers = layers;
+    }
+  }
+
+  function notifyStateChange() {
+    if (typeof onStateChange !== 'function') return;
+    try { onStateChange({ mode, diagnosticCode, recoveryAttempts }); } catch { /* observer errors never break the renderer */ }
+  }
+
+  // ---- public surface -------------------------------------------------------
+
+  await initApplication();
+
+  if (currentSnapshot) applySnapshot(currentSnapshot);
+  if (selectionId && mode !== 'static') applySelection();
+
+  // ---- runtime FPS observer (Task 9 blocker B / SPEC-07) --------------------
+  // Presentation-rate observer only: it counts presented frames through an
+  // injectable clock and NEVER advances movement, animation or any office
+  // state — the single simulation clock stays in the main process. Sustained
+  // sub-threshold presentation degrades THIS view to the static diagnostic
+  // presentation (LOW_FPS_PERSISTENT, distinct from WEBGL_INIT_FAILED /
+  // RENDERER_UNAVAILABLE). When the caller does not arm `fpsMonitor`, nothing
+  // is scheduled and behavior is unchanged.
+  //
+  // 2026-09-24 latch fix: the pump is gated on `foreground`. While the view is
+  // NOT the active main-area view (detached from the window by
+  // syncShellViews()), no frames are fed — a detached view still presents at
+  // 1.3-7.9 fps and feeding those frames latched LOW_FPS_PERSISTENT after
+  // ~2 minutes in the harness, permanently killing the scene. The foreground
+  // transition resets the monitor window so detached-rate frames can never
+  // share a measurement window with foreground frames.
+  let monitor = null;
+  let pumpHandle = null;
+  let scheduleFrame = null;
+  let cancelFrame = null;
+  // Bounded LOW_FPS_PERSISTENT recovery (SPEC-07 contract correction): at most
+  // ONE rebuild attempt per re-activation and 3 per view session. The counter
+  // is exposed through diagnostics() so the shell log records every attempt.
+  const RECOVERY_LIMIT_PER_SESSION = 3;
+  let recoveryAttempts = 0;
+  let rebuildInFlight = null;
+  if (fpsMonitor && mode !== 'static') {
+    scheduleFrame = fpsMonitor.scheduleFrame
+      || (typeof requestAnimationFrame === 'function' ? (cb) => requestAnimationFrame(cb) : null);
+    cancelFrame = fpsMonitor.cancelFrame
+      || (typeof cancelAnimationFrame === 'function' ? (id) => cancelAnimationFrame(id) : null);
+  }
+  function pump() {
+    pumpHandle = null;
+    if (destroyed || !foreground || !monitor || monitor.degraded()) return;
+    monitor.frame();
+    schedulePump();
+  }
+  function schedulePump() {
+    if (destroyed || !foreground || !monitor || monitor.degraded() || pumpHandle !== null || !scheduleFrame) return;
+    pumpHandle = scheduleFrame(pump);
+    armStallPoll();
+  }
+  function stopPump() {
+    if (pumpHandle !== null && cancelFrame) {
+      try { cancelFrame(pumpHandle); } catch { /* already canceled */ }
+    }
+    pumpHandle = null;
+    stopStallPoll();
+  }
+  // ---- M1: stall watchdog --------------------------------------------------
+  // The monitor is pure (no timers), so the view owner polls it: while the pump
+  // is armed, an overdue window is closed even when NO frame arrived. A
+  // renderer that stops presenting entirely (dead rAF pump, lost context) used
+  // to be invisible to the observer under frame-count windows; now it produces
+  // 0-fps windows and still reaches the degrade ladder. Armed only when the
+  // policy asks for it (stallMs/windowMs > 0), so legacy configs schedule
+  // nothing.
+  function armStallPoll() {
+    if (!monitor || !stallPollMs || !scheduleTimeout || stallTimer !== null) return;
+    if (destroyed || !foreground || monitor.degraded()) return;
+    stallTimer = scheduleTimeout(() => {
+      stallTimer = null;
+      if (destroyed || !foreground || !monitor || monitor.degraded()) return;
+      // poll() routes a latch through the monitor's onDegrade → handleLowFpsLatch
+      // exactly like frame() does. The return value must NOT be handled here as
+      // well: that would walk the ladder twice for one latch.
+      if (typeof monitor.poll === 'function') monitor.poll();
+      // Self-sustaining while the view is foreground: a dead rAF pump (no frame
+      // callback ever fires, so schedulePump() is never re-entered) must still
+      // be able to walk the degrade ladder.
+      if (destroyed || !foreground || !monitor || monitor.degraded()) return;
+      armStallPoll();
+    }, stallPollMs);
+  }
+  function stopStallPoll() {
+    if (stallTimer !== null && cancelTimeout) {
+      try { cancelTimeout(stallTimer); } catch { /* already gone */ }
+    }
+    stallTimer = null;
+  }
+  function resetMonitor() {
+    // Re-arms the observer with a fresh measurement window. Only ever called
+    // at the foreground transition, after a render-profile downgrade, and after
+    // a successful recovery rebuild — the monitor never re-arms itself.
+    if (monitor && typeof monitor.reset === 'function') monitor.reset();
+  }
+
+  // ---- M1: the degrade ladder ---------------------------------------------
+  // A LOW_FPS_PERSISTENT latch means "this view cannot hold thresholdFps right
+  // now". Throwing the scene away (static diagnostics, no art) is the LAST
+  // resort, not the first response:
+  //   1. step down to the low-cost render profile — the full art and state are
+  //      kept, fewer pixels per second are produced (no Pixi rebuild);
+  //   2. if the low-cost profile still cannot hold the rate, settle in the
+  //      static diagnostic presentation — but ONLY if the measured rate is
+  //      below staticFloorFps. A scene that still presents ~10+ fps is "slow",
+  //      not "broken": it stays on the living low-cost profile (the footer dot
+  //      explains the downgrade and the static fallback's 「重试渲染」 remains
+  //      the manual road back).
+  // Returns the step that was taken: 'render-profile' | 'kept-low-cost' |
+  // 'static'.
+  function handleLowFpsLatch() {
+    lowFpsEvents += 1;
+    if (renderProfileIndex < RENDER_PROFILES.length - 1) {
+      renderProfileIndex = Math.min(RENDER_PROFILES.length - 1, renderProfileIndex + 1);
+      resetMonitor();   // the downgraded profile gets its own fair measurement window
+      schedulePump();
+      syncViewSurface();
+      notifyStateChange();
+      return 'render-profile';
+    }
+    const stats = monitor && typeof monitor.stats === 'function' ? monitor.stats() : null;
+    const measured = stats && typeof stats.lastFps === 'number' ? stats.lastFps : null;
+    if (staticFloorFps > 0 && measured !== null && measured >= staticFloorFps) {
+      resetMonitor();
+      schedulePump();
+      syncViewSurface();
+      notifyStateChange();
+      return 'kept-low-cost';
+    }
+    degradeToStatic('LOW_FPS_PERSISTENT');
+    return 'static';
+  }
+
+  function degradeToStatic(code) {
+    if (destroyed || mode === 'static') return;
+    diagnosticCode = code;
+    stopPump();
+    for (const record of entities.values()) {
+      if (record.container) {
+        try { record.container.destroy({ children: true, texture: false }); } catch { /* already gone */ }
+        try { if (record.__badge && record.__badge.destroy) record.__badge.destroy(); } catch { /* already gone */ }
+        try { if (record.__marker && record.__marker.destroy) record.__marker.destroy(); } catch { /* already gone */ }
+      }
+    }
+    entities.clear();
+    // 2026-09-25（用户实测：点「重新渲染」后办公室变成灰块/无贴图场景）：
+    // 注入的美术贴图**不能在这里释放**。`textures`（角色帧）与 `officeTextureMap`
+    // （家具素材）由办公室页面在 boot 时一次性加载并注入本视图，页面从不重建它们；
+    // 而 degradeToStatic 之后可能发生有界恢复重建、或用户点「重试渲染」——两条路径
+    // 都要靠这两张 map 重新贴图。旧实现在这里把两张 map 里的 texture 逐个 destroy
+    // 再 clear，于是恢复出来的场景只剩占位图（家具 32 件全灰块、角色空贴图）。
+    // 复现：latch 到 static → retryRendering → officeTextureCount 15→0、
+    // texturedFurniture 32→0、placeholderFurniture 0→32（真壳探针，见
+    // docs/strategy/2026-09-25-v0.4.0-release-verification.md）。
+    // 真正的释放点是 destroy()（视图销毁）——那里的语义不变。
+    if (app) {
+      // Pixi's destroy() leaves the canvas in the DOM (removeView defaults to
+      // false). Detach it here so a later bounded-recovery rebuild mounts
+      // exactly one canvas and the static fallback owns the stage.
+      try {
+        if (app.canvas && app.canvas.parentNode) app.canvas.parentNode.removeChild(app.canvas);
+      } catch { /* host already gone */ }
+      try { app.destroy(true, { children: true, texture: false }); } catch { /* already gone */ }
+    }
+    app = null;
+    stage = null;
+    layers = null;
+    mode = 'static';
+    buildStaticFallback();
+    // Hard failures are not retryable — the retry affordance must say so
+    // instead of offering an action that cannot work.
+    refreshStaticRetry();
+    // Keep the exposed view surface consistent with the degraded state (the
+    // view object captured these values at creation time).
+    syncViewSurface();
+    notifyStateChange();
+  }
+
+  // ---- bounded recovery from LOW_FPS_PERSISTENT (2026-09-24) ---------------
+  // Rebuild the Pixi application, layers and furniture, then restore the
+  // entities from the last pushed snapshot (degradeToStatic already cleared
+  // entities/textures; the snapshot is the only source of entity truth, and
+  // it keeps flowing from the single main-process clock). ONE attempt per
+  // re-activation, at most RECOVERY_LIMIT_PER_SESSION per session, and ONLY
+  // for LOW_FPS_PERSISTENT: WEBGL_INIT_FAILED / RENDERER_UNAVAILABLE are hard
+  // failures (a fresh application would fail exactly the same way), so they
+  // stay static forever on purpose.
+  async function rebuildRenderer() {
+    if (destroyed) return 'failed';
+    if (staticElement && typeof staticElement.remove === 'function') {
+      try { staticElement.remove(); } catch { /* host already gone */ }
+    }
+    staticElement = null;
+    // Boots the shared init chain (webgl -> canvas -> static): it builds the
+    // layers + furniture, mounts the fresh canvas and stops the ticker.
+    const next = await initApplication({ recordMissing: false });
+    if (destroyed) return 'failed';
+    if (next === 'static') {
+      // The rebuild hit a HARD failure (WEBGL_INIT_FAILED — initApplication
+      // already set diagnosticCode and built the static fallback). That code
+      // is never retried by the recovery policy.
+      syncViewSurface();
+      notifyStateChange();
+      return 'failed';
+    }
+    diagnosticCode = null;
+    // A half-rebuilt view must never stay "live": if anything below throws
+    // (e.g. a host/Pixi hiccup), tear the fresh application down and settle
+    // in the static diagnostic presentation with a stable hard-failure code
+    // instead of leaving mode='webgl' over a broken stage.
+    try {
+      if (currentSnapshot) applySnapshot(currentSnapshot);
+      if (selectionId) applySelection();
+      resetMonitor(); // fresh measurement window for the rebuilt view
+      schedulePump();
+    } catch {
+      degradeToStatic('RENDERER_UNAVAILABLE');
+      return 'failed';
+    }
+    syncViewSurface();
+    notifyStateChange();
+    return 'recovered';
+  }
+
+  // Returns 'recovered' | 'failed' | 'exhausted' | 'none'. `none` means no
+  // attempt was warranted (already live, or a hard-failure code).
+  function attemptRecovery() {
+    if (destroyed) return 'none';
+    if (mode !== 'static') return 'none';
+    if (diagnosticCode !== 'LOW_FPS_PERSISTENT') return 'none'; // hard failure: never retry
+    if (recoveryAttempts >= RECOVERY_LIMIT_PER_SESSION) return 'exhausted';
+    recoveryAttempts += 1;
+    if (!rebuildInFlight) {
+      rebuildInFlight = rebuildRenderer()
+        .catch(() => 'failed') // never throws into the page
+        .finally(() => { rebuildInFlight = null; });
+    }
+    return rebuildInFlight;
+  }
+
+  if (fpsMonitor && mode !== 'static' && scheduleFrame) {
+    monitor = createFpsMonitor({
+      thresholdFps: fpsMonitor.thresholdFps,
+      windowFrames: fpsMonitor.windowFrames,
+      lowWindowLimit: fpsMonitor.lowWindowLimit,
+      // M1: 0 (absent) keeps the historical frame-count windows; the office
+      // page arms a time window (OFFICE_LOW_FPS_POLICY).
+      windowMs: fpsMonitor.windowMs,
+      now: fpsMonitor.now,
+      // M1: the latch no longer goes straight to static — the ladder steps down
+      // to the low-cost render profile first and only then falls back.
+      onDegrade: () => handleLowFpsLatch(),
+    });
+    schedulePump();
+  }
+
+  function applySelection() {
+    for (const [id, record] of entities) {
+      if (record.__selectionRing) record.__selectionRing.visible = id === selectionId;
+    }
+  }
+
+  // ---- M1: user-requested retry -------------------------------------------
+  // The static presentation is not a dead end: the user gets a visible
+  // 「重试渲染」 entry (built into the fallback element) that runs the SAME
+  // bounded rebuild the automatic recovery uses. It has its OWN per-session
+  // budget (the automatic policy's 3 per session / 1 per activation is
+  // untouched) and restores the full render profile, because a user asking for
+  // the scene back wants the full-quality scene. Returns
+  // 'recovered' | 'failed' | 'exhausted' | 'none' | 'none(not-static)'.
+  function retryRendering() {
+    if (destroyed) return Promise.resolve('none');
+    if (mode !== 'static') return Promise.resolve('none');
+    if (diagnosticCode !== 'LOW_FPS_PERSISTENT') return Promise.resolve('none'); // hard failure: a rebuild cannot help
+    if (manualRetryAttempts >= MANUAL_RETRY_LIMIT_PER_SESSION) {
+      refreshStaticRetry();
+      return Promise.resolve('exhausted');
+    }
+    manualRetryAttempts += 1;
+    renderProfileIndex = 0;
+    refreshStaticRetry();
+    if (!rebuildInFlight) {
+      rebuildInFlight = rebuildRenderer()
+        .catch(() => 'failed') // never throws into the page
+        .finally(() => { rebuildInFlight = null; });
+    }
+    return rebuildInFlight;
+  }
+
+  const view = {
+    mode,
+    diagnosticCode,
+    app,
+    stage,
+    layers,
+    entities,
+    staticElement,
+    // Armed FPS observer (null when the caller did not arm fpsMonitor).
+    // Exposed so tests and evidence harnesses can drive injected frames.
+    fpsMonitor: monitor,
+
+    // M1: the visible retry entry runs this (the fallback element's button is
+    // wired to it in attachStaticRetry).
+    retryRendering,
+
+    applySnapshot,
+
+    resize({ width, height }) {
+      if (destroyed) return;
+      scene = { width, height };
+      if (mode !== 'static' && app && app.renderer) app.renderer.resize(width, height);
+      if (mode === 'static') return;
+      // furniture nodes persist: resize only re-projects transforms/rects,
+      // so sprite identity and texture references are never recreated
+      if (layers) { layoutFurniture(); sortGround(); }
+      // 2026-09-25（性能）：缩放是"投影变了、快照没变"——两处跳过逻辑都必须失效：
+      // 场景可视签名（强制重画一次）与逐员工签名（强制重投影脚点/缩放/字号）。
+      lastRenderSignature = null;
+      for (const record of entities.values()) record.__sig = null;
+      if (currentSnapshot) applySnapshot(currentSnapshot);
+      else renderNow();
+    },
+
+    setSelection(employeeId) {
+      selectionId = employeeId || null;
+      if (mode !== 'static') applySelection();
+    },
+
+    hitTest(px, py) {
+      if (mode === 'static' || destroyed) return null;
+      let best = null;
+      let bestDistance = Infinity;
+      for (const record of entities.values()) {
+        if (!record.__snapshot) continue;
+        const foot = record.__footPx;
+        const distance = Math.hypot(foot.x - px, foot.y - py);
+        const radius = Math.max(24, record.__layout.visibleHeight * 0.35);
+        if (distance <= radius && distance < bestDistance) {
+          best = record.employeeId;
+          bestDistance = distance;
+        }
+      }
+      return best;
+    },
+
+    setReducedMotion() {
+      // The renderer has no autonomous motion to reduce (single-clock design);
+      // reduced motion is enforced by the main-process simulator. Kept as a
+      // stable API for the page.
+    },
+
+    // 2026-09-24 latch fix: `visible` means "this view is the foreground /
+    // active main-area view" — the office:visibility payload's `active` flag,
+    // NOT the window visibility flag (a hidden window stops rAF entirely, so
+    // it cannot feed the monitor anyway; and a detached view still presents
+    // frames at background rate, which is what used to latch the monitor).
+    //   false -> stopPump(): the presentation-rate observer stops counting.
+    //     Rendering is snapshot-push driven (app.ticker stays stopped), so the
+    //     picture is unaffected while the simulation keeps updating in the
+    //     main process. backgroundThrottling is deliberately NOT touched — it
+    //     keeps the page's boot/snapshot pump alive in the background.
+    //   true  -> on a real false->true transition: reset the monitor's
+    //     measurement window (detached-rate frames must never share a window
+    //     with foreground frames) and re-arm the pump; if the view is sitting
+    //     in the static LOW_FPS_PERSISTENT diagnostic, attempt ONE bounded
+    //     recovery rebuild (at most once per activation, 3 per session).
+    // Returns a promise that resolves to
+    //   { mode, diagnosticCode, recovery: 'none'|'recovered'|'failed'|'exhausted' }.
+    // It never rejects: a failed rebuild stays static with a stable code.
+    setVisible(visible) {
+      const next = !!visible;
+      if (destroyed) return Promise.resolve({ mode, diagnosticCode, recovery: 'none' });
+      if (!next) {
+        foreground = false;
+        stopPump();
+        return Promise.resolve({ mode, diagnosticCode, recovery: 'none' });
+      }
+      const becameForeground = !foreground;
+      foreground = true;
+      if (!becameForeground) {
+        // Already foreground (e.g. a window focus event): never a new attempt.
+        return Promise.resolve({ mode, diagnosticCode, recovery: 'none' });
+      }
+      // 回前台必须补画一次：后台期间 renderNow() 被跳过（没人看得见），画布内容停在
+      // 切走那一刻；失效可视签名让下一次推送（≤16ms）重画。
+      lastRenderSignature = null;
+      if (mode === 'static' && diagnosticCode === 'LOW_FPS_PERSISTENT') {
+        return Promise.resolve(attemptRecovery()).then((recovery) => ({ mode, diagnosticCode, recovery }));
+      }
+      resetMonitor();
+      schedulePump();
+      return Promise.resolve({ mode, diagnosticCode, recovery: 'none' });
+    },
+
+    pause() {
+      if (destroyed || mode === 'static') return;
+      paused = true;
+      if (app && app.ticker) app.ticker.stop();
+    },
+
+    resume() {
+      if (destroyed || mode === 'static') return;
+      paused = false;
+      if (app && app.ticker) app.ticker.start();
+    },
+
+    isPaused: () => paused,
+
+    diagnostics() {
+      return {
+        mode,
+        diagnosticCode,
+        // 2026-09-24 latch-fix observability: the bounded-recovery budget is
+        // part of the renderer state the shell log records.
+        recoveryAttempts,
+        // M1 observability: the render-profile stage (the degrade ladder), the
+        // manual retry budget and the low-fps event count, plus the observer's
+        // own window telemetry. Never affects the decision.
+        renderProfile: (RENDER_PROFILES[renderProfileIndex] || RENDER_PROFILES[0]).id,
+        renderProfileIndex,
+        lowFpsEvents,
+        manualRetryAttempts,
+        fps: monitor && typeof monitor.stats === 'function' ? monitor.stats() : null,
+        foreground,
+        scene: { ...scene },
+        devicePixelRatio: clamp(Number(devicePixelRatio) || 1, 1, 3),
+        entityCount: entities.size,
+        textureCount: textures.size,
+        officeTextureCount: officeTextureMap.size,
+        officeTextureMissing: officeTextureMissing.length,
+        visibleHeight: computeVisibleHeight(scene.height),
+        packMissing: !pack,
+      };
+    },
+
+    // Task 3 golden-workstation diagnostics: which furniture parts render
+    // from managed textures, which fell back to placeholders, and the stable
+    // OFFICE_TEXTURE_MISSING entries (asset id + loader reason) for anything
+    // declared by a calibrated workstation but not usable.
+    officeDiagnostics() {
+      const textured = [];
+      const placeholder = [];
+      for (const record of furnitureRecords.values()) {
+        if (record.kind === 'sprite') textured.push(record.item.id);
+        if (record.kind === 'graphics') placeholder.push(record.item.id);
+      }
+      return {
+        code: officeTextureMissing.length > 0 ? 'OFFICE_TEXTURE_MISSING' : null,
+        missing: officeTextureMissing.map((entry) => ({ ...entry })),
+        texturedFurniture: textured,
+        placeholderFurniture: placeholder,
+      };
+    },
+
+    // Explicit paint order for furniture nodes (back-furniture bottom-up,
+    // then front occluders): the order children were mounted in.
+    groundPaintOrder() {
+      return groundOrder.map((entry) => ({ ...entry }));
+    },
+
+    furniturePaintOrder() {
+      return [...furnitureRecords.values()]
+        .filter((record) => record.kind === 'sprite' || record.kind === 'graphics')
+        .map((record) => ({
+          id: record.item.id,
+          role: furnitureRole(record.item),
+          layer: record.item.layer,
+          // The container the node actually lives in: sortY items paint inside
+          // the merged ground-entities pass, everything else on its declared layer.
+          paintsIn: record.node && record.node.parent ? record.node.parent.__layerId : null,
+          sortY: record.sortable === true,
+          textured: record.kind === 'sprite',
+          // Live scene-px rect (diagnostics for probes/tests that check occlusion).
+          rectPx: record.rect ? {
+            x: (record.mirrorRect || record.rect).x * scene.width,
+            y: (record.mirrorRect || record.rect).y * scene.height,
+            width: (record.mirrorRect || record.rect).width * scene.width,
+            height: (record.mirrorRect || record.rect).height * scene.height,
+          } : null,
+        }));
+    },
+
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      stopPump();
+      for (const record of furnitureRecords.values()) {
+        if (record.node) {
+          try { record.node.destroy({ children: true }); } catch { /* already gone */ }
+        }
+      }
+      furnitureRecords.clear();
+      for (const record of entities.values()) {
+        if (record.container) {
+          try { record.container.destroy({ children: true, texture: false }); } catch { /* already gone */ }
+          try { if (record.__badge.destroy) record.__badge.destroy(); } catch { /* already gone */ }
+          try { if (record.__marker.destroy) record.__marker.destroy(); } catch { /* already gone */ }
+          try { if (record.__selectionRing.destroy) record.__selectionRing.destroy(); } catch { /* already gone */ }
+        }
+      }
+      entities.clear();
+      for (const texture of textures.values()) {
+        try { if (typeof texture.destroy === 'function') texture.destroy(true); } catch { /* already gone */ }
+      }
+      for (const texture of officeTextureMap.values()) {
+        try { if (typeof texture.destroy === 'function') texture.destroy(true); } catch { /* already gone */ }
+      }
+      officeTextureMap.clear();
+      if (app) {
+        try { app.destroy(true, { children: true, texture: false }); } catch { /* already gone */ }
+      }
+      app = null;
+      stage = null;
+      layers = null;
+    },
+
+    get __destroyed() { return destroyed; },
+  };
+
+  // The static fallback's retry button (built by buildStaticFallback before the
+  // view object existed) calls back into the view's manual retry entry.
+  onStaticRetryRequest = () => { retryRendering(); };
+
+  return view;
+}
+
+module.exports = {
+  createOfficeRenderer,
+  computeVisibleHeight,
+  STATIC_FALLBACK_TEXT,
+  STATIC_RETRY_LABEL,
+  STATIC_RETRY_HINT,
+  STATIC_RETRY_EXHAUSTED_LABEL,
+  STATIC_RETRY_UNSUPPORTED_LABEL,
+  RENDER_PROFILES,
+};

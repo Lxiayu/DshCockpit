@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "actionId": "walk-left",
+  "packId": "deepseek-default",
+  "publishedAt": "2026-09-21T18:35:34.762Z",
+  "backupDir": "/Users/xia/program/dsh/DshCockpit-s1/content/build/backups/2026-09-21T18-35-34-754Z",
+  "backupDirRelative": "build/backups/2026-09-21T18-35-34-754Z",
+  "summary": "sync 15 frame file(s) into the pack (overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite); character.json: the action entry rebuilt from freshly measured geometry",
+  "frames": [
+    "assets/animations/walk/left/walk-left-b01.png",
+    "assets/animations/walk/left/walk-left-b02.png",
+    "assets/animations/walk/left/walk-left-b03.png",
+    "assets/animations/walk/left/walk-left-b04.png",
+    "assets/animations/walk/left/walk-left-b05.png",
+    "assets/animations/walk/left/walk-left-b06.png",
+    "assets/animations/walk/left/walk-left-b07.png",
+    "assets/animations/walk/left/walk-left-b08.png",
+    "assets/animations/walk/left/walk-left-b09.png",
+    "assets/animations/walk/left/walk-left-b10.png",
+    "assets/animations/walk/left/walk-left-b11.png",
+    "assets/animations/walk/left/walk-left-b12.png",
+    "assets/animations/walk/left/walk-left-b13.png",
+    "assets/animations/walk/left/walk-left-b14.png",
+    "assets/animations/walk/left/walk-left-b15.png"
+  ],
+  "files": {
+    "rewritten": [
+      "assets/animations/walk/left/walk-left-b01.png",
+      "assets/animations/walk/left/walk-left-b02.png",
+      "assets/animations/walk/left/walk-left-b03.png",
+      "assets/animations/walk/left/walk-left-b04.png",
+      "assets/animations/walk/left/walk-left-b05.png",
+      "assets/animations/walk/left/walk-left-b06.png",
+      "assets/animations/walk/left/walk-left-b07.png",
+      "assets/animations/walk/left/walk-left-b08.png",
+      "assets/animations/walk/left/walk-left-b09.png",
+      "assets/animations/walk/left/walk-left-b10.png",
+      "assets/animations/walk/left/walk-left-b11.png",
+      "assets/animations/walk/left/walk-left-b12.png",
+      "assets/animations/walk/left/walk-left-b13.png",
+      "assets/animations/walk/left/walk-left-b14.png",
+      "assets/animations/walk/left/walk-left-b15.png",
+      "character.json"
+    ],
+    "added": []
+  },
+  "changes": [
+    "sync 15 frame file(s) into the pack (overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite)",
+    "character.json: the action entry rebuilt from freshly measured geometry"
+  ]
+}

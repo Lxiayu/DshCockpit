@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "2194abc-task9-fix1",
+  "scenario": {
+    "activeCharacters": 5,
+    "viewport": "1280x840",
+    "viewportLogical": "1280x840",
+    "devicePixelRatio": 2,
+    "dprNote": "display-forced DPR on a single-2x-display machine; force-device-scale-factor=1 tested ineffective, offscreen setDeviceScaleFactor hangs; reference viewport is 1280x840 logical",
+    "reference": "macOS 14+, Electron 37 baseline; narrow window 720x620 and high-DPR anchor capture recorded separately"
+  },
+  "fps": {
+    "threshold": 30,
+    "measuredAvg": 60.67,
+    "measuredMin": 60,
+    "buckets": [
+      61,
+      61,
+      60
+    ],
+    "sampleMs": 4000,
+    "pass": true
+  },
+  "renderer": {
+    "mode": "webgl",
+    "pixiVersion": "8.5.2",
+    "electronVersion": "37"
+  },
+  "textures": {
+    "files": 19,
+    "decodedRgbaBytes": 9416704,
+    "loadMs": 282
+  },
+  "tickers": {
+    "appTickerStarted": false,
+    "sharedCount": 0
+  },
+  "dpi": 2,
+  "fonts": "[REDACTED:text]",
+  "memoryTrend": [
+    {
+      "atMs": 4544,
+      "rendererWorkingSetKb": 133168
+    },
+    {
+      "atMs": 4992,
+      "rendererWorkingSetKb": 133184
+    },
+    {
+      "atMs": 5456,
+      "rendererWorkingSetKb": 133264
+    }
+  ],
+  "activityDuringSampling": "orchestrator:roaming,researcher:roaming,coder:resting,reviewer:roaming,collaborator:roaming",
+  "classification": {
+    "separatelyClassified": true,
+    "webglInitFailure": {
+      "recorded": true,
+      "diagnosticCode": "WEBGL_INIT_FAILED",
+      "rendererModeAfter": "static"
+    },
+    "lowFps": {
+      "recorded": true,
+      "watchdogPresent": true,
+      "fallbackDemo": true,
+      "measuredAvg": 60.67,
+      "threshold": 30,
+      "pass": true
+    }
+  }
+}

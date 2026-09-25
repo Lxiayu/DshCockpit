@@ -185,7 +185,9 @@ test('startup keeps the loading surface until the real page is ready and uses pa
   const loading = read('loading.html');
   assert.match(aux, /loadingWindow = new BrowserWindow\(\{[\s\S]*show:\s*false/);
   assert.match(aux, /loadingWindow\.once\('ready-to-show',/);
-  assert.match(read('window-manager.js'), /mainWindow\.once\('ready-to-show',/);
+  // M4.2: the shell window loads nothing — the paint-ready timing lives on
+  // the harness VIEW's webContents (same no-flash contract, new surface).
+  assert.match(read('window-manager.js'), /harnessView\.webContents\.once\('did-first-visually-non-empty-paint', showMainWhenReady\)/);
   assert.match(main, /closeLoading\(\)/); // splash closes when the main window paints
   assert.match(aux, /did-fail-load/);
   assert.match(loading, /src="assets\/cockpit-logo\.jpg"/);
@@ -203,11 +205,31 @@ test('session-heavy startup paths use the worker and defer optional services', (
 
 test('main window can never stay hidden: ready-to-show fallback timer + limited load retry', () => {
   const main = read('main.js');
-  assert.match(read('window-manager.js'), /mainWindow\.once\('ready-to-show', showMainWhenReady\)/);
-  assert.match(read('window-manager.js'), /ready-to-show timed out; forcing show/);
+  assert.match(read('window-manager.js'), /harnessView\.webContents\.once\('did-first-visually-non-empty-paint', showMainWhenReady\)/);
+  assert.match(read('window-manager.js'), /dom-ready', \(\) => \{ setTimeout\(showMainWhenReady, 120\); \}\)/, 'the dom-ready backstop still forces the show');
+  assert.match(read('window-manager.js'), /paint timed out; forcing show/);
   const wmr = read('window-manager.js');
   assert.match(wmr, /mainLoadRetries < 2/);
   assert.match(wmr, /code === -3/); // ERR_ABORTED superseded loads ignored
+});
+
+test('main.js imports every Electron class it injects (M4.2 regression guard)', () => {
+  // 2026-09-17: main.js passed WebContentsView into createWindowManager while
+  // the electron destructure never imported it — the app died on load with
+  // "WebContentsView is not defined" before any test could see it. Every
+  // Electron symbol the deps object injects must come from that one import.
+  const main = read('main.js');
+  const destructure = main.match(/const \{([^}]*)\} = require\('electron'\);/);
+  assert.ok(destructure, 'main.js imports from electron');
+  const imported = new Set(destructure[1].split(',').map((name) => name.trim()).filter(Boolean));
+  const injectedBlock = main.slice(main.indexOf('const windowManager = createWindowManager({'));
+  const injected = injectedBlock.slice(0, injectedBlock.indexOf('});')).match(/\b(BrowserWindow|WebContentsView|BrowserView|BaseWindow|screen)\b/g) || [];
+  for (const name of new Set(injected)) {
+    if (name === 'screen' || name === 'BrowserWindow' || name === 'WebContentsView') {
+      assert.ok(imported.has(name), `${name} is injected into createWindowManager but not imported from electron`);
+    }
+  }
+  assert.ok(imported.has('WebContentsView'), 'the M4.2 shell needs the WebContentsView class');
 });
 
 test('no free references to state moved into extracted modules (A1 guard)', () => {

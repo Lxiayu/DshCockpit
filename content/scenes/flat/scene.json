@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "flat",
+  "label": "平面办公室",
+  "logical": {
+    "width": 1280,
+    "height": 840
+  },
+  "groundLine": 0.62,
+  "depthBands": {
+    "background": [
+      0,
+      10
+    ],
+    "floor": [
+      10,
+      20
+    ],
+    "furniture": [
+      20,
+      40
+    ],
+    "character": [
+      45
+    ],
+    "foreground": [
+      50,
+      60
+    ]
+  },
+  "tokens": {
+    "palette": [
+      "#f6f7f8",
+      "#e7ebee"
+    ],
+    "outline": "#7f95a3"
+  },
+  "note": "按 docs/notes/office-workbench-m0.md §2（设计稿 §6.3）定稿的 M0 初值；运行时语义冻结，本文件仅作为内容工程的事实源。"
+}

@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "id": "walk-left",
+  "loop": true,
+  "direction": "left",
+  "frames": [
+    {
+      "file": "assets/animations/walk/left/walk-left-b01.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/left/walk-left-b02.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/left/walk-left-b03.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/left/walk-left-b04.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/left/walk-left-b05.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/left/walk-left-b06.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/left/walk-left-b07.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/left/walk-left-b08.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/left/walk-left-b09.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/left/walk-left-b10.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/left/walk-left-b11.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/left/walk-left-b12.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/left/walk-left-b13.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/left/walk-left-b14.png",
+      "durationMs": 83
+    },
+    {
+      "file": "assets/animations/walk/left/walk-left-b15.png",
+      "durationMs": 83
+    }
+  ],
+  "geometry": {
+    "footLine": 296,
+    "tolerancePx": 1
+  }
+}

@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "task": "Task 4 / SPEC-06 Animation Playground",
+  "viewport": {
+    "width": 1280,
+    "height": 840
+  },
+  "forcedDeviceScaleFactor": 1,
+  "dpr": 1,
+  "pixiVersion": "8.5.2",
+  "electronVersion": "37.10.3",
+  "chromeVersion": "138.0.7204.251",
+  "nodeVersion": "22.21.1",
+  "platform": "darwin arm64",
+  "fonts": "system default (ui-monospace stack; enumerated list not available in-page)",
+  "networkRequests": 0,
+  "pack": {
+    "id": "whale-girl (normalized fixture)",
+    "builtin": "deepseek-default"
+  },
+  "scenarioCount": 9,
+  "scenarios": [
+    {
+      "name": "initial",
+      "file": "initial.png",
+      "size": {
+        "width": 1280,
+        "height": 840
+      },
+      "bytes": 83868,
+      "blank": false,
+      "check": "passed",
+      "checkError": null
+    },
+    {
+      "name": "moving",
+      "file": "moving.png",
+      "size": {
+        "width": 1280,
+        "height": 840
+      },
+      "bytes": 85625,
+      "blank": false,
+      "check": "passed",
+      "checkError": null
+    },
+    {
+      "name": "turning",
+      "file": "turning.png",
+      "size": {
+        "width": 1280,
+        "height": 840
+      },
+      "bytes": 88408,
+      "blank": false,
+      "check": "passed",
+      "checkError": null
+    },
+    {
+      "name": "arriving",
+      "file": "arriving.png",
+      "size": {
+        "width": 1280,
+        "height": 840
+      },
+      "bytes": 86180,
+      "blank": false,
+      "check": "passed",
+      "checkError": null
+    },
+    {
+      "name": "working",
+      "file": "working.png",
+      "size": {
+        "width": 1280,
+        "height": 840
+      },
+      "bytes": 85670,
+      "blank": false,
+      "check": "passed",
+      "checkError": null
+    },
+    {
+      "name": "result",
+      "file": "result.png",
+      "size": {
+        "width": 1280,
+        "height": 840
+      },
+      "bytes": 85241,
+      "blank": false,
+      "check": "passed",
+      "checkError": null
+    },
+    {
+      "name": "resize",
+      "file": "resize.png",
+      "size": {
+        "width": 960,
+        "height": 640
+      },
+      "bytes": 57542,
+      "blank": false,
+      "check": "passed",
+      "checkError": null
+    },
+    {
+      "name": "reduced-motion",
+      "file": "reduced-motion.png",
+      "size": {
+        "width": 960,
+        "height": 640
+      },
+      "bytes": 58200,
+      "blank": false,
+      "check": "passed",
+      "checkError": null
+    },
+    {
+      "name": "missing-texture-fallback",
+      "file": "missing-texture-fallback.png",
+      "size": {
+        "width": 960,
+        "height": 640
+      },
+      "bytes": 57607,
+      "blank": false,
+      "check": "passed",
+      "checkError": null
+    }
+  ]
+}

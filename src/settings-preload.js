@@ -5,6 +5,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('dshShell', {
   getSettings: () => ipcRenderer.invoke('shell:get-settings'),
+  // Task 8 / SPEC-08: additive Office settings bridge (office-state.v1.json
+  // only; never touches the legacy settings.json).
+  getOfficeSettings: () => ipcRenderer.invoke('shell:office-settings-get'),
+  saveOfficeSettings: (partial) => ipcRenderer.invoke('shell:office-settings-set', partial),
   saveSettings: (partial) => ipcRenderer.invoke('shell:save-settings', partial),
   getQuickAskShortcut: () => ipcRenderer.invoke('shell:quickask-shortcut-get'),
   setQuickAskShortcut: (value) => ipcRenderer.invoke('shell:quickask-shortcut-set', value),
@@ -14,6 +18,8 @@ contextBridge.exposeInMainWorld('dshShell', {
   onTheme: (cb) => ipcRenderer.on('shell:theme', (_e, t) => cb(t)),
   pickFolder: (kind) => ipcRenderer.invoke('shell:pick-folder', kind),
   runtimeInfo: () => ipcRenderer.invoke('shell:runtime-info'),
+  // 容器加固（2026-09-23）：运行时降级姿态推送（主进程 5s tick，降级集合变化时）
+  onRuntimeHealth: (cb) => ipcRenderer.on('runtime:health', (_e, h) => cb(h)),
   checkUpdate: () => ipcRenderer.invoke('shell:check-update'),
   applyUpdate: () => ipcRenderer.invoke('shell:apply-update'),
   rollback: () => ipcRenderer.invoke('shell:rollback'),

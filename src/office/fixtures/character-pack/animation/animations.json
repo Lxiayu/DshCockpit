@@ -1,0 +1,372 @@
+{
+  "animations": {
+    "error": {
+      "direction": "none",
+      "frames": [
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/expressions/error.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 42,
+            "y": 49
+          }
+        }
+      ],
+      "loop": false,
+      "state": "error"
+    },
+    "finished": {
+      "direction": "none",
+      "frames": [
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/expressions/finished.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 48,
+            "y": 49
+          }
+        }
+      ],
+      "loop": false,
+      "state": "finished"
+    },
+    "idle": {
+      "direction": "none",
+      "frames": [
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/expressions/idle.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 45,
+            "y": 48
+          }
+        }
+      ],
+      "loop": false,
+      "state": "idle"
+    },
+    "offline": {
+      "direction": "none",
+      "frames": [
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/expressions/offline.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 64,
+            "y": 62
+          }
+        }
+      ],
+      "loop": false,
+      "state": "offline"
+    },
+    "side-back": {
+      "direction": "none",
+      "frames": [
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/side/none/side-back.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 42,
+            "y": 49
+          }
+        }
+      ],
+      "loop": false,
+      "state": "side"
+    },
+    "side-left": {
+      "direction": "none",
+      "frames": [
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/side/none/side-left.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 66,
+            "y": 48
+          }
+        }
+      ],
+      "loop": false,
+      "state": "side"
+    },
+    "side-right": {
+      "direction": "none",
+      "frames": [
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/side/none/side-right.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 36,
+            "y": 48
+          }
+        }
+      ],
+      "loop": false,
+      "state": "side"
+    },
+    "walk-down": {
+      "direction": "down",
+      "frames": [
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/walk/down/walk-down-01.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 48,
+            "y": 47
+          }
+        },
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/walk/down/walk-down-02.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 62,
+            "y": 48
+          }
+        },
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/walk/down/walk-down-03.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 48,
+            "y": 47
+          }
+        },
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/walk/down/walk-down-04.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 50,
+            "y": 46
+          }
+        }
+      ],
+      "loop": true,
+      "state": "walk"
+    },
+    "walk-left": {
+      "direction": "left",
+      "frames": [
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/walk/left/walk-left-01.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 37,
+            "y": 49
+          }
+        },
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/walk/left/walk-left-02.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 46,
+            "y": 49
+          }
+        },
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/walk/left/walk-left-03.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 45,
+            "y": 49
+          }
+        },
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/walk/left/walk-left-04.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 38,
+            "y": 50
+          }
+        }
+      ],
+      "loop": true,
+      "state": "walk"
+    },
+    "walk-right": {
+      "direction": "right",
+      "frames": [
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/walk/right/walk-right-01.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 60,
+            "y": 49
+          }
+        },
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/walk/right/walk-right-02.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 69,
+            "y": 49
+          }
+        },
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/walk/right/walk-right-03.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 69,
+            "y": 47
+          }
+        },
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/walk/right/walk-right-04.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 6,
+            "y": 46
+          }
+        }
+      ],
+      "loop": true,
+      "state": "walk"
+    },
+    "walk-up": {
+      "direction": "up",
+      "frames": [
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/walk/up/walk-up-01.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 58,
+            "y": 47
+          }
+        },
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/walk/up/walk-up-02.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 40,
+            "y": 48
+          }
+        },
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/walk/up/walk-up-03.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 58,
+            "y": 47
+          }
+        },
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/animations/walk/up/walk-up-04.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 44,
+            "y": 48
+          }
+        }
+      ],
+      "loop": true,
+      "state": "walk"
+    },
+    "warning": {
+      "direction": "none",
+      "frames": [
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/expressions/warning.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 48,
+            "y": 49
+          }
+        }
+      ],
+      "loop": false,
+      "state": "warning"
+    },
+    "working": {
+      "direction": "none",
+      "frames": [
+        {
+          "anchor": null,
+          "durationMs": null,
+          "file": "assets/expressions/working.png",
+          "visibleBounds": {
+            "height": 256,
+            "width": 256,
+            "x": 68,
+            "y": 41
+          }
+        }
+      ],
+      "loop": false,
+      "state": "working"
+    }
+  },
+  "defaultFrameDurationMs": 1000,
+  "schemaVersion": 1
+}

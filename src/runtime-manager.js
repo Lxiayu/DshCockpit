@@ -18,6 +18,9 @@ const semver = require('semver');
 
 const PACKAGE = '@deepseek-ai/dsh';
 const SMOKE_TIMEOUT_MS = 60_000;
+// 连续启动/健康失败多少次后自动回滚 previousVersion（默认 3：与 supervisor 的
+// 60s 窗口 crash-loop 语义对齐，但计数跨重启持久，覆盖"每次重启都试一次"的循环）。
+const STARTUP_FAIL_THRESHOLD = 3;
 
 // ---------------------------------------------------------------------------
 // Shell ↔ runtime compatibility matrix (DESIGN.md §6.4).
@@ -27,15 +30,13 @@ const SMOKE_TIMEOUT_MS = 60_000;
 // replaced it wholesale — verified by probe on 2026-09-12:
 //   · every /api call and WS upgrade now needs the browser-session cookie (401 otherwise)
 //   · /api/events.host|mux moved to the /api/remote.mux `$events` stream mux
-//   · /api/session.list and /api/respond were removed
-//   · commands/execute gained required args (submittedAttachments)
-// A runtime outside this range keeps working for chat, but the shell's
-// feed-derived features (notifications, IM pushes, per-turn cost) degrade.
-// The migration ships with v0.4.0 — until then the updater refuses to install
-// a gated version instead of silently losing those features.
-// `-0` + includePrerelease: prereleases of 0.1.0/0.1.1 stay supported
-// (0.1.1-rc.2 is what we bundle) while every 0.1.2 prerelease/alpha is gated.
-const SUPPORTED_RUNTIME_RANGE = '<0.1.2-0';
+// 2026-09-22（用户拍板"放开更新挡板"）：0.1.2+ 的 Remote API 改造（Cookie 鉴权、
+// /api/remote.mux 事件面、无 /api/respond）已由兼容层覆盖，因此矩阵放宽到整个 0.1.x。
+// 该常量的语义也随之改变：它是"已测试矩阵"，**不再作为安装挡板**——矩阵外的版本
+// 仍可安装，壳会记录 knownIssue、提示降级并保留一键回滚（容器优先：harness 可以坏，
+// 壳不能坏）。真正的崩溃保护由 watchdog + 回滚 + 降级态承担（见 docs/strategy/
+// 2026-09-22-harness-upgrade-compat-plan.md）。
+const SUPPORTED_RUNTIME_RANGE = '<0.2.0-0';
 
 /** Is one runtime version inside the shell's supported range?
  * Unparseable/empty versions answer true: a local dev install must never be
@@ -68,7 +69,11 @@ class RuntimeManager {
     this._installRunner = null; // injectable install operation for tests
     this._spawn = spawn; // injectable for tests (defaults to node:child_process)
     this._activeInstalls = new Map(); // version -> cancellable install operation
-    this.state = { activeVersion: null, previousVersion: null, pendingVersion: null, installed: [], broken: [], knownIssues: {}, lastSnapshot: null };
+    // 容器加固（2026-09-23）：同一版本连续启动/健康失败的持久计数。放在
+    // runtime-state.json 里而不是内存：重启壳不能把计数器清零，"坏 harness"
+    // 不会因为用户重启应用而获得免费重试。达阈值即自动回滚 previousVersion。
+    this.startupFailureThreshold = STARTUP_FAIL_THRESHOLD; // injectable for tests
+    this.state = { activeVersion: null, previousVersion: null, pendingVersion: null, installed: [], broken: [], knownIssues: {}, lastSnapshot: null, startupFailStreak: 0, startupFailStreakVersion: null, lastStartupFailReason: null };
     this.loadState();
   }
 
@@ -86,6 +91,14 @@ class RuntimeManager {
       if (!Array.isArray(next.broken)) next.broken = [];
       next.broken = next.broken.filter((version) => typeof version === 'string');
       if (!next.knownIssues || typeof next.knownIssues !== 'object' || Array.isArray(next.knownIssues)) next.knownIssues = {};
+      // 持久失败计数：损坏/手改过的字段按"没有失败"处理，绝不让状态文件把更新
+      // 流程变成类型错误。
+      const streak = Number(next.startupFailStreak);
+      next.startupFailStreak = Number.isInteger(streak) && streak > 0 ? streak : 0;
+      next.startupFailStreakVersion = typeof next.startupFailStreakVersion === 'string' && next.startupFailStreakVersion
+        ? next.startupFailStreakVersion
+        : null;
+      next.lastStartupFailReason = typeof next.lastStartupFailReason === 'string' ? next.lastStartupFailReason.slice(0, 500) : null;
       this.state = next;
     } catch { /* first run */ }
   }
@@ -125,6 +138,8 @@ class RuntimeManager {
       broken: [...this.state.broken],
       knownIssues: { ...this.state.knownIssues },
       activePath: active ? active.path : null,
+      // 容器加固可见化：连续启动失败计数（设置页/排障用）
+      startupFailure: this.startupFailureInfo(),
     };
   }
 
@@ -265,10 +280,13 @@ class RuntimeManager {
     if (cfg.channel === 'latest') {
       return packument['dist-tags'] && packument['dist-tags'].latest || null;
     }
-    // rc: highest version (prereleases included). Versions that semver cannot
-    // parse are skipped — a single malformed entry must not throw the sort and
-    // take down the whole check.
-    const versions = Object.keys(packument.versions || {}).filter((v) => semver.valid(v));
+    // rc: highest version, prereleases included, **alpha excluded**（渠道语义：
+    // alpha 属于 opt-in 通道，用 `pinned` 指定；rc 渠道不该把用户直接推到 alpha）。
+    // Versions that semver cannot parse are skipped — a single malformed entry
+    // must not throw the sort and take down the whole check.
+    const versions = Object.keys(packument.versions || {})
+      .filter((v) => semver.valid(v))
+      .filter((v) => !/-alpha\./.test(v));
     if (!versions.length) return null;
     versions.sort(semver.rcompare);
     return versions[0];
@@ -721,7 +739,7 @@ class RuntimeManager {
   }
 
   /** Switch back to the previous version and restore the DSH_HOME snapshot. */
-  async rollback() {
+  async rollback({ auto = false, reason = null } = {}) {
     const current = this.state.activeVersion;
     const target = this.state.previousVersion || null;
     const prev = target ? this.entry(target) : null;
@@ -730,9 +748,71 @@ class RuntimeManager {
     this.state.previousVersion = null;
     this.state.activeVersion = prev.version;
     this.state.pendingVersion = null;
-    this.state.knownIssues[current] = 'user rolled back';
+    this.state.knownIssues[current] = auto
+      ? `auto-rolled back after ${this.state.startupFailStreak} consecutive startup failures${reason ? `: ${reason}` : ''}`
+      : 'user rolled back';
     this.saveState();
     return { from: current, to: prev.version };
+  }
+
+  // --------------------------------------------------- startup failure streak
+  /** 记录一次"启动/健康失败"（supervisor 的进程提前退出或健康探测失败）。
+   * 计数按版本归属：换了一个 activeVersion 就从 0 开始。持久化到 state 文件，
+   * 重启壳不清零。返回 { version, streak, threshold, tripped, canRollback }。 */
+  recordStartupFailure(reason) {
+    const version = this.state.activeVersion;
+    if (this.state.startupFailStreakVersion !== version) {
+      this.state.startupFailStreak = 0;
+      this.state.startupFailStreakVersion = version;
+    }
+    this.state.startupFailStreak += 1;
+    this.state.lastStartupFailReason = reason ? String(reason).slice(0, 500) : null;
+    this.saveState();
+    const streak = this.state.startupFailStreak;
+    return {
+      version,
+      streak,
+      threshold: this.startupFailureThreshold,
+      tripped: streak >= this.startupFailureThreshold,
+      canRollback: !!(this.state.previousVersion && this.entry(this.state.previousVersion)),
+    };
+  }
+
+  /** 一次健康启动清零（正常 boot / 手动重启成功都算）。返回是否有变化。 */
+  recordStartupSuccess() {
+    if (!this.state.startupFailStreak && !this.state.startupFailStreakVersion) return false;
+    this.state.startupFailStreak = 0;
+    this.state.startupFailStreakVersion = null;
+    this.state.lastStartupFailReason = null;
+    this.saveState();
+    return true;
+  }
+
+  startupFailureInfo() {
+    return {
+      streak: this.state.startupFailStreak,
+      version: this.state.startupFailStreakVersion,
+      reason: this.state.lastStartupFailReason,
+      threshold: this.startupFailureThreshold,
+      tripped: this.state.startupFailStreak >= this.startupFailureThreshold,
+      canRollback: !!(this.state.previousVersion && this.entry(this.state.previousVersion)),
+    };
+  }
+
+  /** 达阈值时自动回滚到 previousVersion（"harness 可以坏、壳不能坏"：坏版本
+   * 不允许无限重试）。没有 previousVersion / 未达阈值时返回 null，绝不抛错。
+   * 回滚成功后清零计数，给回滚目标一次全新的机会。 */
+  async maybeAutoRollback(reason) {
+    const info = this.startupFailureInfo();
+    if (!info.tripped) return null;
+    if (!info.canRollback) {
+      this.log(`[runtime] ${info.version} failed to start ${info.streak}x in a row — no previous version to roll back to`);
+      return null;
+    }
+    const result = await this.rollback({ auto: true, reason: reason || info.reason });
+    this.recordStartupSuccess();
+    this.log(`[runtime] auto-rollback: ${result.from} failed ${info.streak} consecutive startups -> back to ${result.to}`);
+    return result;
   }
 
   // -------------------------------------------------------------------- gc

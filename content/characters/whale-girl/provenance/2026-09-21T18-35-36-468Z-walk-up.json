@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "actionId": "walk-up",
+  "packId": "deepseek-default",
+  "publishedAt": "2026-09-21T18:35:36.476Z",
+  "backupDir": "/Users/xia/program/dsh/DshCockpit-s1/content/build/backups/2026-09-21T18-35-36-468Z",
+  "backupDirRelative": "build/backups/2026-09-21T18-35-36-468Z",
+  "summary": "sync 14 frame file(s) into the pack (overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite); character.json: the action entry rebuilt from freshly measured geometry",
+  "frames": [
+    "assets/animations/walk/up/walk-up-b01.png",
+    "assets/animations/walk/up/walk-up-b02.png",
+    "assets/animations/walk/up/walk-up-b03.png",
+    "assets/animations/walk/up/walk-up-b04.png",
+    "assets/animations/walk/up/walk-up-b05.png",
+    "assets/animations/walk/up/walk-up-b06.png",
+    "assets/animations/walk/up/walk-up-b07.png",
+    "assets/animations/walk/up/walk-up-b08.png",
+    "assets/animations/walk/up/walk-up-b09.png",
+    "assets/animations/walk/up/walk-up-b10.png",
+    "assets/animations/walk/up/walk-up-b11.png",
+    "assets/animations/walk/up/walk-up-b12.png",
+    "assets/animations/walk/up/walk-up-b13.png",
+    "assets/animations/walk/up/walk-up-b14.png"
+  ],
+  "files": {
+    "rewritten": [
+      "assets/animations/walk/up/walk-up-b01.png",
+      "assets/animations/walk/up/walk-up-b02.png",
+      "assets/animations/walk/up/walk-up-b03.png",
+      "assets/animations/walk/up/walk-up-b04.png",
+      "assets/animations/walk/up/walk-up-b05.png",
+      "assets/animations/walk/up/walk-up-b06.png",
+      "assets/animations/walk/up/walk-up-b07.png",
+      "assets/animations/walk/up/walk-up-b08.png",
+      "assets/animations/walk/up/walk-up-b09.png",
+      "assets/animations/walk/up/walk-up-b10.png",
+      "assets/animations/walk/up/walk-up-b11.png",
+      "assets/animations/walk/up/walk-up-b12.png",
+      "assets/animations/walk/up/walk-up-b13.png",
+      "assets/animations/walk/up/walk-up-b14.png",
+      "character.json"
+    ],
+    "added": []
+  },
+  "changes": [
+    "sync 14 frame file(s) into the pack (overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite, overwrite)",
+    "character.json: the action entry rebuilt from freshly measured geometry"
+  ]
+}

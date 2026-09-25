@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "sourcePath": "/Users/xia/Downloads/office-layout-draft.json",
+  "fixture": "office-layout-draft.json",
+  "sha256": "ac03bb3133246f30c0fde715898ab47c132a0be44f43b53eae3d8ac713e770bd",
+  "importedOn": "2026-09-07",
+  "purpose": "Immutable authoring input for deterministic workstation normalization tests."
+}

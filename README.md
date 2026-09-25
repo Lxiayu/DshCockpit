@@ -8,7 +8,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)](#)
-[![Tests](https://img.shields.io/badge/tests-471%20passing-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-1393%20passing-brightgreen)](#)
 [![upstream](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Lxiayu/DshCockpit/master/docs/compat/badge.json)](docs/compat/)
 [![Powered by](https://img.shields.io/badge/powered%20by-DeepSeek%20Harness-4D6BFE)](https://github.com/deepseek-ai/deepseek-harness)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
@@ -65,6 +65,10 @@ DshCockpit 把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harnes
 
 还有：模型管理（6 家预设 + Ollama 本地模型）、插件与技能市场（安装前可预览）、双语界面、深浅主题。
 
+### 4 · 虚拟办公室（v0.4.0 起）
+
+五名员工（调度员 + 研究员/工程/评审/协作者）在办公室里由 harness 的**真实事件**驱动：开工走向工位、工具调用落到设施、子代理各自上工、交付或出错都有确定的收尾。右栏把「今日用量 / 员工行 / 待你处理 / 时间线 / 详情」集中呈现——审批与提问可以直接在这里批复，高危请求走危险模态（展示真实命令原文、无「总是允许」）。办公室是默认视图，切到会话工作台时它在后台照常活着（仿真不冻结）；气泡与面板只吃事实，提示词、代码与模型输出原文不进办公室。
+
 ### 横向对比
 
 | | 裸 `dsh web` | 一般桌面壳 | **DshCockpit** |
@@ -120,10 +124,11 @@ npm install && npm start
 - macOS 包尚未签名公证（需要上面那行 `xattr`）；Windows 可能因同样原因触发 SmartScreen
 - 单人维护的项目；主要在作者自己的机器上实战验证
 - Windows 是主要开发目标；macOS arm64 由 CI 构建并冒烟测试（Intel 包暂停发布，可在 Apple Silicon 上自行交叉构建），但真实环境里程较少
+- 虚拟办公室是 v0.4.0 新增：本机 macOS 上做了 4 小时连续长稳（真对话 + 反复切视图），**Windows 真机与高分屏场景待验证**；巡游的左半区占比在 60 分钟聚合上仍贴 40% 下沿，个体下限已列入发版后专项
 
 ## 🤝 贡献
 
-欢迎 PR！请先跑 `npm test`（471 项测试）。架构见 [`DESIGN.md`](DESIGN.md)，产品理念见 [`PHILOSOPHY.md`](PHILOSOPHY.md)，功能清单见 [`FEATURES.md`](FEATURES.md)，竞争路线图见 [`ROADMAP.md`](ROADMAP.md)。
+欢迎 PR！请先跑 `npm test`（1393 项测试）。架构见 [`DESIGN.md`](DESIGN.md)，产品理念见 [`PHILOSOPHY.md`](PHILOSOPHY.md)，功能清单见 [`FEATURES.md`](FEATURES.md)，竞争路线图见 [`ROADMAP.md`](ROADMAP.md)。
 
 <details>
 <summary><b>操作层原则（产品理念）</b></summary>
@@ -134,6 +139,21 @@ Harness owns the workspace. DshCockpit owns the operating layer.
 
 完整理念见 [`PHILOSOPHY.md`](PHILOSOPHY.md)。
 </details>
+
+## 🧰 更新日志 · v0.4.0（虚拟办公室，2026-09-25）
+
+v0.4.0 把 harness 的真实事件流接进了一座**虚拟办公室**（默认视图，左栏一键切回会话工作台）：员工走位/上工/交付都由真事件驱动，右栏六块信息架构（今日用量 / 员工行 / 待你处理 / 时间线 / 详情 / 页脚）把成本、审批与工作记录集中呈现；审批与提问可直接在办公室里批复（高危走危险模态、展示真实命令原文、无「总是允许」）。隐私红线：提示词、代码、路径原文与模型输出都不进办公室。
+
+同一版里修掉两个用户实测顽疾，并补上 0.1.5 兼容层：
+
+- **渲染锁死**（切到工作台一段时间后办公室画面已死）：低帧判据改时间窗（3s 窗、持续 12s <20fps 才动作），切走不测量、回前台重置；降级阶梯改为先降画质档、末档才静止，并有界恢复 + 手动「重试渲染」。
+- **同步断档**（对话结束后员工卡在「工作中」）：`session/page` 反向重读补发端补齐，模块按 continuation / 基线重启落地；follow 重开不再把开场窗口当增量（造断档的源头）。
+- **子代理会话寻址**（0.4.0 长稳实测新增）：0.1.5 拒绝用根地址 follow 子代理会话（`session/agent-busy: subagent Sessions require their durable parent address`），旧实现因此每 5s 重开一次、每次报错。现在按 `{kind:'subagent', parentSessionId, childSessionId, mode}` 寻址，并加了「连开 N 次零帧即停」的有界守卫（`src/office/runtime/follow-address.js`）。
+- **0.1.5 兼容层**：斜杠端点 RPC + Cookie 鉴权 + `remote.mux` 事件面 + `$events/result` 审批回执；更新挡板放开（矩阵外版本可装/可降级/可回滚）；`rc` 渠道不再把 alpha 当候选。
+- **Windows 性能必修四项**、**巡游/休息区改造**（聚合左半区占比 12/30 分钟 0.469/0.430，抢占延迟最坏 1008ms→240ms）、**排包精简**（asar 创作块 52→0，−6.3%）。
+
+用户可见的发版说明见 GitHub Release 正文；逐项根因、取舍与实测证据的权威记录见各 commit 消息与 `docs/strategy/`（后者不进 git）。
+
 
 ## 📄 许可与致谢
 

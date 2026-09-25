@@ -9,9 +9,9 @@ const path = require('node:path');
 
 function createWindowManager(deps) {
   const {
-    BrowserWindow, screen,
+    BrowserWindow, WebContentsView, screen,
     appName, iconPath, themeBackground, resolvedTheme,
-    windowState, windowStateFile,
+    windowState, windowStateFile, officeWindowStateFile,
     log, t, lang,
     settingsGet,
     noTray = false,
@@ -34,6 +34,13 @@ function createWindowManager(deps) {
   let mainWindow = null;
   let settingsWindow = null;
   let cockpitWindow = null;
+  // M4.2 shell composition: the main window hosts a left rail view plus one
+  // of two main-area views (harness / office). The window itself loads nothing.
+  let railView = null;
+  let harnessView = null;
+  let officeShellView = null;
+  let activeMainView = 'harness';
+  let shellSyncTimer = null;
   let mainWindowPending = false;
   let windowStateSaveTimer = null;
   let cockpitSyncTimer = null;
@@ -42,6 +49,179 @@ function createWindowManager(deps) {
   let returnToCockpitPending = false;
   let cockpitHiddenForAuxWindow = false;
   let cockpitSnapshotCache = { at: 0, snapshot: null };
+
+  // ------------------------------------------ office shell view (M4.2)
+  // The office stopped being an independent window: it is a WebContentsView
+  // in the main window's right area, swapped with the harness view. Hiding
+  // it KEEPS the page alive (the main-process simulation keeps pushing), so
+  // switching back is instant and the office keeps living in the background.
+  let officeShellOnVisibility = null;
+  let officeShellVisibleFlag = 'false|false';
+
+  function officeShellViewId() {
+    return officeShellView ? 'office-shell-1' : null;
+  }
+
+  function notifyOfficeShellVisibility() {
+    // 2026-09-22 修正（用户实测：永远看不到对话气泡）：办公室在 M4.2 就是"后台活着"的
+    // 设计——切到 harness 页不该冻结它的仿真，否则闲聊/走位永远积累不到（无头模拟里首聊
+    // 约需 2 分钟）。因此：**只有窗口隐藏/最小化才暂停仿真**；`active`（办公室是否为当前
+    // 主视图）随载荷下发，供页面做"仅在用户注视时"的节流/提示用。
+    const windowVisible = !!(mainWindow && !mainWindow.isDestroyed()
+      && mainWindow.isVisible() && !mainWindow.isMinimized());
+    const active = !!(officeShellView && activeMainView === 'office');
+    const signature = `${windowVisible}|${active}`;
+    if (signature === officeShellVisibleFlag) return;
+    officeShellVisibleFlag = signature;
+    if (typeof officeShellOnVisibility === 'function') {
+      try { officeShellOnVisibility(officeShellViewId(), windowVisible); } catch { /* module errors never break the view */ }
+    }
+    if (officeShellView) {
+      try { officeShellView.webContents.send('office:visibility', { viewId: officeShellViewId(), visible: windowVisible, active }); } catch { /* closing */ }
+    }
+  }
+
+  function showOfficeShellView({ url, onVisibility = null } = {}) {
+    if (!url) return null;
+    if (typeof onVisibility === 'function') officeShellOnVisibility = onVisibility;
+    if (!officeShellView) {
+      officeShellView = new WebContentsView({
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          // The office page stays ALIVE in the background (the simulation
+          // keeps pushing): throttling its timers would stall its boot and
+          // its snapshot pump exactly when it is hidden.
+          backgroundThrottling: false,
+          preload: path.join(__dirname, 'office', 'office-preload.js'),
+        },
+      });
+      officeShellView.webContents.on('will-navigate', (e) => e.preventDefault());
+      officeShellView.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      officeShellView.webContents.loadURL(url);
+      log('[office] shell view created (main-area office)');
+    }
+    activeMainView = 'office';
+    syncShellViews();
+    notifyOfficeShellVisibility();
+    notifyOfficeViewsChanged();
+    return officeShellView;
+  }
+
+  function hideOfficeShellView() {
+    activeMainView = 'harness';
+    syncShellViews();
+    notifyOfficeShellVisibility();
+    notifyOfficeViewsChanged();
+  }
+
+  function isOfficeViewActive() {
+    return !!(officeShellView && activeMainView === 'office');
+  }
+
+  function closeOfficeShellView() {
+    if (!officeShellView) return;
+    try {
+      mainWindow && !mainWindow.isDestroyed() && mainWindow.contentView.removeChildView(officeShellView);
+      officeShellView.webContents.close();
+    } catch { /* already gone */ }
+    officeShellView = null;
+    officeShellVisibleFlag = false;
+    activeMainView = 'harness';
+    notifyOfficeViewsChanged();
+  }
+
+  // The module pushes snapshots to whatever office surface exists; the page
+  // consumes them whether it is the active view or alive in the background.
+  function broadcastToOfficeViews(channel, payload) {
+    if (!officeShellView) return;
+    try { officeShellView.webContents.send(channel, payload); } catch { /* closing */ }
+  }
+
+  function officeViewCount() {
+    return officeShellView ? 1 : 0;
+  }
+
+  // ---------------------------------------- left function rail (M4.2)
+  // The rail is a slim icon strip on the window's left edge (the M4 floating
+  // window is retired; the follow-up removed the collapse control — 44px of
+  // icons is already the minimal dock). Its page keeps the same preload
+  // bridge and IPC channels, plus the shell theme push.
+  const OFFICE_RAIL_WIDTH = 44;
+
+  function createRailView() {
+    if (railView || !mainWindow || mainWindow.isDestroyed()) return railView;
+    railView = new WebContentsView({
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        preload: path.join(__dirname, 'office-rail-preload.js'),
+      },
+    });
+    railView.webContents.loadFile(path.join(__dirname, 'office-rail.html'));
+    railView.webContents.on('will-navigate', (e) => e.preventDefault());
+    railView.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    mainWindow.contentView.addChildView(railView);
+    log('[office] left rail view created (in-window shell)');
+    return railView;
+  }
+
+  function broadcastToOfficeRail(channel, payload) {
+    if (!railView) return;
+    try { railView.webContents.send(channel, payload); } catch { /* closing */ }
+  }
+
+  // Shell-level pushes (theme in particular) must reach the VIEWS: they are
+  // not BrowserWindows, so main.js's broadcastTheme loop cannot see them.
+  function broadcastToShellViews(channel, payload) {
+    broadcastToOfficeRail(channel, payload);
+    if (officeShellView) {
+      try { officeShellView.webContents.send(channel, payload); } catch { /* closing */ }
+    }
+  }
+
+  function notifyOfficeViewsChanged() {
+    broadcastToOfficeRail('office-rail:office-state', { open: isOfficeViewActive(), count: officeViewCount() });
+    broadcastToOfficeRail('office-rail:view-state', { active: activeMainView });
+  }
+
+  // ---------------------------------------------- shell view geometry
+  // The rail owns the left band at full content height; the ACTIVE main-area
+  // view owns everything to its right. The inactive view is detached (its
+  // page stays alive) and gets the same main-area bounds for the switch back.
+  function syncShellViews() {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const content = mainWindow.getContentBounds();
+    if (railView) {
+      railView.setBounds({ x: 0, y: 0, width: OFFICE_RAIL_WIDTH, height: content.height });
+    }
+    const mainArea = {
+      x: OFFICE_RAIL_WIDTH,
+      y: 0,
+      width: Math.max(0, content.width - OFFICE_RAIL_WIDTH),
+      height: content.height,
+    };
+    if (harnessView) harnessView.setBounds(mainArea);
+    if (officeShellView) officeShellView.setBounds(mainArea);
+    const contentView = mainWindow.contentView;
+    const attached = (view) => {
+      try { return contentView.children.includes(view); } catch { return false; }
+    };
+    if (activeMainView === 'office' && officeShellView) {
+      if (harnessView && attached(harnessView)) contentView.removeChildView(harnessView);
+      if (!attached(officeShellView)) contentView.addChildView(officeShellView);
+    } else {
+      if (officeShellView && attached(officeShellView)) contentView.removeChildView(officeShellView);
+      if (harnessView && !attached(harnessView)) contentView.addChildView(harnessView);
+    }
+  }
+
+  function scheduleShellSync() {
+    clearTimeout(shellSyncTimer);
+    shellSyncTimer = setTimeout(() => { shellSyncTimer = null; syncShellViews(); }, 16);
+  }
 
   // ------------------------------------------------------------- main window
   function createWindow(url) {
@@ -63,22 +243,38 @@ function createWindowManager(deps) {
       },
     });
 
-    mainWindow.on('show', () => { createCockpitWindow(); syncCockpitBounds(); showCockpitInactive(); });
-    mainWindow.on('restore', () => { createCockpitWindow(); syncCockpitBounds(); showCockpitInactive(); });
-    mainWindow.on('hide', () => hideCockpit());
-    mainWindow.on('minimize', () => hideCockpit());
-    mainWindow.on('maximize', () => syncCockpitBounds());
-    mainWindow.on('unmaximize', () => syncCockpitBounds());
-    mainWindow.on('enter-full-screen', () => { hideCockpit(); setTimeout(() => { syncCockpitBounds(); showCockpitInactive(); }, 80); });
-    mainWindow.on('leave-full-screen', () => { setTimeout(() => { syncCockpitBounds(); showCockpitInactive(); }, 80); });
+    mainWindow.on('show', () => { createCockpitWindow(); syncCockpitBounds(); showCockpitInactive(); syncShellViews(); notifyOfficeShellVisibility(); });
+    mainWindow.on('restore', () => { createCockpitWindow(); syncCockpitBounds(); showCockpitInactive(); syncShellViews(); notifyOfficeShellVisibility(); });
+    mainWindow.on('hide', () => { hideCockpit(); notifyOfficeShellVisibility(); });
+    mainWindow.on('minimize', () => { hideCockpit(); notifyOfficeShellVisibility(); });
+    mainWindow.on('maximize', () => { syncCockpitBounds(); scheduleShellSync(); });
+    mainWindow.on('unmaximize', () => { syncCockpitBounds(); scheduleShellSync(); });
+    mainWindow.on('enter-full-screen', () => { hideCockpit(); setTimeout(() => { syncCockpitBounds(); showCockpitInactive(); scheduleShellSync(); }, 80); });
+    mainWindow.on('leave-full-screen', () => { setTimeout(() => { syncCockpitBounds(); showCockpitInactive(); scheduleShellSync(); notifyOfficeShellVisibility(); }, 80); });
 
-    mainWindow.loadURL(url);
+    // M4.2: the window itself loads NOTHING — the harness page lives in a
+    // WebContentsView on the right of the rail, preload.js moves with it, and
+    // the office view can later swap into the same main area. The rail view is
+    // attached last so it always owns the left band on top.
+    harnessView = new WebContentsView({
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        preload: path.join(__dirname, 'preload.js'),
+      },
+    });
+    mainWindow.contentView.addChildView(harnessView);
+    createRailView();
+    syncShellViews();
+    harnessView.webContents.loadURL(url);
     // Show + start deferred services when the page is truly paintable (no white
-    // flash). A timeout fallback covers Windows GPU / older-Electron combos that
-    // never emit ready-to-show even after a successful load, and a did-fail-load
-    // retry recovers transient load failures. Without the fallback a stuck main
-    // window would leave deferred services (token poll, scheduler, balance,
-    // compaction, …) disabled forever.
+    // flash). ready-to-show is a BrowserWindow event tied to ITS webContents,
+    // so the shell listens on the harness view's first non-empty paint. The
+    // timeout fallback covers Windows GPU / older-Electron combos that never
+    // emit the paint event, and a did-fail-load retry recovers transient load
+    // failures. Without the fallback a stuck main window would leave deferred
+    // services (token poll, scheduler, balance, compaction, …) disabled forever.
     let mainShown = false;
     let mainShowFallbackTimer = null;
     const createT0 = Date.now();
@@ -91,20 +287,21 @@ function createWindowManager(deps) {
       log(`[perf] main window paintable in ${Date.now() - createT0}ms`);
       startDeferredServices();
     };
-    mainWindow.once('ready-to-show', showMainWhenReady);
+    harnessView.webContents.once('did-first-visually-non-empty-paint', showMainWhenReady);
+    harnessView.webContents.once('dom-ready', () => { setTimeout(showMainWhenReady, 120); });
     mainShowFallbackTimer = setTimeout(() => {
       if (!mainShown) {
-        log('[shell] main window ready-to-show timed out; forcing show');
+        log('[shell] main window paint timed out; forcing show');
         showMainWhenReady();
       }
     }, 15_000);
     let mainLoadRetries = 0;
-    mainWindow.webContents.on('did-fail-load', (_event, code, description) => {
+    harnessView.webContents.on('did-fail-load', (_event, code, description) => {
       if (code === -3) return; // ERR_ABORTED: superseded navigation, not a real failure
       log(`[shell] main window failed to load (${code}): ${description}`);
-      if (mainLoadRetries < 2 && mainWindow && !mainWindow.isDestroyed()) {
+      if (mainLoadRetries < 2 && harnessView && !harnessView.webContents.isDestroyed()) {
         mainLoadRetries += 1;
-        setTimeout(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(url); }, 1_000);
+        setTimeout(() => { if (harnessView && !harnessView.webContents.isDestroyed()) harnessView.webContents.loadURL(url); }, 1_000);
       } else {
         setLoading(t(lang(), 'loading.failed', { msg: description || code }));
         showLoadingOnError();
@@ -116,7 +313,12 @@ function createWindowManager(deps) {
         mainWindow.hide();
       }
     });
-    mainWindow.on('closed', () => { mainWindow = null; });
+    mainWindow.on('closed', () => {
+      mainWindow = null;
+      railView = null;
+      harnessView = null;
+      officeShellView = null; // child views die with the window's contents
+    });
     mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
     // persist window bounds (debounced)
@@ -125,11 +327,13 @@ function createWindowManager(deps) {
     };
     mainWindow.on('resize', () => {
       scheduleCockpitSync();
+      scheduleShellSync();
       clearTimeout(windowStateSaveTimer);
       windowStateSaveTimer = setTimeout(saveBounds, 500);
     });
     mainWindow.on('move', () => {
       scheduleCockpitSync();
+      scheduleShellSync();
       clearTimeout(windowStateSaveTimer);
       windowStateSaveTimer = setTimeout(saveBounds, 500);
     });
@@ -147,10 +351,12 @@ function createWindowManager(deps) {
   }
 
   function reloadMainWindow() {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload();
+    if (harnessView && !harnessView.webContents.isDestroyed()) harnessView.webContents.reload();
+    else if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload();
   }
   function toggleMainDevTools() {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.toggleDevTools();
+    if (harnessView && !harnessView.webContents.isDestroyed()) harnessView.webContents.toggleDevTools();
+    else if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.toggleDevTools();
   }
   function pickDialogParent() { return settingsWindow || mainWindow; }
   function isMainWindowPending() { return mainWindowPending; }
@@ -385,6 +591,9 @@ function createWindowManager(deps) {
     showCockpitInactive();
   }
   function getMainWindowWebContents() {
+    // M4.2: the harness VIEW is what main.js used to call "the main window's
+    // webContents" — same page, same preload, now hosted in a view.
+    if (harnessView && !harnessView.webContents.isDestroyed()) return harnessView.webContents;
     return mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null;
   }
   function getSettingsWindowWebContents() {
@@ -406,7 +615,7 @@ function createWindowManager(deps) {
   /** Runtime just became healthy: open/refresh the main window + cockpit. */
   function onRuntimeHealthy(bootUrl) {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.loadURL(bootUrl);
+      if (harnessView && !harnessView.webContents.isDestroyed()) harnessView.webContents.loadURL(bootUrl);
       createCockpitWindow();
       showCockpitInactive();
     } else {
@@ -438,6 +647,10 @@ function createWindowManager(deps) {
     buildCockpitSnapshot, invalidateCockpitSnapshot, broadcastCockpitSnapshot,
     createSettingsWindow, closeSettingsWindow, returnToCockpit,
     setCockpitMode, moveCockpitOffset,
+    broadcastToOfficeViews, officeViewCount, closeOfficeShellView,
+    showOfficeShellView, hideOfficeShellView, isOfficeViewActive,
+    broadcastToOfficeRail, broadcastToShellViews,
+    syncShellViews, getActiveMainView: () => activeMainView,
     onRuntimeHealthy, hasTray,
   };
 }

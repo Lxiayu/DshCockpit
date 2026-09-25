@@ -1,0 +1,915 @@
+/* src/office/office.css — Task 7 / SPEC-07. Placeholder styling for the
+   office view: canvas on the left, details panel on the right. Hierarchy per
+   decision 35: large employee name, role dot, prominent task/result, small
+   dim diagnostics. Visual polish (final art) is a later task.
+
+   P2 (right-panel rework, spec §3 six blocks): the panel carries the today's
+   usage block, the staff status rows, the pending inbox container, the
+   timeline with per-turn attribution, the employee details (structure
+   retained) and the minimal footer. Dark theme follows the shell through
+   html[data-theme] (P2 preload shell:get-theme / shell:theme, same
+   convention as the rail page).
+
+   P4 (spec §3 block 5 / §8 P4 行): the selected employee's 今日工作记录 rows
+   inside #details-record, the neutral zero-count pending badge (red is for
+   >0 only), the "harness 原文" modal tag and the compressed overview line —
+   all on the same tokens, so light/dark stay identical in structure. */
+
+:root {
+  color-scheme: light;
+  --office-bg: #e8eaec;
+  --panel-bg: #f6f7f8;
+  --panel-edge: #cdd2d6;
+  --text: #263039;
+  --text-dim: #69757d;
+  --accent: #1677a8;
+  --accent-soft: #e1e8ec;
+  --badge: #a96e00;
+  /* P2 additions */
+  --ok: #2e7d32;
+  --warn: #b26a00;
+  --risk-low: #2e7d32;
+  --risk-medium: #b26a00;
+  --risk-high: #b3261e;
+  --need: #b3261e;
+  --track: #d8dde1;
+  --chip: #ffffff;
+}
+
+/* P2 dark theme (shell-owned via html[data-theme]; light is the default). */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --office-bg: #14171a;
+  --panel-bg: #1b1f23;
+  --panel-edge: #333a41;
+  --text: #e6eaee;
+  --text-dim: #9aa5ae;
+  --accent: #58b6e8;
+  --accent-soft: #22303a;
+  --badge: #e3b341;
+  --ok: #7bd88f;
+  --warn: #e3b341;
+  --risk-low: #7bd88f;
+  --risk-medium: #e3b341;
+  --risk-high: #f28b82;
+  --need: #f28b82;
+  --track: #333a41;
+  --chip: #23282d;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--office-bg);
+  color: var(--text);
+  font: 14px/1.5 -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+  display: flex;
+}
+
+#stage-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  background: var(--office-bg);
+}
+
+#stage-host canvas {
+  display: block;
+  /* Task E4.4 letterbox: the canvas keeps the fixed 1280×840 logical scene
+     aspect at every window size. The page's resize() writes explicit
+     left/top/width/height px styles (uniform scale, dead centered) and the
+     renderer reprojects the scene to the scaled logical size — the canvas is
+     never stretched over the whole stage by CSS again. */
+  position: absolute;
+}
+
+.office-static-fallback {
+  margin: 24px;
+  padding: 16px;
+  border: 1px dashed var(--panel-edge);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* M1 (2026-09-24): the static presentation is not a dead end — visible retry
+   entry for the recoverable low-frame-rate case. */
+.office-static-retry {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 12px;
+}
+.office-static-retry-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.office-static-retry-btn:hover:not(:disabled) { border-color: var(--text-dim); }
+.office-static-retry-btn:disabled { opacity: 0.55; cursor: default; }
+.office-static-retry-hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+#office-panel {
+  flex: 0 0 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 14px;
+  background: var(--panel-bg);
+  border-left: 1px solid var(--panel-edge);
+  overflow-y: auto;
+  max-height: 100vh;
+  /* P3: the danger modal covers the panel only (position: absolute anchor). */
+  position: relative;
+}
+
+#office-overview h1 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+#overview-summary {
+  /* P4 打磨③：压缩后的一行汇总（执行/排队），弱化为 dim 小字——视觉重量让给
+     ① 今日用量块；逐员事实由② 员工状态行承载。 */
+  margin: 0;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+.hint {
+  margin: 4px 0 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+#employee-list-block { margin: 0; }
+
+#details { border-top: 1px solid var(--panel-edge); padding-top: 10px; }
+
+/* decision 35: the name is the most prominent text in the panel */
+.details-name-large {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.details-role-dot {
+  margin: 2px 0 10px;
+  color: var(--accent);
+  font-size: 13px;
+}
+
+/* second visual focus: current task / last result */
+.details-primary {
+  margin: 0 0 10px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+#details-dim {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dim-field {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.queue-line {
+  margin: 10px 0 0;
+  color: var(--badge);
+  font-size: 13px;
+}
+
+/* ---- P4 ⑤ 今日工作记录（spec §3 block 5）------------------------------- */
+
+/* ⑥ 密度：记录块是详情的紧凑子块，跟随面板 token，深浅主题一致。 */
+#details-record {
+  margin-top: 10px;
+  border-top: 1px dashed var(--panel-edge);
+  padding-top: 8px;
+}
+
+#details-record .block-head h3 {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.record-day {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.record-line {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.record-line[hidden] { display: none; }
+
+.record-note {
+  margin-top: 6px;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.record-recent {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.record-recent li {
+  display: flex;
+  gap: 6px;
+}
+
+.record-recent .tl-time {
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.record-recent-what {
+  color: var(--text-dim);
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.actions button {
+  background: var(--accent-soft);
+  border: 1px solid var(--panel-edge);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.actions button:not(:disabled):hover {
+  border-color: var(--accent);
+}
+
+#activity-block { border-top: 1px solid var(--panel-edge); padding-top: 10px; }
+
+#activity-block h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+#activity-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#activity-block { border-top: 1px solid var(--panel-edge); padding-top: 10px; }
+
+#office-footer {
+  margin-top: auto;
+  border-top: 1px solid var(--panel-edge);
+  padding-top: 10px;
+}
+
+/* P2 ⑥ footer: minimal sync dot + reduced motion + theme following. The
+   editor entry left with P5 — the button, its chip styling and the whole
+   editor stylesheet surface were removed (editor moves to the workbench). */
+.footer-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sync-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--ok);
+}
+
+.sync-dot[data-sync="stale"] { background: var(--warn); }
+.sync-dot[data-sync="resyncing"] { background: var(--accent); }
+.sync-dot.sync-warn { background: var(--warn); }
+
+#footer-tools {
+  margin-left: auto;
+}
+
+/* ---- P2: shared block head -------------------------------------------- */
+
+.block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.block-head h2 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+/* ---- P2 ① today's usage ------------------------------------------------ */
+
+#usage-block {
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  background: var(--chip);
+  padding: 10px 12px;
+}
+
+.usage-headline {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 6px 0 0;
+  flex-wrap: wrap;
+}
+
+.usage-headline strong {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.usage-unit {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.usage-money {
+  margin-left: auto;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.usage-stale {
+  font-size: 11px;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.usage-split {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.usage-split li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-dim);
+}
+
+.usage-split b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.usage-note {
+  font-style: normal;
+  opacity: 0.75;
+  margin-left: 2px;
+}
+
+.usage-budget {
+  margin-top: 8px;
+}
+
+.usage-budget-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.usage-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--track);
+  overflow: hidden;
+}
+
+.usage-progress-bar {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.usage-progress-bar.over {
+  background: var(--need);
+}
+
+/* ---- P2 ② staff status rows -------------------------------------------- */
+
+#employee-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#employee-list li {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+#employee-list li:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+#employee-list li.selected {
+  outline: 2px solid var(--accent);
+  background: #33507a;
+}
+
+[data-theme="dark"] #employee-list li.selected {
+  background: #2b4a66;
+}
+
+.staff-name {
+  font-weight: 600;
+}
+
+.staff-status {
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 0 7px;
+  border: 1px solid var(--panel-edge);
+  background: var(--chip);
+  color: var(--text-dim);
+}
+
+.staff-status.status-working { color: var(--ok); border-color: var(--ok); }
+.staff-status.status-roaming { color: var(--accent); border-color: var(--accent); }
+.staff-status.status-chatting { color: var(--badge); border-color: var(--badge); }
+.staff-status.status-sleeping { color: var(--text-dim); }
+.staff-status.status-celebrating { color: var(--ok); border-color: var(--ok); }
+
+.staff-task,
+.staff-tool,
+.staff-queue {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.staff-tool::before {
+  content: "· ";
+}
+
+.need-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--need);
+  border-radius: 999px;
+  padding: 0 8px;
+}
+
+/* P4 打磨①（spec §8 P4 行）：红色只留给 >0。计数为 0 时徽标降为中性描边，
+   不再制造「有东西待办」的错觉（与空态「暂无待处理 ✓」一致）。 */
+.need-badge.need-zero {
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--panel-edge);
+  font-weight: 400;
+}
+
+#pending-count {
+  min-width: 20px;
+  text-align: center;
+}
+
+#employee-list li .need-badge {
+  margin-left: auto;
+}
+
+.need-pulse {
+  animation: need-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes need-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .need-pulse { animation: none; }
+  /* P4 打磨⑥：进度条填充也不再补间（与 need-pulse 同一约定）。 */
+  .usage-progress-bar { transition: none; }
+}
+
+/* ---- P2 ③ pending inbox (container + count only; actions are P3) ------- */
+
+#pending-block {
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  background: var(--chip);
+  padding: 10px 12px;
+}
+
+#pending-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pending-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.pending-risk {
+  flex: 0 0 auto;
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 0 5px;
+  border: 1px solid var(--panel-edge);
+  color: var(--text-dim);
+}
+
+.pending-risk.risk-low { color: var(--risk-low); border-color: var(--risk-low); }
+.pending-risk.risk-medium { color: var(--risk-medium); border-color: var(--risk-medium); }
+.pending-risk.risk-high { color: var(--risk-high); border-color: var(--risk-high); }
+
+.pending-body {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.pending-body b {
+  font-weight: 600;
+}
+
+.pending-time {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+/* ---- P3 ③ pending inbox actions (inline approve/reject + danger modal) ---- */
+
+.pending-item {
+  flex-wrap: wrap;
+}
+
+.pending-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.pending-btn {
+  border: 1px solid var(--panel-edge);
+  border-radius: 4px;
+  background: var(--chip);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.pending-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pending-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.pending-btn-approve {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.pending-btn-reject {
+  border-color: var(--risk-high);
+  color: var(--risk-high);
+}
+
+.pending-status {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.pending-status-failed {
+  color: var(--risk-high);
+}
+
+/* Danger modal (spec §5): a hard interrupt for high-risk approvals. It covers
+   the panel (never the scene) so the employee who is waiting stays visible. */
+.pending-modal {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px 10px;
+  overflow: auto;
+  background: color-mix(in srgb, var(--office-bg) 72%, transparent);
+}
+
+.pending-modal[hidden] {
+  display: none;
+}
+
+.pending-modal-card {
+  width: 100%;
+  border: 1px solid var(--risk-high);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.28);
+  padding: 10px 12px;
+}
+
+.pending-modal-close {
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.pending-modal-body {
+  margin: 8px 0 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  font-size: 12px;
+}
+
+.pending-modal-body dt {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.pending-modal-body dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pending-modal-command {
+  margin: 0;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--chip);
+  border: 1px solid var(--panel-edge);
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 120px;
+  overflow: auto;
+}
+
+.pending-modal-note {
+  color: var(--warn);
+  font-size: 11px;
+}
+
+/* P4 打磨④：harness 英文原文小标注（将要执行 / 命令原文）。弱化呈现，不与
+   面板中文 UI 文案混淆。 */
+.pending-modal-raw-tag {
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--text-dim);
+  border: 1px solid var(--panel-edge);
+  border-radius: 999px;
+  padding: 0 6px;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+
+.pending-modal-body > .pending-modal-note {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+}
+
+.pending-modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pending-modal-actions button {
+  flex: 1 1 0;
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  background: var(--chip);
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.pending-modal-actions button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pending-modal-actions .pending-btn-approve {
+  font-weight: 600;
+}
+
+.pending-modal-question {
+  margin: 8px 0 0;
+  font-size: 12px;
+  grid-column: 1 / -1;
+}
+
+.pending-modal-options {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.pending-modal-options button {
+  border: 1px solid var(--panel-edge);
+  border-radius: 4px;
+  background: var(--chip);
+  color: var(--text);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.pending-modal-options button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pending-modal-options input {
+  flex: 1 1 120px;
+  min-width: 0;
+  border: 1px solid var(--panel-edge);
+  border-radius: 4px;
+  background: var(--chip);
+  color: var(--text);
+  font-size: 11px;
+  padding: 2px 6px;
+}
+
+/* While the modal is open the panel's own action surface is blocked (spec §5 /
+   cross-tool memo: the next action cannot be queued accidentally). */
+#office-panel[data-pending-blocking="true"] #details-actions button {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ---- P2 ④ timeline ------------------------------------------------------ */
+
+#activity-log li {
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  gap: 6px;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 1px 2px;
+}
+
+#activity-log li:hover {
+  background: var(--accent-soft);
+}
+
+.tl-time {
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.tl-who {
+  flex: 0 0 auto;
+  color: var(--text);
+}
+
+.tl-turn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+#timeline-more {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+#timeline-more:hover {
+  text-decoration: underline;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+/* narrow windows: the panel docks below the scene (production responsive
+   rule; the editor palette media rules left with P5) */
+@media (max-width: 760px) {
+  body { flex-direction: column; }
+  #stage-host { flex: 1 1 60%; min-height: 55vh; }
+  #office-panel {
+    flex: 1 1 auto;
+    max-height: none;
+    border-left: none;
+    border-top: 1px solid var(--panel-edge);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+

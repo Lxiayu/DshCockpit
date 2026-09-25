@@ -15,12 +15,20 @@
  * @param {(err: Error) => void} onError
  * @returns {{ close(): void }}
  */
-function connectEvents(baseUrl, path, onFrame, onError) {
+function connectEvents(baseUrl, path, onFrame, onError, options = {}) {
   const wsUrl = baseUrl.replace(/^http/, 'ws').replace(/\/+$/, '') + path;
+  const headers = options.headers && Object.keys(options.headers).length ? options.headers : null;
   let closed = false;
   let socket = null;
   try {
-    socket = new WebSocket(wsUrl);
+    if (headers) {
+      // 0.1.5 起事件面（/api/remote.mux）要求浏览器会话 Cookie；全局 WebSocket
+      // 无法自定义头，因此带 headers 时用 `ws` 包（Electron 主进程可用）。
+      const { WebSocket: NodeWebSocket } = require('ws');
+      socket = new NodeWebSocket(wsUrl, { headers });
+    } else {
+      socket = new WebSocket(wsUrl);
+    }
   } catch (e) {
     if (onError) onError(e instanceof Error ? e : new Error(String(e)));
     return { close: () => {} };

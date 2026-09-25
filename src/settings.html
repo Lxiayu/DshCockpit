@@ -373,6 +373,7 @@
       <button class="nav-item" data-page="runtime"><span class="ico">⚙️</span><span class="txt" data-i18n="nav.runtime">运行时</span></button>
       <button class="nav-item" data-page="plugins"><span class="ico">🧩</span><span class="txt" data-i18n="nav.plugins">插件</span></button>
       <button class="nav-item" data-page="mcp"><span class="ico">🔌</span><span class="txt" data-i18n="nav.mcp">MCP 服务</span></button>
+      <button class="nav-item" data-page="office"><span class="ico">🏢</span><span class="txt" data-i18n="nav.office">虚拟办公室</span></button>
       <button class="nav-item" data-page="skills"><span class="ico">✨</span><span class="txt" data-i18n="nav.skills">技能</span></button>
       <button class="nav-item" data-page="tasks"><span class="ico">⏰</span><span class="txt" data-i18n="nav.tasks">任务与自动化</span></button>
      <button class="nav-item" data-page="notifications"><span class="ico">🔔</span><span class="txt" data-i18n="nav.notifications">通知中心</span></button>
@@ -696,6 +697,8 @@
             <h3 data-i18n="nav.runtime">运行时</h3>
             <div class="kv"><span data-i18n="runtime.liveState">当前状态</span><b id="runtime-live-state">--</b></div>
             <div class="kv"><span data-i18n="about.runtime">当前运行时</span><b id="runtime-live-version">--</b></div>
+            <div class="kv"><span data-i18n="runtime.healthState">事件流</span><b id="runtime-health-state">--</b></div>
+            <div class="warn" id="runtime-degraded" style="display:none"></div>
             <div class="btnrow">
               <button class="secondary" id="btn-runtime-restart" data-i18n="plugins.restartNow">立即重启</button>
             </div>
@@ -948,6 +951,46 @@
       </div>
 
       <!-- ------------------------- page: skills (技能中心) -->
+      <!-- ------------------------- page: office (Task 8 / SPEC-08 虚拟办公室) -->
+      <div class="page" id="page-office">
+        <div class="page-head">
+          <h2 data-i18n="nav.office">虚拟办公室</h2>
+          <p data-i18n="office.desc">办公室运行时的行为与隐私设置（默认关闭；独立于 settings.json，保存到 office-state.v1.json）</p>
+        </div>
+        <div class="card">
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="office.sleepAfter">闲置后进入睡眠（毫秒，60 秒 – 24 小时）</label></div>
+            <div class="setting-ctrl"><input type="number" id="officeSleepAfterMs" min="60000" max="86400000" step="1000" style="width:140px" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="office.resultPresentation">结果展示时长（毫秒，1 – 30 秒）</label></div>
+            <div class="setting-ctrl"><input type="number" id="officeResultPresentationMs" min="1000" max="30000" step="500" style="width:140px" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="office.speed">移动速度（场景最小边/秒）</label></div>
+            <div class="setting-ctrl"><input type="number" id="officeSpeed" min="0.02" max="0.6" step="0.01" style="width:140px" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="office.frameOverride">帧时长覆盖（毫秒，留空为默认）</label></div>
+            <div class="setting-ctrl"><input type="number" id="officeFrameOverrideMs" min="60" max="2000" step="10" style="width:140px" placeholder="—" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="office.reducedMotion">减少动态效果</label></div>
+            <div class="setting-ctrl"><input type="checkbox" class="toggle" id="officeReducedMotion" /></div>
+          </div>
+          <div class="setting">
+            <div class="setting-info"><label data-i18n="office.privacyMode">隐私模式</label></div>
+            <div class="setting-ctrl">
+              <select id="officePrivacyMode" style="width:220px">
+                <option value="redacted" data-i18n="office.privacyRedacted">脱敏（默认）</option>
+                <option value="full" data-i18n="office.privacyFull">完整（密钥仍永不保存）</option>
+              </select>
+            </div>
+          </div>
+          <div class="status" id="office-status"></div>
+        </div>
+      </div>
+
       <div class="page" id="page-skills">
         <div class="page-head">
           <h2 data-i18n="nav.skills">技能</h2>
@@ -1466,6 +1509,13 @@
       runtime_hint: '工作区 / DSH_HOME / 端口 / Node / dsh 路径的修改将在下次重启运行时后生效（托盘 → 重启运行时）。',
       runtime_liveState: '当前状态', runtime_stateStarting: '正在启动…', runtime_stateHealthy: '运行正常', runtime_stateOffline: '不可用',
       runtime_stateRestarting: '正在重启…', runtime_restarted: '运行时重启已启动。',
+      // 容器加固（2026-09-23）：事件流健康行 + 降级警示条（与 src/i18n.js 的 runtime.degraded* 同源措辞）
+      runtime_healthState: '事件流', runtime_healthLive: '正常', runtime_healthDown: '已断开', runtime_healthUnknown: '未连接',
+      runtime_degradedTitle: '⚠ 运行时降级',
+      runtime_degradedFeed: '实时事件面多次连接失败',
+      runtime_degradedAuth: '运行时会话（Cookie）交换持续失败',
+      runtime_degradedDisconnected: '实时事件流已断开',
+      runtime_degradedHint: '壳与 Harness 页面仍可正常使用；通知、IM 推送与办公室状态可能滞后。',
       control_operationFailed: '操作失败：{reason}',
       trayOnClose: '关闭窗口时最小化到托盘', autoStart: '开机自启',
       quickAskHotkey: 'Quick Ask 全局快捷键', quickAskHotkey_hint: '在 Harness 之外快速唤起，不影响当前工作区。',
@@ -1725,6 +1775,18 @@
       nav_search: '搜索设置…',
       group_general: '常规', group_workspace: '工作', group_system: '系统',
       nav_general: '通用', nav_cost: '用量与成本', nav_runtime: '运行时', nav_plugins: '插件',
+nav_office: '虚拟办公室',
+      office_desc: '办公室运行时的行为与隐私设置（默认关闭；独立于 settings.json，保存到 office-state.v1.json）',
+      office_sleepAfter: '闲置后进入睡眠（毫秒，60 秒 – 24 小时）',
+      office_resultPresentation: '结果展示时长（毫秒，1 – 30 秒）',
+      office_speed: '移动速度（场景最小边/秒）',
+      office_frameOverride: '帧时长覆盖（毫秒，留空为默认）',
+      office_reducedMotion: '减少动态效果',
+      office_privacyMode: '隐私模式',
+      office_privacyRedacted: '脱敏（默认）：不保存任务正文、会话 ID 与 Token 数',
+      office_privacyFull: '完整：保留任务文本（密钥仍永不保存）',
+      office_saved: '办公室设置已保存，将在下一个行为决策点生效',
+      office_invalid: '办公室设置无效，请检查取值范围',
       nav_mcp: 'MCP 服务',
       nav_tasks: '自动化', nav_data: '数据与备份', nav_update: '更新', nav_about: '关于',
       page_remote_d: '在手机浏览器中安全使用本机会话',
@@ -1922,6 +1984,13 @@
       runtime_hint: 'Workspace / DSH_HOME / port / Node / dsh path changes take effect after "Restart runtime" in the tray.',
       runtime_liveState: 'Current state', runtime_stateStarting: 'Starting…', runtime_stateHealthy: 'Healthy', runtime_stateOffline: 'Unavailable',
       runtime_stateRestarting: 'Restarting…', runtime_restarted: 'Runtime restart started.',
+      // container hardening (2026-09-23): event-stream health row + degraded warning (same wording as src/i18n.js runtime.degraded*)
+      runtime_healthState: 'Event stream', runtime_healthLive: 'Live', runtime_healthDown: 'Disconnected', runtime_healthUnknown: 'Not connected',
+      runtime_degradedTitle: '⚠ Runtime degraded',
+      runtime_degradedFeed: 'The live event surface failed to connect repeatedly',
+      runtime_degradedAuth: 'The runtime session (cookie) exchange keeps failing',
+      runtime_degradedDisconnected: 'The live event stream is disconnected',
+      runtime_degradedHint: 'The shell and Harness page keep working; notifications, IM pushes and office state may lag.',
       control_operationFailed: 'Operation failed: {reason}',
       trayOnClose: 'Minimize to tray on close', autoStart: 'Start at login',
       quickAskHotkey: 'Quick Ask global shortcut', quickAskHotkey_hint: 'Open Quick Ask outside Harness without disturbing the current workspace.',
@@ -2181,6 +2250,18 @@
       nav_search: 'Search settings…',
       group_general: 'General', group_workspace: 'Workspace', group_system: 'System',
       nav_general: 'General', nav_cost: 'Usage & Cost', nav_runtime: 'Runtime', nav_plugins: 'Plugins',
+nav_office: 'Virtual Office',
+      office_desc: 'Behavior and privacy settings for the office runtime (off by default; stored separately in office-state.v1.json, never in settings.json)',
+      office_sleepAfter: 'Sleep after idle (ms, 60s – 24h)',
+      office_resultPresentation: 'Result presentation duration (ms, 1 – 30s)',
+      office_speed: 'Movement speed (scene min-dimension per second)',
+      office_frameOverride: 'Frame duration override (ms, empty = default)',
+      office_reducedMotion: 'Reduced motion',
+      office_privacyMode: 'Privacy mode',
+      office_privacyRedacted: 'Redacted (default): no task text, session IDs or token counts are stored',
+      office_privacyFull: 'Full: keeps task text (secrets are still never stored)',
+      office_saved: 'Office settings saved; they take effect at the next behavior decision point',
+      office_invalid: 'Invalid office settings; please check the value ranges',
       nav_mcp: 'MCP Servers',
       nav_tasks: 'Automation', nav_data: 'Data & Backup', nav_update: 'Updates', nav_about: 'About',
       page_remote_d: "Use this machine's sessions safely from a phone browser",
@@ -2740,6 +2821,7 @@
       const info = await window.dshShell.runtimeInfo();
       $('runtime-live-version').textContent = info.activeVersion || '--';
       $('runtime-live-state').textContent = tr(RUNTIME_STATE_KEYS[info.state] || 'runtime.stateOffline');
+      renderRuntimeHealth(info.health);
       return info;
     } catch {
       $('runtime-live-version').textContent = '--';
@@ -2747,6 +2829,32 @@
       return null;
     }
   }
+
+  // 容器加固（2026-09-23）：降级姿态在设置页运行时区可见化。恢复自动清除：
+  // 主进程 5s tick 在降级集合变化时经 runtime:health 推送，这里只负责渲染。
+  const RUNTIME_DEGRADED_REASON_KEYS = Object.freeze({
+    'feed-fail-streak': 'runtime_degradedFeed',
+    'auth-fail-streak': 'runtime_degradedAuth',
+    'feed-disconnected': 'runtime_degradedDisconnected',
+  });
+  function renderRuntimeHealth(health) {
+    const state = $('runtime-health-state');
+    const box = $('runtime-degraded');
+    if (!state || !box) return;
+    if (health && health.degraded) {
+      const reasons = (health.reasons || []).map((r) => tr(RUNTIME_DEGRADED_REASON_KEYS[r] || 'runtime_degradedTitle'));
+      state.textContent = tr('runtime_healthDown');
+      box.textContent = tr('runtime_degradedTitle')
+        + (reasons.length ? '：' + reasons.join('；') : '')
+        + ' ' + tr('runtime_degradedHint');
+      box.style.display = '';
+    } else {
+      state.textContent = health && health.feedLive ? tr('runtime_healthLive') : tr('runtime_healthUnknown');
+      box.style.display = 'none';
+      box.textContent = '';
+    }
+  }
+  window.dshShell.onRuntimeHealth((health) => renderRuntimeHealth(health));
 
   $('btn-runtime-restart').addEventListener('click', async () => {
     const button = $('btn-runtime-restart');
@@ -4360,6 +4468,41 @@
     }
   }
 
+  // Task 8 / SPEC-08: Office settings (independent office-state.v1.json via
+  // the main-process store; never touches legacy settings.json).
+  async function loadOffice() {
+    const statusEl = $('office-status');
+    let r;
+    try { r = await window.dshShell.getOfficeSettings(); }
+    catch (e) { setStatus(statusEl, tr('office_invalid') + ' ' + e.message, 'warn'); return; }
+    if (!r || !r.ok) { setStatus(statusEl, tr('office_invalid'), 'warn'); return; }
+    const s = r.settings || {};
+    $('officeSleepAfterMs').value = s.sleepAfterMs ?? 300000;
+    $('officeResultPresentationMs').value = s.resultPresentationMs ?? 5000;
+    $('officeSpeed').value = s.sceneMinDimensionPerSecond ?? 0.12;
+    $('officeFrameOverrideMs').value = s.userFrameDurationOverrideMs ?? '';
+    $('officeReducedMotion').checked = s.reducedMotion === true;
+    $('officePrivacyMode').value = s.privacyMode === 'full' ? 'full' : 'redacted';
+  }
+  async function saveOfficeField(partial) {
+    const statusEl = $('office-status');
+    try {
+      const r = await window.dshShell.saveOfficeSettings(partial);
+      setStatus(statusEl, r && r.ok ? tr('office_saved') : tr('office_invalid'), r && r.ok ? '' : 'warn');
+    } catch (e) {
+      setStatus(statusEl, tr('office_invalid') + ' ' + e.message, 'warn');
+    }
+  }
+  $('officeSleepAfterMs').addEventListener('change', () => saveOfficeField({ sleepAfterMs: Number($('officeSleepAfterMs').value) }));
+  $('officeResultPresentationMs').addEventListener('change', () => saveOfficeField({ resultPresentationMs: Number($('officeResultPresentationMs').value) }));
+  $('officeSpeed').addEventListener('change', () => saveOfficeField({ sceneMinDimensionPerSecond: Number($('officeSpeed').value) }));
+  $('officeFrameOverrideMs').addEventListener('change', () => {
+    const raw = $('officeFrameOverrideMs').value;
+    saveOfficeField({ userFrameDurationOverrideMs: raw === '' ? null : Number(raw) });
+  });
+  $('officeReducedMotion').addEventListener('change', () => saveOfficeField({ reducedMotion: $('officeReducedMotion').checked }));
+  $('officePrivacyMode').addEventListener('change', () => saveOfficeField({ privacyMode: $('officePrivacyMode').value }));
+
   async function loadPlugins(force = false) {
     if (plug.acting) { plug.pendingReload = true; return; } // never re-render buttons mid-op
     const seq = ++plug.seq;
@@ -4487,7 +4630,8 @@
       plug.mode = wantSearch ? 'search' : 'market';
       $('plugin-search').placeholder = tr(wantSearch ? 'market.searchPhGitHub' : 'plugins.searchPh');
       if (wantSearch) $('plugin-search').focus(); // the empty state points here
-      loadPlugins(); // different data source — refetch
+      loadPlugins();
+    loadOffice(); // additive: office state store (SPEC-08), not settings.json // different data source — refetch
       return;
     }
     renderPlugins();

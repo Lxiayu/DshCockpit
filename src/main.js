@@ -15,7 +15,7 @@
 //   DSH_DESKTOP_USER_DATA
 'use strict';
 
-const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut, safeStorage, nativeTheme, clipboard } = require('electron');
+const { app, BrowserWindow, WebContentsView, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut, safeStorage, nativeTheme, clipboard, protocol } = require('electron');
 
 // H-test: DSH_DESKTOP_NO_KEYCHAIN=1 keeps unattended runs unattended. Ad-hoc
 // rebuilds change the code signature on every build, and macOS Keychain ACLs
@@ -47,6 +47,11 @@ const tokenStats = require('./token-stats');
 const { createSessionWorkerClient } = require('./session-worker-client');
 const windowState = require('./window-state');
 const { connectEvents } = require('./runtime-events');
+const { createRuntimeAuth } = require('./runtime-auth');
+const { createRuntimeMux, EVENTS_STREAM_ID } = require('./runtime-mux');
+// 容器加固（2026-09-23）：事件面/鉴权降级的单一真相源。纯状态机——main.js
+// 只负责观察（note*）与呈现（tray / 设置页 / 诊断），策略本身可单测。
+const { createRuntimeHealthMonitor } = require('./runtime-health');
 const cost = require('./cost');
 const balance = require('./balance');
 const { runHeadless } = require('./headless');
@@ -61,10 +66,22 @@ const { createMcpRegistry } = require('./mcp-registry');
 const { createMcpConnect } = require('./mcp-connect');
 const { createMcpImport } = require('./mcp-import');
 const compact = require('./compact');
-const { createHarnessRpcClient, createHarnessRpcWire } = require('./harness-rpc');
+const { createHarnessRpcClient, createHarnessRpcWire, agentPresetOf } = require('./harness-rpc');
 const { createQuickAskShortcutManager } = require('./quickask-shortcut');
 const { createMemoryFiles } = require('./memory-files');
 const { createPluginOpGuard, failureCode, shouldCleanupAfterFailure, summarizeOutput, inferStage, parsePnpmBlockedPackage, upsertOnlyBuiltDependencies, pickSubpackage, resolveDepKey, pruneBundles, sanitizeProfile } = require('./plugin-flow');
+const { resolveOfficeCharacterPack } = require('./office/office-pack-resolver.js');
+// P1 data pipeline (docs/strategy/2026-09-23-office-right-panel-spec.md §4):
+// the office usage block is assembled here from the shell's own caches (the
+// token-stats collect() cache, the cost snapshot and the balance monitor);
+// the office module never collects. toolNameOfJournalData is the shared M5
+// tool-name extraction (data.name, pre-0.1.5 data.tool) also used by the
+// office tool-phrase mapping.
+const { buildOfficeUsage, priceUsageAt } = require('./office/runtime/usage-snapshot.js');
+const { toolNameOfJournalData } = require('./office/runtime/tool-phrases.js');
+const { createPendingMirror } = require('./office/runtime/pending-mirror.js');
+const { createSubagentWiring } = require('./office/runtime/subagent-wiring.js');
+const { createFollowAddressBook } = require('./office/runtime/follow-address.js');
 const { createSkillsManager, buildSkillsMarketPayload } = require('./skills');
 const { createChannelManager } = require('./channels/channel-manager');
 const { computeCockpitBounds } = require('./cockpit-bounds');
@@ -81,6 +98,7 @@ const { pickRuntimeCandidate } = require('./runtime-pick'); // H5 runtime priori
 const { detectCredentialFormatMismatch, readLogTail } = require('./crash-reason'); // H5 crash root cause
 const { createRuntimeLogTailer } = require('./runtime-log-tail'); // boot URL poller (incident-hardened)
 const { createNotificationCenter } = require('./notification-center'); // R6
+const { createShellUpdateNotifier } = require('./shell-update-notice'); // M5
 const { buildCacheEconomics, pricingFromSettings } = require('./cache-economics'); // R4
 const { createWeeklyReport } = require('./weekly-report'); // R5
 const { createCrashLoopGuard, armWatchdog, createRuntimeSupervisor } = require('./runtime-supervisor'); // A1 supervision primitives
@@ -94,6 +112,293 @@ if (process.env.DSH_DESKTOP_USER_DATA) {
   try { app.setPath('userData', process.env.DSH_DESKTOP_USER_DATA); } catch { /* ignore */ }
 }
 
+// ---------------------------------------------------------------------------
+// Office Animation Playground (Task 4 / SPEC-06) — development-only.
+// Frozen default is OFF (`officePlaygroundEnabled=false`); the only way to run
+// it is the explicit dev/evidence override below. No Harness, no IPC business
+// events, no office-state persistence: the page is fully self-contained.
+// ---------------------------------------------------------------------------
+const OFFICE_PLAYGROUND_ENABLED = false;
+const OFFICE_PLAYGROUND_SCHEME = 'office-playground';
+function officePlaygroundEnabled() {
+  return OFFICE_PLAYGROUND_ENABLED || process.env.DSH_DESKTOP_OFFICE_PLAYGROUND === '1';
+}
+function registerOfficePlaygroundScheme() {
+  // Must be called before app ready; serving is registered in openOfficePlayground.
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: OFFICE_PLAYGROUND_SCHEME,
+      privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+    },
+  ]);
+}
+function openOfficePlayground() {
+  if (!officePlaygroundEnabled()) {
+    log('[office] playground disabled (officePlaygroundEnabled=false)');
+    return { ok: false, code: 'OFFICE_PLAYGROUND_DISABLED' };
+  }
+  const officeRoot = path.join(__dirname, 'office');
+  const packRoot = path.join(officeRoot, 'fixtures', 'character-pack');
+  const builtinPackRoot = path.join(officeCharactersRoot(), 'deepseek-default');
+  const nodeModulesRoot = path.join(__dirname, '..', 'node_modules');
+  const serveFile = (abs, type) => new Response(fs.readFileSync(abs), {
+    headers: { 'content-type': type, 'access-control-allow-origin': `${OFFICE_PLAYGROUND_SCHEME}://local` },
+  });
+  const contentTypeFor = (abs) => {
+    if (abs.endsWith('.html')) return 'text/html; charset=utf-8';
+    if (abs.endsWith('.css')) return 'text/css; charset=utf-8';
+    if (abs.endsWith('.js')) return 'text/javascript; charset=utf-8';
+    if (abs.endsWith('.json')) return 'application/json; charset=utf-8';
+    if (abs.endsWith('.png')) return 'image/png';
+    return 'application/octet-stream';
+  };
+  protocol.handle(OFFICE_PLAYGROUND_SCHEME, (request) => {
+    const url = new URL(request.url);
+    if (url.hostname !== 'local') return new Response('not found', { status: 404 });
+    const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+    const routes = [
+      { prefix: 'node_modules/', root: nodeModulesRoot },
+      { prefix: 'pack/', root: packRoot },
+      { prefix: 'builtin/', root: builtinPackRoot },
+      { prefix: '', root: officeRoot },
+    ];
+    for (const route of routes) {
+      if (!rel.startsWith(route.prefix)) continue;
+      const relPath = rel.slice(route.prefix.length);
+      const abs = path.resolve(route.root, relPath);
+      if (!abs.startsWith(path.resolve(route.root) + path.sep) || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+        return new Response('not found', { status: 404 });
+      }
+      return serveFile(abs, contentTypeFor(abs));
+    }
+    return new Response('not found', { status: 404 });
+  });
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 840,
+    useContentSize: true,
+    title: 'Office Animation Playground (dev)',
+    backgroundColor: '#1c2430',
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
+  });
+  win.webContents.setBackgroundThrottling(false); // no throttled wall-clock drift
+  win.loadURL(`${OFFICE_PLAYGROUND_SCHEME}://local/playground.html`);
+  log('[office] playground window opened (development-only)');
+  return { ok: true };
+}
+registerOfficePlaygroundScheme(); // privileged scheme declaration must precede app ready
+
+// ---------------------------------------------------------------------------
+// Office runtime view (Task 7 / SPEC-07) — feature-flagged, default OFF.
+// Frozen default is OFF (`officeRuntimeEnabled=false`, plan stage gate 5); the
+// env override exists only for development/evidence runs. One office module
+// (src/office/office-module.js) owns the single simulation clock and serves
+// up to two office views over the seven `office:*` IPC channels; the views
+// consume snapshots only and never touch Harness.
+// ---------------------------------------------------------------------------
+// M4 直启动 (2026-09-17, user decision D1): the office ships ON by default —
+// the left rail (office-rail.html) is the entry, one click away. Set
+// DSH_DESKTOP_OFFICE_RUNTIME=0 to force it off for debugging.
+const OFFICE_RUNTIME_ENABLED = true;
+const OFFICE_RUNTIME_SCHEME = 'office-runtime';
+let officeModuleInstance = null;
+let officeWindowManager = null; // late-bound: set right after createWindowManager()
+function getWindowManager() { return officeWindowManager; }
+
+// Task 8 / SPEC-08: the independent Office state store. The main process is
+// the ONLY writer of `userData/office-state.v1.json`; legacy settings.json /
+// runtime-state.json / sessions are never touched by it. The epoch identifies
+// this launch: bindings persisted under an older epoch load as stale history
+// and are never restored as running.
+const OFFICE_STATE_EPOCH = Date.now();
+let officeStateStore = null;
+// Task 4: production character pack resolution — the user's selected
+// installed pack wins, the built-in deepseek-default pack is the fallback,
+// and the test fixture pack is never a production candidate.
+function selectedOfficeCharacterPackId() {
+  try {
+    const settings = ensureOfficeStateStore().get().settings;
+    return settings && typeof settings.characterPackId === 'string' ? settings.characterPackId : null;
+  } catch (error) {
+    return null;
+  }
+}
+let productionPackCache = null; // M4 prewarm: parse once per process
+function loadProductionCharacterPack() {
+  if (productionPackCache) return productionPackCache;
+  const packsRoot = officeCharactersRoot();
+  const resolution = resolveOfficeCharacterPack({ packsRoot, selectedPackId: selectedOfficeCharacterPackId(), existsSync: fs.existsSync });
+  if (resolution.code) log(`[office] character pack fallback: ${resolution.code}; using ${resolution.packId}`);
+  try {
+    const root = path.join(packsRoot, resolution.packId);
+    const { createAssetPack } = require('./office/runtime/asset-pack.js');
+    const result = createAssetPack({
+      manifest: JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8')),
+      anchors: JSON.parse(fs.readFileSync(path.join(root, 'animation', 'anchors.json'), 'utf8')),
+      animations: JSON.parse(fs.readFileSync(path.join(root, 'animation', 'animations.json'), 'utf8')),
+    });
+    if (!result.ok) {
+      log(`[office] production pack invalid: ${result.code}`);
+      return null; // no negative cache: a fixed pack must recover on the next call
+    }
+    productionPackCache = result.pack;
+    return result.pack;
+  } catch (error) {
+    log(`[office] production pack load failed: ${error && error.message}`);
+    return null;
+  }
+}
+// Packaged apps keep resources outside app.asar (extraResources): resolve the
+// roots the same way the office protocol handler does, so the pack, the
+// furniture and the dialogue corpus all load in dev AND in a build.
+function officeCharactersRoot() {
+  return app.isPackaged ? path.join(process.resourcesPath, 'characters') : path.join(__dirname, '..', 'resources', 'characters');
+}
+function officeDialogueRoot() {
+  return app.isPackaged ? path.join(process.resourcesPath, 'dialogue') : path.join(__dirname, '..', 'resources', 'dialogue');
+}
+function officeCharacterPackId() {
+  return resolveOfficeCharacterPack({ packsRoot: officeCharactersRoot(), selectedPackId: selectedOfficeCharacterPackId(), existsSync: fs.existsSync }).packId;
+}
+function ensureOfficeStateStore() {
+  if (!officeStateStore) {
+    const { createOfficeStateStore } = require('./office/runtime/office-persistence.js');
+    officeStateStore = createOfficeStateStore({ userDataDir: app.getPath('userData'), epoch: OFFICE_STATE_EPOCH, log });
+    for (const diag of officeStateStore.diagnostics()) log(`[office] state: ${diag.code}`);
+  }
+  return officeStateStore;
+}
+function officeStateSettingsOrNull() {
+  try { return ensureOfficeStateStore().get().settings; } catch { return null; }
+}
+function officeRuntimeEnabled() {
+  return (OFFICE_RUNTIME_ENABLED || process.env.DSH_DESKTOP_OFFICE_RUNTIME === '1')
+    && process.env.DSH_DESKTOP_OFFICE_RUNTIME !== '0';
+}
+function registerOfficeRuntimeScheme() {
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: OFFICE_RUNTIME_SCHEME,
+      privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+    },
+  ]);
+}
+// M4.1d: the dialogue corpus ships in resources/dialogue/** (content/** stays
+// the authoring area — the product dependency graph never touches it). The
+// character overlay is selected by the ACTIVE pack id; a missing corpus is
+// fail-open: no bubbles, everything else unchanged.
+function loadOfficeDialogueCorpus() {
+  try {
+    const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
+    const base = readJson(path.join(officeDialogueRoot(), 'base.json'));
+    // The overlay is keyed by the ACTIVE PACK id — the builtin pack plays the
+    // whale-girl character (see resources/dialogue/README.md), so her authored
+    // overlay ships as characters/deepseek-default.json.
+    const overlayPath = path.join(officeDialogueRoot(), 'characters', `${officeCharacterPackId()}.json`);
+    const characterOverrides = fs.existsSync(overlayPath) ? readJson(overlayPath) : {};
+    return { base, characterOverrides };
+  } catch (error) {
+    log(`[office] dialogue corpus unavailable: ${error && error.code ? error.code : 'unknown'}`);
+    return null;
+  }
+}
+
+function ensureOfficeModule() {
+  if (!officeModuleInstance) {
+    const { createOfficeModule, registerOfficeIpc, persistOfficeSettings, loadRuntimeLayoutFixture } = require('./office/office-module.js');
+    // Task E4: the simulation resolves its layout through the SAME source
+    // chain as the office view (saved flat draft, compiled → bundled flat
+    // fixture → isometric fallback), so the walk graph, the furniture and
+    // the rendered scene can never diverge. Never throws.
+    const runtimeLayout = loadRuntimeLayoutFixture({ userDataDir: app.getPath('userData'), log });
+    officeModuleInstance = createOfficeModule({
+      pack: loadProductionCharacterPack(),
+      layout: runtimeLayout ? runtimeLayout.fixture : undefined,
+      dialogue: loadOfficeDialogueCorpus() || undefined,
+      log,
+      config: officeStateSettingsOrNull(),
+      // P1: the office pending answer surface. It is respondToRuntime itself —
+      // the SAME $events/result channel the IM channel answers approvals and
+      // questions through — so the panel can never grow a second, divergent
+      // answer implementation. P3 wires the click handlers to it.
+      answerRequest: ({ rpcId, value, what }) => respondToRuntime({ rpcId, value, what }),
+      // P3: the spec §4 detailRef resolver behind office:pending {action:'detail'}.
+      // main.js owns the data (journal correlation / session/page / the question
+      // payload); the module owns the boundary (unknown ids are a no-op, the
+      // payload is allowlist-normalized, nothing reaches the snapshot).
+      pendingDetail: (id) => officeResolvePendingDetail(id),
+      // P4 (spec §3 block 5): the real wall clock, injected so the module can
+      // stamp activity-log entries with the real event instant and scope the
+      // selected employee's 今日工作记录 to the same UTC+8 billing day the
+      // usage block uses. Metadata-only — the simulation keeps its logical
+      // clock; without this injection the record stays a session window.
+      realClock: () => Date.now(),
+      // 2026-09-24 resync fix: the office module's runtime adapters ask for a
+      // baseline (office:runtime-resync-request) whenever a forward seq gap
+      // opens. main.js owns the durable-log re-read (session/page) and answers
+      // through the module's ingestHarnessSnapshot() — the request used to die
+      // as a diagnostic string, so every gap ended in sync=stale with the
+      // employee frozen on its last known phase.
+      onResyncRequest: ({ sessionId, request }) => {
+        officeAnswerResync(sessionId, request);
+      },
+    });
+    // P1: any waterfall request that arrived BEFORE the office view was first
+    // opened is waiting in the pre-module mirror — seed it now (bounded,
+    // synchronous, idempotent inside the module) so the panel opens with the
+    // full pending list, then let the module own every arrival from here on.
+    seedOfficePendingMirror(officeModuleInstance);
+    // SPEC-08 persist-first facade: a settings change is written to
+    // office-state.v1.json BEFORE it is applied to the live module; a failed
+    // write returns { ok:false, code:'OFFICE_STATE_WRITE_FAILED' } and never
+    // leaves memory/disk divergent.
+    const officeFacade = {
+      ...officeModuleInstance,
+      updateSettings: (partial) => persistOfficeSettings(officeModuleInstance, ensureOfficeStateStore(), partial),
+    };
+    registerOfficeIpc({ ipcMain, module: officeFacade, log, enabled: true });
+    officeModuleInstance.subscribe((snapshot) => {
+      try { getWindowManager().broadcastToOfficeViews('office:state', snapshot); } catch { /* no views yet */ }
+    });
+    officeModuleInstance.start();
+  }
+  return officeModuleInstance;
+}
+function openOfficeView() {
+  if (!officeRuntimeEnabled()) {
+    log('[office] runtime disabled (officeRuntimeEnabled=false)');
+    return { ok: false, code: 'OFFICE_RUNTIME_DISABLED' };
+  }
+  ensureOfficeModule();
+  // M4.2: the office is a main-area view INSIDE the main window (not an
+  // independent window anymore). Switching back keeps the page alive.
+  const view = getWindowManager().showOfficeShellView({
+    url: `${OFFICE_RUNTIME_SCHEME}://local/office.html?pack=${officeCharacterPackId()}`,
+    onVisibility: (viewId, visible) => officeModuleInstance.noteVisibility({ viewId, visible }),
+  });
+  return view ? { ok: true, viewId: 'office-shell-1' } : { ok: false, code: 'OFFICE_VIEW_LIMIT' };
+}
+function registerOfficeRuntimeProtocolHandler() {
+  const officeRoot = path.join(__dirname, 'office');
+  const nodeModulesRoot = path.join(__dirname, '..', 'node_modules');
+  const officeAssetsRoot = app.isPackaged
+    ? path.join(process.resourcesPath, 'office')
+    : path.join(__dirname, '..', 'resources', 'office');
+  const charactersRoot = app.isPackaged
+    ? path.join(process.resourcesPath, 'characters')
+    : path.join(__dirname, '..', 'resources', 'characters');
+  // Task E2d: the routing table, content types and dynamic layout route live
+  // in the shared module (also used by the standalone editor launcher). The
+  // state store stays LAZY: ensureOfficeStateStore is passed as a factory
+  // and resolved on the first layout request, never at handler registration.
+  // Kept on ONE line on purpose: test/tdz-guard.js scans multi-line factory
+  // blocks for bare shorthand identifiers, and these locals are function-
+  // scoped (a false "has no top-level declaration" would be a misfire).
+  const { createOfficeProtocolHandler } = require('./office/office-protocol.js');
+  protocol.handle(OFFICE_RUNTIME_SCHEME, createOfficeProtocolHandler({ officeRoot, nodeModulesRoot, officeAssetsRoot, charactersRoot, layoutStore: ensureOfficeStateStore }));
+}
+registerOfficeRuntimeScheme(); // privileged scheme declaration must precede app ready
+
 const APP_NAME = 'DshCockpit';
 const APP_VERSION = require('../package.json').version;
 
@@ -105,6 +410,53 @@ let eventsRetryTimer = null;
 let lastTaskNotifyAt = 0;
 let eventsFeedLiveLogged = false;
 let eventsFeedFailStreak = 0;
+// 0.1.5 event surface: the mux client + its protocol tag. 'legacy' keeps the
+// 0.1.1 events.{host,mux} + /api/respond path; 'mux' routes through
+// /api/remote.mux + $events/result (docs/strategy/2026-09-22 plan §4.2).
+let eventsFeedProtocol = 'legacy';
+let runtimeMux = null;
+let eventsFeedSessionErrorCount = 0;
+// 容器加固（2026-09-23）：降级姿态（feed 连续失败 / mux 非 live / cookie 交换
+// 失败）。5s tick 里观察 mux 状态、比较降级集合变化，变化时刷新托盘、推送
+// 设置页、写 knownIssues 诊断。snapshot 也经 shell:runtime-info 下发。
+const runtimeHealth = createRuntimeHealthMonitor({ log });
+let runtimeHealthTimer = null;
+let runtimeHealthKey = ''; // last broadcast degraded-reasons key ('' = healthy)
+let autoRollbackInFlight = false;
+// Office M5: per-session journal follow streams (see startOfficeFollowSync).
+let officeFollowTimer = null;
+const officeFollowStreams = new Map(); // raw sessionId -> { streamId, misses }
+const officeFollowRunning = new Map(); // sessionId -> running (api-session/status edges)
+const officeFollowKnown = new Set(); // sessionIds seen via api-session/added
+const officeFollowRemoved = new Set(); // sessionIds seen via api-session/removed
+
+// ---------------------------------------------------------------------------
+// 2026-09-24 subagent-seat wiring. The translation itself lives in the pure
+// `subagent-wiring.js` (state maps + real-journal -> adapter-vocabulary rules,
+// unit-tested in test/office-subagent-wiring.test.js). The shell only supplies
+// the two side-effect seams: `emit` (into the live office module) and `log`.
+// (`subagent/start|end` is a process-local dsh-subagent lifecycle event and
+// NEVER appears in the durable journal, so the adapter branch was dead in
+// production before this wiring — see dsh-session known-event-types.js.)
+// ---------------------------------------------------------------------------
+const officeSubagentWiring = createSubagentWiring({
+  emit: (sessionId, { type, data, seq, time }) => {
+    // 2026-09-25 长稳实测缺陷：子代理会话不能用根地址开 follow（运行时 0.1.5
+    // 直接拒：session/agent-busy "subagent Sessions require their durable parent
+    // address"），于是壳把它当"流被 host 结束"每 5s 重开一次、每次都报错。
+    // 父侧 journal 的 subagent/start 正好带来可寻址身份（parent + mode），
+    // 在这里顺手记进地址簿；子会话的 follow/page 走 subagent 地址。
+    if (type === 'subagent/start' && data && typeof data.id === 'string') {
+      if (officeFollowAddresses.noteChildAddress(data.id, sessionId, data.mode)) {
+        officeFollowUnfollowable.delete(data.id); // 地址已可寻址：解除"停止重试"标记
+      }
+    }
+    const mod = officeModuleInstance;
+    if (!mod || typeof mod.ingestHarnessEvent !== 'function') return;
+    mod.ingestHarnessEvent({ sessionId, type, seq, time, data });
+  },
+  log: (line) => log(line),
+});
 let lastCostUpdateAt = 0;
 let latestCostSnapshot = { stats: null, key: '', data: null };
 let quickAskRunning = false;
@@ -195,6 +547,17 @@ function syncLoginItemSetting(enabled) {
  * fresh data and forces a scan. */
 let costCache = { at: 0, data: null };
 const COST_CACHE_TTL_MS = 10_000;
+// M3 (windows-perf audit): TTL INVARIANT — token-stats' session-tree walk
+// cache TTL (WALK_TTL_MS = 30s) must be >= this result-cache TTL, otherwise
+// the walk cache can never be warm when a real recompute happens and every
+// 10s re-walks the whole sessions tree (the old 5s < 10s inversion: ~900
+// readdir/stat per 10s at N=300 sessions, idle, through the Windows AV
+// filter). The force path below also passes forceWalk so turn-end accounting
+// still sees a brand-new session immediately. The check below turns a future
+// regression of that ordering into a loud startup log line instead of silence.
+if (Number(tokenStats.WALK_TTL_MS) < COST_CACHE_TTL_MS) {
+  log(`[perf] WARNING: walk TTL (${tokenStats.WALK_TTL_MS}ms) < cost cache TTL (${COST_CACHE_TTL_MS}ms) — the session-tree walk cache can never be warm (M3 regression)`);
+}
 async function collectStats(force = false) {
   const now = Date.now();
   if (!force && costCache.data && now - costCache.at < COST_CACHE_TTL_MS) {
@@ -203,9 +566,12 @@ async function collectStats(force = false) {
   }
   const t0 = Date.now();
   const windows = cost.parseWindows(settings.get().costPeakWindows) || cost.DEFAULT_WINDOWS;
+  // forceWalk only on the forced (turn-end) path; the 5s poll reuses the walk
+  // list for up to WALK_TTL_MS. See WALK_TTL_INVARIANT_HINT above.
+  const collectOpts = { windows, forceWalk: force };
   const data = sessionWorkerClient
-    ? await sessionWorkerClient.collect(dshHomeOf(), { windows })
-    : await tokenStats.collect(dshHomeOf(), { windows });
+    ? await sessionWorkerClient.collect(dshHomeOf(), collectOpts)
+    : await tokenStats.collect(dshHomeOf(), collectOpts);
   log(`[perf] collectStats ${force ? 'forced ' : ''}recompute took ${Date.now() - t0}ms`);
   if (!force) costCache = { at: now, data };
   return data;
@@ -362,11 +728,12 @@ const {
 // coupling surface (was ~35 free-variable references).
 const COCKPIT_SNAPSHOT_TTL_MS = 250; // cockpit snapshot cache TTL (consumed by window-manager)
 const windowManager = createWindowManager({
-  BrowserWindow, screen,
+  BrowserWindow, WebContentsView, screen,
   appName: APP_NAME,
   iconPath,
   themeBackground, resolvedTheme,
   windowState, windowStateFile: () => windowStateFile(),
+  officeRailStateFile: () => path.join(app.getPath('userData'), 'office-rail-state.json'),
   log, t, lang,
   settingsGet: () => settings.get(),
   noTray,
@@ -393,6 +760,9 @@ const windowManager = createWindowManager({
   buildSnapshot,
   runtimeInfo: () => manager.getInfo(),
 });
+officeWindowManager = windowManager; // late-bound office accessor (openOfficeView)
+// M4.2: the rail's accent is remembered in office-rail-state.json. The rail
+// page pulls it through office-rail:get-state; nothing else needs it here.
 const {
   createWindow, showMain, createCockpitWindow, showCockpitInactive, hideCockpit,
   prepareCockpitForAuxWindow, restoreCockpitRail, syncCockpitBounds, scheduleCockpitSync,
@@ -404,6 +774,11 @@ const {
   setMainWindowPending, getMainWindowWebContents, hasVisibleMainWindow,
   onRuntimeHealthy,
 } = windowManager;
+
+// Shared runtime browser session (token URL → dsh-auth-* Cookie): the mux
+// event client and the approval/question answer channel read the same cookie
+// source (plan §4.2). setAuthUrl rides the supervisor's URL discovery.
+const runtimeAuth = createRuntimeAuth({ log });
 
 // A1 step 3: full runtime lifecycle supervision extracted from main.js.
 // The deps object is the explicit coupling surface between the shell and the
@@ -423,11 +798,22 @@ const supervisor = createRuntimeSupervisor({
   selfHealProfile,
   ensureLogDir,
   resolveNodeBin: bestNodeBin,
-  onRemoteUrl: (url) => { if (remote) remote.setRuntimeUrl(url); },
+  onRemoteUrl: (url) => {
+    // The auth URL is the token exchange source for the mux cookie; the phone
+    // gateway keeps its own exchange. On 0.1.1 (no token) the URL is stored
+    // but never exchanged — the legacy feed path does not need a cookie.
+    runtimeAuth.setAuthUrl(url);
+    if (remote) remote.setRuntimeUrl(url);
+  },
   startEventsFeed,
   stopEventsFeed,
   resetEventsFeedLiveFlag: () => { eventsFeedLiveLogged = false; },
-  onHealthy: (bootUrl) => onRuntimeHealthy(bootUrl),
+  onHealthy: (bootUrl) => {
+    onRuntimeHealthy(bootUrl);
+    // 容器加固（2026-09-23）：一次真正健康的启动清零"连续启动失败"持久计数
+    // （手动重启成功同样算——用户已经在自愈了）。
+    manager.recordStartupSuccess();
+  },
   hasMainWindow: () => !!pickDialogParent(),
   isQuitting: () => quitting,
   recordCrash,
@@ -439,6 +825,11 @@ const supervisor = createRuntimeSupervisor({
   upgradeNow: () => runUpdateCheck(true),
   envExtras: () => (mcpMgr ? mcpMgr.runtimeSecretEnv() : null),
   applyPendingUpdate,
+  // 容器加固（2026-09-23）：supervisor 观察到"本世代从未 healthy 就结束"（进程
+  // 提前退出，或健康探测失败）时回调这里。计数进 runtime-state.json，达阈值
+  // 自动回滚 previousVersion。返回 {rollbackScheduled:true} 让 supervisor
+  // 不要叠加自己的自动重启——一个故障一条恢复路径。
+  onStartupFailure: (reason) => handleRuntimeStartupFailure(reason),
 });
 const { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeAuthUrl, getRuntimeLogPath, getRuntimeChild } = supervisor;
 
@@ -447,6 +838,20 @@ const { spawnRuntime, restartRuntime, killRuntime, getRuntimeUrl, getRuntimeAuth
  * /api + WS consumers keep using getRuntimeUrl() — a query token there would
  * corrupt path concatenation. */
 const runtimeAuthUrlOf = () => getRuntimeAuthUrl() || getRuntimeUrl();
+
+/** Protocol pick for the harness RPC layer (plan §4.2 dual stack), using the
+ * same probe as startEventsFeed: a token-carrying auth URL means the runtime
+ * is 0.1.5+ and every /api route (including the old dot methods) is gone —
+ * RPC then speaks slash endpoints through the mux when it is live, else over
+ * cookie-gated fetch. A bare URL is 0.1.1: the legacy dot methods stay. */
+const harnessRpcProtocol = () => {
+  if (runtimeMux) return 'slash';
+  const authUrl = runtimeAuthUrlOf();
+  return typeof authUrl === 'string' && authUrl.includes('token=') ? 'slash' : 'legacy';
+};
+/** Harness RPC deps shared by the IM bind/stop/steer paths and the compact
+ * trigger: protocol + mux (unary transport) + auth (cookie source). */
+const harnessRpcDeps = () => ({ protocol: harnessRpcProtocol(), mux: runtimeMux, auth: runtimeAuth });
 
 // ---------------------------------------------------------------------------
 // binary resolution
@@ -732,6 +1137,20 @@ function selfHealProfile() {
 function startDeferredServices() {
   if (deferredServicesStarted || quitting) return;
   deferredServicesStarted = true;
+  // M4 启动预热: parse the production pack + runtime layout early so the
+  // first rail click opens the office without a visible load stall. This
+  // deliberately does NOT create the office module (its simulation clock
+  // must not tick with no views); both loaders are memoized for reuse.
+  if (officeRuntimeEnabled()) {
+    setTimeout(() => {
+      try {
+        const { loadRuntimeLayoutFixture } = require('./office/office-module.js');
+        loadProductionCharacterPack();
+        loadRuntimeLayoutFixture({ userDataDir: app.getPath('userData'), log });
+        log('[office] prewarmed pack + layout');
+      } catch (error) { log(`[office] prewarm skipped: ${error && error.message}`); }
+    }, 2500);
+  }
   if (channelsMgr) channelsMgr.startEnabled();
   registerQuickAskHotkey();
   startScheduler();
@@ -785,6 +1204,10 @@ function broadcastTheme() {
     w.setBackgroundColor(bg);
     w.webContents.send('shell:theme', t);
   }
+  // M4.2: the shell views (left rail, office) are WebContentsViews and never
+  // appear in getAllWindows() — without this push the rail ignored the
+  // light/dark/system setting entirely.
+  try { windowManager.broadcastToShellViews('shell:theme', t); } catch { /* not created yet */ }
 }
 
 nativeTheme.on('theme-changed', () => broadcastTheme());
@@ -802,6 +1225,11 @@ const trayMenu = createTrayMenu({
   lang,
   t,
   runtimeInfo: () => manager.getInfo(),
+  // 容器加固：降级姿态快照（托盘菜单项 + tooltip + 设置页警示条同源）
+  runtimeHealth: () => runtimeHealth.snapshot(),
+  // tooltip 基线：与 window-manager 创建主窗口时设置的 `AppName — <url>` 同格式，
+  // 降级标记只追加不覆盖（见 tray-menu.updateTray）。
+  baseTooltip: () => `${APP_NAME} — ${getRuntimeUrl() || 'starting…'}`,
   settingsGet: () => settings.get(),
   peakWindowsOf,
   costPeakStatus: cost.peakStatus,
@@ -950,12 +1378,14 @@ async function runUpdateCheck(notifyUser, { install = notifyUser } = {}) {
     // range loads and chats fine, but the operating layer's feed-derived
     // features degrade — refuse to install it silently. v0.4.0 lifts this.
     if (!isRuntimeSupported(report.target)) {
-      manager.state.knownIssues[report.target] = 'outside the shell compat matrix (<0.1.2 Remote API)';
+      // 容器姿态（2026-09-22 用户拍板）：矩阵外版本**不再阻断安装**——壳会先记录
+      // knownIssue、提示"未在测试矩阵内，feed 派生的功能可能降级"，安装后由 watchdog
+      // 守护、异常时一键回滚。挡板只保留"把风险说清楚"的职责。
+      manager.state.knownIssues[report.target] = `outside the tested compat matrix (${SUPPORTED_RUNTIME_RANGE})`;
       manager.saveState();
-      log(`[update] ${report.target} is outside the shell compat matrix — install deferred to v0.4.0`);
+      log(`[update] ${report.target} is outside the tested compat matrix (${SUPPORTED_RUNTIME_RANGE}) — installing with degraded-feature warning`);
       notify(t(lang(), 'notify.updateGated'), t(lang(), 'notify.updateGatedBody', { v: report.target }));
       updateTray();
-      return { ...report, available: true, gated: true, installed: false };
     }
     notify(t(lang(), 'notify.newVersion'), t(lang(), 'notify.downloading', { a: report.current, b: report.target }));
     // Live progress → every window's update console (a long rc install must
@@ -999,8 +1429,8 @@ async function applyPendingUpdate() {
   const pending = manager.state.pendingVersion;
   if (!pending) throw new Error(t(lang(), 'update.noPending'));
   if (!isRuntimeSupported(pending)) {
-    // defense in depth: a pending version recorded by an older shell build
-    throw new Error(t(lang(), 'update.gated', { v: pending }));
+    // 矩阵外版本允许安装（容器姿态）；这里只留一条诊断，便于事后归因。
+    log(`[update] applying ${pending} outside the tested compat matrix (${SUPPORTED_RUNTIME_RANGE})`);
   }
   const { previous } = await manager.activate(pending);
   log(`[shell] applied update: ${previous} -> ${pending}`);
@@ -1015,6 +1445,109 @@ async function doRollback() {
   restartRuntime();
   updateTray();
   return { from, to };
+}
+
+// ---------------------------------------------------------------------------
+// 容器加固（2026-09-23）：连续启动失败 → 自动回滚上一版本
+//
+// supervisor 的 crashing 世代（进程在 healthy 前退出 / 健康探测失败）经
+// onStartupFailure 进来：RuntimeManager 持久计数，同一版本连续 N 次（默认 3）
+// 未启动/未健康即 rollback() 到 previousVersion 并重启运行时。没有
+// previousVersion 时只记录不动作（绝不抛错、绝不切换指针）。用户可见性：
+// 通知一条（含"已回退到 X"）+ tray/设置页的版本行 + knownIssues 诊断。
+// ---------------------------------------------------------------------------
+function handleRuntimeStartupFailure(reason) {
+  if (quitting) return null;
+  const verdict = manager.recordStartupFailure(reason);
+  log(`[shell] startup failure #${verdict.streak}/${verdict.threshold} for ${verdict.version || '?'}: ${reason}`);
+  if (!verdict.tripped || !verdict.canRollback || autoRollbackInFlight) {
+    if (verdict.tripped && !verdict.canRollback) {
+      log(`[shell] ${verdict.version} failed ${verdict.streak} consecutive startups — no previous version to roll back to`);
+    }
+    return { ...verdict, rollbackScheduled: false };
+  }
+  autoRollbackInFlight = true;
+  // 与 supervisor 自身的 1.5s 自动重启同一节奏：先让本世代彻底退出再动作。
+  setTimeout(() => {
+    autoRollbackRuntime().finally(() => { autoRollbackInFlight = false; });
+  }, 1_500);
+  return { ...verdict, rollbackScheduled: true };
+}
+
+async function autoRollbackRuntime() {
+  try {
+    const res = await manager.maybeAutoRollback(manager.state.lastStartupFailReason);
+    if (!res) return;
+    log(`[shell] auto-rolled back runtime: ${res.from} -> ${res.to} (consecutive startup failures)`);
+    notify(
+      t(lang(), 'notify.autoRollback'),
+      t(lang(), 'notify.autoRollbackBody', { v: res.from, n: manager.startupFailureThreshold, to: res.to })
+    );
+    updateTray();
+    restartRuntime();
+  } catch (err) {
+    log(`[shell] auto-rollback failed: ${err.message}`);
+    notify(t(lang(), 'notify.rollbackFailed'), err.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 容器加固（2026-09-23）：降级姿态可见化（托盘 / 设置页 / 诊断）
+//
+// "harness 可以坏、壳不能坏"的另一半：坏了要让人看见。feed 连续失败、mux 长期
+// 非 live、cookie 交换持续失败——三者任一持续即降级。降级只做被动呈现（托盘
+// 菜单项 + tooltip、设置页运行时区警示条、knownIssues 诊断、一条通知），绝不
+// 弹阻塞窗、绝不影响 harness 页面继续可用。恢复自动清除。
+// ---------------------------------------------------------------------------
+const RUNTIME_DEGRADED_REASON_KEYS = Object.freeze({
+  'feed-fail-streak': 'runtime.degradedFeed',
+  'auth-fail-streak': 'runtime.degradedAuth',
+  'feed-disconnected': 'runtime.degradedDisconnected',
+});
+
+/** 用户可读的降级原因（i18n；托盘与设置页共用同一份措辞）。 */
+function runtimeDegradedReasonsText(health, L = lang()) {
+  const reasons = Array.isArray(health && health.reasons) ? health.reasons : [];
+  return reasons.map((r) => t(L, RUNTIME_DEGRADED_REASON_KEYS[r] || 'runtime.degradedTitle')).join('；');
+}
+
+function broadcastRuntimeHealth(health) {
+  for (const w of BrowserWindow.getAllWindows()) {
+    try { if (!w.isDestroyed()) w.webContents.send('runtime:health', health); } catch { /* ignore */ }
+  }
+}
+
+/** 5s 观察 tick：喂 mux 状态、比较降级集合，变化时刷新托盘/设置页/诊断。 */
+function runtimeHealthTick() {
+  if (quitting) return;
+  if (runtimeMux) runtimeHealth.noteMuxState(runtimeMux.state);
+  const health = runtimeHealth.snapshot();
+  const key = health.degraded ? health.reasons.join(',') : '';
+  if (key === runtimeHealthKey) return;
+  const previous = runtimeHealthKey;
+  runtimeHealthKey = key;
+  if (key) {
+    const version = manager.getInfo().activeVersion;
+    log(`[shell] runtime degraded: ${key} (feedFail=${health.feedFailStreak} authFail=${health.authFailStreak} lostFor=${Math.round(health.feedLostForMs / 1000)}s, mux=${health.muxState})`);
+    // 诊断：写进 runtime-state 的 knownIssues（设置页/回滚归因可见）
+    if (version) {
+      manager.state.knownIssues[version] = `event surface degraded: ${key}`;
+      manager.saveState();
+    }
+    notify(t(lang(), 'notify.runtimeDegraded'), t(lang(), 'notify.runtimeDegradedBody', {
+      reason: runtimeDegradedReasonsText(health),
+      v: version || '—',
+    }));
+  } else if (previous) {
+    log('[shell] runtime health recovered (event surface live again)');
+    const version = manager.getInfo().activeVersion;
+    if (version && /^event surface degraded/.test(manager.state.knownIssues[version] || '')) {
+      delete manager.state.knownIssues[version];
+      manager.saveState();
+    }
+  }
+  updateTray();
+  broadcastRuntimeHealth(health);
 }
 
 // ---------------------------------------------------------------------------
@@ -1150,6 +1683,26 @@ function registerIpc() {
     }
     return saved;
   });
+  // Task 8 / SPEC-08: additive Office settings IPC. Reads/writes go to the
+  // independent office-state.v1.json store ONLY; the legacy settings.json
+  // schema is unchanged. Flags are reported but never settable from here.
+  ipcMain.handle('shell:office-settings-get', () => {
+    try {
+      const state = ensureOfficeStateStore().get();
+      return { ok: true, settings: state.settings, flags: state.flags };
+    } catch (error) {
+      return { ok: false, code: 'OFFICE_STATE_READ_FAILED', message: error && error.message };
+    }
+  });
+  ipcMain.handle('shell:office-settings-set', async (_e, partial) => {
+    try {
+      const result = await ensureOfficeStateStore().updateSettings(partial);
+      if (result.ok && officeModuleInstance) officeModuleInstance.updateSettings(result.settings);
+      return result;
+    } catch (error) {
+      return { ok: false, code: 'OFFICE_STATE_WRITE_FAILED', message: error && error.message };
+    }
+  });
   ipcMain.handle('shell:quickask-shortcut-get', () => ({ active: quickAskShortcut.current(), configured: settings.get().quickAskHotkey }));
   ipcMain.handle('shell:quickask-shortcut-set', (_e, value) => {
     const result = quickAskShortcut.set(value, (next) => settings.patch({ quickAskHotkey: next }));
@@ -1167,7 +1720,7 @@ function registerIpc() {
     });
     return res.canceled ? null : { path: res.filePaths[0] };
   });
-  ipcMain.handle('shell:runtime-info', () => ({ ...manager.getInfo(), state: cockpitRuntimeState }));
+  ipcMain.handle('shell:runtime-info', () => ({ ...manager.getInfo(), state: cockpitRuntimeState, health: runtimeHealth.snapshot() }));
   ipcMain.handle('shell:check-update', () => runUpdateCheck(true));
   ipcMain.handle('shell:apply-update', () => applyPendingUpdate());
   ipcMain.handle('shell:rollback', () => doRollback());
@@ -1470,6 +2023,47 @@ function registerIpc() {
     }
     return r;
   });
+  // ---- left office rail (M4 直启动) --------------------------------------
+  ipcMain.handle('office-rail:toggle-office', () => {
+    if (!officeRuntimeEnabled()) return { ok: false, open: false, code: 'OFFICE_RUNTIME_DISABLED' };
+    if (windowManager.isOfficeViewActive()) {
+      windowManager.hideOfficeShellView();
+      return { ok: true, open: false };
+    }
+    const result = openOfficeView();
+    return { ok: !!result.ok, open: !!result.ok, active: result.ok ? 'office' : 'harness', code: result.code || null };
+  });
+  ipcMain.handle('office-rail:switch-view', (_e, view) => {
+    if (view === 'office') {
+      if (!officeRuntimeEnabled()) return { ok: false, active: 'harness', code: 'OFFICE_RUNTIME_DISABLED' };
+      const result = openOfficeView();
+      return { ok: !!result.ok, active: result.ok ? 'office' : 'harness', code: result.code || null };
+    }
+    windowManager.hideOfficeShellView();
+    return { ok: true, active: 'harness' };
+  });
+  ipcMain.handle('office-rail:set-accent', (_e, accent) => {
+    const allowed = ['indigo', 'sky', 'teal', 'amber', 'rose', 'slate'];
+    const next = allowed.includes(accent) ? accent : 'indigo';
+    try { windowState.save(path.join(app.getPath('userData'), 'office-rail-state.json'), { accent: next }); } catch { /* cosmetic */ }
+    windowManager.broadcastToOfficeRail('office-rail:accent', { accent: next });
+    return { ok: true, accent: next };
+  });
+  ipcMain.handle('office-rail:get-state', () => {
+    let accent = 'indigo';
+    try {
+      const saved = windowState.load(path.join(app.getPath('userData'), 'office-rail-state.json'));
+      if (saved && typeof saved.accent === 'string') accent = saved.accent;
+    } catch { /* cosmetic */ }
+    return {
+      ok: true,
+      officeOpen: windowManager.isOfficeViewActive(),
+      activeView: windowManager.isOfficeViewActive() ? 'office' : 'harness',
+      accent,
+      officeEnabled: officeRuntimeEnabled(),
+    };
+  });
+
   // Copy for the settings window (file:// pages have no navigator.clipboard).
   ipcMain.handle('shell:copy-text', (_e, text) => {
     if (typeof text === 'string' && text.length > 0 && text.length <= 4096) clipboard.writeText(text);
@@ -2496,7 +3090,10 @@ async function compactNow() {
   }
   if (!getRuntimeUrl()) return { ok: false, code: 'runtime-offline', reason: t(lang(), 'compact.noWindow') };
   const info = manager.getInfo();
-  const client = createHarnessRpcClient({ baseUrl: getRuntimeUrl(), version: info.activeVersion || '' });
+  // 0.1.5: slash endpoints (session/list _request + commands/execute
+  // submittedAttachments) through the mux unary channel when the event feed is
+  // live; 0.1.1: the original dot-method paths (rollback safety).
+  const client = createHarnessRpcClient({ baseUrl: getRuntimeUrl(), version: info.activeVersion || '', ...harnessRpcDeps() });
   const r = await client.compactLatestSession();
   if (!r.ok) {
     const reason = t(lang(), 'compact.failedBody', { code: r.code });
@@ -2622,6 +3219,413 @@ function checkBudget(monthCost) {
   } else {
     notifyAs('budget', t(lang(), 'notify.budgetWarn'), t(lang(), 'notify.budgetWarnBody', { pct }));
   }
+}
+
+// ---------------------------------------------------------------------------
+// P1 office data pipeline (docs/strategy/2026-09-23-office-right-panel-spec.md
+// §4): inject the shell-assembled usage block into the office module, mirror
+// runtime waterfall requests into its pending list, and remove them through
+// the shared answer path. No new data collection happens here — every field
+// comes from the caches above (token-stats collect, cost snapshot, balance
+// monitor) or from the waterfall frames themselves.
+// ---------------------------------------------------------------------------
+
+/** Session id -> agent composition preset (the `agentPreset` axis:
+ * dsh-agent-presets, real value `standard`). Filled from the session/list calls
+ * the office follow-sync and the IM bindings already make.
+ *
+ * P4-R1 AXIS NOTE (user-verified, first-hand on the installed 0.1.5-rc.2):
+ * this is NOT the permission/sandbox axis (dsh-permission-presets:
+ * read-only / workspace-write / danger-full-access). That axis's `sandboxMode`
+ * is a mount-time composition property the harness does NOT project onto
+ * sessions, so the panel can never read a session's current sandbox mode. The
+ * values here are therefore shown verbatim as 「Agent 预设」 (never relabelled
+ * "unknown"), and they are NOT mapped to any sandbox tier: passed into
+ * classifyRisk() they simply fail its two exact-match preset branches and land
+ * on the class-based (conservative) result. */
+const officeSessionPresets = new Map();
+const OFFICE_PRESET_CAP = 200;
+// Pre-module pending mirror: the office module is created lazily (first office
+// view open), but waterfall requests must be waiting the moment the panel —
+// and the "需要你" badge — appears. Bounded and simulation-free; seeded into
+// the module on creation, after which the module is the single live store.
+const officePendingMirror = createPendingMirror({ log });
+
+function noteOfficeSessionPreset(sessionId, preset) {
+  if (typeof sessionId !== 'string' || sessionId === '') return;
+  const value = typeof preset === 'string' ? preset.trim() : '';
+  if (!value) return;
+  if (!officeSessionPresets.has(sessionId) && officeSessionPresets.size >= OFFICE_PRESET_CAP) {
+    officeSessionPresets.delete(officeSessionPresets.keys().next().value);
+  }
+  officeSessionPresets.set(sessionId, value);
+}
+
+/** Assemble the §4 usage block from the existing caches and inject it. Called
+ * from the token poll after every cost snapshot; a null block (no data yet)
+ * leaves the office snapshot at `usage: null`. */
+function injectOfficeUsage(stats) {
+  const mod = officeModuleInstance;
+  if (!mod || typeof mod.setUsageSnapshot !== 'function') return;
+  const dataAtMs = costCache.data === stats && costCache.at ? costCache.at : Date.now();
+  const block = buildOfficeUsage({
+    collectData: stats || costCache.data,
+    costSnap: latestCostSnapshot.data,
+    balanceSnapshot: balanceMonitor ? balanceMonitor.snapshot() : null,
+    settings: settings.get(),
+    nowMs: Date.now(),
+    dataAtMs,
+  });
+  if (block) mod.setUsageSnapshot(block);
+}
+
+/** Mirror one runtime waterfall request (approval / user question) into the
+ * office pending store: straight into the module when it is live, otherwise
+ * into the bounded pre-module mirror (seeded on module creation). Idempotent
+ * per eventId in both stores.
+ *
+ * The session is the 0.1.1 frame's own `sessionId` when present, else the
+ * waterfall frame's `agentId` — an Agent id IS its SessionId (dsh-agent:
+ * `Agent.id: SessionId`). The mux approval/question request payload carries no
+ * session id of its own (first-hand: dsh-user-approval ApprovalRequestEvent /
+ * dsh-user-questions AskUserQuestionRequestEvent + the api-gateway projection),
+ * so the agentId is what lets the pending item bind to the employee and the
+ * detailRef correlation find the same-turn journal record. */
+function officeNotePending({ kind, frame, rpcId, agentId }) {
+  const sessionId = (frame && typeof frame.sessionId === 'string' && frame.sessionId !== '')
+    ? frame.sessionId
+    : (typeof agentId === 'string' && agentId !== '' ? agentId : '');
+  const toolName = kind === 'question'
+    ? 'ask_user_question'
+    : ((frame && (frame.toolName || frame.tool)) || '');
+  // The session's AGENT composition preset (agent-presets axis, e.g.
+  // `standard`) — the office classifyRisk() second input and the modal's
+  // 「Agent 预设」 row. NOT a sandbox/permission tier (P4-R1: the harness does
+  // not project that axis onto sessions), so it never maps to one.
+  const preset = (frame && typeof frame.agentPreset === 'string' && frame.agentPreset.trim())
+    ? frame.agentPreset.trim()
+    : (officeSessionPresets.get(sessionId) || null);
+  const mux = runtimeMux;
+  // The second arrival argument doubles as the routing id: the 0.1.5 mux
+  // carries the waterfall eventId there, the 0.1.1 frame carries its
+  // server-request rpcId. On the mux protocol that id IS the eventId; on the
+  // legacy protocol there is no waterfall eventId at all.
+  const routingId = typeof rpcId === 'string' && rpcId !== '' ? rpcId : null;
+  // §5 高危判据 ④「任何沙箱放宽请求」: the one approval path the shipped
+  // harness raises is the sandbox escalation retry — dsh-sandbox
+  // approveEscalation asks with reason `escalate sandbox to <mode>:
+  // <justification>` (first-hand evidence from the installed package). The
+  // request carries no widening flag, so the boolean is derived from the
+  // harness's own reason phrasing; the reason text itself stays in the
+  // main-process detail store and never enters the snapshot.
+  const reason = frame && typeof frame.reason === 'string' ? frame.reason : '';
+  const sandboxWidening = /^escalate sandbox to\b/i.test(reason.trim());
+  const record = {
+    eventId: eventsFeedProtocol === 'mux' ? routingId : null,
+    rpcId: routingId,
+    kind,
+    sessionId,
+    toolName,
+    preset,
+    sandboxWidening,
+    clientId: mux && typeof mux.clientId === 'string' && mux.clientId !== '' ? mux.clientId : null,
+    atMs: Date.now(),
+  };
+  // P3 detailRef: hold the answerable context (session/call routing + the
+  // harness-provided reason / question payload) so the danger modal can show
+  // REAL data on demand. The store is bounded and never part of any snapshot.
+  noteOfficePendingDetail(record, {
+    callId: (frame && (frame.callId || frame.approvalId)) || null,
+    reason,
+    questions: kind === 'question' && frame && Array.isArray(frame.questions) ? frame.questions : null,
+  });
+  const mod = officeModuleInstance;
+  if (mod && typeof mod.notePendingRequest === 'function') {
+    const res = mod.notePendingRequest(record);
+    if (res && res.ok && res.status === 'added') {
+      log(`[office] pending ${kind} noted (${toolName || 'unknown tool'})`);
+    }
+    return res;
+  }
+  // No office module yet (the office view has never been opened): hold the
+  // request so it — and the "需要你" state — is there the moment the office
+  // opens, instead of silently missing the most important arrival.
+  const held = officePendingMirror.note(record);
+  if (held && held.ok && held.status === 'added') {
+    log(`[office] pending ${kind} held for the first office view (${toolName || 'unknown tool'})`);
+  }
+  return held;
+}
+
+/** Remove a pending item once its request is answered or revoked. The id the
+ * runtime echoes back is the waterfall eventId (mux) or the server-request
+ * rpcId (0.1.1); the module matches either. */
+function officeResolvePending(id) {
+  if (typeof id !== 'string' || id === '') return null;
+  // Pre-module mirror first: an answer can land through the shared
+  // respondToRuntime path while the office view has never been opened, and a
+  // mirrored request must not resurrect when the module is later seeded.
+  const mirrored = officePendingMirror.resolve(id);
+  const mod = officeModuleInstance;
+  if (!mod || typeof mod.resolvePending !== 'function') return mirrored;
+  return mod.resolvePending(id) || mirrored;
+}
+
+// ---------------------------------------------------------------------------
+// P3 detailRef store (spec §4 'office:pending-detail' / §5 实施备注 1)
+//
+// The harness approval request carries NO tool arguments — first-hand evidence
+// (installed 0.1.5-rc.2 packages):
+//   - dsh-user-approval README Known Limitations: "The request carries no tool
+//     arguments — an answerer sees the tool name, reason, and optional call id."
+//   - dsh-api-gateway projectRemoteEventRequest(): the waterfall frame is
+//     {type:'waterfall', event, eventId, agentId, request} where request is the
+//     ApprovalRequestEvent minus agent/signal — i.e. {toolName, callId?, reason?}.
+// So the danger modal's "命令原文 / 目标路径" is resolved HERE, from the
+// same-turn journal record:
+//   - dsh-agent-loop appendToolCall(): the journal `tool/call` event carries
+//     {turn, step, callId, name, arguments} (the raw model arguments JSON);
+//   - dsh-tools serviceAsk(): the approval ask passes `callId: exec.callId` —
+//     the SAME ToolCallId. So sessionId + callId correlates the approval with
+//     its tool/call record, whose `arguments` is the command text the harness
+//     itself shows the answerer.
+// The records arrive over the session/follow journal streams main.js already
+// opens; a `session/page` RPC re-read of the durable log tail (by the follow
+// cursor) covers the case where the follow stream opened after the call.
+// The store is bounded + TTL'd and NEVER part of any snapshot: the only exit
+// is the office:pending {action:'detail'} IPC the page sends when the user
+// opens the danger modal / question form (a deliberate, user-initiated
+// disclosure into the office view — the same text the harness's own approval
+// UI shows).
+// ---------------------------------------------------------------------------
+const officePendingDetails = new Map(); // id (eventId | rpcId | legacy:rpcId) -> detail record
+const officeToolCallArgs = new Map();   // `${sessionId}#${callId}` -> {name, arguments, atMs}
+const officeFollowCursors = new Map();  // sessionId -> latest seen journal seq (session/page throughSeq)
+const OFFICE_PENDING_DETAIL_CAP = 32;
+const OFFICE_TOOL_ARGS_CAP = 64;
+const OFFICE_TOOL_ARGS_MAX_CHARS = 4000;
+// Approvals never time out (cross-tool memo: permission requests always wait),
+// so the TTL is a generous cleanup, never a request deadline.
+const OFFICE_DETAIL_TTL_MS = 2 * 60 * 60 * 1000;
+
+/** Best-effort target-path extraction for write/edit-class tools: parse the
+ * arguments JSON and read a path-ish key. Returns null instead of guessing
+ * (bash commands are not JSON; a failed parse simply yields no path). */
+const OFFICE_TARGET_PATH_KEYS = ['path', 'file_path', 'filePath', 'file', 'target', 'filename', 'targetPath'];
+function officeTargetPathOf(argsText) {
+  if (typeof argsText !== 'string' || argsText === '') return null;
+  let parsed = null;
+  try {
+    parsed = JSON.parse(argsText);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  for (const key of OFFICE_TARGET_PATH_KEYS) {
+    if (typeof parsed[key] === 'string' && parsed[key] !== '') return parsed[key];
+  }
+  return null;
+}
+
+/** Capture one follow-journal tool/call record for later detailRef
+ * correlation (the raw arguments never enter any snapshot). Bounded by count
+ * and age; the command text itself is capped when stored. */
+function noteOfficeToolCallArgs(sessionId, data, atMs) {
+  if (typeof sessionId !== 'string' || sessionId === '' || !data || typeof data !== 'object') return;
+  const callId = typeof data.callId === 'string' && data.callId !== '' ? data.callId : null;
+  const args = typeof data.arguments === 'string' && data.arguments !== '' ? data.arguments : null;
+  if (!callId || !args) return;
+  const key = `${sessionId}#${callId}`;
+  officeToolCallArgs.set(key, {
+    name: typeof data.name === 'string' ? data.name : null,
+    arguments: args.length > OFFICE_TOOL_ARGS_MAX_CHARS ? `${args.slice(0, OFFICE_TOOL_ARGS_MAX_CHARS)}…` : args,
+    atMs: Number.isFinite(Number(atMs)) ? Number(atMs) : Date.now(),
+  });
+  while (officeToolCallArgs.size > OFFICE_TOOL_ARGS_CAP) {
+    const oldest = officeToolCallArgs.keys().next().value;
+    officeToolCallArgs.delete(oldest);
+  }
+}
+
+/** Hold the answerable context of one waterfall request so the danger modal
+ * and the question form can show REAL data on demand. Keys cover every id
+ * form the panel can address: the routing id and its 0.1.1 legacy: handle. */
+function noteOfficePendingDetail(record, extra = {}) {
+  const routingId = record.eventId || record.rpcId;
+  if (!routingId) return;
+  const now = record.atMs || Date.now();
+  const reason = typeof extra.reason === 'string' && extra.reason !== '' ? extra.reason : null;
+  const detail = {
+    routingId,
+    kind: record.kind,
+    sessionId: record.sessionId || null,
+    toolName: record.toolName || null,
+    preset: record.preset || null,
+    callId: extra.callId || null,
+    reason: reason && reason.length > OFFICE_TOOL_ARGS_MAX_CHARS
+      ? `${reason.slice(0, OFFICE_TOOL_ARGS_MAX_CHARS)}…`
+      : reason,
+    requestedSandboxMode: reason ? (/^escalate sandbox to ([\w.-]+)/i.exec(reason.trim()) || [])[1] || null : null,
+    questions: extra.questions || null,
+    atMs: now,
+  };
+  officePendingDetails.set(routingId, detail);
+  if (record.rpcId) officePendingDetails.set(`legacy:${record.rpcId}`, detail);
+  const cutoff = now - OFFICE_DETAIL_TTL_MS;
+  for (const [key, value] of officePendingDetails) {
+    if (value.atMs < cutoff) officePendingDetails.delete(key);
+  }
+  while (officePendingDetails.size > OFFICE_PENDING_DETAIL_CAP * 2) {
+    const oldest = officePendingDetails.keys().next().value;
+    officePendingDetails.delete(oldest);
+  }
+}
+
+/** session/page fallback: re-read the durable log tail (through the latest
+ * journal seq the follow stream delivered) and find the tool/call record with
+ * the given callId. Best-effort — any failure simply yields "not exposed". */
+async function officePageToolCallArgs(sessionId, callId) {
+  const mux = runtimeMux;
+  if (!mux || mux.state !== 'live' || !sessionId || !callId) return null;
+  const throughSeq = officeFollowCursors.get(sessionId);
+  if (!Number.isInteger(throughSeq) || throughSeq < 0) return null;
+  try {
+    const res = await mux.call('session/page', {
+      request: { address: { kind: 'session', sessionId }, throughSeq, maxMessages: 30 },
+    });
+    const records = res && res.ok && res.value && Array.isArray(res.value.records) ? res.value.records : [];
+    for (const entry of records) {
+      const event = entry && typeof entry === 'object' ? entry.event : null;
+      if (!event || event.type !== 'tool/call') continue;
+      const data = event.data && typeof event.data === 'object' ? event.data : {};
+      if (data.callId !== callId) continue;
+      return typeof data.arguments === 'string' && data.arguments !== '' ? data.arguments : null;
+    }
+  } catch { /* the fallback is advisory; the modal falls back to the honest note */ }
+  return null;
+}
+
+/** P4 打磨⑤（spec §8 P4 行）：agent 预设的实时刷新。原实现只从开启办公室时的
+ * `session/list` 种子读 `officeSessionPresets`，之后新建的会话在审批模态里
+ * 没有可显示的 Agent 预设。两层补丁，都不新增 IPC 通道：
+ *   1) 周期性重列：办公室 follow 心跳（5s）每第 12 次（≈60s）重列一次
+ *      `session/list`，让 `officeSessionPresets` 对新建会话也保持温备；
+ *   2) 按需刷新：详情拉取（用户点开模态）时若该会话预设仍缺失，立刻重列
+ *      一次并取回该会话的真实 agent 预设——模态打开正是用户需要它的时刻。
+ * 若两次都拿不到（mux 掉线 / 会话已退出），模态直接省略该行（不编造值）。
+ * 不用「每 N 秒定时重列 + 常驻」的更重方案：面板只在模态里展示预设，60s 一次
+ * 的心跳重列已足够，按需刷新覆盖即时性，成本有界。
+ * 轴系说明见 officeSessionPresets 上方的 P4-R1 注释：这里的值是 agent 组合
+ * 预设（如 `standard`），不是权限/沙箱档位。 */
+let officePresetResyncTick = 0;
+function officePresetResyncDue() {
+  officePresetResyncTick += 1;
+  return officePresetResyncTick % 12 === 0;
+}
+
+async function officeRefreshSessionPreset(sessionId) {
+  const mux = runtimeMux;
+  if (!mux || mux.state !== 'live' || typeof sessionId !== 'string' || sessionId === '') return null;
+  try {
+    const res = await mux.call('session/list', { _request: {} });
+    const items = (res && res.ok && res.value && Array.isArray(res.value.items)) ? res.value.items : [];
+    for (const item of items) {
+      if (!item || item.sessionId !== sessionId) continue;
+      const preset = agentPresetOf(item);
+      if (preset) {
+        noteOfficeSessionPreset(sessionId, preset);
+        return preset;
+      }
+    }
+  } catch { /* advisory: the modal falls back to the honest unknown note */ }
+  return null;
+}
+
+/** Resolve one pending id's detailRef payload (module-injected resolver). The
+ * approval case correlates the same-turn tool/call by callId; when nothing is
+ * found the payload says so explicitly (noToolArguments) instead of inventing
+ * a command. */
+async function officeResolvePendingDetail(id) {
+  const detail = officePendingDetails.get(id);
+  if (!detail) return null;
+  // P4 打磨⑤: a session created AFTER the seed has no known agent preset —
+  // refresh it live from the session list at the exact moment the modal opens.
+  let preset = detail.preset;
+  if ((!preset || preset === '') && detail.sessionId) {
+    preset = await officeRefreshSessionPreset(detail.sessionId);
+    if (preset) detail.preset = preset; // keep the store warm for the next open
+  }
+  const base = {
+    id,
+    kind: detail.kind,
+    toolName: detail.toolName,
+    preset,
+    reason: detail.reason,
+    requestedSandboxMode: detail.requestedSandboxMode,
+    atMs: detail.atMs,
+  };
+  if (detail.kind === 'question') {
+    return {
+      ...base,
+      questions: Array.isArray(detail.questions)
+        ? detail.questions.map((q) => ({
+          id: q && typeof q.id === 'string' ? q.id : '',
+          question: q && typeof q.question === 'string' ? q.question : '',
+          options: Array.isArray(q && q.options)
+            ? q.options.map((o) => ({ label: o && typeof o.label === 'string' ? o.label : '' })).filter((o) => o.label)
+            : [],
+        })).filter((q) => q.id && q.question)
+        : [],
+      noToolArguments: false,
+    };
+  }
+  let command = null;
+  let commandSource = null;
+  if (detail.sessionId && detail.callId) {
+    const hit = officeToolCallArgs.get(`${detail.sessionId}#${detail.callId}`);
+    if (hit) {
+      command = hit.arguments;
+      commandSource = 'journal-tool-call';
+    } else {
+      const paged = await officePageToolCallArgs(detail.sessionId, detail.callId);
+      if (paged) {
+        command = paged.length > OFFICE_TOOL_ARGS_MAX_CHARS
+          ? `${paged.slice(0, OFFICE_TOOL_ARGS_MAX_CHARS)}…`
+          : paged;
+        commandSource = 'session-page';
+      }
+    }
+  } else if (detail.callId) {
+    // No session id (a legacy frame without one, or an unresolvable agent):
+    // the callId is a globally unique tool-call handle, so a suffix scan over
+    // the captured journal records still correlates the same-turn call.
+    const suffix = `#${detail.callId}`;
+    for (const [key, value] of officeToolCallArgs) {
+      if (!key.endsWith(suffix)) continue;
+      command = value.arguments;
+      commandSource = 'journal-tool-call';
+      break;
+    }
+  }
+  return {
+    ...base,
+    command,
+    commandSource,
+    targetPath: command ? officeTargetPathOf(command) : null,
+    noToolArguments: !command,
+    questions: null,
+  };
+}
+
+/** Seed the pre-module mirror into a freshly created office module (bounded,
+ * synchronous, idempotent inside the module) and hand the live store over. */
+function seedOfficePendingMirror(mod) {
+  if (!mod || typeof mod.notePendingRequest !== 'function') return { seeded: 0, failed: officePendingMirror.size() };
+  const result = officePendingMirror.seed((record) => mod.notePendingRequest(record));
+  if (result.seeded > 0) {
+    log(`[office] pending mirror seeded: ${result.seeded} request(s) that arrived before the office view opened`);
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -3011,22 +4015,40 @@ function startScheduler() {
 
 // ---------------------------------------------------------------------------
 // task-completion + approval/question notifications (runtime event streams)
+//
+// Two protocols, one entry point (plan §4.2, dual stack until 0.1.1 retires):
+//   - 0.1.2+ prints a token-carrying URL → the event surface is the cookie-
+//     gated /api/remote.mux (mux client below).
+//   - 0.1.1 prints a bare URL → the legacy /api/events.{host,mux} pair stays
+//     exactly as it was, so a rolled-back runtime keeps every feed-derived
+//     feature (notifications, IM pushes, per-turn cost).
 // ---------------------------------------------------------------------------
 function startEventsFeed() {
   stopEventsFeed();
   const ru = getRuntimeUrl();
   if (!ru || quitting) return;
+  // The auth URL carries the launch token only on 0.1.2+; its presence is the
+  // protocol probe (the clean origin would 401 on every /api + WS route).
+  const authUrl = runtimeAuthUrlOf();
+  const tokenized = typeof authUrl === 'string' && authUrl.includes('token=');
+  if (tokenized) startMuxEventsFeed(ru);
+  else startLegacyEventsFeed(ru);
+}
+
+function startLegacyEventsFeed(ru) {
+  eventsFeedProtocol = 'legacy';
+  runtimeHealth.noteFeedStart({ protocol: 'legacy' });
   const base = ru.endsWith('/') ? ru : `${ru}/`;
   const onFeedError = (err) => {
     if (quitting) return;
     eventsFeedFailStreak += 1;
+    runtimeHealth.noteFeedFailure(err); // 降级计数（容器加固）
     log(`[shell] events feed error: ${err.message} (attempt ${eventsFeedFailStreak})`);
     if (eventsFeedFailStreak === 3) {
-      // dsh 0.1.2 replaced /api/events.{host,mux} with the /api/remote.mux stream
-      // mux, gated on the browser-session cookie. Until the operating layer speaks
-      // that protocol the feed stays down: say so once and stop the 3s storm —
-      // the runtime itself keeps working, only the feed-derived extras pause.
-      log('[shell] events feed unavailable — the runtime may be 0.1.2+ (feed moved to /api/remote.mux);'
+      // Neither protocol connected after three tries: say so once and stop the
+      // 3s storm — the runtime itself keeps working, only the feed-derived
+      // extras pause.
+      log('[shell] events feed unavailable — the runtime event surface could not be reached;'
         + ' notifications, IM pushes and per-turn cost are paused for this runtime');
     }
     clearTimeout(eventsRetryTimer);
@@ -3040,6 +4062,7 @@ function startEventsFeed() {
       if (!eventsFeedLiveLogged) {
         eventsFeedLiveLogged = true;
         eventsFeedFailStreak = 0; // a live frame proves the feed is healthy again
+        runtimeHealth.noteFeedLive();
         log(`[shell] events feed live (session ${frame.sessionId}, running=${frame.running})`);
       }
       // H-im L2: rising edge → taskStarted push; falling edge → taskDone (existing)
@@ -3066,12 +4089,132 @@ function startEventsFeed() {
   log(`[shell] events feed -> ${base}api/events.{host,mux}`);
 }
 
+/** 0.1.2+ event surface: one /api/remote.mux connection carrying the global
+ * `$events` stream (status / error / waterfall) plus per-session
+ * `session/follow` journal streams for the virtual office (M5). The mux client
+ * owns reconnect + stream re-opening, so onFeedError only records that the
+ * feed went blind (no full-feed restart storm). */
+function startMuxEventsFeed(ru) {
+  eventsFeedProtocol = 'mux';
+  runtimeHealth.noteFeedStart({ protocol: 'mux' });
+  const base = ru.endsWith('/') ? ru : `${ru}/`;
+  const onFeedError = (err) => {
+    if (quitting) return;
+    eventsFeedFailStreak += 1;
+    runtimeHealth.noteFeedFailure(err); // 降级计数（容器加固；cookie 失败归因 auth）
+    log(`[shell] events feed error: ${err && err.message || err} (attempt ${eventsFeedFailStreak})`);
+    if (eventsFeedFailStreak === 3) {
+      log('[shell] events feed still unavailable after 3 attempts — the mux keeps retrying in the background');
+    }
+  };
+  runtimeMux = createRuntimeMux({
+    baseUrl: base,
+    auth: runtimeAuth,
+    log,
+    onError: onFeedError,
+    reconnectMs: 3_000,
+    maxBackoffMs: 60_000,
+  });
+  runtimeMux.onReady(() => {
+    eventsFeedFailStreak = 0; // a ready frame proves the feed is healthy again
+    runtimeHealth.noteFeedLive();
+    if (!eventsFeedLiveLogged) {
+      eventsFeedLiveLogged = true;
+      log('[shell] events feed live (mux ready)');
+    }
+  });
+  runtimeMux.onItem(EVENTS_STREAM_ID, onMuxEventValue);
+  runtimeMux.connect();
+  startOfficeFollowSync();
+  log(`[shell] events feed -> ${base}api/remote.mux ($events + session/follow)`);
+}
+
+/** `$events` stream frames: {type:'emit'|'waterfall'|'cancel', …}. Emit args
+ * are the Cordis event's positional arguments (spike-verified shapes). */
+function onMuxEventValue(value) {
+  if (!value || typeof value !== 'object') return;
+  if (value.type === 'emit') {
+    const args = Array.isArray(value.args) ? value.args : [];
+    switch (value.event) {
+      case 'api-session/status': {
+        // (sessionId, running) — the 0.1.5 replacement for host/session-status
+        const sessionId = typeof args[0] === 'string' ? args[0] : '';
+        const running = args[1] === true;
+        noteOfficeSessionStatus(sessionId, running);
+        const wasRunning = sessionRunning;
+        sessionRunning = running; // busy check for the manual /compact entry (C3)
+        if (!eventsFeedLiveLogged) {
+          eventsFeedLiveLogged = true;
+          eventsFeedFailStreak = 0;
+          log(`[shell] events feed live (session ${sessionId}, running=${running})`);
+        }
+        // H-im L2: rising edge → taskStarted push; falling edge → taskDone (existing)
+        if (running === true && !wasRunning && channelsMgr) {
+          channelsMgr.broadcast({ kind: 'taskStarted' });
+        }
+        if (running === false) {
+          onTaskDone();
+          onTurnEnd(); // per-turn official cost + balance refresh (C1)
+        }
+        break;
+      }
+      case 'api-session/error': {
+        // (sessionId, message) — host-level failure signal, new in 0.1.5.
+        // No dedicated failure channel exists in the notification hub or the
+        // IM formatter (taskDone/taskStarted are the only task kinds), so this
+        // stays log + counter per the "no new machinery" rule.
+        const sessionId = typeof args[0] === 'string' ? args[0] : '';
+        const message = typeof args[1] === 'string' ? args[1] : 'unknown runtime error';
+        eventsFeedSessionErrorCount += 1;
+        log(`[shell] session error (${sessionId || '?'}): ${message} [#${eventsFeedSessionErrorCount}]`);
+        break;
+      }
+      case 'api-session/added':
+        noteOfficeSessionAdded(args[0]);
+        break;
+      case 'api-session/removed':
+        noteOfficeSessionRemoved(args[0]);
+        break;
+      default:
+        break; // forwarded events the shell does not consume (activity, presets, …)
+    }
+    return;
+  }
+  if (value.type === 'waterfall') {
+    // approval / user-question requests; the request payload carries the
+    // 0.1.5 field names (toolName/callId/reason, questions) — the consumers
+    // also accept the legacy names. The frame's `agentId` is the scoped
+    // Agent's id, and an Agent id IS its SessionId (dsh-agent: `Agent.id:
+    // SessionId`, "Session-backed Agent identity") — it is how the office
+    // pending item learns WHICH session raised this request (the request
+    // payload itself carries no session id).
+    const request = value.request && typeof value.request === 'object' ? value.request : {};
+    if (value.event === 'approval/request') onApprovalRequested(request, value.eventId, value.agentId);
+    else if (value.event === 'user-questions/request') onQuestionRequested(request, value.eventId, value.agentId);
+    return;
+  }
+  if (value.type === 'cancel') {
+    // Host revoked a pending waterfall; nothing is pending on our side.
+    log(`[shell] runtime cancelled a pending request (${value.eventId || '?'})`);
+    officeResolvePending(value.eventId); // P1: the office pending item goes too
+  }
+}
+
 function stopEventsFeed() {
   for (const feed of eventsFeed) {
     try { feed.close(); } catch { /* ignore */ }
   }
   eventsFeed = [];
   if (eventsRetryTimer) { clearTimeout(eventsRetryTimer); eventsRetryTimer = null; }
+  stopOfficeFollowSync();
+  if (runtimeMux) {
+    try { runtimeMux.close(); } catch { /* ignore */ }
+    runtimeMux = null;
+  }
+  eventsFeedProtocol = 'legacy';
+  // 容器加固：feed 停了（运行时重启/退出）就不该继续显示降级——新一轮 feed
+  // 起来时 noteFeedStart 重新开始计数。
+  runtimeHealth.reset();
   // no live frames until the feed reconnects: drop the busy flag and any
   // compaction start orphaned by a runtime crash/restart (C3)
   sessionRunning = false;
@@ -3080,6 +4223,542 @@ function stopEventsFeed() {
 
 function windowHidden() {
   return !hasVisibleMainWindow();
+}
+
+// ---------------------------------------------------------------------------
+// Office M5: real harness sessions → virtual office (plan §4.2/§5).
+//
+// Each session the office cares about gets ONE `session/follow` journal stream
+// on the mux; every {type:'event', event} record is expanded into the exact
+// envelope office-module.ingestHarnessEvent expects ({sessionId, type, seq,
+// time, data}). The desired set is reconciled every 5s against the office's
+// own binding ledger (employee cards): new bound sessions open a stream,
+// released ones close it after a one-tick grace so the terminal turn/end
+// always lands first. Nothing here changes the office module's contract.
+// ---------------------------------------------------------------------------
+const OFFICE_FOLLOW_INTERVAL_MS = 5_000;
+const OFFICE_FOLLOW_GRACE_TICKS = 2; // close a stream only after 2 idle ticks
+const OFFICE_FOLLOW_KNOWN_CAP = 32; // bound the added-session memory
+// 2026-09-25: bounded reopen retries per follow stream. The host ends (not
+// re-opens) a stream whose address it rejects, so without a bound a rejected
+// address turns into an unbounded 5s error/reopen loop (measured in the soak:
+// every subagent child session). N reopens with ZERO delivered frames is the
+// signature of an unusable address.
+const OFFICE_FOLLOW_MAX_REOPENS = 3;
+const officeFollowUnfollowable = new Set(); // sessionIds we stopped following (bounded by OFFICE_FOLLOW_KNOWN_CAP)
+// 2026-09-24 resync fix: the durable-log re-read that answers one
+// office:runtime-resync-request. session/page is a BACKWARDS page
+// (first-hand: SessionPageRequest "One message-aligned backwards-history
+// request", throughSeq inclusive + optional beforeSeq), so the re-read walks
+// backwards from the latest delivered journal seq until the requested
+// fromSequence is covered — bounded by page count and message count so a
+// pathological gap can never turn into an unbounded RPC loop.
+const OFFICE_RESYNC_PAGE_MESSAGES = 200;
+const OFFICE_RESYNC_MAX_PAGES = 8;
+const officeResyncInFlight = new Set(); // sessionIds with a re-read running
+const officeFollowKnownOrder = [];
+// 2026-09-25: follow/page 的地址簿（根会话 vs 子代理会话）。子会话的 parent+mode
+// 由父侧 journal 的 subagent/start 带出（见 officeSubagentWiring.emit），会话列表
+// 的 summary（origin/parentSessionId）只作为"这是子会话"的早期信号——mode 未知时
+// 地址簿返回 null，tick 会跳过它而不是拿注定被拒的根地址去打运行时。
+const officeFollowAddresses = createFollowAddressBook({ cap: OFFICE_FOLLOW_KNOWN_CAP * 2 });
+
+/** 该会话的 follow/page 地址；null = 已知子会话但还不可寻址（跳过）。 */
+function officeFollowAddressOf(sessionId) {
+  return officeFollowAddresses.addressOf(sessionId);
+}
+
+function noteOfficeSessionStatus(sessionId, running) {
+  if (typeof sessionId !== 'string' || !sessionId) return;
+  officeFollowRunning.set(sessionId, running === true);
+}
+
+function noteOfficeSessionAdded(summary) {
+  const sessionId = summary && typeof summary.sessionId === 'string' ? summary.sessionId : '';
+  if (!sessionId) return;
+  // 子会话的早期信号：list 行在 header.origin / header.parentSession 存在时才带
+  // 这两个字段（运行时 types/list.js listFields）。带上就记账，让 tick 在拿到
+  // mode 之前先别开流。
+  const childOf = summary && typeof summary.parentSessionId === 'string' ? summary.parentSessionId
+    : (summary && summary.origin === 'subagent' && typeof summary.parentSession === 'string' ? summary.parentSession : '');
+  if (childOf) officeFollowAddresses.noteChildSession(sessionId, childOf);
+  officeFollowRemoved.delete(sessionId);
+  if (!officeFollowKnown.has(sessionId)) {
+    officeFollowKnown.add(sessionId);
+    officeFollowKnownOrder.push(sessionId);
+    while (officeFollowKnownOrder.length > OFFICE_FOLLOW_KNOWN_CAP) {
+      const evicted = officeFollowKnownOrder.shift();
+      officeFollowKnown.delete(evicted);
+    }
+  }
+}
+
+function noteOfficeSessionRemoved(sessionId) {
+  if (typeof sessionId !== 'string' || !sessionId) return;
+  officeFollowRemoved.add(sessionId);
+  officeFollowRunning.delete(sessionId);
+  officeFollowCursors.delete(sessionId);
+  officeFollowAddresses.forget(sessionId);
+}
+
+/** Raw root sessionIds the office currently has an ACTIVE binding for.
+ * Released bindings keep their audit record (single-use session ids), and a
+ * re-bound turn lives under a derived `raw#tN` handle — both cases reduce to
+ * the raw id the follow stream must address. */
+function officeBoundSessionIds() {
+  const mod = officeModuleInstance;
+  if (!mod || typeof mod.debugRegistrySnapshot !== 'function') return [];
+  let snapshot;
+  try { snapshot = mod.debugRegistrySnapshot(); } catch { return []; }
+  const out = [];
+  for (const binding of (snapshot && snapshot.bindings) || []) {
+    if (!binding || binding.releasedAt !== null) continue;
+    const raw = typeof binding.sessionId === 'string' ? binding.sessionId.split('#')[0] : '';
+    if (raw) out.push(raw);
+  }
+  return out;
+}
+
+function officeDesiredFollowIds() {
+  const desired = new Set(officeBoundSessionIds());
+  for (const [sessionId, running] of officeFollowRunning) {
+    if (running) desired.add(sessionId); // a live turn must be journalled
+  }
+  for (const sessionId of officeFollowKnown) {
+    if (!officeFollowRemoved.has(sessionId)) desired.add(sessionId);
+  }
+  return desired;
+}
+
+function startOfficeFollowSync() {
+  stopOfficeFollowSync();
+  // The journal follow streams exist for the office's benefit; with the office
+  // runtime explicitly disabled there is no consumer, so do not open them.
+  if (!officeRuntimeEnabled()) return;
+  // Bootstrap: sessions already running when the feed comes up never emit a
+  // status edge, so seed the running set from the session list once.
+  seedOfficeFollowFromSessionList();
+  officeFollowTimer = setInterval(officeFollowSyncTick, OFFICE_FOLLOW_INTERVAL_MS);
+  if (typeof officeFollowTimer.unref === 'function') officeFollowTimer.unref();
+}
+
+function stopOfficeFollowSync() {
+  if (officeFollowTimer) { clearInterval(officeFollowTimer); officeFollowTimer = null; }
+  officeFollowUnfollowable.clear();
+  const mux = runtimeMux;
+  for (const [, entry] of officeFollowStreams) {
+    try { if (mux) mux.closeStream(entry.streamId); } catch { /* ignore */ }
+  }
+  officeFollowStreams.clear();
+  officeFollowRunning.clear();
+  officeFollowKnown.clear();
+  officeFollowRemoved.clear();
+  officeFollowKnownOrder.length = 0;
+  officeFollowCursors.clear();
+  // Subagent-seat translation ledgers are per-feed: clearing them on stop keeps
+  // a later re-enable from treating stale child ids as already-started.
+  officeSubagentWiring.reset();
+  // Follow addresses are per-feed too (they only exist to address this feed's
+  // streams); a re-enable re-learns them from the parent journals.
+  officeFollowAddresses.forgetAll();
+  officeAssistantStreamStats.clear();
+}
+async function seedOfficeFollowFromSessionList() {
+  const mux = runtimeMux;
+  if (!mux) return;
+  try {
+    const res = await mux.call('session/list', { _request: {} });
+    const items = (res && res.ok && res.value && Array.isArray(res.value.items)) ? res.value.items : [];
+    let running = 0;
+    for (const item of items) {
+      const sessionId = item && typeof item.sessionId === 'string' ? item.sessionId : '';
+      if (sessionId && item.running === true) { noteOfficeSessionStatus(sessionId, true); running += 1; }
+      // P1: remember each session's AGENT composition preset (agent-presets
+      // axis, e.g. `standard`) — the office classifyRisk() second input. NOT a
+      // sandbox tier: the harness does not project the permission/sandbox axis
+      // onto sessions (see the P4-R1 note on officeSessionPresets).
+      noteOfficeSessionPreset(sessionId, agentPresetOf(item));
+    }
+    log(`[office] follow seed: ${items.length} session(s) listed, ${running} running`);
+  } catch (e) {
+    log(`[office] follow seed skipped: ${e && e.message || e}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// C — incremental assistant stream (0.1.5 `assistantStream?: true`).
+//
+// Off by omission historically: the follow request never asked for the
+// process-local assistant presentation frames, so the office only ever saw
+// durable journal events. Turning it on adds WORD-BY-WORD progress at the
+// event layer (attempt start / chunk / end), which is what a "thinking"
+// cadence needs, at the cost of extra mux frames per active attempt.
+//
+// Policy (deliberate, switchable):
+//  - Only office follow streams ask for it; they exist only while the office
+//    runtime is enabled (`startOfficeFollowSync` is a no-op otherwise), so a
+//    user with the office off pays nothing.
+//  - The frame PAYLOAD is never forwarded into the office module: chunks carry
+//    raw model output, which the office privacy boundary forbids. The shell
+//    keeps only COUNTS plus a throttled log line, so the incremental cadence
+//    is observable without leaking text.
+//  - To disable: set OFFICE_ASSISTANT_STREAM to false — the request then omits
+//    `assistantStream` entirely (`false` is rejected by the gateway).
+const OFFICE_ASSISTANT_STREAM = true;
+const OFFICE_ASSISTANT_STREAM_LOG_EVERY = 40; // chunks between log lines
+const officeAssistantStreamStats = new Map(); // sessionId -> {chunks, attempts, ended, lastLogAt}
+
+/** session/follow 的请求体。地址来自地址簿：
+ *  - 根会话 `{kind:'session'}`；
+ *  - 子代理会话 `{kind:'subagent', parentSessionId, childSessionId, mode}`（0.1.5 的
+ *    validateAddress 拒绝根地址寻址子会话）；
+ *  - 已知子会话但 mode 未知 → null：调用方跳过（等父侧 journal 把 mode 带出来）。 */
+function officeFollowRequest(sessionId) {
+  const address = officeFollowAddressOf(sessionId);
+  if (!address) return null;
+  const request = { address };
+  if (OFFICE_ASSISTANT_STREAM) request.assistantStream = true;
+  return request;
+}
+
+function noteOfficeAssistantStreamFrame(sessionId, frame) {
+  if (!frame || typeof frame !== 'object') return;
+  let stat = officeAssistantStreamStats.get(sessionId);
+  if (!stat) { stat = { chunks: 0, attempts: 0, ended: 0 }; officeAssistantStreamStats.set(sessionId, stat); }
+  if (frame.type === 'start') {
+    stat.attempts += 1;
+    log(`[office] assistant-stream start (${sessionId.slice(0, 8)}): attempt ${stat.attempts}`);
+  } else if (frame.type === 'chunk') {
+    stat.chunks += 1;
+    if (stat.chunks === 1 || stat.chunks % OFFICE_ASSISTANT_STREAM_LOG_EVERY === 0) {
+      log(`[office] assistant-stream chunk (${sessionId.slice(0, 8)}): #${stat.chunks}`);
+    }
+  } else if (frame.type === 'end') {
+    stat.ended += 1;
+    log(`[office] assistant-stream end (${sessionId.slice(0, 8)}): ${stat.ended} ended of ${stat.attempts} attempt(s), ${stat.chunks} chunk(s)`);
+  }
+}
+
+function officeFollowSyncTick() {  const mux = runtimeMux;
+  // Mux down (cookie failing, runtime restarting): the office keeps its local
+  // behavior — this is a container posture, the shell must not wobble.
+  if (!mux || mux.state !== 'live') return;
+  // P4 打磨⑤：约每 60s（5s 心跳的第 12 次）重列一次 session/list，让会话预设
+  // 映射对开启办公室之后新建的会话也保持温备（classifyRisk 第二输入 + 审批
+  // 模态的「权限预设」行）。成本有界：一次 RPC/分钟，无新增通道。
+  if (officePresetResyncDue()) seedOfficeFollowFromSessionList();
+  const desired = officeDesiredFollowIds();
+  for (const sessionId of desired) {
+    if (officeFollowUnfollowable.has(sessionId)) continue; // 已判不可寻址：不再重试
+    // 地址：根会话 / 子代理会话（parent+mode）/ null（已知子会话但 mode 未知）。
+    // null 必须"跳过"，不能退回根地址——0.1.5 会以 session/agent-busy 拒掉它。
+    const request = officeFollowRequest(sessionId);
+    if (!request) continue;
+    const streamId = `session-follow-${sessionId}`;
+    if (!officeFollowStreams.has(sessionId)) {
+      mux.onItem(streamId, (value) => {
+        const live = officeFollowStreams.get(sessionId);
+        if (live) live.frames += 1;
+        ingestOfficeFollowFrame(sessionId, value);
+      });
+      officeFollowStreams.set(sessionId, { streamId, misses: 0, reopens: 0, frames: 0 });
+      log(`[office] follow open (${sessionId.slice(0, 8)})`);
+      // Spike-verified wire shape: a flat SessionFollowRequest. `assistantStream`
+      // is z.literal(true).optional() on 0.1.5 — it must be OMITTED or `true`,
+      // never `false` (the gateway rejects `false`). See
+      // officeFollowRequest() for the enable/disable policy.
+      mux.openStream(streamId, 'session/follow', { request });
+    } else if (typeof mux.isStreamOpen === 'function' && !mux.isStreamOpen(streamId)) {
+      // A REAL change (not a refresh): the host ended/errored this follow
+      // stream, or a reconnect dropped it before the mux re-opened it. Re-open
+      // it — the fresh opening window is handled as a stream-restart baseline
+      // by ingestOfficeFollowFrame, so the re-open can no longer manufacture a
+      // forward gap. A stream that is merely already open is NEVER re-opened:
+      // session/follow has no resume cursor, so every needless open would
+      // restart the window for nothing.
+      const entry = officeFollowStreams.get(sessionId);
+      entry.misses = 0;
+      entry.reopens += 1;
+      // 2026-09-25 长稳实测：地址一旦不被运行时接受（典型：子代理会话被用根地址
+      // 寻址 → session/agent-busy），host 会立刻结束流，"重开"于是退化成每 5s
+      // 一次的错误风暴。有界重试：连开 N 次而**一帧都没收到** → 判该会话不可寻址，
+      // 停止重试并留一条诊断（可见、可查；不再刷屏）。
+      if (entry.reopens >= OFFICE_FOLLOW_MAX_REOPENS && entry.frames === 0) {
+        officeFollowUnfollowable.add(sessionId);
+        log(`[office] follow unfollowable (${sessionId.slice(0, 8)}): `
+          + `${entry.reopens} reopens, 0 frames — stopped retrying`);
+        try { mux.closeStream(entry.streamId); } catch { /* ignore */ }
+        officeFollowStreams.delete(sessionId);
+        continue;
+      }
+      log(`[office] follow reopen (${sessionId.slice(0, 8)})`);
+      mux.openStream(streamId, 'session/follow', { request });
+    } else {
+      officeFollowStreams.get(sessionId).misses = 0;
+    }
+  }
+  for (const [sessionId, entry] of [...officeFollowStreams]) {
+    if (desired.has(sessionId)) continue;
+    entry.misses += 1;
+    if (entry.misses < OFFICE_FOLLOW_GRACE_TICKS) continue;
+    mux.closeStream(entry.streamId);
+    officeFollowStreams.delete(sessionId);
+    log(`[office] follow closed (${sessionId.slice(0, 8)})`);
+  }
+}
+
+/** session/follow frames: the opening {type:'snapshot', records:[…]} window
+ * plus incremental {type:'event', event} records — same entry shape.
+ *
+ * 2026-09-24 resync fix: an opening window is a BASELINE (stream restart), not
+ * an increment. First-hand contract (0.1.5-rc.2
+ * @deepseek-ai/dsh-api-session-controller SessionFollowFrame): "Complete
+ * opening window followed by ordered durable events"; SessionFollowRequest
+ * carries NO resume cursor, so every open — first open, host-end heal, mux
+ * reconnect re-open — restarts at a fresh window whose first record can sit
+ * ABOVE the office adapter's watermark. Feeding such a window as an increment
+ * is exactly what manufactured forward gaps (buffered → 5 unanswered resync
+ * attempts → sync=stale → employee frozen mid-task). Window records therefore
+ * go to the module's ingestHarnessSnapshot(), which decides continuation vs
+ * baseline restart from the live watermark. */
+function ingestOfficeFollowFrame(sessionId, value) {
+  if (!value || typeof value !== 'object') return;
+  if (value.type === 'event') {
+    ingestOfficeJournalEvent(sessionId, value.event);
+    return;
+  }
+  if (value.type === 'assistant-stream') {
+    // C: process-local incremental assistant frames. Deliberately NOT forwarded
+    // to the office module — the chunk payload is raw model output and the
+    // office privacy boundary keeps text out. Shell-level cadence only (see
+    // noteOfficeAssistantStreamFrame).
+    noteOfficeAssistantStreamFrame(sessionId, value.frame);
+    return;
+  }
+  if (value.type === 'snapshot') {
+    // The opening cursor doubles as the session/page throughSeq the P3
+    // detailRef fallback needs (officePageToolCallArgs).
+    if (Number.isInteger(value.cursor) && value.cursor >= 0) {
+      officeFollowCursors.set(sessionId, Math.max(officeFollowCursors.get(sessionId) ?? -1, value.cursor));
+    }
+    const records = Array.isArray(value.records) ? value.records : [];
+    for (const record of records) {
+      if (record && record.type === 'event') noteOfficeFollowJournalRecord(sessionId, record.event);
+    }
+    const mod = officeModuleInstance;
+    if (mod && typeof mod.ingestHarnessSnapshot === 'function' && records.length > 0) {
+      const res = mod.ingestHarnessSnapshot({ sessionId, records });
+      if (res && res.ok) {
+        log(`[office] follow window (${sessionId.slice(0, 8)}): ${res.mode}`
+          + ` (watermark ${res.watermark}, sync ${res.sync})`);
+      } else {
+        log(`[office] follow window (${sessionId.slice(0, 8)}): refused (${res && res.code})`);
+      }
+    }
+  }
+  // assistant-stream frames are handled above (OFFICE_ASSISTANT_STREAM on).
+}
+
+/** Per-journal-record shell capture that must happen for BOTH delivery shapes
+ * (opening-window records and live event records): the session/page throughSeq
+ * cursor and the P3 detailRef tool-arguments store. Module ingestion is the
+ * caller's business (event → ingestHarnessEvent, window → ingestHarnessSnapshot). */
+function noteOfficeFollowJournalRecord(sessionId, event) {
+  if (!event || typeof event !== 'object' || typeof event.type !== 'string') return;
+  // P3 detailRef capture — BEFORE the module gate (the office module is created
+  // lazily, and the follow journal is the only place the raw tool arguments
+  // exist). The tool/call record carries {callId, name, arguments}; the
+  // approval request carries the same callId, so the danger modal can later
+  // show the REAL command. Bounded + TTL'd; never part of any snapshot.
+  if (event.type === 'tool/call') {
+    noteOfficeToolCallArgs(sessionId, event.data, event.time);
+  }
+  // Track the latest delivered journal seq per session: it is a valid
+  // session/page throughSeq for the detailRef fallback and the resync re-read.
+  if (Number.isInteger(event.seq) && event.seq >= 0) {
+    officeFollowCursors.set(sessionId, Math.max(officeFollowCursors.get(sessionId) ?? -1, event.seq));
+  }
+}
+
+function ingestOfficeJournalEvent(sessionId, event) {
+  const mod = officeModuleInstance;
+  noteOfficeFollowJournalRecord(sessionId, event);
+  if (!mod || !event || typeof event !== 'object' || typeof event.type !== 'string') return;
+  const data = event.data && typeof event.data === 'object' ? event.data : {};
+  // P2 turn/usage helpers: only non-negative integers ever enter the office
+  // envelope (provider usage counters); the message text never does.
+  const nonNegInt = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.round(Number(v)) : 0);
+  // 0.1.5 journal → office envelope translation (plan §5). The adapter's
+  // vocabulary still speaks the 0.1.x wire: turn/start carries the running
+  // fact (the old agent/status runtime event no longer exists), turn/end's
+  // reason is a {kind} object on the 0.1.5 wire (adapter reads a string), and
+  // tool/call names the tool under data.name (was data.tool). Feeding the raw
+  // 0.1.5 shapes would degrade every turn to a generic "attention" fact.
+  if (event.type === 'turn/start') {
+    mod.ingestHarnessEvent({ sessionId, type: 'agent/status', seq: event.seq, time: event.time, data: { status: 'running' } });
+    return;
+  }
+  if (event.type === 'turn/end') {
+    const reason = data.reason && typeof data.reason === 'object' && typeof data.reason.kind === 'string'
+      ? data.reason.kind
+      : (typeof data.reason === 'string' && data.reason ? data.reason : null);
+    mod.ingestHarnessEvent({
+      sessionId, type: 'turn/end', seq: event.seq, time: event.time,
+      data: reason ? { turn: data.turn, reason } : { turn: data.turn },
+    });
+    return;
+  }
+  if (event.type === 'tool/call') {
+    // Only the tool name is a fact; the raw arguments JSON never reaches the
+    // office (privacy boundary + the adapter's 64KB payload cap). The
+    // extraction (0.1.5 data.name, legacy data.tool) lives in the shared
+    // tool-phrases module so the office tool mapping has exactly one source.
+    mod.ingestHarnessEvent({
+      sessionId, type: 'tool/call', seq: event.seq, time: event.time,
+      data: { tool: toolNameOfJournalData(data) },
+    });
+    return;
+  }
+  if (event.type === 'assistant/message') {
+    // P2 timeline token attribution. The 0.1.5 journal carries the provider
+    // usage record ON the assistant/message event itself — dsh-session's
+    // 'assistant/message' type: "Carries the step's `usage` when the adapter
+    // reported token accounting, so the model output and its accounting
+    // travel together (there is no separate usage record)"; the same
+    // `data.usage = {inputTokens, outputTokens, cacheReadTokens,
+    // cacheWriteTokens}` is what src/token-stats.js reads off session logs.
+    // This is a FIRST-HAND per-turn source (never a day-bucket difference,
+    // which would mis-attribute under concurrency), so only the four NUMBERS
+    // are translated — the message text itself never reaches the office —
+    // under the §4 usage-block key convention, plus a per-turn money
+    // estimate priced at the same local rates as the usage block.
+    const usage = data.usage && typeof data.usage === 'object' && !Array.isArray(data.usage) ? data.usage : null;
+    if (usage) {
+      const bucket = {
+        input: nonNegInt(usage.inputTokens),
+        output: nonNegInt(usage.outputTokens),
+        cacheRead: nonNegInt(usage.cacheReadTokens),
+        cacheWrite: nonNegInt(usage.cacheWriteTokens),
+      };
+      if (bucket.input + bucket.output + bucket.cacheRead + bucket.cacheWrite > 0) {
+        mod.ingestHarnessEvent({
+          sessionId, type: 'turn/usage', seq: event.seq, time: event.time,
+          data: {
+            turn: Number.isFinite(Number(data.turn)) ? Number(data.turn) : null,
+            usage: bucket,
+            cost: priceUsageAt(bucket, { costSnap: latestCostSnapshot.data, settings: settings.get() }),
+          },
+        });
+      }
+    }
+    return;
+  }
+  // -------------------------------------------------------------------------
+  // 2026-09-24 subagent-seat wiring (real durable journal -> adapter vocab).
+  // The translation lives in the pure subagent-wiring module; it returns true
+  // when the event was consumed (it emitted exactly one office event carrying
+  // this journal event's own seq, so the adapter's strict sequencing never sees
+  // a gap). Tracking-only records return false and fall through to the generic
+  // ingest below, which is what advances the watermark for them.
+  // -------------------------------------------------------------------------
+  if (officeSubagentWiring.handleEvent(sessionId, event)) return;
+  mod.ingestHarnessEvent({ sessionId, type: event.type, seq: event.seq, time: event.time, data });
+}
+
+/** 2026-09-24 resync fix — answer ONE office:runtime-resync-request with a
+ * re-read of the durable session log, handed to the office module's
+ * ingestHarnessSnapshot() (which owns the watermark decision).
+ *
+ * Why session/page and not a follow re-open: session/follow has no resume
+ * cursor (first-hand SessionFollowRequest), so re-opening the stream to
+ * "refresh" would restart the opening window for nothing — and the follow
+ * reconcile deliberately no longer re-opens without a real change. The unary
+ * session/page RPC reads the durable log without touching the live stream.
+ * It is a BACKWARDS page (SessionPageRequest: throughSeq inclusive +
+ * optional beforeSeq), so the read walks backwards from the latest delivered
+ * journal seq until the requested fromSequence is covered; when the log start
+ * is reached first, the module adopts a partial baseline (honest diagnostic +
+ * log, never a guess). Every failure path simply returns: the adapter's retry
+ * timeline (250ms…5s, 5 attempts) re-asks, so a transient mux/RPC failure
+ * heals on the next attempt instead of escalating. */
+async function officeAnswerResync(sessionId, request) {
+  const mod = officeModuleInstance;
+  if (!mod || typeof mod.ingestHarnessSnapshot !== 'function') return;
+  if (officeResyncInFlight.has(sessionId)) return; // one re-read per session
+  const mux = runtimeMux;
+  const short = sessionId.slice(0, 8);
+  if (!mux || mux.state !== 'live') {
+    log(`[office] resync answer deferred (${short}): mux not live`);
+    return;
+  }
+  const throughSeq = officeFollowCursors.get(sessionId);
+  if (!Number.isInteger(throughSeq) || throughSeq < 0) {
+    // No journal seq ever delivered for this session: nothing to page from.
+    // The next follow window sets the cursor and the retry re-asks.
+    log(`[office] resync answer deferred (${short}): no follow cursor yet`);
+    return;
+  }
+  officeResyncInFlight.add(sessionId);
+  try {
+    const records = [];
+    let beforeSeq = null;
+    for (let page = 0; page < OFFICE_RESYNC_MAX_PAGES; page += 1) {
+      const args = {
+        request: {
+          // 子代理会话的 page 地址与 follow 同源（同一份地址簿）：0.1.5 的
+          // validateAddress 对 session/page 与 session/follow 是同一套规则。
+          address: officeFollowAddressOf(sessionId) || { kind: 'session', sessionId },
+          throughSeq,
+          maxMessages: OFFICE_RESYNC_PAGE_MESSAGES,
+        },
+      };
+      if (beforeSeq !== null) args.request.beforeSeq = beforeSeq;
+      let res;
+      try {
+        res = await mux.call('session/page', args);
+      } catch (e) {
+        log(`[office] resync read failed (${short}): ${e && e.message || e}`);
+        return;
+      }
+      if (!res || res.ok !== true) {
+        log(`[office] resync read rejected (${short}): ${(res && res.reason) || 'unknown'}`);
+        return;
+      }
+      const value = res.value || {};
+      const pageRecords = Array.isArray(value.records) ? value.records : [];
+      if (pageRecords.length === 0) break;
+      const firstSeq = firstJournalSeq(pageRecords);
+      if (firstSeq === null) {
+        log(`[office] resync read malformed (${short})`);
+        return;
+      }
+      records.unshift(...pageRecords); // pages arrive newest-first
+      if (firstSeq <= request.fromSequence) break; // the gap is fully covered
+      if (value.hasMore !== true) break; // log start reached: partial baseline
+      beforeSeq = firstSeq; // the next page ends just before this page's first record
+    }
+    if (records.length === 0) {
+      log(`[office] resync read empty (${short})`);
+      return;
+    }
+    const result = mod.ingestHarnessSnapshot({ sessionId, records });
+    if (result && result.ok) {
+      log(`[office] resync answered (${short}): ${result.mode}, replayed ${result.replayed},`
+        + ` watermark ${result.watermark}, sync ${result.sync}`);
+    } else {
+      log(`[office] resync answer refused (${short}): ${result && result.code}`);
+    }
+  } finally {
+    officeResyncInFlight.delete(sessionId);
+  }
+}
+
+function firstJournalSeq(records) {
+  for (const record of records) {
+    const event = record && record.event;
+    if (event && Number.isInteger(event.seq)) return event.seq;
+  }
+  return null;
 }
 
 function onTaskDone() {
@@ -3121,7 +4800,7 @@ async function handleImCommand({ command, senderId, text }) {
     if (command === 'bind') {
       const ru = getRuntimeUrl();
       if (!ru) return t(L, 'im.bind.offline');
-      const rpc = createHarnessRpcWire(ru);
+      const rpc = createHarnessRpcWire(ru, harnessRpcDeps());
       const sessions = await rpc.listSessions();
       const running = sessions.filter((s) => s.running);
       if (!arg) {
@@ -3137,7 +4816,7 @@ async function handleImCommand({ command, senderId, text }) {
         }
         if (!sessions.length) return t(L, 'im.bind.noRunning');
         const lines = sessions.slice(0, 8).map((s, i) =>
-          '\n' + (i + 1) + '. `' + String(s.sessionId).slice(0, 8) + '` ' + (s.agentPreset || 'standard') + (s.running ? ' ●' : '')).join('');
+          '\n' + (i + 1) + '. `' + String(s.sessionId).slice(0, 8) + '` ' + (agentPresetOf(s) || 'standard') + (s.running ? ' ●' : '')).join('');
         return t(L, 'im.bind.choose') + lines;
       }
       // /bind <prefix>: match the nearest session by short id (running preferred)
@@ -3156,7 +4835,7 @@ async function handleImCommand({ command, senderId, text }) {
     if (command === 'stop') {
       const ru = getRuntimeUrl();
       if (!ru) return t(L, 'im.bind.offline');
-      const rpc = createHarnessRpcWire(ru);
+      const rpc = createHarnessRpcWire(ru, harnessRpcDeps());
       const list = await rpc.listSessions();
       const running = list.find((s) => s.running);
       if (!running) return t(L, 'im.stop.noneRunning');
@@ -3173,27 +4852,36 @@ async function handleImCommand({ command, senderId, text }) {
 function imGetBinding(channelId, senderId) {
   return imCommandBindings.get(`im:${senderId}`) || null;
 }
-function onApprovalRequested(frame, rpcId) {
-  const tool = frame.toolName || '';
+function onApprovalRequested(frame, rpcId, agentId) {
+  const tool = frame.toolName || frame.tool || '';
+  // P1: mirror the request into the office pending list before anything else,
+  // so the panel sees it even if an IM channel is enabled and slow. agentId is
+  // the raising session (Agent.id = SessionId, first-hand dsh-agent types).
+  officeNotePending({ kind: 'approval', frame, rpcId, agentId });
   // IM push (C5/C6): approval cards carry a one-shot token (120s TTL) whose
-  // payload keeps the runtime routing fields (rpcId/sessionId/approvalId) —
-  // the token redemption hook answers POST /api/respond with them.
+  // payload keeps the runtime routing fields — the 0.1.5 mux carries the
+  // waterfall eventId here (clientId lives in the mux client), 0.1.1 carried
+  // the server-request rpcId; both are echoed back through respondToRuntime.
+  // `protocol` selects the answer value shape (mux: the bare outcome string).
   if (channelsMgr) {
     channelsMgr.broadcast({
       kind: 'approval',
       tool,
       rpcId: rpcId || '',
       sessionId: frame.sessionId || '',
-      approvalId: frame.approvalId || '',
+      approvalId: frame.approvalId || frame.callId || '',
+      protocol: eventsFeedProtocol,
     });
   }
   if (!windowHidden()) return;
   notifyAs('approval', t(lang(), 'notify.approval'), t(lang(), 'notify.approvalBody', { tool }));
 }
 
-function onQuestionRequested(frame, rpcId) {
+function onQuestionRequested(frame, rpcId, agentId) {
+  // P1: same mirror path as approvals (one list, one answer channel).
+  officeNotePending({ kind: 'question', frame, rpcId, agentId });
   // IM push (C5/C6): question cards carry a one-shot reply token (120s TTL)
-  // keeping the rpcId/sessionId/question shape for the /api/respond answer.
+  // keeping the routing id + question shape for the answer channel.
   if (channelsMgr) {
     channelsMgr.broadcast({
       kind: 'question',
@@ -3201,6 +4889,7 @@ function onQuestionRequested(frame, rpcId) {
       rpcId: rpcId || '',
       sessionId: (frame && frame.sessionId) || '',
       questions: (frame && frame.questions) || [],
+      protocol: eventsFeedProtocol,
     });
   }
   if (!windowHidden()) return;
@@ -3208,10 +4897,15 @@ function onQuestionRequested(frame, rpcId) {
 }
 
 /**
- * Answer a pending runtime server-request (approval / question) through
- * POST /api/respond with a client-response echoing the mux rpcId. Runtime
- * business errors come back 200 + {accepted:false}; both shapes map to the
- * {ok, reason} the channel dispatcher replies with over IM.
+ * Answer a pending runtime request (approval / question).
+ *
+ * 0.1.5 (mux protocol): POST /api/$events/result with the ready-frame
+ * clientId + the waterfall eventId; the value is the bare outcome
+ * ('allowed-once'|'rejected') or the AskUserQuestionAnswer {answers} batch
+ * (spike-verified envelope, invalid shapes are rejected by the gateway).
+ * 0.1.1 (legacy): POST /api/respond with a client-response echoing the mux
+ * rpcId. Runtime business errors come back 200 + {accepted:false}; both
+ * shapes map to the {ok, reason} the channel dispatcher replies with over IM.
  */
 async function respondToRuntime({ rpcId, value, what }) {
   const ru = getRuntimeUrl();
@@ -3219,6 +4913,24 @@ async function respondToRuntime({ rpcId, value, what }) {
   if (!rpcId || !value) {
     log(`[channels] ${what || 'respond'} dropped: missing runtime routing id`);
     return { ok: false, reason: 'no rpc id' };
+  }
+  const mux = runtimeMux;
+  if (mux && mux.clientId) {
+    // New protocol: rpcId carries the waterfall eventId.
+    const res = await mux.sendResult({ eventId: rpcId, outcome: { kind: 'result', value } });
+    if (res.ok) {
+      log(`[channels] ${what || 'respond'} accepted by runtime`);
+      officeResolvePending(rpcId); // P1: answered → drop the office pending item
+      return { ok: true };
+    }
+    log(`[channels] ${what || 'respond'} refused: ${res.reason}`);
+    return { ok: false, reason: res.reason };
+  }
+  if (eventsFeedProtocol === 'mux') {
+    // The answer was minted for the mux channel but the stream is down: the
+    // legacy /api/respond route does not exist on 0.1.5+ (would 404).
+    log(`[channels] ${what || 'respond'} dropped: mux event feed offline`);
+    return { ok: false, reason: 'runtime event feed offline' };
   }
   try {
     const base = ru.endsWith('/') ? ru : `${ru}/`;
@@ -3230,6 +4942,7 @@ async function respondToRuntime({ rpcId, value, what }) {
     const body = await res.json().catch(() => ({}));
     if (res.status === 200 && body && body.accepted === true) {
       log(`[channels] ${what || 'respond'} accepted by runtime`);
+      officeResolvePending(rpcId); // P1: answered → drop the office pending item
       return { ok: true };
     }
     const reason = (body && body.reason) || `HTTP ${res.status}`;
@@ -3246,6 +4959,30 @@ async function respondToRuntime({ rpcId, value, what }) {
 // ---------------------------------------------------------------------------
 let autoUpdater = null;
 let _updaterInitTried = false;
+// ---------------------------------------------------------------------------
+// M5 (windows-perf audit): user-visible update feedback.
+// The shell-update pipeline used to answer every failure with a log line only
+// ("autoUpdater.on('error', e => log(...))"): the settings page promises
+// 「结果将通过系统通知告知」 and there is no other surface, so a failed
+// check/download was invisible — while an unsigned exe downloading itself is
+// exactly the action an AV is most likely to block (§4.2/§4.4). The policy
+// (manual checks always answer, automatic ones speak up only for a download
+// that is failing, 10 min rate limit) lives in src/shell-update-notice.js so
+// it is unit-testable; it reuses the existing notification hub and the
+// existing retry entries (tray 「检查壳更新」, settings 「立即检查壳更新」).
+let shellUpdateNotifier = null;
+function shellUpdateNotice() {
+  if (!shellUpdateNotifier) {
+    shellUpdateNotifier = createShellUpdateNotifier({
+      notify,
+      t,
+      lang,
+      log,
+      version: () => app.getVersion(),
+    });
+  }
+  return shellUpdateNotifier;
+}
 
 function initAutoUpdater() {
   if (_updaterInitTried) return;
@@ -3260,12 +4997,22 @@ function initAutoUpdater() {
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.on('update-available', (info) => {
       log(`[shell] updater: update available ${info && info.version}`);
+      shellUpdateNotice().onAvailable(info); // autoDownload=true → the download starts now
+    });
+    autoUpdater.on('update-not-available', () => {
+      log('[shell] updater: up to date');
+      shellUpdateNotice().onNotAvailable();
     });
     autoUpdater.on('update-downloaded', (info) => {
       log(`[shell] updater: downloaded ${info && info.version}`);
+      shellUpdateNotice().onDownloaded(info);
       promptInstallShellUpdate(info);
     });
-    autoUpdater.on('error', (e) => log(`[shell] updater: ${e && e.message}`));
+    autoUpdater.on('error', (e) => {
+      log(`[shell] updater: ${e && e.message}`);
+      // M5: a visible, actionable notice instead of a silent log line.
+      shellUpdateNotice().onError(e);
+    });
     log('[shell] updater initialized');
     if (settings.get().shellAutoUpdate) {
       // check shortly after boot, then every 4 hours
@@ -3310,10 +5057,15 @@ function checkShellUpdate(notifyUser) {
     if (notifyUser) notify(t(lang(), 'notify.updateFailed'), 'updater unavailable');
     return;
   }
+  // M5: the 'error'/'update-not-available' listeners need to know whether this
+  // check came from the user (tray / settings) — a manual check always answers.
+  shellUpdateNotice().beginCheck(notifyUser);
   autoUpdater.checkForUpdates().catch((e) => {
     log(`[shell] updater check failed: ${e && e.message}`);
-    if (notifyUser) notify(t(lang(), 'notify.updateFailed'), String((e && e.message) || e));
-  });
+    // The 'error' event usually fires too; the dedup window inside the notifier
+    // keeps this from double-toasting.
+    shellUpdateNotice().onError(e);
+  }).finally(() => { shellUpdateNotice().endCheck(); });
 }
 
 // ---------------------------------------------------------------------------
@@ -3344,6 +5096,7 @@ if (!gotLock) {
   app.on('second-instance', () => showMain());
 
   app.whenReady().then(async () => {
+    registerOfficeRuntimeProtocolHandler();
     if (process.platform === 'win32') app.setAppUserModelId('com.dshcockpit.app');
     // No visible File/Edit menu bar (autoHideMenuBar hides it), but the menu
     // keeps keyboard accelerators alive (Ctrl+R / Ctrl+Shift+I / Ctrl+, …).
@@ -3419,7 +5172,7 @@ if (!gotLock) {
         const ru = getRuntimeUrl();
         if (!ru) return t(lang(), 'im.bind.offline');
         try {
-          await createHarnessRpcWire(ru).prompt(sessionId, text, 'steer');
+          await createHarnessRpcWire(ru, harnessRpcDeps()).prompt(sessionId, text, 'steer');
           return t(lang(), 'im.steer.accepted', { id: String(sessionId).slice(0, 8) });
         } catch (e) {
           log(`[channels] steer failed: ${e.message}`);
@@ -3443,16 +5196,20 @@ if (!gotLock) {
         prompt: text,
       }),
       // Approval/question decisions verified via one-shot token land here and
-      // are answered through the runtime's POST /api/respond (client-response
-      // echoing the mux server-request rpcId — same wire the web UI uses).
+      // are answered through the runtime: 0.1.5+ mux $events/result (bare
+      // outcome / answer batch), 0.1.1 POST /api/respond (the legacy
+      // client-response envelope). The protocol marker rides the token
+      // payload; the transport is picked by respondToRuntime.
       onApprovalDecision: ({ decision, tool, payload }) =>
         respondToRuntime({
           rpcId: payload && payload.rpcId,
-          value: payload && payload.sessionId && payload.approvalId ? {
-            sessionId: payload.sessionId,
-            approvalId: payload.approvalId,
-            outcome: decision === 'approve' ? 'allowed-once' : 'rejected',
-          } : null,
+          value: payload && payload.protocol === 'mux'
+            ? (decision === 'approve' ? 'allowed-once' : 'rejected')
+            : (payload && payload.sessionId && payload.approvalId ? {
+              sessionId: payload.sessionId,
+              approvalId: payload.approvalId,
+              outcome: decision === 'approve' ? 'allowed-once' : 'rejected',
+            } : null),
           what: `approval ${decision} for "${tool || '(unknown tool)'}"`,
         }),
       onQuestionAnswer: ({ text: answer, payload }) => {
@@ -3468,7 +5225,9 @@ if (!gotLock) {
         }];
         return respondToRuntime({
           rpcId: payload && payload.rpcId,
-          value: payload && payload.sessionId ? { sessionId: payload.sessionId, answer: { answers } } : null,
+          value: payload && payload.protocol === 'mux'
+            ? { answers }
+            : (payload && payload.sessionId ? { sessionId: payload.sessionId, answer: { answers } } : null),
           what: 'question answer',
         });
       },
@@ -3511,6 +5270,10 @@ if (!gotLock) {
       if (quitting || !trayMenu.hasTray()) return;
       if (settings.get().costPeakEnabled) updateTray();
     }, 60_000);
+    // 容器加固（2026-09-23）：降级姿态观察 tick。mux 状态从客户端读、降级集合
+    // 变化时刷新托盘 + 推送设置页 + 写 knownIssues + 一条通知；恢复自动清除。
+    runtimeHealthTimer = setInterval(runtimeHealthTick, 5_000);
+    if (typeof runtimeHealthTimer.unref === 'function') runtimeHealthTimer.unref();
     // Splash on EVERY boot, not just guided first-run: without it Windows
     // users stare at a blank screen for the whole runtime boot (AV scans the
     // runtime's thousands of files). It closes in createWindow().
@@ -3528,6 +5291,15 @@ if (!gotLock) {
       spawnRuntime();
     }
     if (process.env.DSH_DESKTOP_OPEN_SETTINGS === '1') createSettingsWindow();
+    // Dev-only Office Animation Playground (SPEC-06): opt-in via env; the
+    // playground stays off by default (officePlaygroundEnabled=false).
+    if (process.env.DSH_DESKTOP_OPEN_PLAYGROUND === '1') openOfficePlayground();
+    // Office runtime view (SPEC-07) — **默认视图 = 办公室**（用户拍板：M6 P5.2
+    // "默认视图 = office"、rev2 P1-2 "启动自动 openOfficeView()"）。左栏一键切回
+    // 会话工作台，切走后办公室继续在后台活着（仿真不冻结）。
+    // `DSH_DESKTOP_OPEN_OFFICE=0` 回到"会话工作台优先"（调试 / 灰度回退用）；
+    // `=1` 与默认同义，保留给开发与证据运行显式声明。
+    if (officeRuntimeEnabled() && process.env.DSH_DESKTOP_OPEN_OFFICE !== '0') openOfficeView();
 
     // token widget: one collect per tick shared by the widget and the cost
     // center (M7: avoid double full scans every 5s).
@@ -3542,6 +5314,7 @@ if (!gotLock) {
         const stats = await collectStats();
         pushTokens(stats);
         await costSnapshot(stats);
+        injectOfficeUsage(stats); // P1: office usage block from the same caches
       } catch (e) {
         log(`[shell] token poll failed: ${e.message}`);
       } finally {
@@ -3559,6 +5332,7 @@ if (!gotLock) {
       setTimeout(async () => {
         const stats = await collectStats();
         await costSnapshot(stats);
+        injectOfficeUsage(stats); // P1: office usage block from the same caches
         primeTurnBaseline(stats); // seed the per-turn cost baseline (C1)
         const diag = diagnosticsInfo();
         if (diag.crashCount > 0) {
@@ -3645,6 +5419,7 @@ if (!gotLock) {
 
   app.on('will-quit', () => {
     if (trayPeakTimer) { clearInterval(trayPeakTimer); trayPeakTimer = null; }
+    if (runtimeHealthTimer) { clearInterval(runtimeHealthTimer); runtimeHealthTimer = null; }
     if (balanceTimer) { clearInterval(balanceTimer); balanceTimer = null; }
     if (compactTimer) { clearInterval(compactTimer); compactTimer = null; }
     quickAskShortcut.shutdown();

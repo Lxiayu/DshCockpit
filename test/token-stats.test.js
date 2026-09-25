@@ -213,3 +213,80 @@ test('V3 generation: a v3-only session (new session on dsh 0.1.5) is discovered'
   assert.strictEqual(r.current.output, 6);
   fs.rmSync(home, { recursive: true, force: true });
 });
+
+// ---- M3 (windows-perf audit): session-tree walk cache TTL ------------------
+//
+// Defect being pinned: the walk cache TTL was 5s while the cockpit's
+// collectStats result cache was 10s, so the walk cache had ALWAYS expired by
+// the time a real recompute happened — every 10s re-walked the whole sessions
+// tree (2N readdir + 1 stat per session dir; ~900 syscalls/10s at N=300
+// sessions) while the app was idle. These tests assert the CACHE HIT, not just
+// the returned numbers, so a TTL regression fails loudly.
+
+test('M3: the walk cache stays warm across the 10s cost-cache cadence (one walk, many hits)', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-token-walk-'));
+  const line = (n) => JSON.stringify({ type: 'assistant/message', data: { usage: { inputTokens: n } } });
+  for (const [proj, sess, n] of [['proj-a', 's1', 10], ['proj-a', 's2', 20], ['proj-b', 's1', 30]]) {
+    const dir = path.join(home, 'sessions', proj, sess);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'session.jsonl'), line(n) + '\n');
+  }
+  ts.resetWalkCache();
+  const t0 = Date.now();
+  t.mock.timers.enable({ apis: ['Date'], now: t0 });
+  try {
+    const base = ts.walkCacheStats();
+    const r1 = await ts.collect(home);
+    assert.strictEqual(r1.sessionCount, 3);
+    assert.strictEqual(ts.walkCacheStats().walks - base.walks, 1, 'the first collect does exactly one walk');
+
+    // The cockpit cadence: the 5s token poll runs 4 times (= 20s of idle), but
+    // the 10s result cache means a real recompute lands every other tick. With
+    // the old 5s walk TTL every one of these re-walked; now zero do.
+    for (let i = 0; i < 4; i += 1) {
+      t.mock.timers.tick(5_000);
+      const r = await ts.collect(home);
+      assert.strictEqual(r.sessionCount, 3);
+    }
+    const after = ts.walkCacheStats();
+    assert.strictEqual(after.walks - base.walks, 1, '20s / 4 collect() calls later: still exactly ONE walk');
+    assert.strictEqual(after.hits - base.hits, 4, 'every collect() after the first was served by the walk cache');
+    assert.ok(ts.WALK_TTL_MS >= 10_000, 'the walk TTL must not be shorter than the cockpit cost-cache TTL (10s)');
+  } finally {
+    t.mock.timers.reset();
+  }
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('M3: forceWalk (turn-end accounting) still re-walks, and the cache does expire after the TTL', async (t) => {
+  const home = makeSessionLog(EVENTS.map((e) => JSON.stringify(e)));
+  ts.resetWalkCache();
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  try {
+    const base = ts.walkCacheStats();
+    await ts.collect(home);
+    assert.strictEqual(ts.walkCacheStats().walks - base.walks, 1);
+    await ts.collect(home);
+    assert.strictEqual(ts.walkCacheStats().walks - base.walks, 1, 'a warm cache is reused');
+    // The forced path must see a brand-new session immediately (freshness is
+    // exactly what force=true buys) — so it bypasses the list cache.
+    const fresh = path.join(home, 'sessions', 'proj', 'sess-new');
+    fs.mkdirSync(fresh, { recursive: true });
+    fs.writeFileSync(path.join(fresh, 'session.jsonl'),
+      JSON.stringify({ type: 'assistant/message', data: { usage: { inputTokens: 999 } } }) + '\n');
+    const forced = await ts.collect(home, { forceWalk: true });
+    assert.strictEqual(ts.walkCacheStats().walks - base.walks, 2, 'forceWalk re-walks');
+    assert.strictEqual(forced.sessionCount, 2, 'the brand-new session is visible on the forced path');
+    // The poll path stays on the cached list until the TTL lapses...
+    const cached = await ts.collect(home, { forceWalk: true });
+    assert.strictEqual(cached.sessionCount, 2);
+    // ...and picks it up after expiry without another force.
+    t.mock.timers.tick(ts.WALK_TTL_MS + 1);
+    const later = await ts.collect(home);
+    assert.strictEqual(later.sessionCount, 2);
+    assert.ok(ts.walkCacheStats().walks - base.walks >= 3, 'the cache expires after the TTL (not a permanent cache)');
+  } finally {
+    t.mock.timers.reset();
+  }
+  fs.rmSync(home, { recursive: true, force: true });
+});

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "file": "test/fixtures/office-layout-flat-draft.json",
+  "source": "User-approved flat layout draft saved from the standalone layout editor (Task E2d dev data dir), copied byte-for-byte with the user's approval for E4.",
+  "sha256": "cf7541608afc82aa36e211c0e8e09f49a6c87eb9c26b9de443ca154b1055f450",
+  "importDate": "2026-09-12",
+  "itemCount": 38,
+  "workstationCount": 6,
+  "purpose": "Immutable hermetic authoring input for src/office/runtime/office-layout-compiler.js. Tests compile THIS file and lock the compiled runtime fixture (src/office/fixtures/office-layout-flat.json) byte-for-byte; production code never reads a personal path.",
+  "notes": "The draft contains 6 workstations (flat-desk/flat-monitor/whale-girl-back/flat-chair) plus 14 environment props added by the user after the initial 24-item revision. Desks are singleton groupId units; monitors/characters/chairs are grouped (group-1/7/8/10/11/12) and attach to the nearest desk."
+}

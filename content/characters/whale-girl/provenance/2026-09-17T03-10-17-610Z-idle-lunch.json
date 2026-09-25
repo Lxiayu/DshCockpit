@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "actionId": "idle-lunch",
+  "packId": "deepseek-default",
+  "publishedAt": "2026-09-17T03:10:17.611Z",
+  "backupDir": "/Users/xia/program/dsh/DshCockpit-s1/content/build/backups/2026-09-17T03-10-17-610Z",
+  "backupDirRelative": "build/backups/2026-09-17T03-10-17-610Z",
+  "summary": "sync 1 frame file(s) into the pack (add); animations.json: the target action entry rewritten (order/durations/loop/direction); anchors.json: frames key order repaired to the new metadata order (E5a-R1); character.json: the action entry rebuilt from freshly measured geometry",
+  "frames": [
+    "assets/expressions/idle-lunch.png"
+  ],
+  "files": {
+    "rewritten": [
+      "assets/expressions/idle-lunch.png",
+      "animation/animations.json",
+      "animation/anchors.json",
+      "character.json"
+    ],
+    "added": [
+      "assets/expressions/idle-lunch.png"
+    ]
+  },
+  "changes": [
+    "sync 1 frame file(s) into the pack (add)",
+    "animations.json: the target action entry rewritten (order/durations/loop/direction)",
+    "anchors.json: frames key order repaired to the new metadata order (E5a-R1)",
+    "character.json: the action entry rebuilt from freshly measured geometry"
+  ]
+}

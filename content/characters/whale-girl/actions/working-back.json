@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "working-back",
+  "loop": true,
+  "direction": "none",
+  "frames": [
+    {
+      "file": "assets/animations/working/back/working-back-04.png",
+      "durationMs": 350
+    },
+    {
+      "file": "assets/animations/working/back/working-back-05.png",
+      "durationMs": 350
+    },
+    {
+      "file": "assets/animations/working/back/working-back-06.png",
+      "durationMs": 350
+    }
+  ],
+  "geometry": {
+    "footLine": 296,
+    "tolerancePx": 1
+  }
+}

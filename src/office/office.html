@@ -1,0 +1,1299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src office-runtime://local 'unsafe-inline' 'unsafe-eval'; style-src office-runtime://local 'unsafe-inline'; img-src office-runtime://local data: blob:; connect-src office-runtime://local; font-src 'none'" />
+  <title>Agent Office</title>
+  <link rel="stylesheet" href="./office.css" />
+</head>
+<body>
+  <main id="stage-host" aria-label="虚拟办公室场景：六工位与常驻员工">
+    <!-- The single Pixi canvas (or static fallback) mounts here. -->
+  </main>
+
+  <aside id="office-panel" aria-label="办公室详情面板">
+    <header id="office-overview">
+      <h1>Agent Office</h1>
+      <p id="overview-summary" aria-live="polite">载入中…</p>
+    </header>
+
+    <!-- ① 今日用量（spec §3 block 1）：token 与金额双显示、节省拆分（缓存/本地模型·云端等价）、
+         预算进度、数据延迟标记。只读；数值来自壳侧缓存（usage 块，P1 数据管道）。 -->
+    <section id="usage-block" aria-label="今日用量">
+      <div class="block-head">
+        <h2>今日用量</h2>
+        <span id="usage-stale" class="usage-stale" hidden>数据延迟</span>
+      </div>
+      <p id="usage-empty" class="hint" hidden>今日暂无用量数据</p>
+      <div id="usage-body" hidden>
+        <p class="usage-headline">
+          <strong id="usage-tokens" title="">0</strong>
+          <span class="usage-unit">tokens</span>
+          <span id="usage-money" class="usage-money">≈ ¥0.00</span>
+        </p>
+        <p id="usage-basis" class="hint">按 API Key 用量估算（本地速率）</p>
+        <ul class="usage-split">
+          <li><span>缓存命中省</span><b id="usage-save-cache">¥0.00</b></li>
+          <li><span>本地模型省<i class="usage-note">（云端等价）</i></span><b id="usage-save-local">¥0.00</b></li>
+          <li><span>云端实付</span><b id="usage-cloud">¥0.00</b></li>
+        </ul>
+        <div id="usage-budget" class="usage-budget" hidden>
+          <p class="usage-budget-line"><span>本月预算</span><span id="usage-budget-text">¥0.00 / ¥0.00</span></p>
+          <div class="usage-progress"><div id="usage-progress-bar" class="usage-progress-bar"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ② 员工状态行（spec §3 block 2）：状态徽标 + 去标识化任务标题 + 当前工具短语 + 需要你角标。
+         P4 打磨②：下方常驻的「方向键移动焦点…」说教提示收进列表的 title/aria-label
+         （鼠标悬停与读屏均可发现），不再占一行视觉空间。 -->
+    <section id="employee-list-block" aria-label="员工列表">
+      <ul id="employee-list" role="listbox" aria-label="选择员工查看详情（方向键移动焦点，Enter 或空格选中，Esc 取消选中）" title="方向键移动焦点，Enter 或空格选中，Esc 取消选中"></ul>
+    </section>
+
+    <!-- ③ 待你处理（spec §3 block 3）。P2 容器 + 计数；P3 行内批/拒（低/中风险）与危险模态
+         （高风险）：回答统一走既有 respondToRuntime（$events/result）共享通道（office:pending
+         IPC → 模块 answerPending），与 IM 同一实现；命令原文/问题正文经 detailRef
+         （office:pending {action:'detail'}）按需取回，永不进快照。 -->
+    <section id="pending-block" aria-label="待你处理">
+      <div class="block-head">
+        <h2>待你处理</h2>
+        <span id="pending-count" class="need-badge">0</span>
+      </div>
+      <p id="pending-empty" class="hint">暂无待处理 ✓</p>
+      <ul id="pending-list" aria-live="polite"></ul>
+    </section>
+
+    <!-- P3 危险模态（spec §5 高风险）：列出将要执行的步骤 / 影响范围 / 命令原文或目标路径（若有，
+         经 detailRef 取回的真实数据）/ 可否撤销说明；按钮仅 拒绝 / 仅本次批准（harness 结果词表没有
+         长期授权档位，故不提供"总是允许"）。模态打开期间阻塞面板操作（追加任务/取消/中断及
+         其他卡片的行内按钮），审批不设超时——不回答不会自动继续。按钮由 renderPendingModalBody
+         按类型生成（审批：拒绝/仅本次批准；提问：选项与自定义表单）。 -->
+    <div id="pending-modal" class="pending-modal" hidden role="dialog" aria-modal="true" aria-labelledby="pending-modal-title">
+      <div class="pending-modal-card">
+        <div class="block-head">
+          <h2 id="pending-modal-title">高危操作 · 批准请求</h2>
+          <button id="pending-modal-close" type="button" class="pending-modal-close" aria-label="关闭">×</button>
+        </div>
+        <dl id="pending-modal-body" class="pending-modal-body"></dl>
+        <p id="pending-modal-blocked" class="hint"></p>
+        <div id="pending-modal-actions" class="pending-modal-actions"></div>
+      </div>
+    </div>
+
+    <!-- ④ 时间线（spec §3 block 4）：时间 + 员工 + 事件 + 本轮 token/金额归属（provider usage 一手记录）。
+         默认 20 条，更多展开到 100 条。 -->
+    <section id="activity-block" aria-label="时间线">
+      <h3>时间线</h3>
+      <ul id="activity-log" aria-live="polite"></ul>
+      <button id="timeline-more" type="button" hidden>更多</button>
+    </section>
+
+    <!-- ⑤ 选中员工详情（spec §3 block 5，结构保留）＋ P4 ⑤「今日工作记录」：当日任务数/
+         完成/未完成/取消、累计 token 与金额（逐 turn provider usage 归属）、用时合计、
+         常用工具短语 Top N（tool/call 事实日聚合）、今日动态（进入/落座/小憩/任务起止）。
+         全部为模块侧 day record 投影：实数与固定短语，无任务正文、无会话 id；无数据时
+         显示空态而不编造。dayKey 为空（未注入真实时钟的调试路径）时标注为会话记录。 -->
+    <section id="details" aria-label="员工详情" aria-live="polite">
+      <p class="hint" id="details-placeholder">点击场景中的员工或用键盘选择查看详情</p>
+      <div id="details-body" hidden>
+        <h2 id="details-name"></h2>
+        <p id="details-role"></p>
+        <p id="details-primary"></p>
+        <ul id="details-dim"></ul>
+        <p id="details-queue" class="queue-line"></p>
+        <div id="details-record">
+          <div class="block-head">
+            <h3 id="details-record-title">今日工作记录</h3>
+            <span id="record-day" class="record-day" hidden></span>
+          </div>
+          <p id="record-empty" class="hint" hidden>今日暂无工作记录</p>
+          <div id="record-body" hidden>
+            <p id="record-counts" class="record-line"></p>
+            <p id="record-usage" class="record-line"></p>
+            <p id="record-tools" class="record-line" hidden></p>
+            <ul id="record-recent" class="record-recent"></ul>
+            <p id="record-note" class="hint record-note"></p>
+          </div>
+        </div>
+        <div id="details-actions" class="actions">
+          <button id="btn-dispatch" type="button">追加任务</button>
+          <button id="btn-cancel" type="button">请求取消</button>
+          <button id="btn-interrupt" type="button">请求中断</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ⑥ 页脚（spec §3 block 6）：极简同步点（正常/迟到/重连中 + tooltip）+ 减少动画 + 主题跟随。
+         降级诊断收进 tooltip（细节仍走 office:diagnostics）；编辑器入口已随 P5 摘除（编辑器本体移往工作台）。 -->
+    <footer id="office-footer">
+      <div class="footer-row">
+        <span id="sync-dot" class="sync-dot" data-sync="healthy" role="img" aria-label="同步正常" title="同步正常"></span>
+        <span id="degraded-dot" class="sync-dot sync-warn" hidden role="img" aria-label="降级" title=""></span>
+        <label class="checkbox">
+          <input id="ctl-reduced-motion" type="checkbox" />
+          减少动画
+        </label>
+        <span id="footer-tools"></span>
+      </div>
+      <p class="hint" id="fallback-note" hidden></p>
+    </footer>
+  </aside>
+
+  <script src="./node_modules/pixi.js/dist/pixi.min.js"></script>
+  <script>
+    // Page bootstrap: mini CommonJS loader over the local app scheme (same
+    // pattern as the playground). All URLs are office-runtime://local — no
+    // network, no CDN, no fetch of scripts. The renderer consumes ONLY the
+    // main-process snapshot pushed over the office:state channel.
+    (async () => {
+      const REGISTRY = {};
+      function loadModule(url, requireShim) {
+        return fetch(url)
+          .then((r) => { if (!r.ok) throw new Error(`${url}: ${r.status}`); return r.text(); })
+          .then((src) => {
+            const moduleObj = { exports: {} };
+            const factory = new Function('module', 'exports', 'require', src + `\n//# sourceURL=${url}`);
+            factory(moduleObj, moduleObj.exports, requireShim || (() => { throw new Error('require unsupported: ' + url); }));
+            return moduleObj.exports;
+          });
+      }
+
+      const loadJson = (url) => fetch(url).then((r) => { if (!r.ok) throw new Error(`${url}: ${r.status}`); return r.json(); });
+
+      const bridge = window.officeBridge;
+      if (!bridge) throw new Error('office bridge missing (preload not loaded?)');
+
+      // Layout fixtures are bundled local files; the RUNTIME layout resolves
+      // below through the compiled source chain (saved draft → bundled flat
+      // fixture → isometric fallback). The character pack, in contrast, MUST
+      // NOT reject the boot (Task 9 blocker A): loadOfficePack resolves a
+      // diagnostic outcome instead.
+      // Task 4: the production pack arrives as a PORTABLE descriptor id in
+      // the view URL (office.html?pack=<id>) — never an absolute path. The
+      // built-in deepseek-default pack is the safe default.
+      const officeSearchParams = new URLSearchParams(window.location.search);
+      const officePackParam = officeSearchParams.get('pack');
+      const officePackId = officePackParam && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(officePackParam)
+        ? officePackParam
+        : 'deepseek-default';
+      REGISTRY['office-layout'] = await loadModule('./runtime/office-layout.js');
+      REGISTRY['office-boot'] = await loadModule('./office-boot.js');
+      REGISTRY['asset-pack'] = await loadModule('./runtime/asset-pack.js');
+      // layout-assets must load BEFORE the renderer: the renderer's flat
+      // furniture path consumes the catalog (contentBbox + depth) at module
+      // load time.
+      REGISTRY['layout-assets'] = await loadModule('./layout-assets.js');
+      // Task 8: the schema-v1 draft validator (parseDraft/validateDraftSchema)
+      // is a production dependency of the layout boot chain below — P5/B-1
+      // keeps it in layout-schema.js so the production boot needs no editor
+      // code at all. Its single require ('./layout-assets.js') maps to the
+      // already-loaded registry entry above.
+      REGISTRY['layout-schema'] = await loadModule('./layout-schema.js', (spec) => REGISTRY[spec.replace('./', '').replace('.js', '')]);
+      // fps-monitor must load BEFORE pixi-office-renderer: the renderer
+      // requires it at module load time.
+      REGISTRY['fps-monitor'] = await loadModule('./render/fps-monitor.js');
+      REGISTRY['pixi-office-renderer'] = await loadModule('./render/pixi-office-renderer.js', (spec) => {
+        if (spec === './fps-monitor.js') return REGISTRY['fps-monitor'];
+        if (spec === '../layout-assets.js') return REGISTRY['layout-assets'];
+        throw new Error('require unsupported: ' + spec);
+      });
+      REGISTRY['office-page'] = await loadModule('./office-page.js', (spec) => REGISTRY[spec.replace('./', '').replace('.js', '')]);
+      // Task E4: the pure draft→runtime compiler (no requires — loads with
+      // the page's mini module loader).
+      REGISTRY['office-layout-compiler'] = await loadModule('./runtime/office-layout-compiler.js');
+
+      // Task 8 — production layout draft source priority: the user-saved
+      // layout (userData/office-layout.v1.json via the protocol layout route)
+      // wins over the bundled confirmed draft (fixtures/office-layout-draft.json);
+      // both pass the FULL schema-v1 validation before they may replace the
+      // canonical runtime layout. The canonical fixture stays the renderer
+      // fallback: an invalid draft degrades with a stable diagnostic and the
+      // existing runtime layout, never a broken page.
+      // Task 8-R1: response -> attempt classification is the pure
+      // office-boot.classifyLayoutAttempt — only 404 is `missing`; 409/422/
+      // 5xx/network failures are BROKEN attempts whose stable codes must
+      // reach the resolver (folding them into `missing` used to hide the
+      // corrupt-layout diagnostic from the page entirely).
+      const tryLoadLayoutDraft = async (url) => {
+        try {
+          const response = await fetch(url);
+          let body = null;
+          try { body = await response.json(); } catch { body = null; }
+          return REGISTRY['office-boot'].classifyLayoutAttempt({ status: response.status, body });
+        } catch {
+          return REGISTRY['office-boot'].classifyLayoutAttempt({ status: 0, body: null });
+        }
+      };
+      const [savedLayoutAttempt, bundledLayoutAttempt] = await Promise.all([
+        tryLoadLayoutDraft('./office-layout.v1.json'),
+        tryLoadLayoutDraft('./fixtures/office-layout-draft.json'),
+      ]);
+
+      // Task 8 — resolve the production layout draft with the real schema-v1
+      // validator (asset whitelist, kind/asset, position/scale/layer/groupId).
+      const layoutResolution = REGISTRY['office-boot'].resolveProductionLayoutDraft({
+        saved: savedLayoutAttempt,
+        bundled: bundledLayoutAttempt,
+        validateDraftSchema: REGISTRY['layout-schema'].validateDraftSchema,
+      });
+      let layoutDiagnostic = layoutResolution.code;
+      let layoutSource = layoutResolution.source;
+
+      // Task E4 — RUNTIME layout source chain (compiled draft → bundled flat
+      // fixture → isometric fallback): runtimeLayoutSource resolves to
+      // 'saved-compiled' | 'bundled-flat' | 'isometric-fallback'. The saved
+      // user draft is COMPILED into a runtime layout with the same pure
+      // compiler that generated the committed fixture; every candidate must
+      // pass the layout validator, so a broken chain degrades with a stable
+      // diagnostic instead of blocking the boot.
+      const loadJsonOrNull = async (url) => {
+        try { return await loadJson(url); } catch { return null; }
+      };
+      const [isometricFixture, flatFixture] = await Promise.all([
+        loadJsonOrNull('./fixtures/office-layout.json'),
+        loadJsonOrNull('./fixtures/office-layout-flat.json'),
+      ]);
+      const runtimeResolution = REGISTRY['office-layout-compiler'].resolveRuntimeLayout({
+        savedDraft: savedLayoutAttempt.ok ? savedLayoutAttempt.draft : undefined,
+        flatFixture,
+        isometricFixture,
+        validateLayout: (fixture) => REGISTRY['office-layout'].validateOfficeLayout(fixture),
+        assets: REGISTRY['layout-assets'].LAYOUT_ASSETS,
+        draftWidths: REGISTRY['layout-assets'].DRAFT_WIDTHS,
+        characterFoot: REGISTRY['layout-assets'].CHARACTER_FOOT_RATIO,
+      });
+      if (!runtimeResolution.ok || !runtimeResolution.layout) {
+        throw new Error(`OFFICE_LAYOUT_UNAVAILABLE: ${runtimeResolution.code}`);
+      }
+      let runtimeLayoutSource = runtimeResolution.source;
+      let runtimeLayoutCode = runtimeResolution.code;
+      if (runtimeLayoutCode) {
+        layoutDiagnostic = runtimeLayoutCode;
+      }
+
+      const layout = REGISTRY['office-layout'].createOfficeLayout(runtimeResolution.layout);
+      const packOutcome = await REGISTRY['office-boot'].loadOfficePack({
+        packId: officePackId,
+        loadJson,
+        createAssetPack: (input) => REGISTRY['asset-pack'].createAssetPack(input),
+      });
+      const pack = packOutcome.pack;
+      // Stable diagnostic code (SPEC-02 vocabulary): null | PACK_MISSING |
+      // PACK_MANIFEST_INVALID | PACK_ASSET_MISSING | upstream validator code.
+      const packDiagnostic = packOutcome.code;
+
+      // Textures: local validated pack frames only, loaded through Image()
+      // (no fetch, no network), one map per view — never shared between views.
+      const textures = new Map();
+      if (pack) {
+        const animations = packOutcome.animations;
+        const frames = new Set();
+        for (const id of Object.keys(animations.animations)) {
+          for (const frame of animations.animations[id].frames) frames.add(frame.file);
+        }
+        await Promise.all([...frames].map((file) => new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => { textures.set(file, window.PIXI.Texture.from(img)); resolve(); };
+          img.onerror = () => resolve(); // missing frame -> renderer placeholder
+          img.src = `./characters/${officePackId}/${file}`;
+        })));
+      }
+
+      let latestSnapshot = null;
+      // M2 (2026-09-16): snapshots now arrive per tick (~60Hz) so the canvas
+      // paints smoothly; the four DOM panels keep their historical ~10Hz
+      // cadence — rebuilding them per tick buys nothing visible and would
+      // flood the aria-live activity log.
+      const PANEL_RENDER_INTERVAL_MS = 100;
+      let lastPanelRenderAtMs = null;
+      // Task 3 golden workstation: per-view office furniture textures. Every
+      // view loads its own Image objects and creates its own PIXI.Texture map
+      // — no shared global asset cache. Load failures are collected as
+      // OFFICE_TEXTURE_MISSING diagnostics and never break the character
+      // pack or the page boot.
+      const officeTextures = new Map();
+      const officeTextureErrors = [];
+      const officeAssetSrcById = new Map(REGISTRY['layout-assets'].LAYOUT_ASSETS.map((asset) => [asset.id, asset.src]));
+      const furnitureAssetIds = [...new Set(layout.furniture().map((item) => item.assetId).filter(Boolean))];
+      await Promise.all(furnitureAssetIds.map((assetId) => new Promise((resolve) => {
+        const src = officeAssetSrcById.get(assetId);
+        if (!src) {
+          officeTextureErrors.push({ assetId, code: 'OFFICE_TEXTURE_MISSING', reason: 'ASSET_UNDECLARED' });
+          resolve();
+          return;
+        }
+        const image = new Image();
+        image.onload = () => { officeTextures.set(assetId, window.PIXI.Texture.from(image)); resolve(); };
+        image.onerror = () => { officeTextureErrors.push({ assetId, src, code: 'OFFICE_TEXTURE_MISSING', reason: 'IMAGE_DECODE_FAILED' }); resolve(); };
+        image.src = src;
+      })));
+      const stage = document.getElementById('stage-host');
+      const renderer = await REGISTRY['pixi-office-renderer'].createOfficeRenderer({
+        PIXI: window.PIXI,
+        layout,
+        pack,
+        textures,
+        officeTextures,
+        officeTextureErrors,
+        // Task 7A: the approved workstation-1 calibration propagated to all
+        // six stations; every desk renders from the same managed catalog.
+        texturedWorkstations: ['desk-1', 'desk-2', 'desk-3', 'desk-4', 'desk-5', 'desk-6'],
+        scene: { width: layout.scene().referenceWidth, height: layout.scene().referenceHeight },
+        snapshot: null,
+        mount: stage,
+        devicePixelRatio: window.devicePixelRatio || 1,
+        // Runtime low-FPS degradation (SPEC-07 / Task 9 blocker B): the
+        // observer counts presented frames only; the office simulation clock
+        // stays in the main process.
+        //
+        // 2026-09-24 (M1, windows-perf audit): judgement rewritten — the window
+        // is 3 SECONDS OF WALL TIME (windowMs), not 30 frames, the threshold is
+        // 20 fps (not 30) and a latch needs 4 consecutive bad windows, so the
+        // static fallback needs ~12s of sustained sub-20fps instead of ~5s
+        // (0.5s windows) / ~10s at 15fps. This is the exact policy exported as
+        // OFFICE_LOW_FPS_POLICY in src/office/render/fps-monitor.js and pinned
+        // by test/office-low-fps-policy.test.js — change both together.
+        // windowFrames is only an upper bound on a window (>= 3s at 80 fps).
+        // stallMs arms the renderer's stall watchdog: a renderer that presents
+        // NO frame for 3s produces 0-fps windows and still reaches the ladder
+        // (under frame-count windows a frozen renderer was never caught).
+        fpsMonitor: {
+          thresholdFps: 20,
+          windowFrames: 240,
+          windowMs: 3000,
+          lowWindowLimit: 4,
+          stallMs: 3000,
+          // The static presentation is for "not presenting", not for "slow":
+          // a scene that still holds >= 10 fps keeps the living low-cost
+          // profile (with the full art) instead of losing the picture.
+          staticFloorFps: 10,
+        },
+        // 2026-09-24 latch fix: renderer mode / diagnostic code changes (the
+        // LOW_FPS_PERSISTENT latch and the bounded recovery attempts) flow to
+        // the shell log and the footer dot — through the existing
+        // office:visibility invoke, no new channel.
+        onStateChange: () => { syncRendererDegradeNote(); reportRendererState(); },
+      });
+      // ② degraded diagnostics (pack / layout / renderer) moved from the
+      // visible fallback note into a footer dot tooltip; details still flow
+      // through the office:diagnostics channel (spec §2). Declared before the
+      // boot diagnostics below so the first note never hits a TDZ.
+      const degradedNotes = [];
+      // 2026-09-24 latch fix: the renderer note is DYNAMIC (a runtime
+      // LOW_FPS_PERSISTENT latch and its bounded recovery can flip it after
+      // boot) and always names the SPECIFIC stable code, so the footer dot
+      // reads 「渲染降级：LOW_FPS_PERSISTENT」 instead of a generic mode — the
+      // user (and we) can tell a low-frame-rate degrade from a hard WebGL
+      // failure at a glance.
+      let rendererDegradeNote = null;
+      function applyDegradeDot() {
+        const notes = rendererDegradeNote ? [...degradedNotes, rendererDegradeNote] : [...degradedNotes];
+        const dot = document.getElementById('degraded-dot');
+        dot.hidden = notes.length === 0;
+        dot.title = notes.length > 0 ? `${notes.join('；')}；详情走 office:diagnostics` : '';
+      }
+      function noteDegraded(text) {
+        degradedNotes.push(text);
+        applyDegradeDot();
+      }
+      function syncRendererDegradeNote() {
+        const diagnostics = renderer.diagnostics();
+        // Any non-webgl mode is a degrade: 'canvas' (WebGL init failed, the
+        // canvas fallback carries the scene) and 'static' (the diagnostic
+        // presentation). The note names the SPECIFIC stable code.
+        rendererDegradeNote = diagnostics.mode !== 'webgl'
+          ? `渲染降级：${diagnostics.diagnosticCode || 'RENDERER_UNAVAILABLE'}（${diagnostics.mode} 模式）；详情与日志保持可用`
+          : null;
+        // M1 (2026-09-24): a scene that stepped down to the low-cost render
+        // profile is NOT a degrade (it is live and keeps the full art) but the
+        // user should still be able to see that the shell noticed a low frame
+        // rate — and that 「重试渲染」 in the static fallback is the manual road
+        // back if the machine keeps dropping out.
+        if (!rendererDegradeNote && diagnostics.renderProfile === 'low-cost') {
+          rendererDegradeNote = `渲染降档：低开销模式（帧率持续低于 ${diagnostics.fps ? diagnostics.fps.thresholdFps : 20} fps）；画面与操作保持可用，详情走 office:diagnostics`;
+        }
+        applyDegradeDot();
+      }
+      if (packDiagnostic) {
+        noteDegraded(`角色包降级：${packDiagnostic}；已切换诊断占位形象，详情与日志保持可用`);
+      }
+      // Task 8: the production layout draft resolved through saved > bundled;
+      // a failed chain degrades to the runtime fallback with a stable
+      // diagnostic instead of blocking the boot (the editing surface left
+      // with P5 — the page itself always renders a layout).
+      if (layoutDiagnostic) {
+        noteDegraded(`布局降级：${layoutDiagnostic}；已回退内置默认布局，页面保持可用`);
+      }
+      // 2026-09-24: the renderer note is dynamic — syncRendererDegradeNote()
+      // renders the SPECIFIC stable code (WEBGL_INIT_FAILED /
+      // RENDERER_UNAVAILABLE at boot, LOW_FPS_PERSISTENT after a runtime
+      // latch, cleared when a bounded recovery rebuild succeeds).
+      syncRendererDegradeNote();
+
+      // P2 presentation helpers (compact counts / money / durations) come from
+      // the shared page module so the panel and its tests pin one formatter.
+      const FMT = REGISTRY['office-page'];
+      const page = REGISTRY['office-page'].createOfficePageController({
+        bridge,
+        renderer,
+        reducedMotion: false,        onSnapshot: (snapshot) => {
+          latestSnapshot = snapshot;
+          renderer.applySnapshot(snapshot);
+          const now = Date.now();
+          if (lastPanelRenderAtMs === null || now - lastPanelRenderAtMs >= PANEL_RENDER_INTERVAL_MS) {
+            lastPanelRenderAtMs = now;
+            renderOverview(snapshot);
+            renderEmployeeList(snapshot);
+            renderDetails();
+            renderActivity(snapshot);
+            // P2 blocks (① usage, ③ pending inbox) ride the same ~10Hz cadence.
+            renderUsageBlock(snapshot);
+            renderPendingBlock(snapshot);
+          }
+        },
+      });
+
+      // P4 打磨③（spec §8 P4 行）：原「在岗 N 人 · 执行任务 N · 排队 N」与员工状态行
+      // 信息重叠——`presence` 在模块快照里恒为 'present'（六名常驻员工永远在岗），
+      // 「在岗 6 人」是一条永不变的重复计数；执行/排队总数与行内徽标/排队 chip 重复。
+      // 结论：删去恒定的「在岗」计数，压缩为一行弱化汇总（仅保留真正会变的两个数），
+      // 视觉重量让给①用量块；完整逐员事实仍由②员工行承载，读屏播报保持不变。
+      function renderOverview(snapshot) {
+        const overview = page.overview();
+        document.getElementById('overview-summary').textContent =
+          `执行任务 ${overview.runningCount} · 排队 ${overview.queuedCount}`;
+        document.getElementById('overview-summary').title = '全体员工当前在执行的任务数与排队数（逐员状态见下方员工列表）';
+        // P2: the sync long text left the header for the footer's minimal dot.
+        syncDot(snapshot.sync);
+        void snapshot;
+      }
+
+      // ⑥ minimal sync point: dot + tooltip (status itself unchanged; spec §2
+      // demoted the long text). Labels mirror the §6 i18n family (office.sync.*).
+      const SYNC_LABELS_PAGE = { healthy: '同步正常', stale: '同步迟到', resyncing: '重新连接中' };
+      function syncDot(sync) {
+        const dot = document.getElementById('sync-dot');
+        const label = SYNC_LABELS_PAGE[sync] || sync;
+        dot.dataset.sync = sync || 'healthy';
+        dot.title = label;
+        dot.setAttribute('aria-label', label);
+      }
+
+      const listEl = document.getElementById('employee-list');
+      const listItems = new Map();
+      // ② staff status rows (spec §3 block 2): stable element per employee,
+      // content rebuilt per render. Click selects; the 需要你 badge jumps to
+      // the ③ inbox block.
+      function renderEmployeeList(snapshot) {
+        const order = page.focusOrder();
+        for (const row of page.staffRows()) {
+          let item = listItems.get(row.employeeId);
+          if (!item) {
+            item = document.createElement('li');
+            item.setAttribute('role', 'option');
+            item.tabIndex = -1;
+            item.dataset.employeeId = row.employeeId;
+            item.addEventListener('click', (event) => {
+              if (event.target.closest('.need-badge')) {
+                document.getElementById('pending-block').scrollIntoView({
+                  behavior: page.reducedMotion() ? 'auto' : 'smooth',
+                  block: 'start',
+                });
+                return;
+              }
+              page.select(row.employeeId);
+              renderDetails();
+              syncListSelection();
+            });
+            listEl.appendChild(item);
+            listItems.set(row.employeeId, item);
+          }
+          item.setAttribute('aria-label', page.accessibleLabelFor(row.employeeId).label);
+          item.setAttribute('aria-selected', row.selected ? 'true' : 'false');
+          item.classList.toggle('selected', row.selected);
+          item.classList.toggle('needs-you', row.needsYou > 0);
+          item.replaceChildren(...staffRowNodes(row));
+        }
+        for (const [id, item] of [...listItems]) {
+          if (!order.includes(id)) { item.remove(); listItems.delete(id); }
+        }
+        void snapshot;
+      }
+
+      function staffRowNodes(row) {
+        const nodes = [];
+        const name = document.createElement('span');
+        name.className = 'staff-name';
+        name.textContent = row.displayName;
+        nodes.push(name);
+        const status = document.createElement('span');
+        status.className = `staff-status status-${row.statusKey}`;
+        status.textContent = row.statusLabel;
+        nodes.push(status);
+        if (row.taskTitle) {
+          const task = document.createElement('span');
+          task.className = 'staff-task';
+          task.textContent = row.taskTitle;
+          task.title = '去标识化任务标题（仅计数，不含任务内容）';
+          nodes.push(task);
+        }
+        if (row.toolPhrase) {
+          const tool = document.createElement('span');
+          tool.className = 'staff-tool';
+          tool.textContent = row.toolPhrase;
+          nodes.push(tool);
+        }
+        if (row.queueCount > 0) {
+          const queue = document.createElement('span');
+          queue.className = 'staff-queue';
+          queue.textContent = `排队 ${row.queueCount}`;
+          nodes.push(queue);
+        }
+        if (row.needsYou > 0) {
+          const need = document.createElement('span');
+          need.className = 'need-badge need-pulse';
+          need.textContent = `需要你 ×${row.needsYou}`;
+          need.title = '有等待你的审批/提问，点击查看待你处理';
+          nodes.push(need);
+        }
+        return nodes;
+      }
+
+      function syncListSelection() {
+        for (const [id, item] of listItems) {
+          item.setAttribute('aria-selected', page.selectedEmployeeId() === id ? 'true' : 'false');
+          item.classList.toggle('selected', page.selectedEmployeeId() === id);
+        }
+      }
+
+      function renderDetails() {
+        const body = document.getElementById('details-body');
+        const placeholder = document.getElementById('details-placeholder');
+        const selected = page.selectedEmployeeId();
+        const vm = selected ? page.detailsFor(selected) : null;
+        if (!vm) {
+          body.hidden = true;
+          placeholder.hidden = false;
+          return;
+        }
+        placeholder.hidden = true;
+        body.hidden = false;
+        const nameEl = document.getElementById('details-name');
+        nameEl.textContent = vm.name.text;
+        nameEl.className = 'details-name-large';
+        nameEl.setAttribute('aria-label', `${vm.name.text} 详情`);
+        const roleEl = document.getElementById('details-role');
+        roleEl.textContent = `● ${vm.roleDot.text}`;
+        roleEl.className = 'details-role-dot';
+        const primaryEl = document.getElementById('details-primary');
+        primaryEl.textContent = vm.primary.text;
+        primaryEl.className = 'details-primary';
+        primaryEl.setAttribute('aria-label', vm.primary.accessibleLabel || vm.primary.text);
+        const dimEl = document.getElementById('details-dim');
+        dimEl.replaceChildren(...vm.dimFields.map((field) => {
+          const li = document.createElement('li');
+          li.className = 'dim-field';
+          li.textContent = `${field.label}：${field.value}`;
+          return li;
+        }));
+        const queueEl = document.getElementById('details-queue');
+        queueEl.textContent = vm.queueCount > 0
+          ? `排队任务 ${vm.queueCount} 项${vm.waiting.length ? '：' + vm.waiting.map((w) => `第 ${w.position} 位`).join('、') : ''}`
+          : '';
+        renderRecord(selected);
+        const capabilities = page.capabilities() || {};
+        const bound = !!latestSnapshot && !!latestSnapshot.employees.find((e) => e.employeeId === selected && e.binding);
+        document.getElementById('btn-dispatch').disabled = !bound || !capabilities.followup;
+        document.getElementById('btn-cancel').disabled = !bound || !capabilities.cancel;
+        document.getElementById('btn-interrupt').disabled = !bound || !capabilities.interrupt;
+      }
+
+      // ⑤ P4 今日工作记录（spec §3 block 5）：选中员工的当日聚合。每一行都来自模块
+      // 侧 day record 投影（activity-log 计数 / 逐 turn provider usage 归属 /
+      // tool/call 事实日聚合 / 近期动态），没有对应真实来源的行一律不渲染——
+      // 无 usage 归属就没有用量行，无工具调用就没有常用工具行，当日无记录显示空态。
+      function renderRecord(employeeId) {
+        const REC = REGISTRY['office-page'].RECORD_TEXT;
+        const root = document.getElementById('details-record');
+        const vm = page.recordFor(employeeId);
+        const empty = document.getElementById('record-empty');
+        const body = document.getElementById('record-body');
+        const dayEl = document.getElementById('record-day');
+        const titleEl = document.getElementById('details-record-title');
+        const note = document.getElementById('record-note');
+        root.hidden = false;
+        note.textContent = vm && !vm.dayKey ? REC.sessionNote : REC.note;
+        if (!vm) {
+          // 选中但当日无任何记录：显示空态（不编造 0）
+          titleEl.textContent = REC.title;
+          dayEl.hidden = true;
+          dayEl.textContent = '';
+          empty.hidden = false;
+          body.hidden = true;
+          return;
+        }
+        titleEl.textContent = vm.dayKey ? REC.title : '工作记录';
+        dayEl.hidden = !vm.dayKey;
+        if (vm.dayKey) dayEl.textContent = vm.dayKey;
+        // 有计数/用量/工具才显示对应行；只有动态（闲聊/小憩）时动态行独自成立。
+        const hasCounts = vm.tasks > 0 || vm.completed > 0 || vm.failed > 0 || vm.cancelled > 0;
+        empty.hidden = true;
+        body.hidden = false;
+        const countsEl = document.getElementById('record-counts');
+        if (hasCounts) {
+          const parts = [`${REC.tasks} ${vm.tasks}`];
+          if (vm.completed > 0) parts.push(`${REC.completed} ${vm.completed}`);
+          if (vm.failed > 0) parts.push(`${REC.failed} ${vm.failed}`);
+          if (vm.cancelled > 0) parts.push(`${REC.cancelled} ${vm.cancelled}`);
+          countsEl.textContent = parts.join(' · ');
+          countsEl.hidden = false;
+        } else {
+          countsEl.hidden = true;
+          countsEl.textContent = '';
+        }
+        const usageEl = document.getElementById('record-usage');
+        if (vm.usage) {
+          usageEl.hidden = false;
+          // 用时只对拿到了 provider 归属的轮次存在（turnDurationMs 之和），
+          // 与用量同行展示，没有归属就不编造时长。
+          const duration = vm.durationMs > 0 ? ` · ${REC.duration} ${FMT.formatDuration(vm.durationMs)}` : '';
+          usageEl.textContent = `${REC.usage} ${FMT.formatCount(vm.usage.total)} ≈ ${FMT.formatMoney(vm.usage.cost)}${duration}`;
+          usageEl.title = `输入 ${vm.usage.input} · 输出 ${vm.usage.output} · 缓存读 ${vm.usage.cacheRead}（原始值 ${vm.usage.total} tokens）≈ ${vm.usage.cost} CNY${duration ? ` · ${REC.duration} ${FMT.formatDuration(vm.durationMs)}` : ''}`;
+        } else {
+          // 无 provider usage 归属的会话不显示用量行（不编造 0）
+          usageEl.hidden = true;
+          usageEl.textContent = '';
+          usageEl.removeAttribute('title');
+        }
+        const toolsEl = document.getElementById('record-tools');
+        if (vm.tools.length > 0) {
+          toolsEl.hidden = false;
+          toolsEl.textContent = `${REC.tools} ${vm.tools.map((t) => `${t.phrase} ×${t.count}`).join('、')}`;
+          toolsEl.title = `当日工具调用按短语归类（top ${vm.tools.length}）；不记录工具参数与任务内容`;
+        } else {
+          toolsEl.hidden = true;
+          toolsEl.textContent = '';
+          toolsEl.removeAttribute('title');
+        }
+        const recentEl = document.getElementById('record-recent');
+        recentEl.title = `${REC.timeline}（进入队列/落座/小憩/任务起止，仅时间与事件，不含任务内容）`;
+        recentEl.replaceChildren(...vm.recent.map((row) => {
+          const li = document.createElement('li');
+          const time = document.createElement('span');
+          time.className = 'tl-time';
+          time.textContent = FMT.formatClock(row.realMs, row.atMs);
+          const what = document.createElement('span');
+          what.className = 'record-recent-what';
+          what.textContent = row.label;
+          li.append(time, what);
+          return li;
+        }));
+      }
+
+      // ④ timeline (spec §3 block 4): time + employee + event + this turn's
+      // token/money attribution. The attribution comes from the provider
+      // usage record on the 0.1.5 assistant/message event (first-hand; the
+      // module stamps it onto the turn's rows) — never from a day-bucket
+      // difference, which would mis-attribute under concurrency. Default 20
+      // rows, 更多 expands to 100.
+      const TIMELINE_PAGE_SIZE = 20;
+      const TIMELINE_MAX = 100;
+      let timelineExpanded = false;
+      function renderActivity(snapshot) {
+        const logEl = document.getElementById('activity-log');
+        const entries = page.activityLog();
+        const limit = timelineExpanded ? TIMELINE_MAX : TIMELINE_PAGE_SIZE;
+        logEl.replaceChildren(...entries.slice(-limit).reverse().map((entry) => {
+          const li = document.createElement('li');
+          if (entry.employeeId) li.dataset.employeeId = entry.employeeId;
+          const time = document.createElement('span');
+          time.className = 'tl-time';
+          // P4 打磨⑥：真实时钟（realMs，main.js 注入）优先，本地时区显示；无真实
+          // 时钟的调试路径回落到逻辑时钟的历史显示约定。
+          time.textContent = FMT.formatClock(entry.realMs, entry.atMs);
+          const who = document.createElement('span');
+          who.className = 'tl-who';
+          who.textContent = employeeName(entry.employeeId);
+          const what = document.createElement('span');
+          what.className = 'tl-what';
+          what.textContent = entry.label;
+          li.append(time, who, what);
+          if (entry.turnUsage) {
+            const attr = document.createElement('span');
+            attr.className = 'tl-turn';
+            attr.textContent = `本轮 ${FMT.formatCount(entry.turnUsage.total)} · ${FMT.formatMoney(entry.turnCost)}`;
+            attr.title = `本轮 ${entry.turnUsage.total} tokens（输入 ${entry.turnUsage.input} · 输出 ${entry.turnUsage.output} · 缓存读 ${entry.turnUsage.cacheRead}）≈ ${entry.turnCost} CNY · 时长 ${FMT.formatDuration(entry.turnDurationMs)}`;
+            li.appendChild(attr);
+          }
+          li.addEventListener('click', () => {
+            if (!entry.employeeId) return;
+            page.select(entry.employeeId);
+            renderer.setSelection(entry.employeeId);
+            renderDetails();
+            syncListSelection();
+          });
+          return li;
+        }));
+        const more = document.getElementById('timeline-more');
+        more.hidden = timelineExpanded || entries.length <= TIMELINE_PAGE_SIZE;
+        void snapshot;
+      }
+
+      document.getElementById('timeline-more').addEventListener('click', () => {
+        timelineExpanded = true;
+        renderActivity(latestSnapshot);
+      });
+
+      // ① today's usage (spec §3 block 1): tokens + money dual display, the
+      // savings split (cache hits / local model at the cloud-equivalent
+      // basis), budget progress, the stale marker. Null usage (no shell data
+      // yet) keeps the honest empty state.
+      function renderUsageBlock(snapshot) {
+        const view = page.usageView();
+        const empty = document.getElementById('usage-empty');
+        const body = document.getElementById('usage-body');
+        const stale = document.getElementById('usage-stale');
+        if (!view) {
+          empty.hidden = false;
+          body.hidden = true;
+          stale.hidden = true;
+          document.getElementById('usage-budget').hidden = true;
+          return;
+        }
+        empty.hidden = true;
+        body.hidden = false;
+        const tokensEl = document.getElementById('usage-tokens');
+        tokensEl.textContent = FMT.formatCount(view.tokensTotal);
+        tokensEl.title = `输入 ${view.tokensInput} · 输出 ${view.tokensOutput} · 缓存读 ${view.tokensCacheRead}（原始值 ${view.tokensTotal} tokens）`;
+        document.getElementById('usage-money').textContent = `≈ ${FMT.formatMoney(view.moneyPaid)}`;
+        document.getElementById('usage-money').title = `${view.currency} ${view.moneyPaid}`;
+        document.getElementById('usage-basis').textContent = view.pricingBasisLabel;
+        document.getElementById('usage-save-cache').textContent = FMT.formatMoney(view.savingsCacheRead);
+        document.getElementById('usage-save-local').textContent = FMT.formatMoney(view.savingsLocalModel);
+        document.getElementById('usage-save-local').title = `本地模型按云端价折算（${view.savingsLocalModelBasis}）`;
+        document.getElementById('usage-cloud').textContent = FMT.formatMoney(view.moneyPaid);
+        stale.hidden = !view.staleAt;
+        if (view.staleAt) {
+          stale.title = `用量数据自 ${FMT.formatClock(view.staleAt)} 后未更新（${view.dayKey} 计费日）`;
+        }
+        const budget = document.getElementById('usage-budget');
+        if (view.budgetKind === 'monthly' && view.budgetLimit > 0) {
+          budget.hidden = false;
+          const pct = Math.min(100, Math.round((view.budgetUsed / view.budgetLimit) * 100));
+          document.getElementById('usage-budget-text').textContent =
+            `${FMT.formatMoney(view.budgetUsed)} / ${FMT.formatMoney(view.budgetLimit)}（${pct}%）`;
+          const bar = document.getElementById('usage-progress-bar');
+          bar.style.width = `${pct}%`;
+          bar.classList.toggle('over', view.budgetUsed > view.budgetLimit);
+        } else {
+          budget.hidden = true;
+        }
+        void snapshot;
+      }
+
+      // ③ 待你处理 inbox (spec §3 block 3). P3 actions: low/medium approvals
+      // answer INLINE (批准/拒绝); high approvals open the danger modal
+      // (查看并批准); questions open the question form. Every answer goes
+      // through the shared respondToRuntime ($events/result) path — the same
+      // implementation the IM channel uses — so the panel and IM can never
+      // double-answer with divergent logic, and a successful answer removes
+      // the card from the shared snapshot (one store, both entries agree).
+      const PENDING_KIND_LABELS = { approval: '审批', question: '提问' };
+      const PENDING_RISK_LABELS = { low: '低', medium: '中', high: '高' };
+      const PENDING_MODAL_TXT = REGISTRY['office-page'].PENDING_MODAL_TEXT;
+      const pendingModalRoot = document.getElementById('pending-modal');
+      // Per-card answer state (survives the ~10Hz list rebuild): 'sending' or a
+      // failure reason string. Entries are dropped when the card is gone from
+      // the snapshot (answered / revoked) — the module owns removal.
+      const pendingCardState = new Map();
+      // The card the danger modal / question form is open for. While it is
+      // set, the panel's own action inputs are blocked (spec §5 / cross-tool
+      // memo: "the composer is blocked so the next action cannot be queued
+      // accidentally") — the approval waits as long as it takes, no timeout.
+      let pendingModalItem = null;
+
+      function setPanelActionsBlocked(blocked) {
+        for (const id of ['btn-dispatch', 'btn-cancel', 'btn-interrupt']) {
+          const button = document.getElementById(id);
+          if (button) button.disabled = blocked;
+        }
+        // The CSS dims + disables the detail action row as a second layer; the
+        // list rebuild also disables every other card's inline buttons while
+        // pendingModalItem is set.
+        document.getElementById('office-panel').dataset.pendingBlocking = blocked ? 'true' : 'false';
+      }
+
+      /** Shared answer delegation — ONE implementation for the inline buttons,
+       * the danger modal and the question form (page → office:pending →
+       * module.answerPending → respondToRuntime → $events/result). */
+      async function answerPendingCard(item, value) {
+        if (!item || pendingCardState.get(item.id) === 'sending') return { ok: false, reason: 'already-answering' };
+        pendingCardState.set(item.id, 'sending');
+        renderPendingBlock(latestSnapshot);
+        let res = null;
+        try {
+          res = await page.answerPending(item.id, value);
+        } catch (error) {
+          res = { ok: false, reason: String(error && error.message || error) };
+        }
+        if (res && res.ok) {
+          // The shared answer path already removed the item; the next snapshot
+          // drops the card. Nothing to re-render synchronously.
+          if (pendingModalItem && pendingModalItem.id === item.id) closePendingModal();
+          return res;
+        }
+        pendingCardState.set(item.id, (res && res.reason) || '回答失败');
+        renderPendingBlock(latestSnapshot);
+        return res;
+      }
+
+      function renderPendingCardActions(item) {
+        const state = pendingCardState.get(item.id) || null;
+        const actions = document.createElement('span');
+        actions.className = 'pending-actions';
+        if (item.kind === 'question') {
+          const review = document.createElement('button');
+          review.type = 'button';
+          review.className = 'pending-btn pending-btn-review';
+          review.textContent = '查看并回答';
+          review.disabled = state === 'sending' || !!pendingModalItem;
+          review.addEventListener('click', () => openPendingModal(item));
+          actions.append(review);
+        } else if (item.risk === 'high') {
+          // spec §5: dangerous operations go through the modal (never a
+          // one-click irreversible approval).
+          const review = document.createElement('button');
+          review.type = 'button';
+          review.className = 'pending-btn pending-btn-review';
+          review.textContent = '查看并批准';
+          review.disabled = state === 'sending' || !!pendingModalItem;
+          review.addEventListener('click', () => openPendingModal(item));
+          actions.append(review);
+        } else {
+          const approve = document.createElement('button');
+          approve.type = 'button';
+          approve.className = 'pending-btn pending-btn-approve';
+          approve.textContent = '批准';
+          approve.disabled = state === 'sending' || !!pendingModalItem;
+          approve.addEventListener('click', () => answerPendingCard(item, 'allowed-once'));
+          const reject = document.createElement('button');
+          reject.type = 'button';
+          reject.className = 'pending-btn pending-btn-reject';
+          reject.textContent = '拒绝';
+          reject.disabled = state === 'sending' || !!pendingModalItem;
+          reject.addEventListener('click', () => answerPendingCard(item, 'rejected'));
+          actions.append(approve, reject);
+        }
+        if (state === 'sending') {
+          const status = document.createElement('span');
+          status.className = 'pending-status';
+          status.textContent = '回答中…';
+          actions.append(status);
+        } else if (typeof state === 'string') {
+          const status = document.createElement('span');
+          status.className = 'pending-status pending-status-failed';
+          status.textContent = state;
+          actions.append(status);
+        }
+        return actions;
+      }
+
+      function renderPendingBlock(snapshot) {
+        const summary = page.pendingSummary();
+        const live = new Set(summary.items.map((item) => item.id));
+        for (const id of [...pendingCardState.keys()]) {
+          if (!live.has(id)) pendingCardState.delete(id); // answered / revoked elsewhere
+        }
+        if (pendingModalItem && !live.has(pendingModalItem.id)) closePendingModal();
+        // P4 打磨①（spec §8 P4 行）：红色只留给 >0。计数为 0 时徽标降为中性
+        // （need-zero），不再用警示红点制造「有东西待办」的错觉。
+        const countEl = document.getElementById('pending-count');
+        countEl.textContent = String(summary.count);
+        countEl.classList.toggle('need-zero', summary.count === 0);
+        countEl.title = summary.count > 0 ? `${summary.count} 项待你处理` : '暂无待处理';
+        document.getElementById('pending-empty').hidden = summary.count > 0;
+        const list = document.getElementById('pending-list');
+        list.replaceChildren(...summary.items.map((item) => {
+          const li = document.createElement('li');
+          li.className = 'pending-item';
+          li.dataset.risk = item.risk;
+          li.dataset.pendingId = item.id;
+          const risk = document.createElement('span');
+          risk.className = `pending-risk risk-${item.risk}`;
+          risk.textContent = PENDING_RISK_LABELS[item.risk] || item.risk;
+          const body = document.createElement('span');
+          body.className = 'pending-body';
+          const who = document.createElement('b');
+          who.textContent = item.employeeId ? employeeName(item.employeeId) : '未绑定';
+          const what = document.createElement('span');
+          what.textContent = `${PENDING_KIND_LABELS[item.kind] || item.kind} · ${item.summary}`;
+          body.append(who, what);
+          const at = document.createElement('span');
+          at.className = 'pending-time';
+          at.textContent = FMT.formatClock(item.createdAtMs);
+          li.append(risk, body, at, renderPendingCardActions(item));
+          return li;
+        }));
+        void snapshot;
+      }
+
+      // ---- P3 danger modal (spec §5 high risk) + question form --------------
+
+      function modalRow(term, valueNode) {
+        const dt = document.createElement('dt');
+        dt.textContent = term;
+        const dd = document.createElement('dd');
+        dd.append(valueNode);
+        return [dt, dd];
+      }
+
+      /** dt-only variant for rows whose dd carries several nodes (raw tag). */
+      function modalDt(term) {
+        const dt = document.createElement('dt');
+        dt.textContent = term;
+        return dt;
+      }
+
+      // P4 打磨④（spec §8 P4 行）：「将要执行」的步骤与「命令原文」是 harness 的
+      // 英文原文（reason / journal arguments），加一枚「harness 原文」小标注，
+      // 避免与面板中文 UI 文案混淆。
+      function rawTag() {
+        const tag = document.createElement('span');
+        tag.className = 'pending-modal-raw-tag';
+        tag.textContent = PENDING_MODAL_TXT.rawTag;
+        tag.title = '本段为 harness 原文，未经翻译';
+        return tag;
+      }
+
+      function modalText(value, className) {
+        const node = document.createElement('span');
+        if (className) node.className = className;
+        node.textContent = value;
+        return node;
+      }
+
+      function openPendingModal(item) {
+        const body = document.getElementById('pending-modal-body');
+        const actions = document.getElementById('pending-modal-actions');
+        body.replaceChildren();
+        actions.replaceChildren();
+        const title = document.getElementById('pending-modal-title');
+        const closeBtn = document.getElementById('pending-modal-close');
+        title.textContent = item.kind === 'question' ? PENDING_MODAL_TXT.questionTitle : PENDING_MODAL_TXT.title;
+        // The blocked-composer note is set in renderPendingModalBody from the
+        // view model (P4 打磨⑥: the pre-P4 code read the raw text object here
+        // with a key that does not exist on it (`blocked` vs the read key), so
+        // the note silently rendered empty since P3; the model carries it as
+        // blockedNote like every other modal row).
+
+        // detailRef (spec §4): fetch the REAL command text / question body per
+        // user action — never on the snapshot cadence, never in the snapshot.
+        Promise.resolve(page.pendingDetail(item.id))
+          .then((res) => {
+            const detail = res && res.ok ? res.detail : null;
+            const model = page.pendingModalModel(item, detail);
+            renderPendingModalBody(model);
+          })
+          .catch(() => {
+            // A failed detail fetch must not answer anything: the modal shows
+            // the honest "not exposed" state via the null-detail model.
+            renderPendingModalBody(page.pendingModalModel(item, null));
+          });
+        pendingModalRoot.hidden = false;
+        pendingModalItem = item;
+        setPanelActionsBlocked(true);
+        closeBtn.focus();
+      }
+
+      function renderPendingModalBody(model) {
+        const body = document.getElementById('pending-modal-body');
+        const actions = document.getElementById('pending-modal-actions');
+        body.replaceChildren();
+        actions.replaceChildren();
+        document.getElementById('pending-modal-blocked').textContent = model.blockedNote || '';
+        if (model.toolName) body.append(...modalRow(PENDING_MODAL_TXT.tool, modalText(model.toolName)));
+        if (model.agentPreset) {
+          // P4-R1: the Agent 预设 row shows the verbatim agent composition
+          // preset (agent-presets axis, e.g. `standard`) — never relabelled
+          // "unknown", and never mapped to a sandbox tier.
+          const value = modalText(model.agentPreset);
+          body.append(...modalRow(PENDING_MODAL_TXT.agentPreset, value));
+        }
+        for (const step of model.steps) {
+          const dd = document.createElement('dd');
+          dd.append(modalText(step), rawTag());
+          body.append(modalDt(PENDING_MODAL_TXT.steps), dd);
+        }
+        body.append(...modalRow(PENDING_MODAL_TXT.impact, modalText(model.impact)));
+        if (model.command) {
+          const pre = document.createElement('pre');
+          pre.className = 'pending-modal-command';
+          pre.textContent = model.command;
+          const dd = document.createElement('dd');
+          dd.append(pre, rawTag());
+          body.append(modalDt(PENDING_MODAL_TXT.command), dd);
+        } else if (model.targetPath) {
+          body.append(...modalRow(PENDING_MODAL_TXT.target, modalText(model.targetPath)));
+        }
+        if (model.noArgsNote) body.append(...modalRow(PENDING_MODAL_TXT.command, modalText(model.noArgsNote, 'pending-modal-note')));
+        if (model.noAlwaysNote) {
+          const note = document.createElement('p');
+          note.className = 'pending-modal-note';
+          note.textContent = model.noAlwaysNote;
+          body.append(note);
+        }
+        body.append(...modalRow(PENDING_MODAL_TXT.reversible, modalText(model.reversibleNote, 'pending-modal-note')));
+
+        if (model.approval) {
+          const reject = document.createElement('button');
+          reject.id = 'pending-modal-reject';
+          reject.type = 'button';
+          reject.textContent = '拒绝';
+          reject.addEventListener('click', () => answerPendingCard(pendingModalItem, 'rejected'));
+          const approve = document.createElement('button');
+          approve.id = 'pending-modal-approve';
+          approve.type = 'button';
+          approve.className = 'pending-btn-approve';
+          approve.textContent = '仅本次批准';
+          approve.addEventListener('click', () => answerPendingCard(pendingModalItem, 'allowed-once'));
+          actions.append(reject, approve);
+        } else {
+          // question form: options as one-click answers + a custom free-text
+          // input (same {answers} batch shape the IM dispatcher sends).
+          const questions = Array.isArray(model.questions) ? model.questions : [];
+          for (const question of questions) {
+            const q = document.createElement('p');
+            q.className = 'pending-modal-question';
+            q.textContent = question.question;
+            body.append(q);
+            const options = document.createElement('div');
+            options.className = 'pending-modal-options';
+            for (const option of question.options || []) {
+              const button = document.createElement('button');
+              button.type = 'button';
+              button.textContent = option.label;
+              button.addEventListener('click', () => answerPendingCard(pendingModalItem, {
+                answers: [{ id: question.id, selected: [option.label] }],
+              }));
+              options.append(button);
+            }
+            const custom = document.createElement('input');
+            custom.type = 'text';
+            custom.placeholder = PENDING_MODAL_TXT.customPlaceholder;
+            custom.maxLength = 500;
+            const submit = document.createElement('button');
+            submit.type = 'button';
+            submit.textContent = PENDING_MODAL_TXT.submit;
+            submit.addEventListener('click', () => {
+              const text = custom.value.trim();
+              if (!text) return;
+              answerPendingCard(pendingModalItem, {
+                answers: [{ id: question.id, selected: [], custom: text }],
+              });
+            });
+            options.append(custom, submit);
+            body.append(options);
+          }
+        }
+      }
+
+      function closePendingModal() {
+        pendingModalRoot.hidden = true;
+        pendingModalItem = null;
+        document.getElementById('pending-modal-body').replaceChildren();
+        document.getElementById('pending-modal-actions').replaceChildren();
+        setPanelActionsBlocked(false);
+      }
+
+      document.getElementById('pending-modal-close').addEventListener('click', closePendingModal);
+      pendingModalRoot.addEventListener('click', (event) => {
+        if (event.target === pendingModalRoot) closePendingModal(); // backdrop: answer nothing
+      });
+
+      function employeeName(employeeId) {
+        const employee = latestSnapshot && latestSnapshot.employees.find((e) => e.employeeId === employeeId);
+        return employee ? employee.displayName : employeeId;
+      }
+
+      // pointer selection on the Pixi canvas — hit-tests run against the
+      // LETTERBOXED canvas rect (scene pixels), not the whole stage
+      stage.addEventListener('click', (event) => {
+        const sceneCanvas = stage.querySelector('canvas');
+        const rect = (sceneCanvas || stage).getBoundingClientRect();
+        const hit = renderer.hitTest(event.clientX - rect.left, event.clientY - rect.top);
+        if (hit) {
+          page.select(hit);
+          renderer.setSelection(hit);
+          syncListSelection();
+          renderDetails();
+        }
+      });
+
+      // keyboard: list focus + scene selection (shared with the evidence API)
+      function handleKeyEvent(key) {
+        const result = page.handleKey({ key });
+        if (result.action === 'focus') {
+          const id = page.focusOrder()[result.index];
+          const item = listItems.get(id);
+          if (item) item.focus();
+          renderer.setSelection(null);
+        } else if (result.action === 'select') {
+          renderer.setSelection(result.employeeId);
+          syncListSelection();
+          renderDetails();
+        } else if (result.action === 'clear') {
+          renderer.setSelection(null);
+          syncListSelection();
+          renderDetails();
+        }
+        return result;
+      }
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Tab') return; // native focus order handles panel traversal
+        // P3: the danger modal owns Escape while it is open. Closing it
+        // answers NOTHING — an approval request never times out, so the card
+        // simply stays until the user decides (cross-tool memo: "Permission
+        // requests and plan approvals always wait").
+        if (!pendingModalRoot.hidden && event.key === 'Escape') {
+          closePendingModal();
+          event.preventDefault();
+          return;
+        }
+        const result = handleKeyEvent(event.key);
+        if (result.action !== 'none') event.preventDefault();
+      });
+
+      document.getElementById('btn-dispatch').addEventListener('click', async () => {
+        const selected = page.selectedEmployeeId();
+        if (selected) await page.dispatch(selected);
+      });
+      document.getElementById('btn-cancel').addEventListener('click', async () => {
+        const selected = page.selectedEmployeeId();
+        if (selected) await page.cancel(selected);
+      });
+      document.getElementById('btn-interrupt').addEventListener('click', async () => {
+        const selected = page.selectedEmployeeId();
+        if (selected) await page.interrupt(selected);
+      });
+
+      const reducedMotionCtl = document.getElementById('ctl-reduced-motion');
+      reducedMotionCtl.addEventListener('change', async () => {
+        await page.setReducedMotion(reducedMotionCtl.checked);
+      });
+      // P2 ⑥ theme following: the shell owns the theme (themeMode setting);
+      // the office page consumes it exactly like the rail page does
+      // (shell:get-theme once + shell:theme pushes). Light until it arrives.
+      function applyPageTheme(theme) {
+        document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light';
+      }
+      applyPageTheme('light');
+      if (bridge.getTheme) {
+        Promise.resolve(bridge.getTheme()).then(applyPageTheme).catch(() => {});
+        if (bridge.onTheme) bridge.onTheme(applyPageTheme);
+      }
+      if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        reducedMotionCtl.checked = true;
+        await page.setReducedMotion(true);
+      }
+
+      // visibility lifecycle: pause the main-process clock when hidden.
+      // 2026-09-24 latch fix: the office:visibility payload carries BOTH
+      // `visible` (window visible / not minimized — the module's simulation
+      // pause) and `active` (the office is the current main-area view). Only
+      // `active` gates the renderer's frame pump and triggers the bounded
+      // recovery: a detached view still presents frames at background rate,
+      // and feeding those used to latch LOW_FPS_PERSISTENT permanently.
+      let officeActive = true; // the office opens as the active main view
+      const visibility = (payload) => page.handleVisibility(payload);
+      document.addEventListener('visibilitychange', () => visibility({ visible: document.visibilityState === 'visible', active: officeActive }));
+      window.addEventListener('blur', () => visibility({ visible: false, active: officeActive }));
+      window.addEventListener('focus', () => visibility({ visible: true, active: officeActive }));
+      bridge.onVisibilityPush((payload) => {
+        officeActive = !!(payload && payload.active);
+        visibility({ visible: !!(payload && payload.visible), active: officeActive });
+      });
+      // Forwards the view's renderer state to the module (shell log +
+      // office:diagnostics) — on every renderer state change (latch, recovery
+      // attempts) and on every activation/visibility event, so the change is
+      // never more than one event behind.
+      function reportRendererState() {
+        page.handleVisibility({ visible: document.visibilityState === 'visible', active: officeActive });
+      }
+
+      function resize() {
+        const rect = stage.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          // Task E4.4: FIXED logical scene + letterbox — the canvas keeps the
+          // scene reference aspect at every window size (uniform scale, dead
+          // centered), so the composition never stretches or crops with the
+          // window ratio. The renderer reprojects the whole scene to the
+          // scaled logical size; the leftover space stays background.
+          const ref = layout.scene();
+          const letterboxScale = Math.min(rect.width / ref.referenceWidth, rect.height / ref.referenceHeight);
+          const sceneW = ref.referenceWidth * letterboxScale;
+          const sceneH = ref.referenceHeight * letterboxScale;
+          renderer.resize({ width: sceneW, height: sceneH });
+          const canvas = stage.querySelector('canvas');
+          if (canvas) {
+            canvas.style.left = `${(rect.width - sceneW) / 2}px`;
+            canvas.style.top = `${(rect.height - sceneH) / 2}px`;
+            canvas.style.width = `${sceneW}px`;
+            canvas.style.height = `${sceneH}px`;
+          }
+        }
+      }
+      window.addEventListener('resize', resize);
+      resize();
+
+      const stateResult = await bridge.getState();
+      page.applySnapshot(stateResult && stateResult.ok ? stateResult.snapshot : stateResult);
+      // One main-process clock: subsequent snapshots arrive as office:state
+      // pushes (throttled in the module); the page only re-renders the VM.
+      bridge.onState((snapshot) => page.applySnapshot(snapshot));
+
+      // Evidence hooks (diagnostics-only, same spirit as the playground)
+      window.__office = {
+        ready: true,
+        page,
+        renderer,
+        api: {
+          selected: () => page.selectedEmployeeId(),
+          select: (id) => { page.select(id); renderer.setSelection(id); renderDetails(); syncListSelection(); },
+          clear: () => { page.clearSelection(); renderer.setSelection(null); renderDetails(); syncListSelection(); },
+          key: (key) => handleKeyEvent(key),
+          overview: () => page.overview(),
+          snapshot: () => latestSnapshot,
+          rendererMode: () => renderer.mode,
+          diagnosticCode: () => renderer.diagnosticCode,
+          // 2026-09-24 latch fix: the bounded-recovery budget is part of the
+          // observable renderer state (each attempt is logged by the shell).
+          rendererDiagnostics: () => renderer.diagnostics(),
+          officeDiagnostics: () => renderer.officeDiagnostics(),
+          furniturePaintOrder: () => renderer.furniturePaintOrder(),
+          packDiagnostic: () => packDiagnostic,
+          packId: () => officePackId,
+          applySnapshotManually: (s) => renderer.applySnapshot(s),
+          resizeTo: (w, h) => renderer.resize({ width: w, height: h }),
+          devicePixelRatio: () => window.devicePixelRatio,
+          pixiVersion: () => window.PIXI && window.PIXI.VERSION,
+          setReducedMotion: async (v) => { reducedMotionCtl.checked = !!v; await page.setReducedMotion(!!v); },
+          layoutDiagnostic: () => layoutDiagnostic,
+          layoutSource: () => layoutSource,
+          runtimeLayoutSource: () => runtimeLayoutSource,
+          runtimeLayoutCode: () => runtimeLayoutCode,
+        },
+      };
+
+    })().catch((error) => {
+      const note = document.getElementById('fallback-note');
+      if (note) {
+        note.hidden = false;
+        note.textContent = `办公室页面启动失败：${(error && error.message) || error}`;
+      }
+      window.__office = { ready: false, error: String((error && error.message) || error), stack: String((error && error.stack) || error) };
+    });
+  </script>
+</body>
+</html>

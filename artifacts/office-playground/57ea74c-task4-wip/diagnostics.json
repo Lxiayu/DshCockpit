@@ -1,0 +1,1031 @@
+{
+  "scenarios": [
+    {
+      "name": "initial",
+      "pixelInfo": {
+        "w": 1280,
+        "h": 840,
+        "dpr": 1,
+        "vw": 1280,
+        "vh": 840
+      },
+      "diagnostics": {
+        "schemaVersion": 1,
+        "seed": "office-playground",
+        "fakeTimeMs": 19936,
+        "scene": {
+          "width": 1280,
+          "height": 840
+        },
+        "position": {
+          "x": 0.62,
+          "y": 0.52
+        },
+        "target": {
+          "point": {
+            "x": 0.62,
+            "y": 0.52
+          },
+          "nodeId": "desk-1",
+          "route": [
+            "roam-1",
+            "desk-1"
+          ]
+        },
+        "direction": "right",
+        "arrived": true,
+        "routeId": "roam-1>desk-1",
+        "transition": null,
+        "animation": {
+          "resource": "idle",
+          "frameIndex": 0,
+          "frameElapsedMs": 1000,
+          "fallbackReason": null,
+          "emphasis": null
+        },
+        "reducer": {
+          "presence": "present",
+          "sync": "healthy",
+          "runtime": "idle",
+          "activity": "roaming",
+          "movement": "stationary",
+          "control": "none",
+          "binding": "unbound",
+          "queue": "empty"
+        },
+        "geometry": {
+          "visibleHeight": 92.4,
+          "spriteScale": 0.33357400722021663,
+          "anchor": {
+            "x": 178,
+            "y": 296
+          },
+          "visibleBounds": {
+            "height": 277,
+            "width": 319,
+            "x": 6,
+            "y": 41
+          }
+        },
+        "speedRatio": 0.12,
+        "directionOverride": null,
+        "loopOverride": null,
+        "log": [
+          {
+            "atMs": 0,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 9008,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 12000,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 16000,
+            "type": "task-terminal"
+          },
+          {
+            "atMs": 17504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 18512,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19504,
+            "type": "phase-complete"
+          }
+        ]
+      }
+    },
+    {
+      "name": "moving",
+      "pixelInfo": {
+        "w": 1280,
+        "h": 840,
+        "dpr": 1,
+        "vw": 1280,
+        "vh": 840
+      },
+      "diagnostics": {
+        "schemaVersion": 1,
+        "seed": "office-playground",
+        "fakeTimeMs": 21824,
+        "scene": {
+          "width": 1280,
+          "height": 840
+        },
+        "position": {
+          "x": 0.7194880993198345,
+          "y": 0.35163552422797434
+        },
+        "target": {
+          "point": {
+            "x": 0.75,
+            "y": 0.3
+          },
+          "nodeId": "roam-2",
+          "route": [
+            "desk-1",
+            "roam-2"
+          ]
+        },
+        "direction": "up",
+        "arrived": false,
+        "routeId": "desk-1>roam-2",
+        "transition": {
+          "kind": "task-start",
+          "phase": "stop",
+          "outcome": null,
+          "reason": "runtime-task"
+        },
+        "animation": {
+          "resource": "walk-up",
+          "frameIndex": 1,
+          "frameElapsedMs": 824,
+          "fallbackReason": null,
+          "emphasis": null
+        },
+        "reducer": {
+          "presence": "present",
+          "sync": "healthy",
+          "runtime": "idle",
+          "activity": "roaming",
+          "movement": "moving",
+          "control": "none",
+          "binding": "bound",
+          "queue": "empty"
+        },
+        "geometry": {
+          "visibleHeight": 92.4,
+          "spriteScale": 0.33357400722021663,
+          "anchor": {
+            "x": 178,
+            "y": 296
+          },
+          "visibleBounds": {
+            "height": 277,
+            "width": 319,
+            "x": 6,
+            "y": 41
+          }
+        },
+        "speedRatio": 0.12,
+        "directionOverride": null,
+        "loopOverride": null,
+        "log": [
+          {
+            "atMs": 0,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 9008,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 12000,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 16000,
+            "type": "task-terminal"
+          },
+          {
+            "atMs": 17504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 18512,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19936,
+            "type": "dispatch"
+          }
+        ]
+      }
+    },
+    {
+      "name": "turning",
+      "pixelInfo": {
+        "w": 1280,
+        "h": 840,
+        "dpr": 1,
+        "vw": 1280,
+        "vh": 840
+      },
+      "diagnostics": {
+        "schemaVersion": 1,
+        "seed": "office-playground",
+        "fakeTimeMs": 22608,
+        "scene": {
+          "width": 1280,
+          "height": 840
+        },
+        "position": {
+          "x": 0.6781752445175296,
+          "y": 0.42154958620110206
+        },
+        "target": {
+          "point": {
+            "x": 0.3,
+            "y": 0.78
+          },
+          "nodeId": "roam-3",
+          "route": [
+            "roam-2",
+            "desk-1",
+            "roam-3"
+          ]
+        },
+        "direction": "left",
+        "arrived": false,
+        "routeId": "roam-2>desk-1>roam-3",
+        "transition": {
+          "kind": "task-start",
+          "phase": "stop",
+          "outcome": null,
+          "reason": "runtime-task"
+        },
+        "animation": {
+          "resource": "walk-left",
+          "frameIndex": 2,
+          "frameElapsedMs": 608,
+          "fallbackReason": null,
+          "emphasis": null
+        },
+        "reducer": {
+          "presence": "present",
+          "sync": "healthy",
+          "runtime": "idle",
+          "activity": "roaming",
+          "movement": "moving",
+          "control": "none",
+          "binding": "bound",
+          "queue": "empty"
+        },
+        "geometry": {
+          "visibleHeight": 92.4,
+          "spriteScale": 0.33357400722021663,
+          "anchor": {
+            "x": 178,
+            "y": 296
+          },
+          "visibleBounds": {
+            "height": 277,
+            "width": 319,
+            "x": 6,
+            "y": 41
+          }
+        },
+        "speedRatio": 0.12,
+        "directionOverride": null,
+        "loopOverride": null,
+        "log": [
+          {
+            "atMs": 0,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 9008,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 12000,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 16000,
+            "type": "task-terminal"
+          },
+          {
+            "atMs": 17504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 18512,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19936,
+            "type": "dispatch"
+          }
+        ]
+      }
+    },
+    {
+      "name": "arriving",
+      "pixelInfo": {
+        "w": 1280,
+        "h": 840,
+        "dpr": 1,
+        "vw": 1280,
+        "vh": 840
+      },
+      "diagnostics": {
+        "schemaVersion": 1,
+        "seed": "office-playground",
+        "fakeTimeMs": 23248,
+        "scene": {
+          "width": 1280,
+          "height": 840
+        },
+        "position": {
+          "x": 0.6444504650870775,
+          "y": 0.4786222898526365
+        },
+        "target": {
+          "point": {
+            "x": 0.62,
+            "y": 0.52
+          },
+          "nodeId": "desk-1",
+          "route": [
+            "desk-1"
+          ]
+        },
+        "direction": "down",
+        "arrived": false,
+        "routeId": "desk-1",
+        "transition": {
+          "kind": "task-start",
+          "phase": "stop",
+          "outcome": null,
+          "reason": "runtime-task"
+        },
+        "animation": {
+          "resource": "walk-down",
+          "frameIndex": 3,
+          "frameElapsedMs": 248,
+          "fallbackReason": null,
+          "emphasis": null
+        },
+        "reducer": {
+          "presence": "present",
+          "sync": "healthy",
+          "runtime": "idle",
+          "activity": "roaming",
+          "movement": "moving",
+          "control": "none",
+          "binding": "bound",
+          "queue": "empty"
+        },
+        "geometry": {
+          "visibleHeight": 92.4,
+          "spriteScale": 0.33357400722021663,
+          "anchor": {
+            "x": 178,
+            "y": 296
+          },
+          "visibleBounds": {
+            "height": 277,
+            "width": 319,
+            "x": 6,
+            "y": 41
+          }
+        },
+        "speedRatio": 0.12,
+        "directionOverride": null,
+        "loopOverride": null,
+        "log": [
+          {
+            "atMs": 0,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 9008,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 12000,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 16000,
+            "type": "task-terminal"
+          },
+          {
+            "atMs": 17504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 18512,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19936,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 22608,
+            "type": "dispatch"
+          }
+        ]
+      }
+    },
+    {
+      "name": "working",
+      "pixelInfo": {
+        "w": 1280,
+        "h": 840,
+        "dpr": 1,
+        "vw": 1280,
+        "vh": 840
+      },
+      "diagnostics": {
+        "schemaVersion": 1,
+        "seed": "office-playground",
+        "fakeTimeMs": 24144,
+        "scene": {
+          "width": 1280,
+          "height": 840
+        },
+        "position": {
+          "x": 0.62,
+          "y": 0.52
+        },
+        "target": {
+          "point": {
+            "x": 0.62,
+            "y": 0.52
+          },
+          "nodeId": "desk-1",
+          "route": [
+            "desk-1"
+          ]
+        },
+        "direction": "down",
+        "arrived": true,
+        "routeId": "desk-1",
+        "transition": {
+          "kind": "task-start",
+          "phase": "work",
+          "outcome": null,
+          "reason": "runtime-task"
+        },
+        "animation": {
+          "resource": "working",
+          "frameIndex": 0,
+          "frameElapsedMs": 1000,
+          "fallbackReason": null,
+          "emphasis": null
+        },
+        "reducer": {
+          "presence": "present",
+          "sync": "healthy",
+          "runtime": "running",
+          "activity": "working",
+          "movement": "stationary",
+          "control": "none",
+          "binding": "bound",
+          "queue": "empty"
+        },
+        "geometry": {
+          "visibleHeight": 92.4,
+          "spriteScale": 0.33357400722021663,
+          "anchor": {
+            "x": 178,
+            "y": 296
+          },
+          "visibleBounds": {
+            "height": 277,
+            "width": 319,
+            "x": 6,
+            "y": 41
+          }
+        },
+        "speedRatio": 0.12,
+        "directionOverride": null,
+        "loopOverride": null,
+        "log": [
+          {
+            "atMs": 0,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 9008,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 12000,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 16000,
+            "type": "task-terminal"
+          },
+          {
+            "atMs": 17504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 18512,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19936,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 22608,
+            "type": "dispatch"
+          }
+        ]
+      }
+    },
+    {
+      "name": "result",
+      "pixelInfo": {
+        "w": 1280,
+        "h": 840,
+        "dpr": 1,
+        "vw": 1280,
+        "vh": 840
+      },
+      "diagnostics": {
+        "schemaVersion": 1,
+        "seed": "office-playground",
+        "fakeTimeMs": 24736,
+        "scene": {
+          "width": 1280,
+          "height": 840
+        },
+        "position": {
+          "x": 0.62,
+          "y": 0.52
+        },
+        "target": {
+          "point": {
+            "x": 0.62,
+            "y": 0.52
+          },
+          "nodeId": "desk-1",
+          "route": [
+            "desk-1"
+          ]
+        },
+        "direction": "down",
+        "arrived": true,
+        "routeId": "desk-1",
+        "transition": {
+          "kind": "task-end",
+          "phase": "result",
+          "outcome": "completed",
+          "reason": "completed"
+        },
+        "animation": {
+          "resource": "finished",
+          "frameIndex": 0,
+          "frameElapsedMs": 1000,
+          "fallbackReason": "STATIC_POSE_FALLBACK",
+          "emphasis": null
+        },
+        "reducer": {
+          "presence": "present",
+          "sync": "healthy",
+          "runtime": "completed",
+          "activity": "working",
+          "movement": "stationary",
+          "control": "none",
+          "binding": "releasing",
+          "queue": "empty"
+        },
+        "geometry": {
+          "visibleHeight": 92.4,
+          "spriteScale": 0.33357400722021663,
+          "anchor": {
+            "x": 178,
+            "y": 296
+          },
+          "visibleBounds": {
+            "height": 277,
+            "width": 319,
+            "x": 6,
+            "y": 41
+          }
+        },
+        "speedRatio": 0.12,
+        "directionOverride": null,
+        "loopOverride": null,
+        "log": [
+          {
+            "atMs": 0,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 9008,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 12000,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 16000,
+            "type": "task-terminal"
+          },
+          {
+            "atMs": 17504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 18512,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19936,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 22608,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 24144,
+            "type": "task-terminal"
+          }
+        ]
+      }
+    },
+    {
+      "name": "resize",
+      "pixelInfo": {
+        "w": 960,
+        "h": 640,
+        "dpr": 1,
+        "vw": 960,
+        "vh": 640
+      },
+      "diagnostics": {
+        "schemaVersion": 1,
+        "seed": "office-playground",
+        "fakeTimeMs": 25248,
+        "scene": {
+          "width": 960,
+          "height": 640
+        },
+        "position": {
+          "x": 0.62,
+          "y": 0.52
+        },
+        "target": {
+          "point": {
+            "x": 0.62,
+            "y": 0.52
+          },
+          "nodeId": "desk-1",
+          "route": [
+            "desk-1"
+          ]
+        },
+        "direction": "down",
+        "arrived": true,
+        "routeId": "desk-1",
+        "transition": {
+          "kind": "task-end",
+          "phase": "result",
+          "outcome": "completed",
+          "reason": "completed"
+        },
+        "animation": {
+          "resource": "finished",
+          "frameIndex": 0,
+          "frameElapsedMs": 1000,
+          "fallbackReason": "STATIC_POSE_FALLBACK",
+          "emphasis": null
+        },
+        "reducer": {
+          "presence": "present",
+          "sync": "healthy",
+          "runtime": "completed",
+          "activity": "working",
+          "movement": "stationary",
+          "control": "none",
+          "binding": "releasing",
+          "queue": "empty"
+        },
+        "geometry": {
+          "visibleHeight": 70.4,
+          "spriteScale": 0.25415162454873647,
+          "anchor": {
+            "x": 178,
+            "y": 296
+          },
+          "visibleBounds": {
+            "height": 277,
+            "width": 319,
+            "x": 6,
+            "y": 41
+          }
+        },
+        "speedRatio": 0.12,
+        "directionOverride": null,
+        "loopOverride": null,
+        "log": [
+          {
+            "atMs": 0,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 9008,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 12000,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 16000,
+            "type": "task-terminal"
+          },
+          {
+            "atMs": 17504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 18512,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19936,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 22608,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 24144,
+            "type": "task-terminal"
+          }
+        ]
+      }
+    },
+    {
+      "name": "reduced-motion",
+      "pixelInfo": {
+        "w": 960,
+        "h": 640,
+        "dpr": 1,
+        "vw": 960,
+        "vh": 640
+      },
+      "diagnostics": {
+        "schemaVersion": 1,
+        "seed": "office-playground",
+        "fakeTimeMs": 25632,
+        "scene": {
+          "width": 960,
+          "height": 640
+        },
+        "position": {
+          "x": 0.2,
+          "y": 0.35
+        },
+        "target": {
+          "point": {
+            "x": 0.2,
+            "y": 0.35
+          },
+          "nodeId": "roam-1",
+          "route": [
+            "desk-1",
+            "roam-1"
+          ]
+        },
+        "direction": "down",
+        "arrived": true,
+        "routeId": "desk-1>roam-1",
+        "transition": {
+          "kind": "task-end",
+          "phase": "result",
+          "outcome": "completed",
+          "reason": "completed"
+        },
+        "animation": {
+          "resource": "finished",
+          "frameIndex": 0,
+          "frameElapsedMs": 1000,
+          "fallbackReason": "STATIC_POSE_FALLBACK",
+          "emphasis": null
+        },
+        "reducer": {
+          "presence": "present",
+          "sync": "healthy",
+          "runtime": "completed",
+          "activity": "working",
+          "movement": "stationary",
+          "control": "none",
+          "binding": "releasing",
+          "queue": "empty"
+        },
+        "geometry": {
+          "visibleHeight": 70.4,
+          "spriteScale": 0.25415162454873647,
+          "anchor": {
+            "x": 178,
+            "y": 296
+          },
+          "visibleBounds": {
+            "height": 277,
+            "width": 319,
+            "x": 6,
+            "y": 41
+          }
+        },
+        "speedRatio": 0.12,
+        "directionOverride": null,
+        "loopOverride": null,
+        "log": [
+          {
+            "atMs": 0,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 9008,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 12000,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 16000,
+            "type": "task-terminal"
+          },
+          {
+            "atMs": 17504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 18512,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19936,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 22608,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 24144,
+            "type": "task-terminal"
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing-texture-fallback",
+      "pixelInfo": {
+        "w": 960,
+        "h": 640,
+        "dpr": 1,
+        "vw": 960,
+        "vh": 640
+      },
+      "diagnostics": {
+        "schemaVersion": 1,
+        "seed": "office-playground",
+        "fakeTimeMs": 26016,
+        "scene": {
+          "width": 960,
+          "height": 640
+        },
+        "position": {
+          "x": 0.2,
+          "y": 0.35
+        },
+        "target": {
+          "point": {
+            "x": 0.2,
+            "y": 0.35
+          },
+          "nodeId": "roam-1",
+          "route": [
+            "desk-1",
+            "roam-1"
+          ]
+        },
+        "direction": "down",
+        "arrived": true,
+        "routeId": "desk-1>roam-1",
+        "transition": {
+          "kind": "task-end",
+          "phase": "result",
+          "outcome": "completed",
+          "reason": "completed"
+        },
+        "animation": {
+          "resource": "idle",
+          "frameIndex": 0,
+          "frameElapsedMs": 1000,
+          "fallbackReason": "STATIC_POSE_FALLBACK",
+          "emphasis": null
+        },
+        "reducer": {
+          "presence": "present",
+          "sync": "healthy",
+          "runtime": "completed",
+          "activity": "working",
+          "movement": "stationary",
+          "control": "none",
+          "binding": "releasing",
+          "queue": "empty"
+        },
+        "geometry": {
+          "visibleHeight": 70.4,
+          "spriteScale": 0.25415162454873647,
+          "anchor": {
+            "x": 178,
+            "y": 296
+          },
+          "visibleBounds": {
+            "height": 277,
+            "width": 319,
+            "x": 6,
+            "y": 41
+          }
+        },
+        "speedRatio": 0.12,
+        "directionOverride": null,
+        "loopOverride": null,
+        "log": [
+          {
+            "atMs": 0,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 9008,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 12000,
+            "type": "runtime/fact"
+          },
+          {
+            "atMs": 16000,
+            "type": "task-terminal"
+          },
+          {
+            "atMs": 17504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 18512,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19504,
+            "type": "phase-complete"
+          },
+          {
+            "atMs": 19936,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 22608,
+            "type": "dispatch"
+          },
+          {
+            "atMs": 24144,
+            "type": "task-terminal"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -11,3 +11,11 @@ vendor/compat/
 vendor/.archive/
 wechat-article.md
 ANALYSIS-REPORT.md
+
+# Office（2026-09-22 合并）：独立 dev 数据与工具产物
+.office-editor-data/
+.workbench-data/
+content/build/
+# 注：docs/ 在本仓库整体忽略（既有约定）；office 测试实际读取的
+# docs/specs|research|superpowers 少数文件用 git add -f 强制纳入，
+# 与 docs/compat/** 的处理方式一致。
