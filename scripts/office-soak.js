@@ -58,6 +58,8 @@ const DEBUG_PORT = Number(argValue('--debug-port', '9411'));
 const KEEP_RUN_DIR = flagSet('--keep-run-dir');
 const NO_CONVERSATION = flagSet('--no-conversation');
 const NO_SWITCH = flagSet('--no-switch');
+// 每 N 轮里拿一轮做「中途取消」（覆盖 office 的 cancel→释放路径；0 = 关）
+const CANCEL_EVERY = Number(argValue('--cancel-every', '0'));
 const STAMP = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const EVIDENCE = path.resolve(argValue('--evidence',
   path.join(os.homedir(), 'Desktop', 'office-evidence-2026-09-23', `长稳-v0.4.0-${STAMP}`)));
@@ -91,6 +93,54 @@ function writeJson(name, value) {
   try { fs.writeFileSync(path.join(EVIDENCE, name), JSON.stringify(value, null, 2)); } catch (err) { log(`evidence write failed (${name}): ${err.message}`); }
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 屏幕/会话呈现状态：渲染类判据只在"真的有人在呈现"时才有意义。
+ * 2026-09-25 实测：机器锁屏 + 显示器休眠期间，Chromium 把 WebContents 节流到
+ * ~1.3fps，办公室按设计进入 static 诊断态——这是诚实结果，不是回归。判据必须
+ * 区分"没人看"与"有人看但画面死了"。
+ *   locked : ioreg 的 CGSSessionScreenIsLocked（快，30s 查一次）
+ *   display: pmset 的 Display is turned on/off（慢 ~1.2s，60s 查一次）
+ */
+function screenLocked() {
+  if (process.platform !== 'darwin') return null;
+  try {
+    const out = execFileSync('ioreg', ['-n', 'Root', '-d1'], { encoding: 'utf8', timeout: 5000 });
+    const m = /"CGSSessionScreenIsLocked"\s*=\s*(Yes|No)/.exec(out);
+    return m ? m[1] === 'Yes' : null;
+  } catch { return null; }
+}
+
+function displayState() {
+  if (process.platform !== 'darwin') return 'unknown';
+  try {
+    const out = execFileSync('pmset', ['-g', 'log'], { encoding: 'utf8', timeout: 20000, maxBuffer: 32 * 1024 * 1024 });
+    let state = 'unknown';
+    for (const line of out.split('\n')) {
+      if (line.includes('Display is turned on')) state = 'on';
+      else if (line.includes('Display is turned off')) state = 'off';
+    }
+    return state;
+  } catch { return 'unknown'; }
+}
+
+/** 是否"有人在看"：显示器亮 且 屏幕未锁。读不到 → null（未知，按"有人在看"处理）。 */
+function presentedNow(state) {
+  if (Date.now() - (state.presentationCheckedAt || 0) > 30_000) {
+    state.presentationCheckedAt = Date.now();
+    state.screenLocked = screenLocked();
+    if (Date.now() - (state.displayCheckedAt || 0) > 60_000) {
+      state.displayCheckedAt = Date.now();
+      const next = displayState();
+      if (next !== 'unknown' && next !== state.display) log(`display → ${next}`);
+      if (next !== 'unknown') state.display = next;
+    }
+  }
+  if (state.screenLocked === true) return false;
+  if (state.display === 'off') return false;
+  if (state.screenLocked === null && state.display === 'unknown') return null;
+  return true;
+}
 
 // ------------------------------------------------------- runtime + homes
 /** 选一个本机可用、且在当前支持区间内的运行时版本：已装目录优先，其次仓库内置种子。 */
@@ -465,6 +515,7 @@ async function main() {
 
   const tailer = new ShellLogTailer(logsDir);
   const violations = [];
+  const notes = [];
   const samples = [];
   const cycles = [];
   const state = {
@@ -481,6 +532,9 @@ async function main() {
     lastWindowsAdvanceAt: null,
     pausedReported: false,
     packMissingReported: false,
+    display: "unknown",
+    displayCheckedAt: 0,
+    staticWhileDisplayOffNoted: false,
   };
 
   function violation(kind, detail) {
@@ -488,6 +542,15 @@ async function main() {
     violations.push(rec);
     log(`VIOLATION ${kind}: ${JSON.stringify(detail)}`);
     writeJson('violations.json', violations);
+  }
+
+  // observations：不是违规，但必须留档的事实（例：显示器休眠期间的 latch 是设计内
+  // 的诚实结果；唤醒后不自愈，恢复路径=切视图/手动重试）。
+  function note(kind, detail) {
+    const rec = { at: new Date().toISOString(), elapsedMin: Math.round((Date.now() - startedAt) / 60000), kind, detail };
+    notes.push(rec);
+    log(`NOTE ${kind}: ${JSON.stringify(detail).slice(0, 300)}`);
+    writeJson('notes.json', notes);
   }
 
   // --- 1) 等壳拿到 runtime URL（同时确认办公室视图已建）
@@ -547,6 +610,23 @@ async function main() {
 
   async function sampleOnce(tag) {
     const row = { at: new Date().toISOString(), elapsedMin: Math.round((Date.now() - startedAt) / 60000), tag, viewActive: state.viewActive };
+    // 呈现状态（锁屏/息屏时渲染类判据不适用；30s 查锁屏、60s 查显示器）
+    const presented = presentedNow(state);
+    row.presented = presented;
+    row.screenLocked = state.screenLocked;
+    row.display = state.display;
+    if (presented === false) state.suppressedSamples = (state.suppressedSamples || 0) + 1;
+    else if (presented === true) state.presentedSamples = (state.presentedSamples || 0) + 1;
+    if (presented === true && state.lastSample && state.lastSample.mode === 'static' && state.viewActive
+      && !state.staticWhileLockedNoted) {
+      // 解锁/唤醒后不自愈（latch 无自动恢复），恢复路径 = 切视图 / 手动重试。如实记录。
+      state.staticWhileLockedNoted = true;
+      note('PRESENTED_BUT_STATIC', {
+        note: 'screen is presented again while the office is the active view, but the renderer is still latched (recovery = view switch or manual retry)',
+        code: state.lastSample.code, fps: state.lastSample.fps, recoveryAttempts: state.lastSample.recoveryAttempts,
+      });
+    }
+    if (presented === false) state.staticWhileLockedNoted = false;
     const metrics = processTreeMetrics(child.pid);
     if (metrics) {
       row.rssMb = metrics.rssMb; row.cpuPct = metrics.cpuPct; row.processes = metrics.processes; row.maxProcRssMb = metrics.maxProcRssMb;
@@ -561,13 +641,22 @@ async function main() {
     state.lastSampleRow = row;
     try { fs.appendFileSync(samplesFile, JSON.stringify(row) + '\n'); } catch { /* best effort */ }
 
-    // ---- 不变量 1：渲染锁死类
+    // ---- 不变量 1：渲染锁死类（显示器关着时不判定：合成器不呈现，1~2fps 是真实环境）
     const off = row.office;
     const busy = off && off.staff ? off.staff.filter((s) => s.bound || s.activity === 'working') : [];
     row.busyStaff = busy.map((s) => s.id);
     if (off && off.mode) {
       const isStatic = off.mode === 'static' || off.code === 'LOW_FPS_PERSISTENT';
-      if (isStatic && state.viewActive) {
+      if (isStatic && state.viewActive && presented === false) {
+        if (!state.staticWhileDisplayOffNoted) {
+          state.staticWhileDisplayOffNoted = true;
+          note('STATIC_WHILE_NOT_PRESENTED', {
+            note: 'renderer latched while the screen was locked/off — expected (nothing is presented); render judgements are suppressed in this window',
+            code: off.code, fps: off.fps, recoveryAttempts: off.recoveryAttempts,
+            screenLocked: state.screenLocked, display: state.display,
+          });
+        }
+      } else if (isStatic && state.viewActive) {
         if (state.staticSince === null) state.staticSince = Date.now();
         else if (Date.now() - state.staticSince > 120_000) {
           violation('RENDER_LATCHED_ACTIVE', { mode: off.mode, code: off.code, sinceMin: Math.round((Date.now() - state.staticSince) / 60000), fps: off.fps, recoveryAttempts: off.recoveryAttempts });
@@ -592,7 +681,12 @@ async function main() {
     } else if (off) {
       state.codeSince = null;
     }
-    if (off && off.paused === true && !state.pausedReported) { state.pausedReported = true; violation('SIM_PAUSED_WHILE_VISIBLE', { note: 'module paused while the window is visible and office active' }); }
+    if (off && off.paused === true && presented === true && !state.pausedReported) {
+      state.pausedReported = true;
+      violation('SIM_PAUSED_WHILE_VISIBLE', { note: 'module paused although the screen is presented and the office is the active view' });
+    }
+    // 锁屏/息屏期间模块按设计暂停仿真：绑定不会走回漫游，卡住类判据一律不适用。
+    row.simPaused = !!(off && off.paused === true);
     if (off && off.packMissing === true && !state.packMissingReported) { state.packMissingReported = true; violation('PACK_MISSING', { note: 'renderer has no character pack' }); }
     return row;
   }
@@ -635,6 +729,8 @@ async function main() {
       let sawRunning = false;
       let running = null;
       let falseObservations = 0;
+      let cancelSent = false;
+      const cancelThisTurn = CANCEL_EVERY > 0 && (activeSession.promptIndex % CANCEL_EVERY === 0);
       const busyIds = new Set();
       let maxBusy = 0;
       await sleep(1500);
@@ -660,6 +756,14 @@ async function main() {
             cycle.sessionMissingPolls = (cycle.sessionMissingPolls || 0) + 1;
           }
         } catch (err) { row.listError = err.message; }
+        if (cancelThisTurn && !cancelSent && Date.now() - t0 > 25_000) {
+          cancelSent = true;
+          try {
+            await client.cancel(sessionId);
+            cycle.cancelled = true;
+            log(`cancel sent (${cycle.sessionShort}) 25s into the turn`);
+          } catch (err) { cycle.cancelError = err.message; }
+        }
         await sleep(3000);
       }
       if (!cycle.endDetection) { cycle.endDetection = sawRunning ? 'timeout-running' : 'timeout'; cycle.timeoutAfterMs = Date.now() - t0; }
@@ -678,6 +782,7 @@ async function main() {
       let frozenSince = null;
       while (Date.now() < releaseDeadline && !exited) {
         const row = await sampleOnce(`settle:${activeSession.promptIndex}`);
+        if (row.presented === false || row.simPaused === true) { cycle.releaseEvaluated = false; cycle.releaseSkipReason = row.presented === false ? 'not-presented' : 'simulation-paused'; break; }
         const staff = (row.office && row.office.staff) || [];
         const busy = staff.filter((s) => s.bound || s.activity === 'working');
         const frozen = busy.filter((s) => s.movement === 'stationary');
@@ -696,7 +801,14 @@ async function main() {
       cycle.staffAtEnd = state.lastSample && state.lastSample.staff ? state.lastSample.staff.map((s) => `${s.id}:${s.activity}${s.bound ? '/bound' : ''}`) : null;
       const lastResult = state.lastSample && state.lastSample.staff ? state.lastSample.staff.map((s) => s.result).filter(Boolean) : [];
       cycle.lastResultOutcomes = lastResult;
-      if (!released) violation('STUCK_WORKING', { note: 'employee still bound/working 120s after the turn ended', sessionId: cycle.sessionId, staff: cycle.staffAtEnd });
+      // 卡住类判据只在这两个前提下成立：① 本轮确实有人被绑上（否则无可释放）；
+      // ② 收尾期间"有人在看且仿真在跑"（锁屏/息屏期间的绑定行为不适用）。
+      if (cycle.releaseEvaluated === false) {
+        cycle.releaseNote = `release check suppressed (${cycle.releaseSkipReason})`;
+        log(`release check suppressed (${cycle.releaseSkipReason}) for ${cycle.sessionShort}`);
+      } else if (sawBound && !released) {
+        violation('STUCK_WORKING', { note: 'employee was bound during the turn but is still bound/working 180s after it ended', sessionId: cycle.sessionId, staff: cycle.staffAtEnd });
+      }
       if (state.lastSample && state.lastSample.sync === 'stale') violation('SYNC_STALE_AFTER_TURN', { sessionId: cycle.sessionId });
       log(`turn done: ${cycle.sessionShort} turn=${(cycle.turnMs / 1000).toFixed(0)}s followWait=${(cycle.followWaitMs / 1000).toFixed(0)}s detection=${cycle.endDetection} busySaw=${sawBound}${busyIds.size ? `(${[...busyIds].join(',')} max ${maxBusy})` : ''} released=${released}${releasedAfterMs !== null ? ` (+${(releasedAfterMs / 1000).toFixed(0)}s)` : ''} outcomes=${JSON.stringify(cycle.lastResultOutcomes)}`);
     } catch (err) {
@@ -751,8 +863,9 @@ async function main() {
       setTimeout(async () => {
         const row = await sampleOnce('after-return');
         const off = row.office;
-        if (off && (off.mode === 'static' || off.code === 'LOW_FPS_PERSISTENT')) {
-          violation('RENDER_LATCHED_AFTER_RETURN', { mode: off.mode, code: off.code, fps: off.fps, recoveryAttempts: off.recoveryAttempts });
+        // 只在"有人在看"时判定（锁屏/息屏期间的 static 是诚实结果，不是回归）
+        if (row.presented !== false && off && (off.mode === 'static' || off.code === 'LOW_FPS_PERSISTENT')) {
+          violation('RENDER_LATCHED_AFTER_RETURN', { mode: off.mode, code: off.code, fps: off.fps, recoveryAttempts: off.recoveryAttempts, note: '90s after returning to the office view' });
         }
         if (shotsTaken < 12) { try { if (await office.screenshot(path.join(shotsDir, `${String(++shotsTaken).padStart(2, '0')}-after-return.png`))) shotsTaken += 1; } catch { /* optional */ } }
       }, 90_000);
@@ -820,7 +933,17 @@ async function main() {
       for (const s of samples) { const v = s.office && s.office.sync; if (v) st[v] = (st[v] || 0) + 1; }
       return st;
     })(),
+    // 呈现覆盖：只在"有人在看"（屏幕未锁 + 显示器亮）的样本上判定渲染类不变量；
+    // 锁屏/息屏期间的 latch 是设计内的诚实结果，抑制并留档（notes.json）。
+    presentation: {
+      presentedSamples: state.presentedSamples || 0,
+      suppressedSamples: state.suppressedSamples || 0,
+      unknownSamples: samples.filter((s) => s.presented === null).length,
+      maxPresentedFps: samples.reduce((max, s) => (s.presented === true && s.office && s.office.fps && Number.isFinite(s.office.fps.lastFps) ? Math.max(max, s.office.fps.lastFps) : max), 0),
+      presentedStaticSamples: samples.filter((s) => s.presented === true && s.office && (s.office.mode === 'static' || s.office.code === 'LOW_FPS_PERSISTENT')).length,
+    },
     logCounts: Object.fromEntries(tailer.counts),
+    notes,
     cycles: cycles.length,
     turns: cycles.filter((c) => c.sessionId).length,
     violations,
