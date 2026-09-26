@@ -1,6 +1,6 @@
 # 服务器运维（2026-09-26）
 
-站点：http://dshcockpit.site （同时支持 www）；当前 HTTP 已部署。自有 SSL 证书已安装，服务器内部 HTTPS 校验通过；公网 HTTPS 尚未连通，等待确认云防火墙／安全组 443 入站。服务器访问 GitHub 和 Let's Encrypt 超时。
+站点：https://dshcockpit.site （同时支持 www）；云端放行 443 后，公网 HTTPS 已正常，HTTP 301 跳转至 HTTPS。服务器访问 GitHub 和 Let's Encrypt 仍超时，当前采用本地下载、手动上传安装包。
 
 ## 路径
 
@@ -33,8 +33,8 @@ sudo systemctl enable --now dsh-release-sync.timer
 - 配置备份：`/var/backups/dshcockpit/nginx-before-tls.conf`
 - 已开启 TLS 1.2/1.3，Nginx 配置校验与 reload 成功。
 - 服务器内部以域名和正常证书校验访问 127.0.0.1:443 返回 200。
-- 本地公网 curl 和浏览器连接失败，抓包窗口未捕获到对应 443 请求。系统 UFW 已放行 443；云防火墙／安全组和客户端线路仍需排查，尚不能确认具体拦截位置。
-- 保留 HTTP，不启用强制跳转，待公网 HTTPS 正常后再配置。
+- 维护者在云端放行 443 后，公网主域名与 www 的 HTTPS 正常返回 200，证书校验通过。
+- HTTP 已配置 301 跳转至 https://dshcockpit.site，保留请求路径与查询参数。跳转前备份：`/var/backups/dshcockpit/nginx-before-https-redirect.conf`。
 
 参考文章 https://zhuanlan.zhihu.com/p/374584044 建议修改 hosts。2026-09-26 使用 curl --resolve 保留域名与证书校验，尝试 GitHub/API 多个 IP（含公共 DNS 查询结果）及 release-assets 域名，均在 TCP 443 超时，因此未持久修改 hosts。此办法未解决当前网络问题；COS 仅为未验证备选，尚未开通或产生相关服务成本。
 
@@ -58,3 +58,17 @@ gh run list --workflow mirror-downloads.yml --repo Lxiayu/DshCockpit
 ```
 
 实测结果：2026-09-26 两次 GitHub Runner 均在 SSH TCP 22 连接阶段超时，未进入认证；尚未成功上传。workflow 已在 GitHub 暂停，避免周期性失败，线路解决后先启用再手动触发：`gh workflow enable mirror-downloads.yml --repo Lxiayu/DshCockpit`。不要把“工作流已配置”等同于“同步已通”。
+
+## 当前手动发布流程
+
+自动拉取 timer 与 GitHub Actions 上传工作流继续保留并暂停。先在能够访问 GitHub 的维护电脑上下载最近一个稳定版：
+
+```sh
+python3 website/deploy/sync-releases.py --root "$HOME/Downloads/dsh-release-mirror/downloads" --keep 1
+```
+
+脚本从官方 Release 下载完整 Windows EXE、Windows 便携 ZIP、macOS DMG，并核对文件大小和 GitHub 提供的 SHA256，生成兼容官网的 index.json。要加入更多历史版本可调整 --keep；不上传 mac 自动更新 ZIP 或 blockmap。
+
+通过 SSH 将该目录上传至服务器非公开暂存目录 `/home/ubuntu/dsh-release-upload`。在服务器重新核对 index.json 中每个文件的大小和 SHA256，通过后先发布安装包，最后原子替换 `/www/wwwroot/dshcockpit.site/downloads/index.json`。保留已有历史安装包，不向 Git 仓库提交二进制包。发布后检查公网索引、安装包响应大小和 Range 续传。
+
+2026-09-26 已手动发布 v0.4.0：Windows x64 EXE、Windows x64 便携 ZIP、macOS arm64 DMG，共 569202135 字节。此版本没有 Intel Mac DMG。本地与服务器 SHA256 校验通过，公网 index.json、全部安装包 HEAD 大小和 Range 206 检查通过。
