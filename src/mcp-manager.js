@@ -15,7 +15,12 @@
 // Patch-file surgery (M-1): cordis.patch.yml is a top-level YAML sequence;
 // we add/remove exactly one block per server under its `- insert:` item and
 // leave every other byte untouched. Every write is: backup → line-level patch
-// → atomic write → `--dump-config` verify (injected dep) → rollback on failure.
+// → atomic write → `--dump-config` verify → rollback on failure. Windows+AV
+// P1 (2026-09-25 audit §三#2): verification runs through the verify gate
+// (src/mcp-verify-gate.js) — a burst of edits pays ONE dump-config cold
+// start, an already-verified text is reused (invalidated by content or
+// runtime change), skipped runs are never cached, and the gate owns rollback
+// so a failed burst is restored exactly once, to the pre-burst bytes.
 //
 // Secrets (M-2): sensitive env values live only in the shell vault
 // (safeStorage; KeyVault reused from models-manager). They never enter
@@ -29,6 +34,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { KeyVault, yamlScalar, writeSettingsFile } = require('./models-manager');
+const { createMcpVerifyGate } = require('./mcp-verify-gate');
 
 const PATCH_FILE = 'cordis.patch.yml';
 const PLUGIN_NAME = '@deepseek-ai/dsh-mcp-client';
@@ -300,6 +306,8 @@ function publicView(server, vault) {
  *   - safeStorage           — electron safeStorage (nullable in tests)
  *   - log(line)
  *   - dumpConfigVerify(): Promise<{ok, reason?}>  — injected smoke check
+ *   - verifyGateOpts: {}  — passthrough for the verify gate (tests: delayMs,
+ *     maxWaitMs, schedule, now)
  *   - platform: string      — override for tests
  */
 function createMcpManager(deps) {
@@ -318,38 +326,71 @@ function createMcpManager(deps) {
     try { return fs.readFileSync(patchFile(), 'utf8'); } catch { return ''; }
   };
 
+  // Windows+AV P1 (audit §三#2): the raw spawn verifier is wrapped by a gate
+  // that merges a burst of edits into one `--dump-config` run, reuses an
+  // already-verified text, and owns rollback (see mcp-verify-gate.js header).
+  // Failure semantics are unchanged: a rejected write returns { ok:false } and
+  // the file is restored to its exact pre-write bytes.
+  const verifyGate = createMcpVerifyGate({
+    spawnVerify: verify,
+    readText: readPatch,
+    restore: (pre) => {
+      const file = patchFile();
+      if (pre === '') { fs.rmSync(file, { force: true }); return true; } // no prior file → restore absence
+      writeSettingsFile(file, pre);
+      return true;
+    },
+    runtimeVersion: () => (d.runtimeVersionOf ? d.runtimeVersionOf() : ''),
+    log,
+    ...(d.verifyGateOpts || {}), // tests: delayMs / maxWaitMs / schedule / now
+  });
+
+  // Serializes the file-mutating section (read → patch → write → gate
+  // registration) so overlapping saves land in file order and every burst's
+  // `pre` is the true disk state. Verification is awaited OUTSIDE the lock so
+  // a burst can still accumulate writers while its spawn is pending.
+  let writeLockTail = Promise.resolve();
+
   /**
-   * Shared write pipeline: backup → patch → atomic write → verify → rollback.
+   * Shared write pipeline: backup → patch → atomic write → gated verify
+   * (debounced/merged/reused; rollback owned by the gate).
    * `apply(text)` returns the new file text (or null for a no-op).
    */
-  async function writePatch(apply, opLabel) {
+  function writePatch(apply, opLabel) {
+    let releaseLock;
+    const lockFree = new Promise((r) => { releaseLock = r; });
+    const prev = writeLockTail;
+    writeLockTail = lockFree;
+    return prev.catch(() => {}).then(() => {
+      let out;
+      try { out = registerWrite(apply, opLabel); } finally { releaseLock(); }
+      return out; // a gate promise (caller awaits the verdict) or an early result
+    });
+  }
+
+  /** Synchronous half of writePatch — runs under the write lock. */
+  function registerWrite(apply, opLabel) {
     const file = patchFile();
     const before = readPatch();
     const after = apply(before);
     if (after === null) return { ok: true, noop: true };
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    let backupOk = false;
     if (before !== '') {
-      try { fs.copyFileSync(file, file + BACKUP_SUFFIX); backupOk = true; } catch { /* best effort */ }
+      try { fs.copyFileSync(file, file + BACKUP_SUFFIX); } catch { /* best effort crash artifact */ }
     }
     try {
       writeSettingsFile(file, after);
     } catch (e) {
       return { ok: false, reason: `write failed: ${e.message}` };
     }
-    const v = await verify();
-    if (!v.ok) {
-      log(`[mcp] ${opLabel}: dump-config rejected the write (${v.reason}); rolling back`);
-      try {
-        if (backupOk) fs.copyFileSync(file + BACKUP_SUFFIX, file);
-        else fs.unlinkSync(file); // no prior file → restore absence
-      } catch (e) {
-        log(`[mcp] rollback failed: ${e.message}`);
-        return { ok: false, reason: `${v.reason}; rollback failed: ${e.message}` };
+    return verifyGate.request(after, before).then((v) => {
+      if (!v.ok) {
+        // the gate already rolled the file back to the pre-burst bytes
+        log(`[mcp] ${opLabel}: dump-config rejected the write (${v.reason}); rolled back`);
+        return { ok: false, reason: v.reason };
       }
-      return { ok: false, reason: v.reason };
-    }
-    return { ok: true };
+      return v.reused ? { ok: true, reused: true } : { ok: true, ...(v.skipped ? { skipped: v.skipped } : {}) };
+    });
   }
 
   /** Whether the server currently has a block in the truth layer. */
@@ -483,6 +524,7 @@ function createMcpManager(deps) {
 
     patchFile,
     vault,
+    verifyGate, // probe hook for tests: .verified() / .invalidate()
   };
 }
 

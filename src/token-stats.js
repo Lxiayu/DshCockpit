@@ -183,8 +183,8 @@ async function parseSessionLogAsync(file, windows) {
       const grown = await readFileRange(file, hit.offset, st.size - hit.offset);
       const lastNl = grown.lastIndexOf('\n');
       if (lastNl === -1) {
-        // only a partial line was appended; keep the old result and offset
-        const result = { ...hit.result, mtimeMs: st.mtimeMs };
+      // only a partial line was appended; keep the old result and offset
+      const result = { ...hit.result, mtimeMs: st.mtimeMs, size: st.size };
         parseCache.set(file, { size: st.size, mtimeMs: st.mtimeMs, result, offset: hit.offset, wkey });
         return result;
       }
@@ -222,7 +222,7 @@ async function parseSessionLogAsync(file, windows) {
       // the cache entry while we were reading — abandon our increment and let
       // the catch below fall through to a full re-parse.
       if (parseCache.get(file) !== hit) throw new Error('cache advanced concurrently; full re-parse');
-      const result = { totals: t, meta: hit.result.meta, mtimeMs: st.mtimeMs };
+      const result = { totals: t, meta: hit.result.meta, mtimeMs: st.mtimeMs, size: st.size };
       // byte length (not char length) keeps the offset valid for multi-byte logs
       parseCache.set(file, { size: st.size, mtimeMs: st.mtimeMs, result, offset: hit.offset + Buffer.byteLength(fresh, 'utf8'), wkey });
       return result;
@@ -239,7 +239,7 @@ async function parseSessionLogAsync(file, windows) {
     text = await decodeSessionLogAsync(file);
     offset = undefined;
   }
-  const result = text === null ? null : { totals: sumUsage(text, windows), meta: parseHeader(text), mtimeMs: st.mtimeMs };
+  const result = text === null ? null : { totals: sumUsage(text, windows), meta: parseHeader(text), mtimeMs: st.mtimeMs, size: st.size };
   if (result !== null) {
     if (parseCache.size > 100) { // cap the cache, drop the oldest
       const first = parseCache.keys().next().value;
@@ -383,7 +383,7 @@ async function collect(dshHome, opts) {
       totals.offPeak.cacheRead += usage.offPeak.cacheRead || 0; totals.offPeak.cacheWrite += usage.offPeak.cacheWrite || 0;
     }
     const mtimeMs = r.mtimeMs || 0;
-    sessions.push({ file, cwd: r.meta.cwd, usage, mtimeMs });
+    sessions.push({ file, cwd: r.meta.cwd, usage, mtimeMs, size: r.size || 0 });
     if (mtimeMs > latestMtime) { latestMtime = mtimeMs; current = usage; }
     // Yield between files so a large sessions tree can't pin the main thread.
     // (parseSessionLogAsync already uses fsp so each file is non-blocking, but

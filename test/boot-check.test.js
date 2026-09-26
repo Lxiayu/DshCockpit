@@ -294,3 +294,91 @@ test('H5: absent credentials keep the layout check green', async () => {
   assert.strictEqual(layout.ok, true);
   assert.match(layout.detail, /absent|empty/i);
 });
+
+// ------------------- windows-perf P1 #2: the runtime.bin probe is on-demand
+
+/** Spawn-counting fixture: counts cold starts of the --version probe. */
+function countingFixture() {
+  let spawns = 0;
+  const realSpawn = require('node:child_process').spawn;
+  const f = fixture({ spawn: (...args) => { spawns += 1; return realSpawn(...args); } });
+  f.spawns = () => spawns;
+  return f;
+}
+
+test('REGRESSION #2 (on-demand): a fresh healthy report reuses runtime.bin — second boot pays 0 spawns', async () => {
+  const f = countingFixture();
+  const first = await f.bc.runChecks();
+  assert.strictEqual(resultOf(first, 'runtime.bin').ok, true);
+  assert.strictEqual(f.spawns(), 1, 'first boot: deep probe runs');
+  const second = await f.bc.runChecks();
+  assert.strictEqual(f.spawns(), 1, 'second boot within TTL: probe reused, 0 spawns');
+  const bin = resultOf(second, 'runtime.bin');
+  assert.strictEqual(bin.ok, true);
+  assert.match(bin.detail, /reused/);
+  assert.strictEqual(second.overall, 'ok');
+  assert.strictEqual(second.probe.ok, true, 'reuse keys persist for the next boot');
+  // manual rerun (Settings → About) is always deep
+  const manual = await f.bc.runChecks({ deep: true });
+  assert.strictEqual(f.spawns(), 2, 'manual deep rerun probes again');
+  assert.doesNotMatch(resultOf(manual, 'runtime.bin').detail, /reused/);
+});
+
+test('REGRESSION #2 (discoverability): a cheap-check anomaly forces the deep probe and is still reported', async () => {
+  const f = countingFixture();
+  await f.bc.runChecks(); // healthy baseline persisted
+  assert.strictEqual(f.spawns(), 1);
+  // break the profile link farm (what dsh's own heal watches)
+  fs.mkdirSync(path.join(f.home, 'profiles', 'node_modules'), { recursive: true });
+  fs.writeFileSync(path.join(f.home, 'profiles', 'node_modules', 'broken-pkg'), 'not a link');
+  const report = await f.bc.runChecks();
+  assert.strictEqual(f.spawns(), 2, 'anomaly → the deep probe runs again');
+  assert.strictEqual(resultOf(report, 'profile.links').ok, false);
+  assert.strictEqual(report.overall, 'failed');
+  const healed = JSON.parse(fs.readFileSync(f.bc.reportFile(), 'utf8'));
+  assert.strictEqual(healed.probe.ok, true, 'the fresh probe verdict is persisted, never the reused one');
+});
+
+test('REGRESSION #2 (TTL/keys): stale, foreign or failed probe verdicts are never reused', async () => {
+  const f = countingFixture();
+  await f.bc.runChecks();
+  assert.strictEqual(f.spawns(), 1);
+  const file = f.bc.reportFile();
+  const readReport = () => JSON.parse(fs.readFileSync(file, 'utf8'));
+
+  // 1) older than the 24h TTL → deep again
+  const stale = readReport();
+  stale.probe.at = new Date(Date.now() - 25 * 3_600_000).toISOString();
+  fs.writeFileSync(file, JSON.stringify(stale));
+  await f.bc.runChecks();
+  assert.strictEqual(f.spawns(), 2, 'expired probe verdict re-probes');
+
+  // 2) a FAILED verdict is never reused (the last real probe saw exit 3):
+  // the next boot probes deep even though the env is otherwise fresh
+  fs.writeFileSync(f.rt.binJs, 'process.exit(3)\n');
+  const failed = readReport();
+  failed.probe.ok = false;
+  failed.probe.detail = '--version exited 3';
+  fs.writeFileSync(file, JSON.stringify(failed));
+  const bad = await f.bc.runChecks();
+  assert.strictEqual(f.spawns(), 3, 'a failed verdict is never reused — deep probe runs');
+  assert.strictEqual(resultOf(bad, 'runtime.bin').ok, false);
+  fs.writeFileSync(f.rt.binJs, "process.stdout.write('1.0.0\\n'); process.exit(0);\n");
+  const healed = await f.bc.runChecks();
+  assert.strictEqual(f.spawns(), 4, 'verdict after a failure re-probes once more');
+  assert.strictEqual(resultOf(healed, 'runtime.bin').ok, true);
+
+  // 3) a different dshHome invalidates the reuse
+  const foreign = readReport();
+  foreign.probe.dshHome = path.join(f.userDataDir, 'some-other-home');
+  fs.writeFileSync(file, JSON.stringify(foreign));
+  await f.bc.runChecks();
+  assert.strictEqual(f.spawns(), 5, 'dshHome change invalidates the reuse');
+
+  // 4) a different active runtime version invalidates the reuse
+  const otherRt = readReport();
+  otherRt.probe.runtimeVersion = '9.9.9';
+  fs.writeFileSync(file, JSON.stringify(otherRt));
+  await f.bc.runChecks();
+  assert.strictEqual(f.spawns(), 6, 'runtime version change invalidates the reuse');
+});

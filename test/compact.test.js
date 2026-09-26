@@ -279,3 +279,85 @@ test('parseSessionLogAsync surfaces lastUsage = the most recent usage event, not
   assert.deepStrictEqual(r.totals.lastUsage, { input: 2000, output: 30, cacheRead: 3000, cacheWrite: 0 });
   assert.strictEqual(tokenStats.pressureOf(r.totals), 5000);
 });
+
+// ------------- windows-perf P1 #4: the compact tick shares the token poll's traversal
+
+test('REGRESSION #4 (shared stat): the compact tick rides the token-poll snapshot — one stat per tick, zero walks, TTL falls back to the walk', async () => {
+  const home = tmpdir();
+  const sesDir = path.join(home, 'sessions', 'proj', 'ses-share');
+  await fsp.mkdir(sesDir, { recursive: true });
+  const file = path.join(sesDir, 'session.jsonl');
+  await fsp.writeFile(file, usageEvent(1000, 10, 0, 0, 1) + '\n');
+  const root = path.join(home, 'sessions');
+
+  // what a tokenStats.collect()/session-worker result carries for the tracker
+  const st = await fsp.stat(file);
+  const stats = { sessions: [{ file, usage: {}, mtimeMs: st.mtimeMs, size: st.size }] };
+
+  let clock = 1_000_000;
+  let statCalls = 0;
+  let deepScans = 0;
+  const snapshot = compact.createSessionSnapshot({
+    ttlMs: 15_000,
+    rootOf: () => root,
+    deepScan: async () => { deepScans += 1; return compact.walkActiveSession(() => home); },
+    now: () => clock,
+    stat: async (f) => { statCalls += 1; return fsp.stat(f); },
+  });
+  snapshot.update(stats, root); // fed by pollTokens after each collect()
+
+  let scans = 0;
+  const tracker = compact.createTracker({
+    historyFile: path.join(home, 'compact-history.json'),
+    dshHomeOf: () => home,
+    activeFile: () => snapshot.activeFile(),
+    scan: async () => { scans += 1; return { records: [], open: null }; },
+    log: () => {},
+  });
+
+  const walksBefore = tokenStats.walkCacheStats().walks;
+  await tracker.tick();
+  await tracker.tick();
+  await tracker.tick();
+  assert.strictEqual(tokenStats.walkCacheStats().walks, walksBefore, 'quiet ticks: zero full-tree walks');
+  assert.strictEqual(statCalls, 3, 'exactly ONE stat per quiet tick (was N per tick before)');
+  assert.strictEqual(deepScans, 0);
+  assert.strictEqual(scans, 1, 'baseline scan once, quiet ticks skip via size/mtime gating');
+
+  // the writer appends → the single stat sees the new size → rescan
+  await fsp.appendFile(file, usageEvent(100, 5, 0, 0, 2) + '\n');
+  await tracker.tick();
+  assert.strictEqual(statCalls, 4, 'still exactly one stat per tick');
+  assert.strictEqual(scans, 2, 'change detected through the shared snapshot');
+
+  // snapshot goes stale (token poll stalled) → old walk path, tracking survives
+  clock += 20_000;
+  const walksBeforeStale = tokenStats.walkCacheStats().walks;
+  await tracker.tick();
+  assert.strictEqual(deepScans, 1, 'stale snapshot hands back to the deep scan');
+  assert.strictEqual(tokenStats.walkCacheStats().walks, walksBeforeStale + 1, 'the fallback is the pre-P1 walk');
+  assert.strictEqual(scans, 2, 'unchanged file still not rescanned through the fallback');
+});
+
+test('REGRESSION #4 (invalidation): missing snapshot, foreign root, and stale snapshot all fall back', async () => {
+  const home = tmpdir();
+  const root = path.join(home, 'sessions');
+  let deepScans = 0;
+  const snapshot = compact.createSessionSnapshot({
+    rootOf: () => root,
+    deepScan: async () => { deepScans += 1; return null; },
+    now: () => 0,
+    stat: async () => { throw new Error('stat must not run while invalid'); },
+  });
+  await snapshot.activeFile();
+  assert.strictEqual(deepScans, 1, 'no snapshot yet → deep scan');
+  snapshot.update({ sessions: [{ file: '/x', mtimeMs: 1, size: 0 }] }, path.join(home, 'sessions-of-old-home'));
+  await snapshot.activeFile();
+  assert.strictEqual(deepScans, 2, 'foreign root (dshHome switched) → deep scan');
+  snapshot.update({ sessions: [{ file: '/x', mtimeMs: 1, size: 0 }] }, root);
+  assert.strictEqual(await snapshot.activeFile(), null, 'fresh snapshot: stat of a vanished file → quiet null');
+  assert.strictEqual(deepScans, 2, 'fresh snapshot serves without the deep scan');
+  snapshot.update(null, root);
+  snapshot.update({}, root);
+  assert.strictEqual(snapshot.fresh(), true, 'malformed collect results are ignored, good snapshot kept');
+});

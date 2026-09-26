@@ -24,7 +24,7 @@ function registerFeatureIpc(ipcMain, ctx) {
 
   // R1 boot self-check (report contract in boot-check.js)
   ipcMain.handle('boot:report', () => ({ ok: true, report: bootCheck.readReport(), file: bootCheck.reportFile() }));
-  ipcMain.handle('boot:rerun', async () => ({ ok: true, report: await bootCheck.runChecks() }));
+  ipcMain.handle('boot:rerun', async () => ({ ok: true, report: await bootCheck.runChecks({ deep: true }) })); // manual rerun: always a full deep check
   ipcMain.handle('boot:repair', async (_e, ids) => {
     const out = await bootCheck.repair(Array.isArray(ids) ? ids : undefined);
     if (out.repaired.length) notify(t(lang(), 'notify.bootRepairDone'), t(lang(), 'notify.bootRepairDoneBody', { items: out.repaired.join(', '), passed: out.report.summary.passed, total: out.report.summary.total }));

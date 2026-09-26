@@ -42,7 +42,7 @@ const { SettingsStore } = require('./settings-store');
 const { RuntimeManager, isRuntimeSupported } = require('./runtime-manager');
 const { createRuntimeStateController } = require('./runtime-state');
 const { t, resolveLanguage, STRINGS } = require('./i18n');
-const { backupNow, backupInfo } = require('./backup');
+const { backupNow, backupDeltaNow, backupInfo } = require('./backup');
 const tokenStats = require('./token-stats');
 const { createSessionWorkerClient } = require('./session-worker-client');
 const windowState = require('./window-state');
@@ -475,6 +475,7 @@ let mcpReg = null;    // MCP registry (builtin list + GitHub search)
 let mcpConn = null;   // MCP two-tier health checks
 let mcpImp = null;    // MCP universal importer
 let compactTracker = null; // compaction watcher (C3, constructed after app ready)
+let compactSessionSnapshot = null; // shared newest-session snapshot (windows-perf P1 #4)
 let weekly = null; // R5 weekly report (constructed after app ready)
 let compactTimer = null; // 5-second compaction scan cadence
 let sessionWorkerClient = null;
@@ -3768,10 +3769,22 @@ function initBalanceMonitor() {
  * compact.js, so a quiet cycle costs one stat call, and the savings are
  * priced with the same bucketing the cost center uses. */
 function initCompactTracking() {
+  // windows-perf P1 #4: the 5s token poll's collect() already traverses the
+  // whole session tree in the session worker; the compact tick used to do
+  // its OWN full-tree walk + N stats on the main thread every 5s (2×N per
+  // 10s through the AV filter). Share one snapshot: the tracker now picks
+  // the newest session from the poll's result and pays exactly ONE stat per
+  // quiet tick; a stale snapshot (poll stalled) falls back to the old walk,
+  // so tracking never freezes — it just loses the optimization.
+  compactSessionSnapshot = compact.createSessionSnapshot({
+    rootOf: () => path.join(dshHomeOf(), 'sessions'),
+    deepScan: () => compact.walkActiveSession(dshHomeOf),
+  });
   compactTracker = compact.createTracker({
     historyFile: path.join(app.getPath('userData'), 'compact-history.json'),
     dshHomeOf,
     windows: () => cost.parseWindows(settings.get().costPeakWindows) || cost.DEFAULT_WINDOWS,
+    activeFile: () => compactSessionSnapshot.activeFile(),
     log,
     scan: sessionWorkerClient ? (file) => sessionWorkerClient.scanCompactions(file) : undefined,
     onStatus: () => broadcastCompactStatus(),
@@ -5358,6 +5371,7 @@ if (!gotLock) {
       tokenPollBusy = true;
       try {
         const stats = await collectStats();
+        if (compactSessionSnapshot) compactSessionSnapshot.update(stats, path.join(dshHomeOf(), 'sessions')); // P1 #4: one traversal feeds both
         pushTokens(stats);
         await costSnapshot(stats);
         injectOfficeUsage(stats); // P1: office usage block from the same caches
@@ -5451,10 +5465,15 @@ if (!gotLock) {
   app.on('before-quit', () => {
     quitting = true;
     // back up history before the runtime is torn down (sessions are durable
-    // JSONL, this is a belt-and-suspenders safety net; see DESIGN.md §15)
+    // JSONL, this is a belt-and-suspenders safety net; see DESIGN.md §15).
+    // Windows+AV P1 #3: this used to be a full synchronous cpSync of the
+    // whole session tree ON THE QUIT PATH (blocked quit + per-file AV scans
+    // = "the app won't quit"). It is now an incremental pass: metadata-only
+    // walk, only files changed since the newest backup are copied into it,
+    // so the quit is bounded by the delta and the backup stays complete.
     if (settings.get().backupOnQuit) {
       try {
-        backupNow({ dshHome: dshHomeOf(), backupDir: backupDir(), keep: settings.get().backupKeep, log });
+        backupDeltaNow({ dshHome: dshHomeOf(), backupDir: backupDir(), keep: settings.get().backupKeep, log });
       } catch (err) {
         log(`[shell] quit backup failed: ${err.message}`);
       }

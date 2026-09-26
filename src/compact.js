@@ -208,11 +208,87 @@ function appendHistory(file, rec) {
 // ---------------------------------------------------------------------------
 // tracker: watch the active (latest-mtime) session for compaction events
 // ---------------------------------------------------------------------------
+/** Full-tree active-session lookup (walk + one stat per session file). This
+ * used to be the tracker's EVERY-5s tick cost (2×N stats/10s through the
+ * Windows AV filter, duplicating the token poll's collect() which walks the
+ * same tree in the session worker); after P1 #4 it is only the FALLBACK for
+ * when the shared snapshot is missing or stale (stalled token poll). */
+async function walkActiveSession(dshHomeOf) {
+  const root = path.join(dshHomeOf(), 'sessions');
+  const files = await tokenStats.walkSessionFilesAsync(root);
+  let best = null;
+  for (const f of files) {
+    let st;
+    try { st = await fsp.stat(f); } catch { continue; }
+    if (!best || st.mtimeMs > best.mtimeMs) best = { file: f, size: st.size, mtimeMs: st.mtimeMs };
+  }
+  return best;
+}
+
+/**
+ * Shared newest-session snapshot (windows-perf P1 #4). The 5s token poll's
+ * collect() already traverses + stats the whole session tree in the session
+ * worker; the compact tick re-used to do its own full-tree walk + N stats on
+ * the main thread. update() stores the poll's fresh sessions list;
+ * activeFile() picks the newest entry and refreshes it with exactly ONE
+ * stat — a quiet tick costs 1 stat and 0 walks, and scan-change detection
+ * latency stays at one tick.
+ *
+ * Invalidation: a snapshot older than ttlMs, from a foreign sessions root
+ * (dshHome switch), or absent entirely hands back to deepScan (the old
+ * walkActiveSession path), so a stalled token poll can never freeze
+ * compaction tracking — it only loses the optimization.
+ *
+ * @param {object} [opts]
+ *   ttlMs    snapshot freshness window (default 15s ≥ 2 poll intervals)
+ *   rootOf   () => current <dshHome>/sessions — foreign-root snapshots are ignored
+ *   deepScan async () => {file,size,mtimeMs}|null — fallback walk
+ *   now/stat injectable clock + stat (tests)
+ */
+function createSessionSnapshot(opts = {}) {
+  const ttlMs = Number.isFinite(opts.ttlMs) && opts.ttlMs > 0 ? opts.ttlMs : 15_000;
+  const rootOf = opts.rootOf || (() => null);
+  const deepScan = opts.deepScan || (async () => null);
+  const now = opts.now || Date.now;
+  const stat = opts.stat || fsp.stat;
+  let snap = null; // { root, at, sessions }
+
+  return {
+    /** Feed the latest collectStats() result + the root it was collected from. */
+    update(stats, root) {
+      if (!stats || !Array.isArray(stats.sessions) || !root) return;
+      snap = { root, at: now(), sessions: stats.sessions };
+    },
+    async activeFile() {
+      if (!snap || snap.root !== rootOf() || now() - snap.at > ttlMs) return deepScan();
+      let best = null;
+      for (const s of snap.sessions) {
+        if (!s || !s.file) continue;
+        if (!best || (s.mtimeMs || 0) > best.mtimeMs) best = s;
+      }
+      if (!best) return deepScan();
+      try {
+        const st = await stat(best.file); // the quiet tick's single stat
+        return { file: best.file, size: st.size, mtimeMs: st.mtimeMs };
+      } catch {
+        return null; // active session vanished; next collect refreshes the snapshot
+      }
+    },
+    /** Test probe: is a fresh snapshot currently serving activeFile()? */
+    fresh() {
+      return !!snap && snap.root === rootOf() && now() - snap.at <= ttlMs;
+    },
+  };
+}
+
 /**
  * @param {object} opts
  *   historyFile  path under userData for the persisted records
  *   dshHomeOf    () => DSH_HOME root (sessions live under <root>/sessions)
  *   windows      () => peak hour ranges for savings pricing (or null)
+ *   activeFile   optional async () => {file,size,mtimeMs}|null — injected
+ *                newest-session lookup (P1 #4: shared snapshot; default is
+ *                the full-tree walkActiveSession fallback)
  *   log          optional line logger
  *   onStatus     optional ('running'|'idle', openInfo?) on transitions
  *   onRecord     optional (entry) when a new completed compaction lands
@@ -228,6 +304,7 @@ function createTracker(opts) {
     const text = await tokenStats.decodeSessionLogAsync(file);
     return text === null ? { records: [], open: null, unavailable: true } : scanCompactions(text);
   });
+  const activeFileOf = opts.activeFile || (() => walkActiveSession(dshHomeOf));
   let history = loadHistory(historyFile);
   const known = new Set(history.map((r) => r.id));
   let lastFile = null;
@@ -237,24 +314,12 @@ function createTracker(opts) {
   let openId = null;
   let tickInFlight = false;
 
-  async function activeFile() {
-    const root = path.join(dshHomeOf(), 'sessions');
-    const files = await tokenStats.walkSessionFilesAsync(root);
-    let best = null;
-    for (const f of files) {
-      let st;
-      try { st = await fsp.stat(f); } catch { continue; }
-      if (!best || st.mtimeMs > best.mtimeMs) best = { file: f, size: st.size, mtimeMs: st.mtimeMs };
-    }
-    return best;
-  }
-
   async function tick() {
     if (tickInFlight) return;
     tickInFlight = true;
     try {
       let active;
-      try { active = await activeFile(); } catch { return; }
+      try { active = await activeFileOf(); } catch { return; }
       if (!active) return;
       if (active.file === lastFile && active.size === lastSize && active.mtimeMs === lastMtimeMs) return;
       let result;
@@ -317,5 +382,7 @@ module.exports = {
   estimateSavings,
   loadHistory,
   appendHistory,
+  walkActiveSession,
+  createSessionSnapshot,
   createTracker,
 };

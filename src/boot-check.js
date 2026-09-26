@@ -26,6 +26,10 @@ const DSH_PACKAGE_PARTS = ['@deepseek-ai', 'dsh'];
 const CREDENTIALS_FILE = '.credentials.yaml';
 const PROBE_FILE = '.__dsh_cockpit_write_probe';
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
+/** How long a REAL runtime.bin spawn verdict may be reused at startup
+ * (Windows+AV P1: skip the extra child cold start when the environment was
+ * verified less than a day ago and nothing relevant changed). */
+const PROBE_REUSE_TTL_MS = 24 * 3_600_000;
 /** First upstream release that reads/writes the v1 (version+refs)
  * credential layout; older runtimes only understand the flat layout. */
 const V1_CREDENTIALS_SINCE = '0.1.1';
@@ -334,20 +338,64 @@ function createBootCheck(deps) {
   // ------------------------------------------------------------------ api
   let lastRichResults = []; // rich check results (repair needs farm/path fields)
 
-  async function runChecks() {
+  /** Cached verdict for the runtime.bin SPAWN probe. Windows+AV P1 (audit
+   * §三#1): the probe is one more child cold start (node boot through the AV
+   * filter driver) on every launch, ~4s after boot, on top of dsh's own
+   * farm heal — and it judges a runtime whose REAL verdict arrives moments
+   * later when the cockpit spawns that same runtime anyway. So the probe
+   * runs deep only when it can learn something new:
+   *   - a fresh (< 24h), matching (same dshHome + same active runtime
+   *     version) OK verdict is REUSED (0 spawns);
+   *   - any cheap-check anomaly forces a deep run (full picture);
+   *   - a failed or stale or absent verdict always probes deep.
+   * A failed verdict is never reused, so a runtime that broke since the
+   * last report is still caught — by the probe here, or by the runtime
+   * failing to start right after. */
+  function cachedProbeVerdict(cfg, info) {
+    const report = readReport();
+    const probe = report && report.probe;
+    if (!probe || !probe.ok) return null;
+    const age = Date.now() - Date.parse(probe.at);
+    if (!(age >= 0) || age > PROBE_REUSE_TTL_MS) return null; // stale (or clock skew)
+    if (probe.dshHome !== cfg.dshHome) return null; // different home → different runtime tree
+    if ((probe.runtimeVersion || '') !== (info.activeVersion || '')) return null; // vocabulary changed
+    return probe;
+  }
+
+  async function runChecks(opts) {
+    const forceDeep = !!(opts && opts.deep);
     const raw = effectiveSettings();
     // mirror spawnRuntime's default: an empty dshHome means ~/.dsh — checking
     // the raw '' would test the CWD instead of the home the runtime uses
     const cfg = { ...raw, dshHome: raw.dshHome || path.join(os.homedir(), '.dsh') };
     const info = runtimeInfo();
-    const results = [];
-    results.push(await checkRuntimeBin(cfg, info));
-    results.push(checkRuntimePointer(info));
-    results.push(checkDshHomeWritable(cfg));
-    results.push(checkProfileLinks(cfg));
-    results.push(await checkPortAvailable(cfg));
-    results.push(checkCredentialsExist(cfg));
-    results.push(checkCredentialsLayout(cfg, info));
+    // cheap checks first — they decide whether the deep probe is worth spawning
+    const cheap = [];
+    cheap.push(checkRuntimePointer(info));
+    cheap.push(checkDshHomeWritable(cfg));
+    cheap.push(checkProfileLinks(cfg));
+    cheap.push(await checkPortAvailable(cfg));
+    cheap.push(checkCredentialsExist(cfg));
+    cheap.push(checkCredentialsLayout(cfg, info));
+    let binResult;
+    let probeMeta;
+    const freshProbe = forceDeep ? null : cachedProbeVerdict(cfg, info);
+    if (freshProbe && cheap.every((r) => r.ok)) {
+      binResult = { id: 'runtime.bin', ok: true, fixable: false, detail: `${freshProbe.detail} (reused)` };
+      probeMeta = { ...freshProbe, reused: true };
+      log(`[boot-check] runtime.bin: reusing probe from ${freshProbe.at} (no spawn)`);
+    } else {
+      binResult = await checkRuntimeBin(cfg, info);
+      probeMeta = {
+        at: new Date().toISOString(),
+        dshHome: cfg.dshHome,
+        runtimeVersion: info.activeVersion || '',
+        ok: !!binResult.ok,
+        detail: binResult.detail,
+      };
+      if (forceDeep) log('[boot-check] runtime.bin: deep probe requested (spawn)');
+    }
+    const results = [binResult, ...cheap];
     for (const r of results) if (r.severity === undefined) r.severity = 'error';
     lastRichResults = results;
     const passed = results.filter((r) => r.ok).length;
@@ -359,6 +407,7 @@ function createBootCheck(deps) {
       overall: failed === 0 ? 'ok' : (degraded === failed ? 'degraded' : 'failed'),
       summary: { total: results.length, passed, failed, fixable: results.filter((r) => !r.ok && r.fixable).length, degraded },
       results: results.map(({ id, ok, fixable, detail, severity }) => ({ id, ok, fixable, detail, severity })),
+      probe: probeMeta, // additive: last REAL spawn verdict + reuse keys (never reused when !ok)
     };
     try { atomicWriteJson(reportFile(), report); } catch (err) { log(`[boot-check] report write failed: ${err.message}`); }
     log(`[boot-check] ${passed}/${results.length} checks passed (fixable=${report.summary.fixable}, degraded=${degraded})`);
@@ -369,7 +418,7 @@ function createBootCheck(deps) {
    * Uses the rich in-memory results from the freshest run — the persisted
    * report intentionally carries only the stable public fields. */
   async function repair(ids) {
-    const current = await runChecks();
+    const current = await runChecks({ deep: true }); // manual repair: always see the full picture
     const rich = new Map(lastRichResults.map((r) => [r.id, r]));
     const wanted = Array.isArray(ids) && ids.length
       ? new Set(ids)
@@ -382,7 +431,7 @@ function createBootCheck(deps) {
       if (repairOne(result)) repaired.push(id);
       else skipped.push(id);
     }
-    const report = await runChecks();
+    const report = await runChecks({ deep: true }); // re-verify the repair, no cache
     return { report, repaired, skipped };
   }
 
