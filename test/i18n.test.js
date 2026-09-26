@@ -41,6 +41,36 @@ test('zh/en dictionaries cover the same keys', () => {
   assert.deepStrictEqual(zhKeys, enKeys, 'zh and en key sets must match');
 });
 
+// ---------------------------------------------------------------------------
+// 2026-09-25 UX 必修（E2）：同表重复键 lint。
+// JS 对象字面量的重复键会被静默覆盖（后声明胜出）：zh 表里 `plugin.gitMissing`
+// 曾被一行英文重复声明覆盖（中文用户看到英文报错），channels/im 段还有一整块
+// 先英文后中文的重复声明。重复键在运行时不可见（STRINGS 已是覆盖后的结果），
+// 所以这条 lint 直接扫描 src/i18n.js 源码。扫描器实现在
+// test/helpers/i18n-duplicate-key-lint.js（office-ux-mustfix.test.js 用合成源
+// 自证 lint 会真的触发）。
+// ---------------------------------------------------------------------------
+
+const fs = require('node:fs');
+const path = require('node:path');
+const { collectDuplicateKeys } = require('./helpers/i18n-duplicate-key-lint.js');
+
+test('duplicate-key lint: no key is declared twice inside one language table (E2)', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'i18n.js'), 'utf8');
+  const duplicates = collectDuplicateKeys(source);
+  assert.deepStrictEqual(
+    duplicates,
+    {},
+    `duplicate keys inside a STRINGS table silently overwrite (last wins): ${JSON.stringify(duplicates)}`
+  );
+});
+
+test('plugin.gitMissing resolves to the zh copy for Chinese users (E2 regression)', () => {
+  const zh = t('zh', 'plugin.gitMissing', { msg: 'x' });
+  assert.match(zh, /Git for Windows/, 'zh table must keep the Chinese git-missing copy');
+  assert.doesNotMatch(zh, /^Installing GitHub-sourced/, 'zh must not be overwritten by an English duplicate');
+});
+
 test('plugin.* market strings exist in both languages', () => {
   const keys = ['plugin.busy', 'plugin.timeout', 'plugin.spawnFailed',
     'plugin.installed', 'plugin.installedBody', 'plugin.removed', 'plugin.removedBody',

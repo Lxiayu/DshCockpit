@@ -193,6 +193,37 @@ const PENDING_MODAL_TEXT = Object.freeze({
   sandboxUnprojected: '沙箱模式：harness 未投影（仅在放宽请求时可见），影响范围无法预先界定',
 });
 
+// 2026-09-25 UX 必修（B2）：审批/提问回答失败时，内部英文 reason 不再原样渲染。
+// 这张表把主进程/模块的已知 reason（respondToRuntime 与 answerPending 的失败词）
+// 映射到 office.pending.fail.* 词典键；不在表内的未知 reason 兜底
+// office.pending.answerFailed（中性中文）+ 原文进可展开的技术详情。键值两侧
+// （本表 + src/i18n.js）同改。
+const PENDING_FAIL_KEY_OF = Object.freeze({
+  'runtime offline': 'office.pending.fail.runtimeOffline',
+  'runtime event feed offline': 'office.pending.fail.feedOffline',
+  'no rpc id': 'office.pending.fail.unroutable',
+  'missing pending id': 'office.pending.fail.unroutable',
+  'unknown pending id': 'office.pending.fail.unroutable',
+  'unsupported answer value': 'office.pending.fail.unsupported',
+  'answer channel unavailable': 'office.pending.fail.channelUnavailable',
+  'already-answering': 'office.pending.fail.alreadyAnswering',
+});
+
+/** Resolve one failure reason into { key, unknown, detail }:
+ *  - `key` is the mapped office.pending.fail.* dictionary key (null when the
+ *    reason is unknown — the caller then falls back to answerFailed);
+ *  - `detail` is the RAW reason (never localized) for the expandable technical
+ *    details disclosure; null when there is nothing beyond the localized text. */
+function pendingFailureView(reason) {
+  const raw = String(reason === null || reason === undefined ? '' : reason).trim();
+  const key = PENDING_FAIL_KEY_OF[raw.toLowerCase()] || null;
+  return {
+    key,
+    unknown: !key,
+    detail: raw || null,
+  };
+}
+
 // P4 ⑤ 选中员工「今日工作记录」(spec §3 block 5). The zh strings mirror the
 // office.record.* dictionary keys (same convention as the blocks above). Every
 // row is a projection of module-side real data: counts of task-started /
@@ -845,9 +876,10 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
       }
     },
 
-    async dispatch(employeeId) {
+    async dispatch(employeeId, text) {
       if (typeof bridge.dispatch !== 'function') return { ok: false, code: 'BRIDGE_MISSING' };
-      return bridge.dispatch({ employeeId });
+      // 2026-09-25 UX 必修（B1）：追加任务带正文（session/prompt steer 的内容）。
+      return bridge.dispatch({ employeeId, text });
     },
 
     async cancel(employeeId) {
@@ -868,6 +900,8 @@ module.exports = {
   buildRecordViewModel,
   buildPendingModalModel,
   PENDING_MODAL_TEXT,
+  PENDING_FAIL_KEY_OF,
+  pendingFailureView,
   RECORD_TEXT,
   ACTIVITY_LABELS,
   ACTIVITY_LOG_LABELS,

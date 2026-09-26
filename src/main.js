@@ -324,6 +324,29 @@ function ensureOfficeModule() {
       // questions through — so the panel can never grow a second, divergent
       // answer implementation. P3 wires the click handlers to it.
       answerRequest: ({ rpcId, value, what }) => respondToRuntime({ rpcId, value, what }),
+      // 2026-09-25 UX 必修（B1/G1）：办公室三个控制按钮的真接线 seam（与
+      // answerRequest 同一注入模式），复用 IM 已实证的同一批 harness RPC，不另起
+      // 一套：cancel → session/cancel（IM /stop 同款）；followup → session/prompt
+      // mode:'steer'（IM 绑定会话注入同款）。interrupt 在 0.1.5 无对应接口，模块
+      // 侧直接诚实拒绝（CONTROL_UNWIRED），不落到这里。sessionId 只在主进程内
+      // 流动，从不进快照。
+      controlRequest: async ({ sessionId, control, text } = {}) => {
+        if (typeof sessionId !== 'string' || sessionId === '') return { ok: false, code: 'NOT_BOUND' };
+        const ru = getRuntimeUrl();
+        if (!ru) return { ok: false, code: 'RUNTIME_OFFLINE', reason: 'runtime offline' };
+        const rpc = createHarnessRpcWire(ru, harnessRpcDeps());
+        if (control === 'cancel') {
+          await rpc.cancel(sessionId);
+          return { ok: true };
+        }
+        if (control === 'followup') {
+          const body = typeof text === 'string' ? text.trim() : '';
+          if (!body) return { ok: false, code: 'TEXT_REQUIRED' };
+          await rpc.prompt(sessionId, body, 'steer');
+          return { ok: true };
+        }
+        return { ok: false, code: 'CONTROL_UNSUPPORTED' };
+      },
       // P3: the spec §4 detailRef resolver behind office:pending {action:'detail'}.
       // main.js owns the data (journal correlation / session/page / the question
       // payload); the module owns the boundary (unknown ids are a no-op, the
@@ -4255,6 +4278,21 @@ function stopEventsFeed() {
   // 容器加固：feed 停了（运行时重启/退出）就不该继续显示降级——新一轮 feed
   // 起来时 noteFeedStart 重新开始计数。
   runtimeHealth.reset();
+  // 2026-09-25 UX 必修（A1）：运行时重启/退出后，遗留的审批/提问卡的旧路由 id
+  // 已死——永远无法被回答，必须失效而不是继续冒充"待你处理"。面板会在下一份
+  // 快照上看到失效说明（office.pending.expired）。pre-module 镜像里的同样已死，
+  // 一并清空。
+  try {
+    if (officeModuleInstance && typeof officeModuleInstance.expirePendingFromRuntime === 'function') {
+      const expired = officeModuleInstance.expirePendingFromRuntime();
+      if (expired && expired.expired > 0) {
+        log(`[office] ${expired.expired} pending request(s) invalidated by the runtime restart`);
+      }
+    }
+  } catch (error) {
+    log(`[office] pending expiry failed: ${error && error.message}`);
+  }
+  try { officePendingMirror.clear(); } catch { /* best effort */ }
   // no live frames until the feed reconnects: drop the busy flag and any
   // compaction start orphaned by a runtime crash/restart (C3)
   sessionRunning = false;

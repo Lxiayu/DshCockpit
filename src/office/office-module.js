@@ -26,10 +26,13 @@
 //   (`fact.runId`, already `run-sha256:*`); this module never re-hashes a
 //   proxy and only ever calls deriveRunProxy() on a raw id seen in raw
 //   Harness history (never on a fact).
-// - cancel/interrupt acknowledgements are never terminal evidence. There is
-//   no live Harness RPC wiring in Task 7: control intents are recorded as
-//   `cancellationPending` with a CONTROL_UNWIRED diagnostic until the
-//   harness subscription lands.
+// - Control buttons are REALLY wired since the 2026-09-25 UX must-fix (B1/G1):
+//   main.js injects a `controlRequest` seam (same injection pattern as
+//   `answerRequest`) that reuses the IM-proven Harness RPCs — cancel →
+//   `session/cancel`, followup → `session/prompt` mode 'steer'. Interrupt has
+//   NO 0.1.5 counterpart: it is honestly refused (CONTROL_UNWIRED, capability
+//   false) instead of pretending. A failed RPC never produces the badge /
+//   timeline line — feedback must match facts.
 // - Visibility pauses the logical clock; resume continues from the current
 //   logical position and never replays time.
 // - Two office views consume this one module: one snapshot, one clock.
@@ -200,7 +203,10 @@ const OFFICE_IPC_CHANNELS = Object.freeze([
 
 const PROVEN_CAPABILITIES = Object.freeze({
   cancel: true,
-  interrupt: true,
+  // 2026-09-25 UX 必修（B1/G1）：0.1.5 没有与"中断"对应的 RPC（session/cancel
+  // 就是唯一的停止原语）。false 让面板把「请求中断」停用并在 tooltip 明示
+  // "暂未接入"，而不是保留一个只记本地事实的安慰剂按钮。
+  interrupt: false,
   followup: true,
   steer: true,
   inject: true,
@@ -917,6 +923,13 @@ function createOfficeModule(options = {}) {
   let usageBlock = null;
   const pendingItems = new Map(); // id -> contract item (insertion ordered)
   const pendingRoutes = new Map(); // id -> { rpcId } — the runtime routing id
+  // 2026-09-25 UX 必修（A1）：最近一次"运行时重启 → 遗留 pending 全部失效"的
+  // 标记（显式布尔位 + 逻辑钟/真实钟时间戳——时间戳可能为 0，不能只靠真值判断）。
+  // 非 null 时面板显示失效说明行；新的 pending 到达即清除。只是呈现字段，永不
+  // 携带会话信息。
+  let pendingInvalid = false;
+  let pendingInvalidAtMs = null;
+  let pendingInvalidRealMs = null;
   // P2 timeline token attribution (spec §3 block 4). One open turn per active
   // binding handle: `runtime/usage` facts (main.js translated the 0.1.5
   // assistant/message `data.usage` provider record into them — a first-hand
@@ -2783,6 +2796,12 @@ function createOfficeModule(options = {}) {
       // shell's own caches; pending is the runtime waterfall list.
       usage: usageBlock,
       pending: pendingSnapshot(),
+      // 2026-09-25 UX 必修（A1）：pending 失效说明（运行时重启后 pendingInvalid
+      // 为 true，新 pending 到达即清）。呈现字段；显式写法过 tdz-guard 的
+      // shorthand 扫描。
+      pendingInvalid: pendingInvalid,
+      pendingInvalidAtMs: pendingInvalidAtMs,
+      pendingInvalidRealMs: pendingInvalidRealMs,
     };
     for (const rec of employees.values()) {
       const binding = registry.getBindingForSession(activeSessionIdFor(rec.employeeId));
@@ -3044,6 +3063,10 @@ function createOfficeModule(options = {}) {
     });
     pendingItems.set(id, item);
     pendingRoutes.set(id, { rpcId: rpcId || eventId });
+    // 新请求到达：失效说明行完成使命（A1）。
+    pendingInvalid = false;
+    pendingInvalidAtMs = null;
+    pendingInvalidRealMs = null;
     while (pendingItems.size > PENDING_LIMIT) {
       const oldest = pendingItems.keys().next().value;
       pendingItems.delete(oldest);
@@ -3163,6 +3186,30 @@ function createOfficeModule(options = {}) {
       if (a.createdAtMs !== b.createdAtMs) return a.createdAtMs - b.createdAtMs;
       return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
     });
+  }
+
+  /**
+   * 2026-09-25 UX 必修（A1）：运行时重启/事件流停止后，遗留的审批/提问卡的旧
+   * rpcId/eventId 已死——它们永远无法被回答，也永远不该继续冒充"待你处理"。
+   * main.js 在 stopEventsFeed() 调用本入口（模块内部路径，无新 office:* 通道）：
+   * 清空全部卡片，在快照留下失效说明字段（面板据此显示"运行时已重启，之前的
+   * 待处理请求已失效"），新的 pending 到达时说明自动消失。
+   * @returns {{ok: true, expired: number}}
+   */
+  function expirePendingFromRuntime() {
+    const expired = pendingItems.size;
+    pendingItems.clear();
+    pendingRoutes.clear();
+    // 只有真的清掉了卡片才标记失效：说明行的语义是"刚才那些卡为什么不见了"，
+    // 没有卡片丢失（如启动期的空 stop）就不该打扰用户。
+    if (expired > 0) {
+      noteDiagnostic('PENDING_EXPIRED_RUNTIME_RESTART');
+      pendingInvalid = true;
+      pendingInvalidAtMs = logicalMs;
+      pendingInvalidRealMs = typeof options.realClock === 'function' ? options.realClock() : null;
+    }
+    pushSnapshot();
+    return Object.freeze({ ok: true, expired });
   }
 
   function activeSessionIdFor(employeeId) {
@@ -3493,23 +3540,61 @@ function createOfficeModule(options = {}) {
     });
   }
 
-  function controlIntent(employeeId, control) {
+  // 2026-09-25 UX 必修（B1/G1）：三个控制按钮从"安慰剂"改为真接线。main.js 注入
+  // `controlRequest` seam（与 answerRequest 同一注入模式），复用 IM 已验证的同一批
+  // harness RPC，不另起第二套实现：
+  //   - cancel    → session/cancel（IM /stop 同款，已实证能真取消运行）
+  //   - followup  → session/prompt mode:'steer'（IM 绑定会话注入同款路径；需要任务文本）
+  //   - interrupt → 0.1.5 无对应接口：诚实拒绝（CONTROL_UNWIRED），不发 fact、
+  //                 不记时间线、不点亮徽标——没有任何假反馈。
+  // RPC 失败同样不产生"取消已请求"式假成功：徽标、cancel-ack fact 与时间线记录
+  // 只在运行时真正接受之后才出现（反馈与事实一致）。
+  async function controlIntent(employeeId, control, text) {
     if (!EMPLOYEE_IDS.includes(employeeId)) return Object.freeze({ ok: false, code: 'UNKNOWN_EMPLOYEE' });
+    if (control === 'interrupt') return Object.freeze({ ok: false, code: 'CONTROL_UNWIRED' });
     const sessionId = activeSessionIdFor(employeeId);
     if (!sessionId) return Object.freeze({ ok: false, code: 'NOT_BOUND' });
     const adapter = adapters.get(sessionId.split('#')[0]);
     if (!adapter) return Object.freeze({ ok: false, code: 'NOT_BOUND' });
-    const requested = adapter.requestControl({ control });
-    if (!requested.ok) return Object.freeze({ ok: false, code: requested.code });
-    const rec = employees.get(employeeId);
-    if (control === 'cancel' || control === 'interrupt') {
+    if (typeof options.controlRequest !== 'function') {
+      // 无注入（纯模块装配）：拒绝而不是假装"已记录"。
+      return Object.freeze({ ok: false, code: 'CONTROL_UNAVAILABLE' });
+    }
+    if (control === 'followup') {
+      // 追加任务必须有正文（session/prompt 的内容）；空文本在调用运行时之前拒绝。
+      const trimmed = typeof text === 'string' ? text.trim() : '';
+      if (!trimmed) return Object.freeze({ ok: false, code: 'TEXT_REQUIRED' });
+      text = trimmed;
+    }
+    let res = null;
+    try {
+      res = await options.controlRequest({ sessionId, control, text: typeof text === 'string' ? text.trim() : '' });
+    } catch (error) {
+      res = { ok: false, code: 'RUNTIME_ERROR', reason: error && error.message };
+    }
+    if (!res || !res.ok) {
+      // 诚实失败路径：面板上不出现任何"取消已请求/已派遣"式假状态。
+      noteDiagnostic('CONTROL_RPC_FAILED');
+      return Object.freeze({
+        ok: false,
+        code: (res && res.code) || 'RUNTIME_ERROR',
+        reason: (res && res.reason) || null,
+      });
+    }
+    if (control === 'cancel') {
+      const rec = employees.get(employeeId);
+      const requested = adapter.requestControl({ control });
+      if (!requested.ok) return Object.freeze({ ok: false, code: requested.code });
       reduce(rec, { type: 'control/cancel' });
       adapter.noteCancelAcknowledged();
       registry.cancelAcknowledged({ sessionId, nowMs: logicalMs });
-      noteDiagnostic('CONTROL_UNWIRED');
-      noteLog(control === 'cancel' ? 'control-cancel' : 'control-interrupt', employeeId);
-    } else {
+      noteLog('control-cancel', employeeId);
+    } else if (control === 'followup') {
+      const requested = adapter.requestControl({ control });
+      if (!requested.ok) return Object.freeze({ ok: false, code: requested.code });
       noteLog('dispatch-followup', employeeId);
+    } else {
+      return Object.freeze({ ok: false, code: 'CONTROL_UNSUPPORTED' });
     }
     pushSnapshot();
     return Object.freeze({ ok: true, control });
@@ -3693,9 +3778,12 @@ function createOfficeModule(options = {}) {
     // P3: the spec §4 detailRef gate (main-process resolver injected at
     // creation as the `pendingDetail` option; unknown ids are a no-op).
     resolvePendingDetail,
-    dispatch: ({ employeeId } = {}) => controlIntent(employeeId, 'followup'),
+    dispatch: ({ employeeId, text } = {}) => controlIntent(employeeId, 'followup', text),
     cancel: ({ employeeId } = {}) => controlIntent(employeeId, 'cancel'),
     interrupt: ({ employeeId } = {}) => controlIntent(employeeId, 'interrupt'),
+    // 2026-09-25 UX 必修（A1）：运行时重启/事件流停止后的 pending 失效清理入口
+    //（main.js stopEventsFeed 调用；模块内部路径，无新 office:* 通道）。
+    expirePendingFromRuntime,
     noteVisibility,
     isPaused,
     getSettings,
@@ -3785,6 +3873,17 @@ function validateOfficeIpcPayload(channel, payload) {
     case 'office:dispatch':
     case 'office:cancel':
     case 'office:interrupt': {
+      // 2026-09-25 UX 必修（B1）：office:dispatch 允许可选 `text`（追加任务正文，
+      // 经 session/prompt steer 注入绑定的会话）——仍是原通道，无新增 office:* 通道。
+      if (channel === 'office:dispatch' && keys.length === 2 && keys.includes('text')) {
+        if (typeof payload.employeeId !== 'string' || !EMPLOYEE_IDS.includes(payload.employeeId)) {
+          return { ok: false, code: 'PAYLOAD_INVALID' };
+        }
+        if (typeof payload.text !== 'string' || payload.text.trim() === '' || payload.text.length > 2000) {
+          return { ok: false, code: 'PAYLOAD_INVALID' };
+        }
+        return { ok: true, value: { employeeId: payload.employeeId, text: payload.text } };
+      }
       if (keys.length !== 1 || keys[0] !== 'employeeId' || typeof payload.employeeId !== 'string') {
         return { ok: false, code: 'PAYLOAD_INVALID' };
       }

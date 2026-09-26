@@ -244,6 +244,8 @@ const STRINGS = {
     'office.staff.currentTool.asking': '等待你回答',
     'office.staff.currentTool.other': '其他',
     'office.timeline.more': '更多',
+    // 2026-09-25 UX 必修（D1）：时间线空态（此前首启只剩标题 + 空白）。
+    'office.timeline.empty': '暂无动态；员工开始任务后，这里会出现时间线',
     'office.sync.ok': '同步正常',
     'office.sync.late': '同步迟到',
     'office.sync.reconnecting': '重新连接中',
@@ -349,6 +351,18 @@ const STRINGS = {
     'office.pending.reviewAnswer': '查看并回答',
     'office.pending.sending': '回答中…',
     'office.pending.answerFailed': '回答失败',
+    // 2026-09-25 UX 必修（B2/A2）：审批/提问回答失败的 reason→本地化映射（内部英文
+    // reason 不再原样渲染；未知值兜底 office.pending.answerFailed + 可展开技术详情）。
+    // 键值对应表在 src/office/office-page.js PENDING_FAIL_KEY_OF，两边同改。
+    'office.pending.fail.runtimeOffline': '运行时未就绪，回答未送达',
+    'office.pending.fail.feedOffline': '运行时事件通道离线，回答未送达；可从托盘「重启运行时」恢复',
+    'office.pending.fail.unroutable': '该请求已失效，无法定位回答通道',
+    'office.pending.fail.unsupported': '回答格式未被运行时接受',
+    'office.pending.fail.channelUnavailable': '回答通道不可用',
+    'office.pending.fail.alreadyAnswering': '正在回答中，请稍候',
+    'office.pending.technicalDetail': '技术详情',
+    // 2026-09-25 UX 必修（A1）：运行时重启后旧 pending 请求失效的说明行。
+    'office.pending.expired': '运行时已重启，之前的待处理请求已失效（旧请求无法再回答）',
     'office.pending.countTitle': '{n} 项待你处理',
     'office.pending.countNone': '暂无待处理',
     // 用量块补充
@@ -382,6 +396,16 @@ const STRINGS = {
     'office.panel.dispatch': '追加任务',
     'office.panel.cancel': '请求取消',
     'office.panel.interrupt': '请求中断',
+    // 2026-09-25 UX 必修（B1/G1/F1）：三按钮真接线后的诚实反馈文案；中断在
+    // 0.1.5 无对应 RPC → 按钮停用 + tooltip 明示，不保留假成功。
+    'office.panel.dispatchPlaceholder': '输入要追加给该员工的任务…',
+    'office.panel.dispatchSend': '发送',
+    'office.panel.dispatchSent': '已追加（已注入该员工的会话）',
+    'office.panel.cancelSent': '取消请求已送达运行时，等待其结束当前任务',
+    'office.panel.interruptUnwiredTip': '中断在当前运行时（0.1.5）暂无对应接口，按钮已停用；要停止任务请用「请求取消」',
+    'office.control.failed': '操作失败：{reason}',
+    'office.control.notBound': '该员工当前未绑定会话',
+    'office.control.unwired': '该操作暂未接入运行时',
     'office.panel.bootFailed': '办公室页面启动失败：{msg}',
     'office.panel.rawTagTip': '本段为 harness 原文，未经翻译',
     'office.panel.sep': '：',
@@ -420,9 +444,11 @@ const STRINGS = {
     'plugin.removed': '插件已卸载',
     'plugin.removedBody': '{name} 已卸载；运行时已自动重启。',
     'plugin.failed': '插件操作失败',
+    // 2026-09-25 UX 必修（E2）：这里曾跟一行英文重复声明把中文覆盖（中文用户在插件
+    // Git 缺失时看到英文报错）；英文原文只在 en 表（本文件 en 段同键）。同表重复键
+    // 由 test/i18n.test.js 的 duplicate-key lint 防复发。
     'plugin.gitMissing': '安装 GitHub 来源的插件需要 Git。检测到当前环境无法访问 git 命令：请安装 Git for Windows（https://git-scm.com）后重启应用重试。原始错误：{msg}',
     'plugin.failedBody': '{name}：{reason}',
-    'plugin.gitMissing': 'Installing GitHub-sourced plugins requires Git, which is not reachable here. Install Git (https://git-scm.com) and restart the app. Original error: {msg}',
     'plugin.collectionRepo': '该仓库是皮肤/插件合集，根目录没有可安装的包（多个子包时请手动指定）',
     // skills center (C4) — error/warning codes map to skills.<code>
     'skills.e1': '未找到 SKILL.md：这不是一个技能包（可能是普通文档仓库或 dsh 插件）',
@@ -482,26 +508,9 @@ const STRINGS = {
     'channels.rx.hookFailed': '操作未生效：{reason}',
     'channels.rx.answerAccepted': '回答已送达。',
     'channels.rx.promptDone': '执行完成（{ok}，{sec} 秒）：\n{summary}',
-    'channels.welcome': '👋 DshCockpit connected ({id}). You can:\n1. Send messages to talk to your agent\n2. Get notified when tasks finish or need approval\n3. Send /status for state · /tasks for tasks · /help for help\nNote: add your open_id to the allowlist in Settings → Channels first.',
-    'channels.welcomeCommands': '/status · /tasks · /help',
-    'channels.rx.notAllowedGuidance': '⛔ Your account is not allowlisted (open_id: {senderId}). Add this open_id under DshCockpit Settings → Channels → {id} allowlist, then retry.',
-    'channels.helpMenu': 'Commands:\n/status — runtime state\n/tasks — scheduled tasks\n/help — this menu\nPlain text = talk to the agent; approvals/questions arrive as cards — reply with the token.',
-    'channels.statusReply': 'Runtime: {runtime}\nScheduled tasks: {tasks}\nLast result: {last}',
-    'channels.tasksReply': 'Scheduled tasks:\n{list}',
-    'channels.noTasks': '(no scheduled tasks)',
-    'channels.stRunning': 'running', 'channels.stIdle': 'idle', 'channels.stNone': '(none yet)',
-    'channels.msg.taskStartedTitle': 'Task started',
-    'channels.msg.taskStartedBody': 'A Harness session started running; you will be notified when it finishes.',
-    'channels.msg.runtimeErrorTitle': 'Runtime exited unexpectedly',
-    'channels.msg.runtimeErrorBody': 'The runtime exited (code={code}). It will restart automatically; see the app log for details.',
-    'im.bind.offline': 'Runtime not ready yet; try again shortly.', 'im.bind.noRunning': 'No running session right now.',
-    'im.bind.choose': 'Pick a running session to bind (send /bind <prefix>):',
-    'im.bind.noMatch': 'No running session starts with {arg}.', 'im.bind.done': '✅ Bound to session {id} ({state}): your messages now steer that Agent live.',
-    'im.unbind.done': 'Unbound; back to companion-mode chat.', 'im.stop.noneRunning': 'No running session right now.',
-    'im.stop.done': 'Stopped the current run of session {id}.', 'im.unknown': 'Unknown command — send /help for the menu.',
-    'im.commandFailed': 'Command failed: {reason}', 'im.steer.accepted': 'Steered into running session {id}.',
-    'channels.rx.steerFailed': 'Steer failed: {reason}',
-    'channels_steer_binding': '• Running session (steer):',
+    // 2026-09-25 UX 必修（E2）：这里曾残留一整段先英文后中文的重复声明
+    // （channels.* / im.*，485-524 行段）——后声明胜出所以功能没坏，但属于同表
+    // 重复键隐患，整段删除；英文原文只保留在 en 表。duplicate-key lint 防复发。
     'channels.welcome': '👋 DshCockpit 已连接（{id}）。你可以：\n1. 直接发消息与 Agent 对话\n2. 任务完成/需要审批时我会自动通知你\n3. 发送 /status 查看状态 · /tasks 查看任务 · /help 获取帮助\n注意：首次使用请在 设置→渠道 把你的 open_id 加入允许列表。',
     'channels.welcomeCommands': '/status · /tasks · /help',
     'channels.rx.notAllowedGuidance': '⛔ 你的账号尚未加入允许列表（open_id: {senderId}）。请在 DshCockpit 设置 → 渠道 → {id} 的允许列表中添加该 open_id 后重试。',
@@ -781,6 +790,8 @@ const STRINGS = {
     'office.staff.currentTool.asking': 'Waiting for your answer',
     'office.staff.currentTool.other': 'Other',
     'office.timeline.more': 'More',
+    // 2026-09-25 UX must-fix (D1): timeline empty state.
+    'office.timeline.empty': 'No activity yet; the timeline appears as employees start tasks',
     'office.sync.ok': 'In sync',
     'office.sync.late': 'Sync late',
     'office.sync.reconnecting': 'Reconnecting',
@@ -884,6 +895,17 @@ const STRINGS = {
     'office.pending.reviewAnswer': 'Review & answer',
     'office.pending.sending': 'Sending…',
     'office.pending.answerFailed': 'Answer failed',
+    // 2026-09-25 UX must-fix (B2/A2): localized failure reasons — mirrors the
+    // zh family; the mapping table lives in src/office/office-page.js.
+    'office.pending.fail.runtimeOffline': 'Runtime not ready; the answer was not delivered',
+    'office.pending.fail.feedOffline': 'Runtime event feed offline; the answer was not delivered — restart the runtime from the tray',
+    'office.pending.fail.unroutable': 'This request is no longer routable',
+    'office.pending.fail.unsupported': 'The runtime did not accept this answer shape',
+    'office.pending.fail.channelUnavailable': 'Answer channel unavailable',
+    'office.pending.fail.alreadyAnswering': 'Already answering; please wait',
+    'office.pending.technicalDetail': 'Technical details',
+    // 2026-09-25 UX must-fix (A1): expired pending requests after a runtime restart.
+    'office.pending.expired': 'The runtime restarted; earlier pending requests were invalidated (they can no longer be answered)',
     'office.pending.countTitle': '{n} item(s) need you',
     'office.pending.countNone': 'Nothing pending',
     'office.usage.empty': 'No usage recorded today',
@@ -913,6 +935,16 @@ const STRINGS = {
     'office.panel.dispatch': 'Add task',
     'office.panel.cancel': 'Request cancel',
     'office.panel.interrupt': 'Interrupt',
+    // 2026-09-25 UX must-fix (B1/G1): honest feedback copy for the wired
+    // control buttons; interrupt stays disabled (no 0.1.5 counterpart).
+    'office.panel.dispatchPlaceholder': 'Follow-up task for this employee…',
+    'office.panel.dispatchSend': 'Send',
+    'office.panel.dispatchSent': 'Follow-up sent (steered into the session)',
+    'office.panel.cancelSent': 'Cancel request delivered; waiting for the runtime to end the task',
+    'office.panel.interruptUnwiredTip': 'Interrupt has no counterpart in the current runtime (0.1.5); the button stays disabled — use Request cancel',
+    'office.control.failed': 'Action failed: {reason}',
+    'office.control.notBound': 'This employee has no bound session right now',
+    'office.control.unwired': 'This control is not wired to the runtime yet',
     'office.panel.bootFailed': 'Office page failed to start: {msg}',
     'office.panel.rawTagTip': 'Verbatim harness text — not translated',
     'office.panel.sep': ': ',

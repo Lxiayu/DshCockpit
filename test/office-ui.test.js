@@ -586,8 +586,13 @@ test('unclassified subagents queue on the single collaborator seat FIFO and disp
   assert.equal(afterRelease.queueCount, 0);
 });
 
-test('cancel/interrupt requests only record pending control and retain the binding', () => {
-  const module = makeModule();
+// 2026-09-25 UX 必修（B1/G1）：控制按钮真接线。cancel/followup 经注入的
+// controlRequest seam 到达运行时（main.js 用 IM 已验证的 session/cancel /
+// session/prompt steer 实现它）；这里的 stub 模拟"运行时接受"。
+async function acceptingControlRequest() { return { ok: true }; }
+
+test('cancel/interrupt requests only record pending control and retain the binding', async () => {
+  const module = makeModule({ controlRequest: acceptingControlRequest });
   tickFor(module, 100);
   module.ingestHarnessEvent({
     sessionId: 'sess-root-4',
@@ -596,7 +601,7 @@ test('cancel/interrupt requests only record pending control and retain the bindi
     time: 1,
     data: { status: 'running' },
   });
-  const result = module.cancel({ employeeId: 'orchestrator' });
+  const result = await module.cancel({ employeeId: 'orchestrator' });
   assert.equal(result.ok, true);
   const employee = module.state().employees.find((e) => e.employeeId === 'orchestrator');
   assert.equal(employee.control, 'cancellationPending');
@@ -691,8 +696,8 @@ test('stale duplicate events cannot disturb the next turn or double-release', ()
     ? true : after.lastResult.atMs > 0, true, 'no fabricated terminal from stale events');
 });
 
-test('cancel in a later turn releases the turn-scoped binding on cancelled evidence', () => {
-  const module = makeModule();
+test('cancel in a later turn releases the turn-scoped binding on cancelled evidence', async () => {
+  const module = makeModule({ controlRequest: acceptingControlRequest });
   tickFor(module, 200);
   runFirstTurn(module, 'sess-cancel-multi');
   module.ingestHarnessEvent({ sessionId: 'sess-cancel-multi', type: 'agent/status', seq: 3, time: 3, data: { status: 'running' } });
@@ -700,7 +705,7 @@ test('cancel in a later turn releases the turn-scoped binding on cancelled evide
   const second = snap.bindings.find((b) => b.sessionId.startsWith('sess-cancel-multi#t') && b.releasedAt === null);
   assert.ok(second, 'second turn bound via handle');
 
-  const result = module.cancel({ employeeId: 'orchestrator' });
+  const result = await module.cancel({ employeeId: 'orchestrator' });
   assert.equal(result.ok, true);
   const pending = module.state().employees.find((e) => e.employeeId === 'orchestrator');
   assert.equal(pending.control, 'cancellationPending');
@@ -719,13 +724,16 @@ test('cancel in a later turn releases the turn-scoped binding on cancelled evide
 });
 
 
-test('capability gating: unsupported controls are rejected, pause/resume never exposed', () => {
+test('capability gating: unsupported controls are rejected, pause/resume never exposed', async () => {
   const module = makeModule();
-  assert.equal(module.dispatch({ employeeId: 'coder' }).ok, false, 'dispatch without binding is rejected, never fabricated');
+  assert.equal((await module.dispatch({ employeeId: 'coder' })).ok, false, 'dispatch without binding is rejected, never fabricated');
   const state = module.state();
   assert.equal(state.capabilities.pause, false);
   assert.equal(state.capabilities.resume, false);
   assert.equal(state.capabilities.cancel, true);
+  // 2026-09-25 UX 必修（B1/G1）：0.1.5 无中断接口——能力位如实为 false，
+  // 面板停用「请求中断」而不是保留安慰剂按钮。
+  assert.equal(state.capabilities.interrupt, false);
 });
 
 // ---------------------------------------------------------------------------
