@@ -34,6 +34,10 @@ jobs:
   # ledger from being recorded.
   test:
     name: unit tests (${{ matrix.os }})
+    # 2026-09-26: informational — a red unit suite must not turn the daily run
+    # red (that is what spammed failure mails). The outcome is reported in the
+    # notify mail / run summary instead.
+    continue-on-error: true
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -53,6 +57,9 @@ jobs:
 
   smoke:
     name: smoke ${{ matrix.os }}
+    # 2026-09-26: informational for the same reason — the per-platform verdict
+    # is recorded by `report` and mailed by `notify`; the run itself stays green.
+    continue-on-error: true
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false # one platform failing must not hide the other's verdict
@@ -142,11 +149,32 @@ jobs:
             const failed = Object.entries(byPlatform).filter(([, ok]) => !ok).map(([p]) => p);
             const first = names.length ? JSON.parse(fs.readFileSync(".compat-flat/" + names[0], "utf8")) : null;
             const version = first && first.version ? first.version : "?";
-            if (missing.length || failed.length) {
-              console.error("[verdict] FAILED missing=[" + missing.join(",") + "] failed=[" + failed.join(",") + "] for " + version);
-              process.exit(1);
-            }
-            console.log("[verdict] " + version + " pass on " + want.join(","));
+            // 2026-09-26: this step used to exit 1 on incompatibility, which made the
+            // DAILY run red and spammed failure mails. The verdict is DATA, not a
+            // pipeline failure: record it, render a summary, and let the notify job
+            // mail it. Nothing exits non-zero here anymore.
+            const lines = names.map((n) => {
+              const r = JSON.parse(fs.readFileSync(".compat-flat/" + n, "utf8"));
+              const p = r.platform || "unknown";
+              const reasons = (r.reasons || r.errors || []).slice(0, 4).join("; ");
+              return { platform: p, ok: !!r.ok, reasons };
+            });
+            const status = (missing.length || failed.length) ? "NEEDS ATTENTION" : "all green";
+            const md = [
+              "# 上游兼容验证结果（@deepseek-ai/dsh " + version + "）",
+              "",
+              "- 结论：**" + status + "**",
+              "- 平台结果：" + (lines.map((l) => l.platform + "=" + (l.ok ? "pass" : "FAIL")).join(", ") || "(无)"),
+              (missing.length ? "- 缺结果的平台：" + missing.join(", ") : ""),
+              (failed.length ? "- 未通过的平台：" + failed.join(", ") : ""),
+              "",
+              ...lines.filter((l) => l.reasons).map((l) => "- " + l.platform + "：" + l.reasons),
+              "",
+              "- 运行：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            ].filter((x) => x !== "").join("\n");
+            fs.writeFileSync("compat-summary.md", md);
+            if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + "\n");
+            console.log("[verdict] " + version + " " + status + " :: " + JSON.stringify(lines));
           '
 
       # !cancelled(): the ledger PR must be recorded even when the verdict
@@ -178,3 +206,72 @@ jobs:
              -f body="$(cat docs/compat/discussion-body.md)" || \
           echo "::warning::discussion publish failed (check category id)"
 
+
+  # 2026-09-26: upstream verdicts are delivered by e-mail instead of failing the
+  # daily run. Add these repo secrets to enable delivery (Settings → Secrets):
+  #   SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, MAIL_TO
+  # Without them the job only warns and the verdict stays in the run summary.
+  notify:
+    name: e-mail the upstream verdict
+    needs: [test, smoke, report]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    env:
+      SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      MAIL_TO: ${{ secrets.MAIL_TO }}
+      UNIT_TEST_RESULT: ${{ needs.test.result }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: .compat-artifacts
+
+      - name: Compose verdict mail
+        run: |
+          mkdir -p .compat-flat
+          find .compat-artifacts -name 'compat-result-*.json' -exec cp {} .compat-flat/ \;
+          node -e '
+            const fs = require("fs");
+            const names = fs.readdirSync(".compat-flat").filter((n) => n.endsWith(".json"));
+            const rows = names.map((n) => JSON.parse(fs.readFileSync(".compat-flat/" + n, "utf8")));
+            const version = rows.find((r) => r && r.version)?.version || "(unknown)";
+            const bad = rows.filter((r) => !r.ok).map((r) => r.platform || "unknown");
+            const missing = ["darwin-arm64", "win32-x64"].filter((p) => !rows.some((r) => (r.platform || "") === p));
+            const ok = rows.length > 0 && bad.length === 0 && missing.length === 0;
+            const subject = `[DshCockpit] 上游兼容验证：${version} ${ok ? "全部通过 ✅" : "需要关注 ⚠️"}`;
+            const body = [
+              `上游版本：${version}`,
+              `结论：${ok ? "全部通过" : "需要关注"}`,
+              `单元测试（win/mac）：${process.env.UNIT_TEST_RESULT}`,
+              "",
+              "平台明细：",
+              ...rows.map((r) => `- ${r.platform || "unknown"}：${r.ok ? "pass" : "FAIL"}` + ((r.reasons || []).length ? ` — ${(r.reasons || []).slice(0, 3).join("; ")}` : "")),
+              missing.length ? `- 缺结果：${missing.join(", ")}` : "",
+              "",
+              `运行日志：${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+              "",
+              "（这封邮件由 upstream-compat 工作流自动发送；判红不再触发失败邮件。）",
+            ].filter(Boolean).join("\n");
+            fs.writeFileSync("mail-subject.txt", subject);
+            fs.writeFileSync("mail-body.txt", body);
+            console.log(subject);
+          '
+
+      - name: Send verdict mail
+        if: ${{ env.SMTP_SERVER != '' && env.MAIL_TO != '' }}
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ env.SMTP_SERVER }}
+          server_port: ${{ env.SMTP_PORT || '587' }}
+          username: ${{ env.SMTP_USERNAME }}
+          password: ${{ env.SMTP_PASSWORD }}
+          subject: ${{ 'DshCockpit 上游兼容验证结果' }}
+          to: ${{ env.MAIL_TO }}
+          from: ${{ env.SMTP_USERNAME }}
+          body: file://mail-body.txt
+
+      - name: No mail configured (warn only)
+        if: ${{ env.SMTP_SERVER == '' || env.MAIL_TO == '' }}
+        run: echo "::warning::SMTP_SERVER/MAIL_TO 未配置，跳过邮件；结论已写入本次运行 Summary。"
