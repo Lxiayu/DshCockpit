@@ -35,3 +35,14 @@ sudo systemctl enable --now dsh-release-sync.timer
 ## 上线检查
 
 检查首页、视频 Range 请求、二维码、手机布局、版本索引和真实安装包下载。交流群图片标注 2026-10-03 前有效，需要及时更新。
+
+## GitHub Actions 主动上传（2026-09-26）
+
+`mirror-downloads` 在 release-win / release-mac 成功结束后触发，也可手动执行，每 6 小时补偿检查。GitHub Runner 运行同一同步脚本，下载并校验最近 5 个稳定版本，再用 rsync 校验传输；最后单独原子替换 index.json。发布互斥，不删除旧包。
+
+部署账号 dshdeploy 没有 sudo；专用密钥在 authorized_keys 中通过 restrict 与 rrsync 限制为下载目录写入，禁止删除和任意 shell。密钥与经现有 SSH 连接读取的主机公钥存入 GitHub Actions Secrets，不提交到仓库。服务器原来的拉取 timer 保持停用，避免两种同步同时写目录。
+
+```sh
+gh workflow run mirror-downloads.yml --repo Lxiayu/DshCockpit
+gh run list --workflow mirror-downloads.yml --repo Lxiayu/DshCockpit
+```

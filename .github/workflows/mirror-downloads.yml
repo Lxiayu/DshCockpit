@@ -1,0 +1,52 @@
+name: mirror-downloads
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [release-win, release-mac]
+    types: [completed]
+  schedule:
+    - cron: '23 */6 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: mirror-downloads
+  cancel-in-progress: false
+jobs:
+  mirror:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: master
+          persist-credentials: false
+      - name: Configure restricted SSH deployment
+        env:
+          DEPLOY_KEY: ${{ secrets.DSH_DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DSH_DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.DSH_DEPLOY_HOST }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/dsh_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/dsh_deploy ~/.ssh/known_hosts
+          mkdir -p "$RUNNER_TEMP/connection-probe"
+          rsync -rt --dry-run -e 'ssh -i ~/.ssh/dsh_deploy -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20' "$RUNNER_TEMP/connection-probe/" "dshdeploy@$DEPLOY_HOST:./"
+      - name: Download and verify official full installers
+        run: python3 website/deploy/sync-releases.py --root "$RUNNER_TEMP/mirror/downloads" --keep 5
+      - name: Upload installers, then publish catalog
+        env:
+          DEPLOY_HOST: ${{ secrets.DSH_DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          transport='ssh -i ~/.ssh/dsh_deploy -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o ServerAliveInterval=30'
+          rsync -rt --checksum --chmod=D755,F644 --exclude=index.json -e "$transport" "$RUNNER_TEMP/mirror/downloads/" "dshdeploy@$DEPLOY_HOST:./"
+          rsync -rt --checksum --chmod=F644 -e "$transport" "$RUNNER_TEMP/mirror/downloads/index.json" "dshdeploy@$DEPLOY_HOST:./index.json"
+      - name: Verify public catalog
+        run: |
+          curl --fail --retry 3 --max-time 30 http://dshcockpit.site/downloads/index.json -o "$RUNNER_TEMP/published.json"
+          cmp "$RUNNER_TEMP/mirror/downloads/index.json" "$RUNNER_TEMP/published.json"
+      - name: Remove runner deployment key
+        if: always()
+        run: rm -f ~/.ssh/dsh_deploy
