@@ -22,7 +22,6 @@ jobs:
   # 发布只保留构建 + 产物闸门（verify-dist / e2e-smoke）。
   build-arm64:
     name: build arm64 mac
-    needs: test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4

@@ -24,7 +24,6 @@ jobs:
   # 发布只保留构建 + 产物闸门（verify-dist / e2e-smoke）。
   build:
     name: build x64 win
-    needs: test
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
