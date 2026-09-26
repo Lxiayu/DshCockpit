@@ -257,13 +257,29 @@ function createMovementController({ graph, config, clock } = {}) {
   // Without it the left wing measured 70% of
   // preferred-left decisions "blocked" with no reachable candidate even though
   // the corridor would have cleared a moment later.
-  function findRoute({ fromNodeId, toNodeId, behavior, reservations, nowMs, employeeId, occupiedNodeIds = null, priority = false } = {}) {
+  // 2026-09-26 工位缺陷修复：`blockedSegments` = 同伴"正在走/正站在"的几何
+  // 线段（当前腿或身体位置点）。规划期避开这些线段（社交半径 0.03，与
+  // step 时的 occupant gate 同一个数），任务路线就不会规划进对向走廊——
+  // 规划进去了就是 1D 对向死锁（双方身体互挡、无任何出口，实测冻结 240s+）。
+  // 找不到绕路时返回 UNREACHABLE，由调用方的 retry 梯子等走廊腾空。
+  function findRoute({ fromNodeId, toNodeId, behavior, reservations, nowMs, employeeId, occupiedNodeIds = null, priority = false, blockedSegments = null } = {}) {
     const at = nowMs !== undefined ? nowMs : now();
     const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
     const from = nodesById.get(fromNodeId);
     const to = nodesById.get(toNodeId);
     if (!from || !to) return Object.freeze({ code: 'UNREACHABLE' });
     if (fromNodeId === toNodeId) return Object.freeze([fromNodeId]);
+
+    const blocked = Array.isArray(blockedSegments) && blockedSegments.length > 0
+      ? blockedSegments.filter((segment) => segment && isPoint2(segment.from) && isPoint2(segment.to))
+      : null;
+    const edgeBlockedByBody = (nodeA, nodeB) => {
+      if (!blocked) return false;
+      for (const segment of blocked) {
+        if (segmentsConflict(segment.from, segment.to, nodeA.position, nodeB.position, { width: 1, height: 1 }, OCCUPANT_SOCIAL_RADIUS)) return true;
+      }
+      return false;
+    };
 
     const adjacency = new Map();
     for (const edge of graph.edges) {
@@ -292,11 +308,15 @@ function createMovementController({ graph, config, clock } = {}) {
       const nextQueue = [];
       for (const currentId of queue) {
         const edges = adjacency.get(currentId) || [];
+        const currentNode = nodesById.get(currentId);
         for (const edge of edges) {
           if (!edge.allowed || visited.has(edge.to)) continue;
           const node = nodesById.get(edge.to);
           if (!node) continue;
           if (priority < 1 && occupied.has(edge.to) && edge.to !== fromNodeId) continue;
+          // 工位缺陷修复：这条边的几何线段若与同伴身体/当前腿冲突，规划期
+          // 直接绕开（找不到绕路 ⇒ UNREACHABLE，retry 梯子等走廊腾空）。
+          if (currentNode && !priority && edgeBlockedByBody(currentNode, node) && edge.to !== toNodeId) continue;
           // Reservation checks apply to EVERY entered node, including the
           // route target: a full-capacity or protected target must force an
           // alternate route or UNREACHABLE, never a planned intrusion.
@@ -395,12 +415,23 @@ function createMovementController({ graph, config, clock } = {}) {
       const radius = reservation.safeRadius || 0;
       for (const segment of reservation.segments) {
         if (segmentsConflict(segment.from, segment.to, from, to, scene, radius)) {
+          // 2026-09-26 工位缺陷修复：yield 规则必须给出全序。旧条件是严格的
+          // `acquiredAt < acquiredAt`——同一条 tick 里先后 plan 的两条任务路线
+          // （同 logicalMs ⇒ acquiredAt 相同）互相冲突时双方都拿不出"更早的
+          // 自己"，双双进入 wait： coder 的腿被 reviewer 的身体挡住、reviewer
+          // 的腿被 collaborator 的腿预留挡住、collaborator 的腿被 coder 的
+          // 身体挡住（实测 5 人同开工位时底部走廊三人环，位置冻结 540s+），
+          // 而 handleBlocked 的让位/重规划出口都把 task-bound 员工排除在外，
+          // 死锁无人可解。平手时用 owner id 的字典序做确定性破平：任何一对
+          // 冲突的移动者中恰好一个获胜前进，等待图无环。
           const mine = reservations.find(
             (candidate) =>
               candidate.owner === employeeId &&
               reservationActive(candidate, at) &&
               reservationCoversMovement(candidate, from, to) &&
-              candidate.acquiredAt < reservation.acquiredAt
+              (candidate.acquiredAt < reservation.acquiredAt
+                || (candidate.acquiredAt === reservation.acquiredAt
+                  && String(employeeId) < String(reservation.owner)))
           );
           if (!mine) {
             return Object.freeze({
@@ -426,6 +457,14 @@ function createMovementController({ graph, config, clock } = {}) {
       if (!reservationActive(reservation, at)) continue;
       if (employeeId !== undefined && reservation.owner === employeeId) continue;
       if (!reservation.nodeId) continue;
+      // 2026-09-26 工位缺陷修复：workstation 预留保护的是"座位锚点供其主人
+      // 到达"，而工位 approach 节点紧贴过道（实测 desk-5-approach 距
+      // roam-6>roam-5 走道仅 0.0009）。座位上没人时，这条预留却以社交半径
+      // 硬挡一切过路腿——5 人同批开工时互相挡死（3 身体 + 1 预留的等待环，
+      // 位置冻结 540s+）。现在无人占座的 workstation 预留只挡"以它为落点"
+      // 的腿（isTarget 全半径不变：别人不能把腿收进别人的座位），不再挡
+      // 纯路过；主人身体真的站上去之后由 occupant gate 继续保护。
+      if (reservation.purpose === 'workstation' && targetNodeId !== reservation.nodeId) continue;
       const node = graph && graph.nodes ? graph.nodes.find((candidate) => candidate.id === reservation.nodeId) : null;
       if (!node) continue;
       // M4.1b: two different protections. ARRIVING at the reserved node keeps

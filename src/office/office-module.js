@@ -642,6 +642,9 @@ function createOfficeModule(options = {}) {
       reachedSeat: false,
       routeRetryAt: null,
       routeRetryDeadline: null,
+      // 2026-09-26 工位缺陷修复：绑定落在半路上时先走完脚下这段本地行走，
+      // 再规划任务路线（true = 任务路线挂起，等 in-flight leg 归零）。
+      taskRoutePending: false,
       // SPEC-04 decision points: the node a finished local walk arrived at
       // (reported to the scheduler on the next tick, then cleared).
       arrivedNodeId: null,
@@ -1596,7 +1599,26 @@ function createOfficeModule(options = {}) {
       if (!next || next.kind !== 'task-start') break;
       rec.transition = next;
     }
-    if (!planTaskRoute(rec, logicalMs)) {
+    // 2026-09-26 工位缺陷修复：绑定落在半路上时，只走完脚下这一跳本地腿，
+    // 再规划任务路线。旧实现在半空直接按 nearestNodeId 规划、朝路线第二跳
+    // 直线切过去——切角会撞进同伴的身体，而 task-bound 员工在 handleBlocked
+    // 里没有任何出口（实测：两人对向冻结、外观 working，正是"员工站在空地
+    // 进入工作态"的另一形态）。截断到当前腿：到节点后 route 归零，routeRetry
+    // 梯子从真实脚下节点重新规划——延迟有界（一跳几秒），deadline 仍生效。
+    const finishingLocalLeg = !!rec.taskRoutePending && !!rec.route;
+    const startingMidLeg = !resumingTask && !rec.taskRoutePending
+      && rec.route && rec.routeIndex < rec.route.length - 1
+      && rec.targetNodeId !== rec.workstation.approachNodeId;
+    if (finishingLocalLeg || startingMidLeg) {
+      if (rec.route.length - rec.routeIndex > 2) {
+        // truncate the local walk to the CURRENT leg only (one hop)
+        rec.route = [rec.route[rec.routeIndex], rec.route[rec.routeIndex + 1]];
+        rec.routeIndex = 0;
+      }
+      rec.taskRoutePending = true;
+      rec.routeRetryAt = logicalMs + ROUTE_RETRY_DELAY_MS;
+      rec.routeRetryDeadline = logicalMs + ROUTE_RETRY_BUDGET_MS;
+    } else if (!planTaskRoute(rec, logicalMs)) {
       // transient block: keep the task-start transition and workstation
       // reservation alive and retry the route plan from the tick loop
       rec.routeRetryAt = logicalMs + ROUTE_RETRY_DELAY_MS;
@@ -1604,19 +1626,55 @@ function createOfficeModule(options = {}) {
     }
   }
 
+  // 工位缺陷修复：同伴的"身体位置"点段，规划期要避开（社交半径 0.03，与
+  // step 时 occupant gate 同一个数）。任务路线规划进对向走廊就是 1D 对向
+  // 死锁（双方身体互挡、task-bound 无出口）；规划期绕开或等走廊腾空
+  // （UNREACHABLE → retry 梯子），都好过冻死在半路。用身体点而不是整条
+  // 当前腿：腿的两端会与别人的出发边共享端点、把彼此的重规划出口也堵死
+  // （实测三人连环互相规划封锁），而身体的真实位置本来就在它的腿上。
+  function peerBlockedSegments(rec) {
+    const segments = [];
+    for (const other of employees.values()) {
+      if (other === rec || !other.position) continue;
+      segments.push({ from: { x: other.position.x, y: other.position.y }, to: { x: other.position.x, y: other.position.y } });
+    }
+    return segments;
+  }
+
   // Plans the task route to the workstation approach. Returns false when the
   // route is currently unreachable (a transient reservation block).
+  // 2026-09-26 工位缺陷修复：出发节点在 task 行为图上可以是死角——聊天对散场后
+  // 员工正站在 chat-a/chat-b（这两个座位的边只带 roaming|chatting|resting，
+  // 没有 task），此时绑定落在头上，纯 task 搜索永远 UNREACHABLE，10s 后旧逻辑
+  // 降级成"原地工作"：员工带着 working 外观站在聊天座/空地上，永不到工位
+  // （用户实测：调度员进入工作态但不在工位）。兜底：task 搜索失败时改用
+  // 全边集（behavior=null）再搜一次——聊天座必然经 roaming 边接回主图，走
+  // 出去再上 task 走廊。行走本身不校验边行为，逐腿预留照常保护。
   function planTaskRoute(rec, at) {
     const fromNodeId = nearestNodeId(rec.position);
-    const route = movement.findRoute({
+    const blockedSegments = peerBlockedSegments(rec);
+    let route = movement.findRoute({
       fromNodeId,
       toNodeId: rec.workstation.approachNodeId,
       behavior: 'task',
       reservations: scheduler.reservations(),
       nowMs: at,
       employeeId: rec.employeeId,
+      blockedSegments,
     });
+    if (!Array.isArray(route)) {
+      route = movement.findRoute({
+        fromNodeId,
+        toNodeId: rec.workstation.approachNodeId,
+        behavior: null,
+        reservations: scheduler.reservations(),
+        nowMs: at,
+        employeeId: rec.employeeId,
+        blockedSegments,
+      });
+    }
     if (!Array.isArray(route)) return false;
+    rec.taskRoutePending = false;
     planRoute(rec, route, rec.workstation.approachNodeId, at);
     return true;
   }
@@ -1634,6 +1692,7 @@ function createOfficeModule(options = {}) {
     rec.reachedSeat = false;
     rec.routeRetryAt = null;
     rec.routeRetryDeadline = null;
+    rec.taskRoutePending = false;
     rec.transition = null;
   }
 
@@ -2280,6 +2339,21 @@ function createOfficeModule(options = {}) {
       } catch { /* scheduler stays optional */ }
     }
     const replanMs = onMission ? ROAM_MISSION_REPLAN_MS : 1000;
+    // 2026-09-26 工位缺陷修复：task 行走者的唯一出口。旧逻辑里 task-bound
+    // 员工既不让位也不重规划——被同伴身体挡住（对向走廊、多车连环、身体
+    // 压腿）就永久冻结，外观 working 站在半路（用户实测"在空地进入工作态"
+    // 的另一形态，实测位置 240s+ 不动）。耐心窗口过后从当前节点重规划任务
+    // 路线：planTaskRoute 现在带同伴身体/当前腿的几何避让（blockedSegments）
+    // 与聊天座全边集兜底——有绕路就绕开车堆，没绕路返回 false 继续等
+    // （诚实等待，绝不假工作）。挂起中的本地腿同样适用：被堵死时直接换成
+    // 重规划的任务路线。
+    if (isTaskBound(rec) && rec.workstation && rec.transition
+        && rec.transition.kind === 'task-start' && rec.transition.phase === 'move'
+        && at - rec.blockedSinceMs >= patienceMs
+        && at - (rec.taskReplanAskedAt || 0) >= replanMs) {
+      rec.taskReplanAskedAt = at;
+      planTaskRoute(rec, at);
+    }
     if (!isTaskBound(rec) && at - rec.blockedSinceMs >= patienceMs
         && at - (rec.replanAskedAt || 0) >= replanMs) {
       rec.replanAskedAt = at;
@@ -2448,11 +2522,36 @@ function createOfficeModule(options = {}) {
         continue;
       }
       if (at >= rec.routeRetryDeadline) {
+        // 2026-09-26 工位缺陷修复：原地降级只在"图上真的无路"时触发。旧实现
+        // 把"10s 内没抢到路"一律降级成原地工作——并发开工（5 个会话同批到达）
+        // 时走廊被同伴的路径预留/身体暂时占住，员工就带着 working 外观站在
+        // 空地上（用户实测：调度员不在工位、在空地进入工作态）。现在先做一次
+        // 无预留、全边集的可达性判定（与 planTaskRoute 的兜底同一语义）：
+        // 图上仍有路 ⇒ 只是暂时性拥堵，保持 task-start 移动相位续等重试
+        // （下面的 Fix A 保证走廊会解开），永不假工作；
+        // 图上无路 ⇒ 真不可达，才走既有的诚实降级（原地、可见、稳定诊断）。
+        const graphRoute = movement.findRoute({
+          fromNodeId: nearestNodeId(rec.position),
+          toNodeId: rec.workstation.approachNodeId,
+          behavior: null,
+          reservations: [],
+          nowMs: at,
+          employeeId: rec.employeeId,
+        });
+        if (Array.isArray(graphRoute)) {
+          rec.routeRetryDeadline = at + ROUTE_RETRY_BUDGET_MS;
+          rec.routeRetryAt = at + ROUTE_RETRY_DELAY_MS;
+          continue;
+        }
         // permanent degradation: work in place, stay visible, stable diagnostic
         noteDiagnostic('ROUTE_UNAVAILABLE');
         finishTaskCleanup(rec);
         continue;
       }
+      // 工位缺陷修复：本地腿还没走完（taskRoutePending && route 仍在）⇒ 先等
+      // 它走完——到节点后 route 归零，下一轮 retry 从真实脚下节点规划，
+      // 不在半空朝路线第二跳切角。
+      if (rec.taskRoutePending && rec.route) continue;
       if (planTaskRoute(rec, at)) rec.routeRetryAt = null;
       else rec.routeRetryAt = at + ROUTE_RETRY_DELAY_MS;
     }
