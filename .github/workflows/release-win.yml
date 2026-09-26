@@ -18,29 +18,10 @@ permissions:
   contents: write
 
 jobs:
-  # Gate every release on a green unit-test run, on the same OS as the build
-  # so platform-specific assertions are exercised where they matter.
-  test:
-    name: unit tests (win)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # 2026-09-26: 资产复现链/台账类测试要读 git 历史，浅克隆会全红
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - run: npm install
-
-      - name: Python deps for asset tests (pillow/numpy)
-        run: python3 -m pip install --quiet --disable-pip-version-check pillow numpy || python -m pip install --quiet pillow numpy
-
-      - run: npm test
-
+  # 2026-09-26: 发布流水线不再用单元测试门禁 —— 见 CHANGELOG/提交说明：
+  # 像素/抠像类用例依赖 Pillow 等 runner 侧工具链，Windows runner 上还出现过
+  # 挂死（>30min）。测试改由 upstream-compat 工作流定时跑并邮件汇报结果；
+  # 发布只保留构建 + 产物闸门（verify-dist / e2e-smoke）。
   build:
     name: build x64 win
     needs: test

@@ -36,8 +36,10 @@ jobs:
     name: unit tests (${{ matrix.os }})
     # 2026-09-26: informational — a red unit suite must not turn the daily run
     # red (that is what spammed failure mails). The outcome is reported in the
-    # notify mail / run summary instead.
+    # notify mail / run summary instead. Time-boxed: a hanging test must not
+    # hold the scheduled pipeline open (Windows runners hung >30min once).
     continue-on-error: true
+    timeout-minutes: 30
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -57,7 +59,9 @@ jobs:
       - run: npm install
 
       - name: Python deps for asset tests (pillow/numpy)
-        run: python3 -m pip install --quiet --disable-pip-version-check pillow numpy || python -m pip install --quiet pillow numpy
+        shell: bash
+        timeout-minutes: 8
+        run: python -m pip install --quiet --no-input pillow numpy
 
       - run: npm test
 
