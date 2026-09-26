@@ -32,5 +32,13 @@
     "pnpm": "^10.34.5",
     "semver": "^7.8.5",
     "ws": "^8.18.0"
+  },
+  "overrides": {
+    "pixi.js": {
+      "@xmldom/xmldom": "0.9.12"
+    },
+    "plist": {
+      "@xmldom/xmldom": "0.9.12"
+    }
   }
 }
