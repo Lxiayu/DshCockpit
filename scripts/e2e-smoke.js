@@ -125,8 +125,20 @@ function findRuntimeAuthUrl() {
 
 async function main() {
   const startedAt = Date.now();
+  const dshHomeDir = process.env.DSH_E2E_DSH_HOME || path.join(path.dirname(userDataDir), 'dsh-home');
+  try { fs.mkdirSync(dshHomeDir, { recursive: true }); } catch { /* best effort */ }
+
   const child = spawn(appPath, [], {
-    env: { ...process.env, DSH_DESKTOP_USER_DATA: userDataDir, DSH_DESKTOP_NO_TRAY: '1', DSH_DESKTOP_NO_KEYCHAIN: '1' },
+    // 2026-09-26: CI 上没有 ~/.dsh，壳会把它当 DSH_HOME 传给运行时，运行时随即
+    // 以 code=1 退出（实测：打包产物冒烟在 runner 上必然超时）。镜像本地验证的做法：
+    // 给一个隔离、可写的 DSH_HOME（可用 DSH_E2E_DSH_HOME 覆盖）。
+    env: {
+      ...process.env,
+      DSH_HOME: process.env.DSH_E2E_DSH_HOME || dshHomeDir,
+      DSH_DESKTOP_USER_DATA: userDataDir,
+      DSH_DESKTOP_NO_TRAY: '1',
+      DSH_DESKTOP_NO_KEYCHAIN: '1',
+    },
     windowsHide: true,
     detached: process.platform !== 'win32',
     stdio: 'ignore',
