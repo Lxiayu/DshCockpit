@@ -46,3 +46,5 @@ sudo systemctl enable --now dsh-release-sync.timer
 gh workflow run mirror-downloads.yml --repo Lxiayu/DshCockpit
 gh run list --workflow mirror-downloads.yml --repo Lxiayu/DshCockpit
 ```
+
+实测结果：2026-09-26 两次 GitHub Runner 均在 SSH TCP 22 连接阶段超时，未进入认证；尚未成功上传。workflow 已在 GitHub 暂停，避免周期性失败，线路解决后先启用再手动触发：`gh workflow enable mirror-downloads.yml --repo Lxiayu/DshCockpit`。不要把“工作流已配置”等同于“同步已通”。
