@@ -23,6 +23,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 2026-09-26: 资产复现链/台账类测试要读 git 历史，浅克隆会全红
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -30,6 +33,9 @@ jobs:
           cache: npm
 
       - run: npm install
+
+      - name: Python deps for asset tests (pillow/numpy)
+        run: python3 -m pip install --quiet --disable-pip-version-check pillow numpy || python -m pip install --quiet pillow numpy
 
       - run: npm test
 
@@ -39,6 +45,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 2026-09-26: 资产复现链/台账类测试要读 git 历史，浅克隆会全红
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -119,6 +128,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 2026-09-26: 资产复现链/台账类测试要读 git 历史，浅克隆会全红
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v4
         with:

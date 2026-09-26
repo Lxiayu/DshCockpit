@@ -16,6 +16,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 
 const { DEFAULT_FLAGS } = require('../src/office/runtime/office-persistence.js');
@@ -323,13 +324,24 @@ gateTest('per-file test ledger covers every repo test file to isolate office reg
   // 这类文件按 mtime 判定并显式标注"待下一轮证据"，而不是把它当成台账缺失
   // （真正的缺失——证据轮时已存在却没有记录——仍然 fail）。
   const ledgerPath = path.join(EVIDENCE_DIR, 'npmtest-perfile.json');
-  const ledgerMtimeMs = fs.statSync(ledgerPath).mtimeMs;
+  // 2026-09-26: CI 上所有文件的 mtime 都是检出时间，mtime 判据在那里失效
+  // （本地绿、CI 全红）。改用文件的**最后提交时间**（git log -1 --format=%ct），
+  // 无 git 时回落 mtime。语义不变：晚于证据轮提交的测试文件标"待下一轮证据"。
+  const gitCommitMs = (relPath) => {
+    try {
+      const out = execFileSync('git', ['log', '-1', '--format=%ct', '--', relPath], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+      const secs = Number(out);
+      return Number.isFinite(secs) && secs > 0 ? secs * 1000 : null;
+    } catch { return null; }
+  };
+  const ledgerMtimeMs = gitCommitMs(EVIDENCE_DIR.replace(`${REPO_ROOT}/`, '')) ?? fs.statSync(ledgerPath).mtimeMs;
   const pending = [];
   for (const file of repoTests) {
     const entry = recorded.get(`test/${file}`);
     if (entry === undefined) {
-      const fileMtimeMs = fs.statSync(path.join(REPO_ROOT, 'test', file)).mtimeMs;
-      if (fileMtimeMs > ledgerMtimeMs + 1000) { pending.push(`test/${file}`); continue; }
+      const rel = `test/${file}`;
+      const fileMtimeMs = gitCommitMs(rel) ?? fs.statSync(path.join(REPO_ROOT, 'test', file)).mtimeMs;
+      if (fileMtimeMs > ledgerMtimeMs + 1000) { pending.push(rel); continue; }
     }
     assert.notEqual(entry, undefined, `per-file ledger missing test/${file}`);
     if (pending.includes(`test/${file}`)) continue;
