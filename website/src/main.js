@@ -1,199 +1,122 @@
-import './fonts.js';
-import { dict } from './i18n.js';
-
-const $ = (s, p = document) => p.querySelector(s);
-const $$ = (s, p = document) => [...p.querySelectorAll(s)];
-const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-/* ---------- i18n 切换 ---------- */
-const langBtn = $('#langBtn');
-const ZH = 'zh', EN = 'en';
-
-function applyLang(lang) {
-  document.documentElement.lang = lang === EN ? 'en' : 'zh-CN';
-  langBtn.textContent = lang === EN ? '中文' : 'EN';
-
-  if (lang === EN) {
-    $$('[data-i18n]').forEach((el) => {
-      const key = el.dataset.i18n;
-      const en = dict.en[key];
-      if (en === undefined) return;
-      if (!el.dataset.zh) el.dataset.zh = el.innerHTML;
-      el.innerHTML = en;
+const scenes = {
+  working: { image: 'working', alt: '鲸鱼娘在笔记本电脑前认真工作', bubble: '这个我来。', title: '交给我，你去忙吧。', text: '任务开始，鲸鱼娘回到工位。让运行中的 Agent 有一个看得见的身影，进度也多了一份真实感。', status: '● 工作中' },
+  lunch: { image: 'idle-lunch', alt: '鲸鱼娘捧着碗吃午饭', bubble: '先补充一点能量～', title: '吃饱了，才有力气嘛。', text: '空闲时，办公室也不会变得冷清。吃饭、散步、小憩，这些可爱的日常让等待多了一点生活气息。', status: '● 休息中' },
+  finished: { image: 'finished', alt: '鲸鱼娘为完成任务开心庆祝', bubble: '搞定了！', title: '这份小小的成就，分你一半。', text: '任务完成，鲸鱼娘也会开心一下。在应用中，完成状态由真实运行结果触发，让每一个结果都有回应。', status: '● 已完成' }
+};
+document.querySelectorAll('[data-state]').forEach(button => {
+  button.addEventListener('click', () => {
+    const scene = scenes[button.dataset.state];
+    document.querySelectorAll('[data-state]').forEach(item => {
+      const selected = item === button;
+      item.classList.toggle('selected', selected);
+      item.setAttribute('aria-pressed', String(selected));
     });
-    document.title = 'DshCockpit — Turn DeepSeek Harness into a resident Agent cockpit';
-    $('meta[name="description"]').setAttribute('content',
-      'Open-source desktop cockpit for DeepSeek Harness: live token monitoring & context-pressure alerts, cost center with budget alarms, smoke-guarded auto-update with rollback, global-hotkey Quick Ask, scheduled tasks, Ctrl+K full-text search and a plugin marketplace. Fully local, MIT licensed.');
-  } else {
-    $$('[data-i18n]').forEach((el) => {
-      if (el.dataset.zh) el.innerHTML = el.dataset.zh;
-    });
-    document.title = 'DshCockpit — 把 DeepSeek Harness 变成常驻后台的 Agent 驾驶舱';
-    $('meta[name="description"]').setAttribute('content',
-      '开源桌面驾驶舱：Token 实时监控与上下文压力预警、成本控制中心与预算报警、冒烟守卫自动更新与一键回滚、全局热键 Quick Ask、定时任务、Ctrl+K 全文检索、插件市场。完全本地运行，MIT 开源。');
-  }
-  // OS 检测按钮文案跟随语言
-  updateDlText();
-  localStorage.setItem('dsh-lang', lang);
-}
-
-langBtn.addEventListener('click', () => {
-  applyLang(document.documentElement.lang === 'en' ? ZH : EN);
+    const image = document.getElementById('demoImage');
+    image.src = `assets/${scene.image}.webp`;
+    image.alt = scene.alt;
+    document.getElementById('demoBubble').textContent = scene.bubble;
+    document.getElementById('demoTitle').textContent = scene.title;
+    document.getElementById('demoText').textContent = scene.text;
+    document.getElementById('demoStatus').textContent = scene.status;
+  });
 });
 
-const saved = localStorage.getItem('dsh-lang');
-if (saved === EN) applyLang(EN);
-
-/* ---------- OS 检测下载按钮 ---------- */
-const ua = navigator.userAgent;
-const isMac = /Mac/i.test(ua) && !/iPhone|iPad/i.test(ua);
-const isWin = /Windows/i.test(ua);
-
-function updateDlText() {
-  const el = $('#heroDlText');
-  if (!el) return;
-  const en = document.documentElement.lang === 'en';
-  el.textContent = en
-    ? `Download for ${isMac ? 'macOS' : isWin ? 'Windows' : 'all platforms'}`
-    : `下载 ${isMac ? 'macOS' : isWin ? 'Windows' : ''}版`.replace('  ', ' ');
+// Adapted from photo/output/b-plan-player.html; original 83 ms timing and frame order.
+const walkDirections = { left: {count:15,label:'向左'}, right: {count:15,label:'向右'}, up: {count:14,label:'向后'}, down: {count:15,label:'向前'} };
+const walkSprite = document.getElementById('walkSprite');
+const walkPlay = document.getElementById('walkPlay');
+const walkStatus = document.getElementById('walkStatus');
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+let walkDirection = 'right', walkFrame = 0, walkPlaying = false, walkVisible = false, walkTimer;
+const walkImages = Object.keys(walkDirections).map(direction => { const img = new Image(); img.src = `assets/walk/${direction}.webp`; return img; });
+function renderWalk() {
+  const direction = walkDirections[walkDirection];
+  walkSprite.style.backgroundImage = `url('assets/walk/${walkDirection}.webp')`;
+  walkSprite.style.backgroundSize = `${direction.count * 280}px 280px`;
+  walkSprite.style.backgroundPosition = `${-walkFrame * 280}px 0`;
+  walkSprite.setAttribute('aria-label', `鲸鱼娘${direction.label}行走动画`);
 }
-
-/* ---------- 导航 ---------- */
-const nav = $('#nav');
-const onScroll = () => nav.classList.toggle('scrolled', scrollY > 8);
-addEventListener('scroll', onScroll, { passive: true });
-onScroll();
-
-const burger = $('#burger');
-burger.addEventListener('click', () => $('#navLinks').classList.toggle('open'));
-$$('#navLinks a').forEach((a) => a.addEventListener('click', () => $('#navLinks').classList.remove('open')));
-
-/* ---------- 滚动显现 ---------- */
-const io = new IntersectionObserver((entries) => {
-  entries.forEach((e) => {
-    if (e.isIntersecting) {
-      e.target.classList.add('in');
-      io.unobserve(e.target);
-    }
-  });
-}, { threshold: 0.12 });
-$$('.reveal').forEach((el) => io.observe(el));
-
-/* ---------- 仪表演示动画 ---------- */
-// 1) 上下文压力条：42% → 68%(黄) → 86%(红) → 重置 循环
-const pressure = $('#pressure');
-const pFill = $('#pressureFill');
-const pVal = $('#pressureVal');
-
-if (pressure && !reduced) {
-  let stage = 0;
-  const stages = [
-    { v: 42, cls: '', label: { zh: '42% · 正常', en: '42% · NOMINAL' } },
-    { v: 68, cls: 'warn', label: { zh: '68% · 黄色预警', en: '68% · AMBER' } },
-    { v: 86, cls: 'danger', label: { zh: '86% · 红色预警 — 建议开新会话', en: '86% · RED — open a new session' } },
-  ];
-  const run = () => {
-    const s = stages[stage];
-    pressure.classList.remove('warn', 'danger');
-    if (s.cls) pressure.classList.add(s.cls);
-    pFill.style.width = s.v + '%';
-    const en = document.documentElement.lang === 'en';
-    pVal.textContent = en ? s.label.en : s.label.zh;
-    stage = (stage + 1) % stages.length;
-  };
-  const pio = new IntersectionObserver((es) => {
-    es.forEach((e) => {
-      if (e.isIntersecting) { run(); setInterval(run, 2600); pio.disconnect(); }
-    });
-  });
-  pio.observe(pressure);
-} else if (pressure) {
-  pFill.style.width = '42%';
+function syncWalk() {
+  clearInterval(walkTimer);
+  walkPlay.textContent = walkPlaying ? '暂停行走' : '播放行走';
+  walkPlay.setAttribute('aria-pressed', String(walkPlaying));
+  walkStatus.textContent = `${walkDirections[walkDirection].label}行走 · ${walkPlaying ? '播放中' : '已暂停'}`;
+  if (walkPlaying && walkVisible && !document.hidden) walkTimer = setInterval(() => {
+    walkFrame = (walkFrame + 1) % walkDirections[walkDirection].count;
+    renderWalk();
+  }, 83);
 }
+document.querySelectorAll('[data-walk]').forEach(button => button.addEventListener('click', () => {
+  walkDirection = button.dataset.walk; walkFrame = 0;
+  document.querySelectorAll('[data-walk]').forEach(item => item.setAttribute('aria-pressed',String(item === button)));
+  renderWalk(); syncWalk();
+}));
+walkPlay.addEventListener('click', () => { walkPlaying = !walkPlaying; syncWalk(); });
+new IntersectionObserver(entries => { walkVisible = entries[0].isIntersecting; syncWalk(); }).observe(walkSprite);
+document.addEventListener('visibilitychange', syncWalk);
+reducedMotion.addEventListener('change', () => { if(reducedMotion.matches){walkPlaying=false;syncWalk();} });
+walkPlaying = !reducedMotion.matches; renderWalk(); syncWalk();
 
-// 2) 成本柱状图
-const cost = $('#costDemo');
-if (cost) {
-  const cio = new IntersectionObserver((es) => {
-    es.forEach((e) => {
-      if (!e.isIntersecting) return;
-      cost.classList.add('play');
-      $$('.bar-v', cost).forEach((b, i) => {
-        setTimeout(() => { b.style.height = b.dataset.h; }, reduced ? 0 : i * 90);
-      });
-      cio.disconnect();
-    });
-  });
-  cio.observe(cost);
+const downloadSelect = document.getElementById('downloadPlatform');
+const downloadButton = document.getElementById('directDownload');
+const downloadStatus = document.getElementById('downloadStatus');
+const versionSelect = document.getElementById('releaseVersion');
+const packageMeta = document.getElementById('packageMeta');
+const releaseNotes = document.getElementById('releaseNotes');
+const labels = {windows:'Windows x64 · 安装版', 'windows-portable':'Windows x64 · 便携版', mac:'macOS · Apple Silicon', 'mac-intel':'macOS · Intel'};
+let releases = [];
+function detectDesktop(platform, userAgent, touchPoints = 0) {
+  if (/Android|iPhone|iPad|iPod/i.test(userAgent) || (/Mac/i.test(platform) && touchPoints > 1)) return '';
+  if (/Win/i.test(platform) || /Windows/i.test(userAgent)) return 'windows';
+  if (/Mac/i.test(platform) || /Macintosh/i.test(userAgent)) return 'mac';
+  return '';
 }
-
-// 3) 更新管道步骤点亮
-const pipe = $('#pipeline');
-if (pipe) {
-  const steps = $$('.pipe-step', pipe);
-  const arrows = $$('.pipe-arrow', pipe);
-  const lio = new IntersectionObserver((es) => {
-    es.forEach((e) => {
-      if (!e.isIntersecting) return;
-      steps.forEach((s, i) => {
-        setTimeout(() => {
-          s.classList.add('on');
-          if (i > 0) arrows[i - 1].classList.add('lit');
-        }, reduced ? 0 : i * 520);
-      });
-      lio.disconnect();
-    });
-  });
-  lio.observe(pipe);
+const detectedPlatform = detectDesktop(navigator.userAgentData?.platform || navigator.platform, navigator.userAgent, navigator.maxTouchPoints);
+function selectedRelease(){return releases.find(r=>r.version===versionSelect.value);}
+function selectedAsset(){return selectedRelease()?.assets.find(a=>a.platform===downloadSelect.value);}
+function updateDownload(){
+  const asset = selectedAsset();
+  downloadButton.disabled = !asset;
+  downloadButton.textContent = asset ? `下载 ${labels[asset.platform]} ↓` : '请选择可用的版本';
+  downloadStatus.textContent = asset ? (asset.platform==='mac' ? '适用于 M 系列芯片；Intel Mac 请选择 Intel 版本。' : '完整安装包，由本站服务器提供下载。') : '请选择系统与安装包。';
+  packageMeta.textContent = asset ? `${selectedRelease().version} · ${(asset.size/1048576).toFixed(1)} MB · ${selectedRelease().publishedAt.slice(0,10)}` : '';
 }
-
-// 4) Quick Ask 按键演示
-const hotkey = $('#quickask .hotkey');
-if (hotkey && !reduced) {
-  let n = 0;
-  setInterval(() => {
-    hotkey.classList.add('press');
-    setTimeout(() => hotkey.classList.remove('press'), 260);
-  }, 3200);
+function updatePlatforms(){
+  const wanted = downloadSelect.value || detectedPlatform;
+  const release = selectedRelease();
+  downloadSelect.replaceChildren(new Option('请选择系统',''));
+  for(const asset of release.assets) downloadSelect.add(new Option(labels[asset.platform],asset.platform));
+  downloadSelect.value = release.assets.some(a=>a.platform===wanted) ? wanted : (wanted==='windows' && release.assets.some(a=>a.platform==='windows-portable') ? 'windows-portable' : '');
+  releaseNotes.href = release.notesUrl;
+  updateDownload();
 }
-
-// 5) 胶囊数字轻微跳动（仪表活着的感觉）
-const capIn = $('#capIn');
-const capOut = $('#capOut');
-if ((capIn || capOut) && !reduced) {
-  let io1 = 12480, io2 = 3102;
-  setInterval(() => {
-    io1 += Math.floor(Math.random() * 90);
-    io2 += Math.floor(Math.random() * 26);
-    if (capIn) capIn.textContent = io1.toLocaleString('en-US');
-    if (capOut) capOut.textContent = io2.toLocaleString('en-US');
-  }, 2400);
-}
-
-/* ---------- 复制 xattr 命令 ---------- */
-const toast = $('#toast');
-let toastTimer;
-function showToast(msg) {
-  toast.textContent = msg;
-  toast.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
-}
-
-$('#copyXattr').addEventListener('click', async () => {
-  const cmd = $('#xattrCmd').textContent.trim();
-  try {
-    await navigator.clipboard.writeText(cmd);
-  } catch {
-    const ta = document.createElement('textarea');
-    ta.value = cmd;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    ta.remove();
+versionSelect.addEventListener('change',updatePlatforms);
+downloadSelect.addEventListener('change',updateDownload);
+downloadButton.disabled = true;
+(async()=>{
+  try{
+    const response=await fetch('/downloads/index.json',{cache:'no-store',signal:AbortSignal.timeout(12000)});
+    if(!response.ok) throw new Error('Catalog unavailable');
+    const catalog=await response.json();
+    releases=catalog.releases.filter(r=>typeof r.version==='string' && typeof r.publishedAt==='string' && r.notesUrl.startsWith('https://github.com/Lxiayu/DshCockpit/releases/') && Array.isArray(r.assets)).map(r=>({...r,assets:r.assets.filter(a=>labels[a.platform] && /^\/downloads\/[A-Za-z0-9._-]+\/DshCockpit-[A-Za-z0-9._-]+$/.test(a.url) && a.size>0)})).filter(r=>r.assets.length);
+    if(!releases.length) throw new Error('No mirrored installers');
+    versionSelect.replaceChildren();
+    releases.forEach((r,i)=>versionSelect.add(new Option(`${r.version}${i===0?' · 最新已同步稳定版':''}`,r.version)));
+    versionSelect.disabled=false; downloadSelect.value=detectedPlatform; updatePlatforms();
+  }catch{
+    versionSelect.replaceChildren(new Option('版本列表暂不可用',''));
+    downloadStatus.textContent='本站安装包暂未就绪，请通过旁边的 GitHub 下载；服务器同步恢复后将提供直链。';
+    downloadButton.textContent='服务器下载待就绪';
   }
-  const en = document.documentElement.lang === 'en';
-  showToast(en ? 'Copied to clipboard ✓' : '已复制到剪贴板 ✓');
+})();
+downloadButton.addEventListener('click',async()=>{
+  const asset=selectedAsset(); if(!asset)return;
+  downloadButton.disabled=true;downloadStatus.textContent='正在连接下载服务器…';
+  try{
+    const response=await fetch(asset.url,{method:'HEAD',cache:'no-store',signal:AbortSignal.timeout(12000)});
+    if(!response.ok || /text\/html/i.test(response.headers.get('content-type')||''))throw new Error('Unavailable');
+    const link=document.createElement('a');link.href=asset.url;link.download=asset.name;document.body.appendChild(link);link.click();link.remove();
+    downloadStatus.textContent='已发起下载，请查看浏览器下载列表。';
+  }catch{downloadStatus.textContent='下载暂时不可用，请稍后重试，或通过 GitHub 获取此版本。';}
+  finally{downloadButton.disabled=false;}
 });
-
-updateDlText();

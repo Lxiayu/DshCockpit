@@ -1,0 +1,18 @@
+[Unit]
+Description=Mirror DshCockpit official GitHub release installers
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=www
+Group=www
+EnvironmentFile=-/etc/dsh-release-sync.env
+ExecStart=/usr/bin/python3 /opt/dshcockpit/sync-releases.py
+TimeoutStartSec=3h
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/www/wwwroot/dshcockpit.site/downloads /www/wwwroot/.dsh-mirror-state

@@ -1,0 +1,26 @@
+{
+  "left": {
+    "frames": 15,
+    "width": 560,
+    "height": 560,
+    "frameDuration": 83
+  },
+  "right": {
+    "frames": 15,
+    "width": 560,
+    "height": 560,
+    "frameDuration": 83
+  },
+  "up": {
+    "frames": 14,
+    "width": 560,
+    "height": 560,
+    "frameDuration": 83
+  },
+  "down": {
+    "frames": 15,
+    "width": 560,
+    "height": 560,
+    "frameDuration": 83
+  }
+}
