@@ -44,6 +44,10 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+// P1 运行时体检（2026-09-26）：仿真时钟节流归因。monitorEventLoopDelay / ELU /
+// GC 记录都是主进程级观测（不是仿真状态），只服务 start() 驱动器的诊断块；
+// 仿真本身仍然只吃 logicalMs（固定步进），绝不读墙钟。
+const perfHooks = (() => { try { return require('node:perf_hooks'); } catch { return null; } })();
 
 const profiles = require('./runtime/employee-profile.js');
 const { createMovementController } = require('./runtime/movement-controller.js');
@@ -84,6 +88,27 @@ const TICK_MS = 16;
 // the two-view limit, and nothing is pushed while every view is hidden (the
 // paused clock stops advancing, so the due check never fires).
 const PUSH_INTERVAL_MS = TICK_MS;
+// P1 运行时体检（2026-09-26，性能专项实测缺陷）：性能专项测得仿真时钟只跑到
+// 实时 0.83x——start() 的 setInterval 每 16ms 只推进 1 步，主进程事件循环被
+// 其它工作（IPC/GC/窗口）拖慢时 fire 间隔变长，logicalMs 增长恒为 16ms/fire，
+// 慢掉的 fire 不补 → 员工移动/动画比设计慢约 17%。修复策略（诊断先行，补步
+// 有界）：
+//   - 驱动器补步：每次 fire 按"落后量"最多多跑 CLOCK_MAX_CATCH_UP_TICKS 步
+//     （默认 2 → 单次 fire 至多 3 步 = 48ms 仿真 / 16ms 墙钟，3x 瞬时恢复力），
+//     每次补步批次只 push 一次快照（IPC 频率不随补步上升）。
+//   - 绝不追陈账：落后超过补步容量的部分直接丢弃（驱动器锚点重置到当前
+//     墙钟）——长时间停顿（显示器休眠/进程挂起）唤醒后只补一小步，绝不
+//     爆发式追赶；代价是持续重载下仍可能 <1.0x，由诊断块如实呈现。
+//   - 仿真语义不变：advanceOneTick 恒定 +16ms logicalMs，纯逻辑时序（测试、
+//     手动单步 tickOnce）完全不受补步影响——补步只存在于 start() 的墙钟驱动器。
+//   - 可配：工厂 options.clockMaxCatchUpTicks（0 = 关闭补步，回到旧 1 步/fire；
+//     上限 8，防burst）。
+const CLOCK_MAX_CATCH_UP_TICKS = 2;
+const CLOCK_MAX_CATCH_UP_TICKS_CAP = 8;
+// 迟到判定阈值：fire 实际间隔超过 1.5×TICK_MS 记一次 late fire（24ms）。
+const CLOCK_LATE_FACTOR = 1.5;
+// 诊断日志节流：clock 块最多每 30s 一行 [office] clock 日志。
+const CLOCK_LOG_INTERVAL_MS = 30_000;
 // Task 7A: a task route can be TRANSIENTLY blocked by another employee's
 // crossing path reservation. The move phase retries the route plan before the
 // permanent in-place degradation, so one crossing never loses a whole task.
@@ -105,6 +130,20 @@ const ROUTE_RETRY_BUDGET_MS = 10000;
 const ROAM_MISSION_PATIENCE_MS = 2000;
 const ROAM_MISSION_REPLAN_MS = 1500;
 const ACTIVITY_LOG_LIMIT = 200;
+// P1 运行时体检（2026-09-26，长稳实测缺陷）：ROUTE_UNAVAILABLE 曾以每 tick 一条
+// （16ms）的速度刷满 100 条诊断环（stepMovement 每 tick 重试路径预留，失败即
+// noteDiagnostic——62.5 条/s，1.6s 环即全满），其它低频诊断（BINDING_FAILED、
+// SYNC_STALE、RESYNC_* 等）全被挤出窗口，诊断环失去可观测性。策略（对全部
+// 诊断码统一生效，不点名 ROUTE_UNAVAILABLE）：
+//   - 窗口合并：同一 code 在窗口内只占一个环位。窗口内第一次出现**立刻入环**
+//     （首现绝不丢），后续重复不再推入，只在原条目上累加 count。
+//   - 折叠摘要：环条目携带 {count, lastAtMs}（count=1 时无 lastAtMs）——一条
+//     "被折叠的刷屏"就是一个可读的频次摘要，低频诊断各占各的环位、互不挤占。
+//   - 阈值可配：工厂 options.diagnosticsDedupWindowMs（0 = 关闭去重，回到旧行为；
+//     上限 60_000），默认 DIAGNOSTICS_DEDUP_WINDOW_MS。这是进程内构造参数，
+//     不是持久化设置——刷屏治理不属于用户可调的观感项。
+const DIAGNOSTICS_DEDUP_WINDOW_MS = 5000;
+const DIAGNOSTICS_DEDUP_WINDOW_MAX_MS = 60_000;
 // 2026-09-25 收尾状态修复：绑定释放点（result 提交 / 取消释放）之后员工不得
 // 再停在任务态 activity——这四个值都来自 runtime 事实而非本地行为，释放后
 // 必须回到 LOCAL_ACTIVITIES（roaming/chatting/resting/sleeping）之一。
@@ -418,6 +457,10 @@ function createOfficeModule(options = {}) {
     // null everywhere and the day record aggregates without a day boundary
     // (documented fallback: a session-window record, never labelled "today").
     realClock = null,
+    // P1 运行时体检：诊断环退避窗口（见 DIAGNOSTICS_DEDUP_WINDOW_MS 上的注释）。
+    diagnosticsDedupWindowMs = DIAGNOSTICS_DEDUP_WINDOW_MS,
+    // P1 运行时体检：墙钟驱动器补步上限（见 CLOCK_MAX_CATCH_UP_TICKS 注释）。
+    clockMaxCatchUpTicks = CLOCK_MAX_CATCH_UP_TICKS,
   } = options || {};
 
   const layout = layoutFixture
@@ -430,6 +473,10 @@ function createOfficeModule(options = {}) {
   const scene = { width: referenceScene.referenceWidth, height: referenceScene.referenceHeight };
 
   // The ONLY clock: a fixed-step logical counter. No wall-clock reads.
+  // (P1 运行时体检 2026-09-26：start() 的墙钟驱动器为节流诊断/有界补步读墙钟，
+  // 但仿真时间本身仍只由 advanceOneTick 的 +TICK_MS 推进——补步是"多跑几个
+  // 固定步"，不是"改步长"。行为时序对补步不可见：每个 tick 看到的世界与
+  // 从前完全一致。)
   let logicalMs = 0;
   const clock = { nowMs: () => logicalMs };
 
@@ -606,8 +653,178 @@ function createOfficeModule(options = {}) {
   const listeners = new Set();
   let lastPushAtMs = null;
   let autoTimer = null;
+
+  // ---- P1 运行时体检：仿真时钟节流诊断（start() 驱动器专属） ----------------
+  // 墙钟读取：优先注入的 realClock（main.js 提供），缺省回落 Date.now——这只
+  // 服务驱动器/诊断，仿真时间仍是纯 logicalMs。
+  const wallNow = () => (typeof realClock === 'function' ? realClock() : Date.now());
+  const clockMaxCatchUp = Number.isInteger(clockMaxCatchUpTicks)
+    && clockMaxCatchUpTicks >= 0 && clockMaxCatchUpTicks <= CLOCK_MAX_CATCH_UP_TICKS_CAP
+    ? clockMaxCatchUpTicks : CLOCK_MAX_CATCH_UP_TICKS;
+  // 累计统计（自 start() 起）：fires/ticks 计数、落后量分布、tick 体重、被丢弃
+  // 的陈账。全部是观测数据，不参与任何行为决策。
+  const clockStats = {
+    running: false,
+    startedAtWallMs: null,
+    fires: 0,
+    ticks: 0,
+    catchUpTicks: 0, // 补步跑出的"多出来的"步数（不含每次 fire 的常规 1 步）
+    catchUpBatches: 0,
+    lateFires: 0,
+    maxBehindMs: 0,
+    behindSumMs: 0,
+    maxIntervalMs: 0,
+    droppedDebtMs: 0,
+    tickBodyMaxMs: 0,
+    tickBodySumMs: 0,
+    lastLogAtWallMs: 0,
+  };
+  let lastTickWallMs = null;
+  // 主进程级归因探针：事件循环延迟分位 + ELU + GC 停顿。lazy 创建（start 时），
+  // stop 时关闭。进程级观测，进程里其它工作（IPC/窗口/GC）的忙碌度都在这里。
+  let loopDelayMonitor = null;
+  let gcObserver = null;
+  let lastElu = null;
+  const gcStats = { count: 0, totalPauseMs: 0, maxPauseMs: 0 };
+
+  function startClockProbes() {
+    if (!perfHooks) return;
+    try {
+      if (!loopDelayMonitor) {
+        loopDelayMonitor = perfHooks.monitorEventLoopDelay({ resolution: 4 });
+        loopDelayMonitor.enable();
+      }
+    } catch { loopDelayMonitor = null; }
+    try {
+      if (!gcObserver && typeof perfHooks.PerformanceObserver === 'function') {
+        gcObserver = new perfHooks.PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            // GC entry.duration 单位 ms（perf_hooks 对 gc 条目已折算）。
+            gcStats.count += 1;
+            gcStats.totalPauseMs += entry.duration;
+            if (entry.duration > gcStats.maxPauseMs) gcStats.maxPauseMs = entry.duration;
+          }
+        });
+        gcObserver.observe({ entryTypes: ['gc'] });
+      }
+    } catch { gcObserver = null; }
+  }
+
+  function stopClockProbes() {
+    if (loopDelayMonitor) { try { loopDelayMonitor.disable(); } catch { /* gone */ } }
+    if (gcObserver) { try { gcObserver.disconnect(); } catch { /* gone */ } }
+  }
+
+  /** start() 每 fire 调用一次：墙钟节奏（补步决策）+ 节流诊断。 */
+  function clockFire() {
+    const fireStart = wallNow();
+    if (clockStats.startedAtWallMs === null) clockStats.startedAtWallMs = fireStart;
+    clockStats.fires += 1;
+    if (perfHooks && perfHooks.performance && typeof perfHooks.performance.eventLoopUtilization === 'function') {
+      try { lastElu = perfHooks.performance.eventLoopUtilization(lastElu); } catch { /* unavailable */ }
+    }
+
+    let steps = 1;
+    let owed = 0;
+    if (lastTickWallMs !== null) {
+      const interval = fireStart - lastTickWallMs;
+      if (interval > clockStats.maxIntervalMs) clockStats.maxIntervalMs = interval;
+      const behind = Math.max(0, interval - TICK_MS);
+      clockStats.behindSumMs += behind;
+      if (interval > TICK_MS * CLOCK_LATE_FACTOR) clockStats.lateFires += 1;
+      if (behind > clockStats.maxBehindMs) clockStats.maxBehindMs = behind;
+      if (behind > 0 && clockMaxCatchUp > 0) {
+        // 补步：落后每满一个整步多跑一步，容量封顶 clockMaxCatchUp。
+        owed = Math.min(Math.floor(behind / TICK_MS), clockMaxCatchUp);
+        if (owed > 0) {
+          steps += owed;
+          clockStats.catchUpBatches += 1;
+          clockStats.catchUpTicks += owed;
+        }
+      }
+      // 陈账：落后超过本次补步容量的部分直接丢弃（锚点重置到当前墙钟），
+      // 绝不爆发式追赶。默认 2 步容量下单次 fire 至多追回 48ms。
+      clockStats.droppedDebtMs += Math.max(0, behind - steps * TICK_MS);
+    }
+    // 批内只推进不推送：补步不放大 IPC（pushSnapshot 在批末统一调一次）。
+    const tickStart = perfHooks && perfHooks.performance ? perfHooks.performance.now() : fireStart;
+    let ran = 0;
+    for (let i = 0; i < steps; i += 1) {
+      const advanced = advanceOneTick();
+      if (advanced === null) break; // 暂停（窗口全隐藏）：不空转、不计步
+      ran += 1;
+      clockStats.ticks += 1;
+    }
+    const tickEnd = perfHooks && perfHooks.performance ? perfHooks.performance.now() : fireStart;
+    const bodyMs = Math.max(0, tickEnd - tickStart);
+    clockStats.tickBodySumMs += bodyMs;
+    if (bodyMs > clockStats.tickBodyMaxMs) clockStats.tickBodyMaxMs = bodyMs;
+    if (ran > 0) pushSnapshot();
+    // 锚点重置（丢陈账）：下一次 fire 的"落后量"从当前墙钟重新计量。
+    lastTickWallMs = wallNow();
+
+    if (clockStats.lastLogAtWallMs === 0) clockStats.lastLogAtWallMs = fireStart;
+    else if (fireStart - clockStats.lastLogAtWallMs >= CLOCK_LOG_INTERVAL_MS) {
+      clockStats.lastLogAtWallMs = fireStart;
+      const diag = clockDiagnostics();
+      log(`[office] clock fires=${clockStats.fires} ticks=${clockStats.ticks} `
+        + `catchUp=${clockStats.catchUpTicks} late=${clockStats.lateFires} `
+        + `maxBehind=${Math.round(clockStats.maxBehindMs)}ms droppedDebt=${Math.round(clockStats.droppedDebtMs)}ms `
+        + `tickBody(max/mean)=${clockStats.tickBodyMaxMs.toFixed(1)}/`
+        + `${(clockStats.ticks ? clockStats.tickBodySumMs / clockStats.ticks : 0).toFixed(2)}ms`
+        + `${diag.simulatedPerWall !== null ? ` simPerWall=${diag.simulatedPerWall.toFixed(2)}x` : ''}`);
+    }
+  }
+
+  /** P1 运行时体检：时钟诊断块（rides office:diagnostics，不加通道）。 */
+  function clockDiagnostics() {
+    const wallElapsed = clockStats.startedAtWallMs === null ? null : Math.max(1, wallNow() - clockStats.startedAtWallMs);
+    const simulated = clockStats.ticks * TICK_MS;
+    const delay = loopDelayMonitor;
+    let eventLoop = null;
+    if (delay && delay.count > 0) {
+      const round2 = (v) => Math.round(v * 100) / 100;
+      eventLoop = {
+        delayMeanMs: round2(delay.mean / 1e6),
+        delayP50Ms: round2(delay.percentile(50) / 1e6),
+        delayP99Ms: round2(delay.percentile(99) / 1e6),
+        delayMaxMs: round2(delay.max / 1e6),
+        elu: lastElu ? Math.round(lastElu.utilization * 1000) / 1000 : null,
+      };
+    }
+    return Object.freeze({
+      running: clockStats.running,
+      tickMs: TICK_MS,
+      maxCatchUpTicks: clockMaxCatchUp,
+      fires: clockStats.fires,
+      ticks: clockStats.ticks,
+      catchUpTicks: clockStats.catchUpTicks,
+      catchUpBatches: clockStats.catchUpBatches,
+      lateFires: clockStats.lateFires,
+      maxIntervalMs: Math.round(clockStats.maxIntervalMs),
+      meanBehindMs: clockStats.fires > 1 ? Math.round((clockStats.behindSumMs / (clockStats.fires - 1)) * 10) / 10 : null,
+      maxBehindMs: Math.round(clockStats.maxBehindMs),
+      droppedDebtMs: Math.round(clockStats.droppedDebtMs),
+      tickBodyMaxMs: Math.round(clockStats.tickBodyMaxMs * 100) / 100,
+      tickBodyMeanMs: clockStats.ticks ? Math.round((clockStats.tickBodySumMs / clockStats.ticks) * 100) / 100 : null,
+      // 实测核心指标：仿真时间 / 墙钟时间（性能专项测得 0.83x 的直接复现位）。
+      simulatedPerWall: wallElapsed === null || clockStats.ticks === 0
+        ? null : Math.round((simulated / wallElapsed) * 100) / 100,
+      eventLoop,
+      gc: gcStats.count > 0
+        ? Object.freeze({
+            count: gcStats.count,
+            totalPauseMs: Math.round(gcStats.totalPauseMs * 10) / 10,
+            maxPauseMs: Math.round(gcStats.maxPauseMs * 10) / 10,
+          })
+        : Object.freeze({ count: 0, totalPauseMs: 0, maxPauseMs: 0 }),
+    });
+  }
+
   const activityLog = [];
   const diagnostics = [];
+  // P1 运行时体检：code -> 最近一次入环条目（同一对象引用，见 noteDiagnostic）。
+  const diagLedger = new Map();
 
   // P4 (spec §3 block 5 / §8 P4 行): the selected employee's 今日工作记录.
   // One bounded counter set per employee, aggregated from the module's own
@@ -829,9 +1046,33 @@ function createOfficeModule(options = {}) {
     record.toolsTotal += 1;
   }
 
+  // P1 运行时体检：退避窗口参数。非法/越界值回落默认——构造参数坏值绝不改变
+  // 诊断环的容量语义（DIAGNOSTICS_LIMIT 仍然封顶整个环）。
+  const diagDedupWindowMs = Number.isInteger(diagnosticsDedupWindowMs)
+    && diagnosticsDedupWindowMs >= 0 && diagnosticsDedupWindowMs <= DIAGNOSTICS_DEDUP_WINDOW_MAX_MS
+    ? diagnosticsDedupWindowMs : DIAGNOSTICS_DEDUP_WINDOW_MS;
+
   function noteDiagnostic(code) {
-    diagnostics.push({ atMs: logicalMs, code });
-    if (diagnostics.length > DIAGNOSTICS_LIMIT) diagnostics.splice(0, diagnostics.length - DIAGNOSTICS_LIMIT);
+    // 同码窗口合并：窗口内重复不推入，只在原条目上累加（环里其它 code 的
+    // 条目不受影响——去重永远按 code 分桶，关键诊断不会被别人的刷屏吃掉）。
+    if (diagDedupWindowMs > 0) {
+      const previous = diagLedger.get(code);
+      if (previous && logicalMs - previous.atMs < diagDedupWindowMs) {
+        previous.count += 1;
+        previous.lastAtMs = logicalMs;
+        return;
+      }
+    }
+    const entry = { atMs: logicalMs, code, count: 1 };
+    diagnostics.push(entry);
+    diagLedger.set(code, entry);
+    if (diagnostics.length > DIAGNOSTICS_LIMIT) {
+      // 被裁掉的旧条目同步清账，避免账本引用已经离开环的条目（窗口判定会
+      // 因此误判"窗口内还有同码条目"）。
+      for (const removed of diagnostics.splice(0, diagnostics.length - DIAGNOSTICS_LIMIT)) {
+        if (diagLedger.get(removed.code) === removed) diagLedger.delete(removed.code);
+      }
+    }
   }
 
   function reduce(rec, event) {
@@ -3310,19 +3551,39 @@ function createOfficeModule(options = {}) {
 
   function start() {
     if (autoTimer) return;
+    // P1 运行时体检：驱动器启动即开归因探针 + 清零节流观测（累计口径 =
+    // 本次 start 起的一段时间，与 diagnosticsSnapshot.clock 的语义一致）。
+    clockStats.running = true;
+    clockStats.startedAtWallMs = null;
+    clockStats.fires = 0;
+    clockStats.ticks = 0;
+    clockStats.catchUpTicks = 0;
+    clockStats.catchUpBatches = 0;
+    clockStats.lateFires = 0;
+    clockStats.maxBehindMs = 0;
+    clockStats.behindSumMs = 0;
+    clockStats.maxIntervalMs = 0;
+    clockStats.droppedDebtMs = 0;
+    clockStats.tickBodyMaxMs = 0;
+    clockStats.tickBodySumMs = 0;
+    clockStats.lastLogAtWallMs = 0;
+    lastTickWallMs = null;
+    lastElu = null;
+    gcStats.count = 0;
+    gcStats.totalPauseMs = 0;
+    gcStats.maxPauseMs = 0;
+    startClockProbes();
     autoTimer = setInterval(() => {
-      advanceOneTick();
-      // the view consumes snapshots over office:state only: a running clock
-      // pushes one snapshot per tick (PUSH_INTERVAL_MS == TICK_MS, M2), so
-      // roaming and transition motion — and the view's paint rate — stay
-      // live at tick resolution between harness events
-      pushSnapshot();
+      clockFire();
     }, TICK_MS);
     if (typeof autoTimer.unref === 'function') autoTimer.unref();
   }
   function stop() {
     if (autoTimer) clearInterval(autoTimer);
     autoTimer = null;
+    clockStats.running = false;
+    lastTickWallMs = null;
+    stopClockProbes();
   }
 
   function pushSnapshot() {
@@ -3391,6 +3652,10 @@ function createOfficeModule(options = {}) {
       // over office:visibility (null before the first report). Mode/code/
       // recoveryAttempts mirror the page's pixi-office-renderer diagnostics.
       renderer: lastRendererState ? { ...lastRendererState } : null,
+      // P1 运行时体检（2026-09-26）：仿真时钟节流归因块。累计口径 = 当前
+      // start() 起；riding the existing office:diagnostics channel — no new
+      // office:* channel（保持恰好 8 个）。
+      clock: clockDiagnostics(),
     });
   }
 
@@ -3437,6 +3702,11 @@ function createOfficeModule(options = {}) {
     validateSettings,
     updateSettings,
     diagnostics: diagnosticsSnapshot,
+    // P1 运行时体检：时钟节流归因块的直读入口（诊断/单测用，不新增 IPC）。
+    clockDiagnostics,
+    // P1 运行时体检：单次墙钟 fire 的手动驱动（诊断/单测用——确定性补步断言
+    // 不依赖真实 setInterval 节奏）。
+    debugClockFire: clockFire,
     debugRootHandleCounts: () => ({
       queued: queuedRootHandles.size,
       promoted: activeRootHandles.size,

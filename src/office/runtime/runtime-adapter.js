@@ -45,6 +45,9 @@ const crypto = require('node:crypto');
 
 const { createPrivacyRedactor } = require('./privacy-redactor.js');
 const snapshotModule = require('./runtime-snapshot.js');
+// P1 运行时体检：tool/call 的工具名提取与 main.js 的 live 翻译共用同一实现
+// （0.1.5 `data.name` / pre-0.1.5 `data.tool` 双形状，见 mapEnvelope tool/call）。
+const { toolNameOfJournalData } = require('./tool-phrases.js');
 
 const ADAPTER_VERSION = 'task6-runtime-adapter-1';
 const EPOCH_PREFIX = 'adapter-';
@@ -371,7 +374,14 @@ function createRuntimeAdapter(options = {}) {
         break;
       }
       case 'tool/call': {
-        facts.push({ type: 'runtime/tool', tool: coarse(payload.tool) });
+        // P1 运行时体检（2026-09-26，子代理座位工具短语核对缺陷）：两条投递路径
+        // 的工具名形状不同——live 事件由 main.js 预翻译成 0.1.x wire 的
+        // `{tool}`，而 session/follow 开窗与 resync 回放（ingestHarnessSnapshot）
+        // 把 0.1.5 journal 原始记录原样交给适配器（`{callId, name, arguments}`）。
+        // 旧映射只认 `data.tool` → 回放路径把每次工具调用都映射成 tool:null 的
+        // runtime/tool 事实：座位 toolKind 被清空、开窗里的工具调用永远不亮
+        // toolPhrase。统一走共享提取器（name 优先、tool 兼容），两条路径同义。
+        facts.push({ type: 'runtime/tool', tool: toolNameOfJournalData(raw) });
         break;
       }
       // P2 timeline attribution: main.js's ingestOfficeJournalEvent already
