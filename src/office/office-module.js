@@ -3619,15 +3619,23 @@ function createOfficeModule(options = {}) {
   function noteRendererState(viewId, renderer) {
     const normalized = normalizeRendererReport(renderer);
     if (!normalized) return;
-    if (lastRendererState
+    // P2 诊断包: fps/renderProfile are pure telemetry — they must update the
+    // stored state (the office:diagnostics response should carry fresh fps)
+    // WITHOUT producing a log line per jitter. The log dedup stays on the
+    // (mode, code, attempts) tuple exactly as the 2026-09-24 latch fix pinned.
+    const tupleUnchanged = !!lastRendererState
       && lastRendererState.mode === normalized.mode
       && lastRendererState.diagnosticCode === normalized.diagnosticCode
-      && lastRendererState.recoveryAttempts === normalized.recoveryAttempts) {
-      return; // unchanged: no log line
+      && lastRendererState.recoveryAttempts === normalized.recoveryAttempts;
+    const telemetryUnchanged = !!lastRendererState
+      && lastRendererState.fps === normalized.fps
+      && lastRendererState.renderProfile === normalized.renderProfile;
+    if (tupleUnchanged && telemetryUnchanged) return; // unchanged: no log line
+    if (!tupleUnchanged) {
+      log(`[office] renderer mode=${normalized.mode} code=${normalized.diagnosticCode || 'ok'} `
+        + `recoveryAttempts=${normalized.recoveryAttempts} (view ${viewId})`);
     }
     lastRendererState = normalized;
-    log(`[office] renderer mode=${normalized.mode} code=${normalized.diagnosticCode || 'ok'} `
-      + `recoveryAttempts=${normalized.recoveryAttempts} (view ${viewId})`);
   }
 
   function isPaused() {
@@ -3841,19 +3849,37 @@ function createOfficeModule(options = {}) {
 // 2026-09-24 latch fix: normalizes the optional view-side renderer report on
 // the office:visibility invoke. Returns undefined when the field is absent
 // (optional), null when present but malformed, else the normalized
-// { mode, diagnosticCode, recoveryAttempts }. Validated, never trusted: the
-// shape mirrors pixi-office-renderer's diagnostics() surface.
+// { mode, diagnosticCode, recoveryAttempts }.
+// P2 诊断包（2026-09-26）：报告追加两个可选遥测字段（仍走同一 visibility
+// invoke，无新通道）——`fps`（最后一次实测帧率，0–240，保留 1 位小数）与
+// `renderProfile`（渲染档位枚举 id：full / low-cost）。两者都只在页面带上
+// 时才出现在归一化产物里，旧载荷的产物形状逐字节不变（深比较测试不破）。
+const RENDERER_REPORT_PROFILES = new Set(['full', 'low-cost']);
 function normalizeRendererReport(renderer) {
   if (renderer === undefined || renderer === null) return undefined;
   if (!isPlainObject(renderer)) return null;
   const keys = Object.keys(renderer);
-  if (!keys.every((key) => key === 'mode' || key === 'diagnosticCode' || key === 'recoveryAttempts')) return null;
+  if (!keys.every((key) => key === 'mode' || key === 'diagnosticCode' || key === 'recoveryAttempts'
+    || key === 'fps' || key === 'renderProfile')) return null;
   if (typeof renderer.mode !== 'string' || renderer.mode.length === 0 || renderer.mode.length > 32) return null;
   const diagnosticCode = renderer.diagnosticCode === undefined ? null : renderer.diagnosticCode;
   if (diagnosticCode !== null && (typeof diagnosticCode !== 'string' || diagnosticCode.length === 0 || diagnosticCode.length > 64)) return null;
   const attempts = renderer.recoveryAttempts === undefined ? 0 : renderer.recoveryAttempts;
   if (!Number.isInteger(attempts) || attempts < 0 || attempts > 1000) return null;
-  return { mode: renderer.mode, diagnosticCode, recoveryAttempts: attempts };
+  const normalized = { mode: renderer.mode, diagnosticCode, recoveryAttempts: attempts };
+  // fps: optional, bounded, one-decimal. Absent/malformed = simply not carried
+  // (the report stays valid — telemetry must never break the visibility call).
+  if (renderer.fps !== undefined) {
+    if (typeof renderer.fps !== 'number' || !Number.isFinite(renderer.fps)
+      || renderer.fps < 0 || renderer.fps > 240) return null;
+    normalized.fps = Math.round(renderer.fps * 10) / 10;
+  }
+  // renderProfile: optional coarse enum id (pixi-office-renderer RENDER_PROFILES).
+  if (renderer.renderProfile !== undefined) {
+    if (typeof renderer.renderProfile !== 'string' || !RENDERER_REPORT_PROFILES.has(renderer.renderProfile)) return null;
+    normalized.renderProfile = renderer.renderProfile;
+  }
+  return normalized;
 }
 
 function validateOfficeIpcPayload(channel, payload) {

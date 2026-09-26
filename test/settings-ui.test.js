@@ -403,3 +403,31 @@ test('automation center: preload exposes the history/run/clear/ask APIs used by 
     assert.ok(settingsJs.includes(`.${api}(`), `settings.html never calls ${api}()`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// P2 运维能力: 一键导出诊断包（Settings → About）
+// ---------------------------------------------------------------------------
+
+test('diagnostics export: the About card wires the button, the bridge and the main handler', () => {
+  const html = read('settings.html');
+  // the button lives in the SAME diagnostics card as the existing open buttons
+  assert.match(html, /id="export-diagnostics" data-i18n="btn\.exportDiagnostics"/,
+    'About 卡片缺「导出诊断包」按钮');
+  assert.match(html, /id="diagnostics-export-status"/, 'missing the in-page status line');
+  // page handler: busy guard + status line feedback (success AND failure paths)
+  assert.match(html, /\$\('export-diagnostics'\)\.addEventListener\('click'/,
+    'the export button has no click handler');
+  assert.match(html, /exportDiagnostics\(\)/, 'the page never calls the bridge API');
+  // zh + en dictionaries both carry the new keys (applyI18n resolves from either)
+  for (const key of ['btn_exportDiagnostics', 'about_exporting', 'about_exportOk', 'about_exportFailed']) {
+    const zhCount = (html.match(new RegExp(`(?:^|\\s)${key}:`, 'gm')) || []).length;
+    assert.ok(zhCount >= 2, `settings.html dictionary key ${key} missing in zh/en (found ${zhCount})`);
+  }
+  // preload bridge exposes it
+  assert.match(read('settings-preload.js'), /\bexportDiagnostics\s*:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('shell:export-diagnostics'\)/);
+  // main process registers the handler next to the existing shell:* family
+  const main = read('main.js');
+  assert.match(main, /ipcMain\.handle\('shell:export-diagnostics'/, 'main.js missing the shell:export-diagnostics handler');
+  assert.match(main, /require\('\.\/diagnostics-bundle'\)/, 'main.js must use the shared diagnostics-bundle module');
+  assert.match(main, /writeDiagnosticsBundleInto/, 'main.js must route the export through the shared writer');
+});

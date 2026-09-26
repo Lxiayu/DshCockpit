@@ -1393,7 +1393,10 @@
           <div class="btnrow">
             <button class="secondary" id="open-logs" data-i18n="btn.openLogs">打开日志目录</button>
             <button class="secondary" id="open-diagnostics" data-i18n="btn.openDiagnostics">打开诊断目录</button>
+            <!-- P2 运维能力: 一键导出诊断包（脱敏 + README 隐私清单，fail-closed 终扫） -->
+            <button class="secondary" id="export-diagnostics" data-i18n="btn.exportDiagnostics">导出诊断包</button>
           </div>
+          <div class="status" id="diagnostics-export-status"></div>
         </div>
         <div class="card" id="boot-check-card">
           <h3 data-i18n="card.bootCheck">启动自检</h3>
@@ -1771,6 +1774,11 @@
       privacy_body: '本应用完全在本地运行。我们不会收集、上传或存储您的任何个人信息、API Key、会话内容或用量数据；所有数据仅保存在本机。仅在以下情况访问网络：更新检查（npm registry / GitHub Releases）、插件市场列表（GitHub）、运行时下载（npm registry）。费用估算基于您自行配置的价格参数，不构成计费依据。',
       about_diagnostics: '崩溃诊断', about_diagnosticsCount: '{n} 次（可在诊断目录查看）', about_diagnosticsNone: '无',
       btn_openDiagnostics: '打开诊断目录',
+      btn_exportDiagnostics: '导出诊断包',
+      about_exporting: '正在导出诊断包…',
+      about_exportOk: '已导出：{path}（{size}）',
+      about_exportOkHint: '包内已脱敏：不含 key / cookie / token / prompt 正文 / 会话 id（见包内 README.txt）',
+      about_exportFailed: '导出失败：{reason}',
       settings_contextWindow: '上下文窗口（估算）', settings_contextWindowHint: 'Cockpit 的 Context 指示器按此值估算压力；DeepSeek V4.1 / V4-Pro 为 1M',
       nav_search: '搜索设置…',
       group_general: '常规', group_workspace: '工作', group_system: '系统',
@@ -2246,6 +2254,11 @@ nav_office: '虚拟办公室',
       privacy_body: 'This app runs fully locally. We never collect, upload or store your personal information, API keys, conversation contents or usage data; everything stays on this machine. Network is only touched for: update checks (npm registry / GitHub Releases), plugin market listing (GitHub), runtime downloads (npm registry). Cost estimates use the rates you configure and are not a billing basis.',
       about_diagnostics: 'Crash diagnostics', about_diagnosticsCount: '{n} (see diagnostics folder)', about_diagnosticsNone: 'none',
       btn_openDiagnostics: 'Open diagnostics',
+      btn_exportDiagnostics: 'Export diagnostics bundle',
+      about_exporting: 'Exporting diagnostics bundle…',
+      about_exportOk: 'Exported: {path} ({size})',
+      about_exportOkHint: 'Redacted: no keys / cookies / tokens / prompt text / session ids (see README.txt inside the bundle)',
+      about_exportFailed: 'Export failed: {reason}',
       settings_contextWindow: 'Context window (estimate)', settings_contextWindowHint: 'The Cockpit Context indicator estimates pressure against this value; DeepSeek V4.1 / V4-Pro are 1M',
       nav_search: 'Search settings…',
       group_general: 'General', group_workspace: 'Workspace', group_system: 'System',
@@ -4078,6 +4091,31 @@ nav_office: 'Virtual Office',
   }
 
   $('open-diagnostics').addEventListener('click', () => window.dshShell.openDiagnostics());
+
+  // P2 运维能力: 一键导出诊断包。主进程弹目录选择（默认桌面）→ 写包 → 弹
+  // 成功/失败对话框（含路径与大小）；这里同步给页内状态行 + busy 指示。
+  $('export-diagnostics').addEventListener('click', async () => {
+    const btn = $('export-diagnostics');
+    const status = $('diagnostics-export-status');
+    btn.disabled = true;
+    busy(true, tr('about.exporting'));
+    setStatus(status, tr('about.exporting'));
+    try {
+      const r = await window.dshShell.exportDiagnostics();
+      if (r && r.ok) {
+        setStatus(status, tr('about.exportOk', { path: r.path, size: r.bytesHuman }));
+      } else if (r && r.canceled) {
+        setStatus(status, '');
+      } else {
+        setStatus(status, tr('about.exportFailed', { reason: (r && (r.error || r.code)) || 'unknown' }), 'warn');
+      }
+    } catch (e) {
+      setStatus(status, tr('about.exportFailed', { reason: e.message }), 'warn');
+    } finally {
+      busy(false);
+      btn.disabled = false;
+    }
+  });
 
   // ------------------------------------------------- boot self-check (R1)
   const BOOT_CHECK_TITLES = {

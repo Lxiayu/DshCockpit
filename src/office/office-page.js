@@ -558,15 +558,28 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
   // needs it — mode, stable diagnostic code and the bounded-recovery attempt
   // count. Null when this controller has no renderer attached (legacy callers
   // keep the historical bare-boolean notifyVisibility shape).
+  // P2 诊断包（2026-09-26）：追加两个可选遥测字段，ride 同一 visibility invoke，
+  // 无新通道——`fps`（观测器最后一次实测帧率，1 位小数）与 `renderProfile`
+  // （渲染档位枚举 id）。两者只在渲染器真的给出时才进报告（键不出现，而非
+  // undefined 占位——旧调用方的 deepEqual 逐字节不变），坏值绝不打断上报。
   function rendererStateOf() {
     if (!renderer || typeof renderer.diagnostics !== 'function') return null;
     try {
       const diagnostics = renderer.diagnostics();
-      return {
+      const report = {
         mode: diagnostics.mode,
         diagnosticCode: diagnostics.diagnosticCode || null,
         recoveryAttempts: diagnostics.recoveryAttempts || 0,
       };
+      if (diagnostics.renderProfile) {
+        report.renderProfile = String(diagnostics.renderProfile);
+      }
+      const stats = diagnostics.fps;
+      const lastFps = stats && typeof stats === 'object' ? stats.lastFps : stats;
+      if (typeof lastFps === 'number' && Number.isFinite(lastFps) && lastFps >= 0 && lastFps <= 240) {
+        report.fps = Math.round(lastFps * 10) / 10;
+      }
+      return report;
     } catch { return null; }
   }
 

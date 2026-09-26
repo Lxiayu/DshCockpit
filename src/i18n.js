@@ -485,6 +485,13 @@ const STRINGS = {
     'dialog.pickWorkspace': '选择工作区目录',
     'dialog.pickDshHome': '选择 DSH_HOME 目录',
     'dialog.pickSkillDir': '选择技能目录（包含 SKILL.md）',
+    // P2 运维能力: 一键导出诊断包（设置 → 关于）
+    'dialog.exportDiagnostics': '选择诊断包导出位置（默认桌面）',
+    'dialog.exportDiagnosticsHere': '导出到这里',
+    'diagnostics.exportDoneTitle': '诊断包已导出',
+    'diagnostics.exportDoneBody': '位置：{path}\n大小：{size}\n\n包内已脱敏：不含 key / cookie / token / prompt 正文 / 会话 id，随包附隐私字段清单（README.txt）。',
+    'diagnostics.exportOpen': '打开目录',
+    'diagnostics.exportFailedTitle': '诊断包导出失败',
     'scheduled.defaultName': '任务',
     // IM channels (C5) — outbound card/text templates + inbound replies
     'channels.notInstalled': '渠道协议实现未安装，将在该渠道接入后提供',
@@ -1019,6 +1026,13 @@ const STRINGS = {
     'dialog.pickWorkspace': 'Choose a workspace folder',
     'dialog.pickDshHome': 'Choose a DSH_HOME folder',
     'dialog.pickSkillDir': 'Choose a skill folder (containing SKILL.md)',
+    // P2: one-click diagnostics bundle export (Settings → About)
+    'dialog.exportDiagnostics': 'Choose where to save the diagnostics bundle (desktop by default)',
+    'dialog.exportDiagnosticsHere': 'Export here',
+    'diagnostics.exportDoneTitle': 'Diagnostics bundle exported',
+    'diagnostics.exportDoneBody': 'Path: {path}\nSize: {size}\n\nThe bundle is redacted: no keys / cookies / tokens / prompt text / session ids. A privacy field manifest (README.txt) is included.',
+    'diagnostics.exportOpen': 'Open folder',
+    'diagnostics.exportFailedTitle': 'Diagnostics bundle export failed',
     'scheduled.defaultName': 'Task',
     // IM channels (C5) — outbound card/text templates + inbound replies
     'channels.notInstalled': 'Channel protocol implementation not installed yet; it arrives with the channel integration',

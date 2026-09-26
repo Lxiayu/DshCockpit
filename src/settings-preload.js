@@ -69,6 +69,8 @@ contextBridge.exposeInMainWorld('dshShell', {
   balanceRefresh: () => ipcRenderer.invoke('shell:balance-refresh'),
   diagnosticsInfo: () => ipcRenderer.invoke('shell:diagnostics-info'),
   openDiagnostics: () => ipcRenderer.invoke('shell:open-diagnostics'),
+  // P2 运维能力: 一键导出诊断包（Settings → About）。
+  exportDiagnostics: () => ipcRenderer.invoke('shell:export-diagnostics'),
   scheduledList: () => ipcRenderer.invoke('shell:scheduled-list'),
   scheduledUpsert: (task) => ipcRenderer.invoke('shell:scheduled-upsert', task),
   scheduledRemove: (id) => ipcRenderer.invoke('shell:scheduled-remove', id),

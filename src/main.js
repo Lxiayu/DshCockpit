@@ -97,6 +97,7 @@ const { createCompatStatus } = require('./compat-status'); // R2
 const { pickRuntimeCandidate } = require('./runtime-pick'); // H5 runtime priority
 const { detectCredentialFormatMismatch, readLogTail } = require('./crash-reason'); // H5 crash root cause
 const { createRuntimeLogTailer } = require('./runtime-log-tail'); // boot URL poller (incident-hardened)
+const { createDiagnosticsBundle } = require('./diagnostics-bundle'); // P2 one-click diagnostics export (redacted, fail-closed)
 const { createNotificationCenter } = require('./notification-center'); // R6
 const { createShellUpdateNotifier } = require('./shell-update-notice'); // M5
 const { buildCacheEconomics, pricingFromSettings } = require('./cache-economics'); // R4
@@ -1905,6 +1906,9 @@ function registerIpc() {
   });
   ipcMain.handle('shell:diagnostics-info', () => diagnosticsInfo());
   ipcMain.handle('shell:open-diagnostics', () => shell.openPath(diagnosticsDir()));
+  // P2 运维能力: 一键导出诊断包（设置 → 关于）。结果 {ok, path, bytes, ...} /
+  // {ok:false, canceled:true} / {ok:false, code, error}。
+  ipcMain.handle('shell:export-diagnostics', () => exportDiagnosticsBundleInteractive());
   ipcMain.handle('quickask:submit', (_e, prompt) => handleQuickAskSubmit(prompt));
   ipcMain.on('quickask:close', () => auxWindows.closeQuickAsk());
   ipcMain.handle('shell:scheduled-list', () => ({
@@ -3874,6 +3878,91 @@ function diagnosticsInfo() {
 }
 
 // ---------------------------------------------------------------------------
+// P2 运维能力: 一键导出诊断包（Settings → 关于）。
+// 收集/脱敏/白名单全部在 src/diagnostics-bundle.js（纯 Node、可单测、最终
+// 全文扫描 fail-closed——任何残留 key/cookie/token 形状即整包删除并报失败）。
+// 这里只做三件事：目录选择、写包、给用户可见反馈（成功给路径/大小，失败给
+// 原因）。不新增 office:* 通道；office 数据直接读本进程的 officeModuleInstance
+// （office:diagnostics 的同一份产物）。
+// ---------------------------------------------------------------------------
+const diagnosticsBundle = createDiagnosticsBundle({
+  appVersion: () => app.getVersion(),
+  runtimeVersion: () => manager.getInfo().activeVersion || bundledRuntimeVersion,
+  runtimeState: () => String(cockpitRuntimeState || 'unknown'),
+  logDir: ensureLogDir,
+  crashDir: diagnosticsDir,
+  officeDiagnostics: () => {
+    try { return officeModuleInstance ? officeModuleInstance.diagnostics() : null; }
+    catch { return null; }
+  },
+  officeEmployees: () => {
+    const mod = officeModuleInstance;
+    if (!mod) return [];
+    try {
+      const st = mod.state();
+      // Coarse projection only: role + enum activity/movement + binding
+      // presence + queue length. NO employeeId, NO displayName, NO session id,
+      // NO task/tool text — the privacy contract lives in the bundle module.
+      return (st.employees || []).map((e) => ({
+        role: e.role,
+        activity: e.activity,
+        movement: e.movement,
+        bound: !!(e.binding && e.binding.source),
+        bindingSource: e.binding ? e.binding.source : null,
+        queueCount: e.queueCount,
+      }));
+    } catch { return []; }
+  },
+  locale: () => app.getLocale(),
+  home: () => os.homedir(),
+  log,
+});
+
+/** Shared by the interactive export and the one-shot probe. */
+async function writeDiagnosticsBundleInto(targetDir) {
+  const result = await diagnosticsBundle.build(targetDir);
+  log(`[shell] diagnostics bundle export: ${result.ok
+    ? `${result.path} (${result.bytesHuman}, ${result.files.length} files)`
+    : `${result.code || 'FAILED'}: ${result.error || 'unknown'}`}`);
+  return result;
+}
+
+async function exportDiagnosticsBundleInteractive() {
+  const picked = await dialog.showOpenDialog(pickDialogParent(), {
+    title: t(lang(), 'dialog.exportDiagnostics'),
+    defaultPath: app.getPath('desktop'),
+    properties: ['openDirectory', 'createDirectory'],
+    buttonLabel: t(lang(), 'dialog.exportDiagnosticsHere'),
+  });
+  if (picked.canceled || !picked.filePaths[0]) return { ok: false, canceled: true };
+  const result = await writeDiagnosticsBundleInto(picked.filePaths[0]);
+  if (result.ok) {
+    dialog.showMessageBox(pickDialogParent(), {
+      type: 'info',
+      title: APP_NAME,
+      message: t(lang(), 'diagnostics.exportDoneTitle'),
+      detail: t(lang(), 'diagnostics.exportDoneBody', { path: result.path, size: result.bytesHuman }),
+      buttons: [t(lang(), 'diagnostics.exportOpen'), t(lang(), 'crashloop.later')],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    }).then(({ response }) => {
+      if (response === 0) shell.openPath(result.path);
+    }).catch(() => { /* dialog failed; the log line above already records it */ });
+  } else {
+    dialog.showMessageBox(pickDialogParent(), {
+      type: 'error',
+      title: APP_NAME,
+      message: t(lang(), 'diagnostics.exportFailedTitle'),
+      detail: `${result.code || 'EXPORT_FAILED'}: ${result.error || 'unknown'}`,
+      buttons: [t(lang(), 'crashloop.later')],
+      noLink: true,
+    }).catch(() => { /* dialog failed */ });
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Quick Ask (global hotkey -> background headless run)
 // ---------------------------------------------------------------------------
 
@@ -5352,6 +5441,51 @@ if (!gotLock) {
     // 变化时刷新托盘 + 推送设置页 + 写 knownIssues + 一条通知；恢复自动清除。
     runtimeHealthTimer = setInterval(runtimeHealthTick, 5_000);
     if (typeof runtimeHealthTimer.unref === 'function') runtimeHealthTimer.unref();
+    // P2 真壳探针（一次性交付验证，默认关闭）：DSH_DIAGNOSTICS_EXPORT_PROBE=<目录>。
+    // 完整壳启动（IPC/日志/办公室模块 + 办公室页面都走产品路径），只跳过运行时
+    // 引导与子进程 spawn——探针验证的是壳侧收集与脱敏，不是运行时引导；办公室
+    // 模块无运行时照常仿真（员工游走，诊断环/仿真时钟为真值）。页面加载后其
+    // renderer 状态经既有 office:visibility 上报（真实遥测，非合成）。写包 →
+    // probe-result.json → 退出。隔离 userData + 自清理（e2e-smoke 同款纪律）。
+    if (process.env.DSH_DIAGNOSTICS_EXPORT_PROBE) {
+      const probeDir = process.env.DSH_DIAGNOSTICS_EXPORT_PROBE;
+      log(`[shell] diagnostics export probe: ${probeDir}`);
+      try { fs.mkdirSync(probeDir, { recursive: true }); } catch { /* build() reports failures */ }
+      if (officeRuntimeEnabled()) {
+        openOfficeView();
+        // A real window makes the office page VISIBLE: its visibilitychange
+        // fires and the renderer state rides office:visibility — the probe
+        // then exercises the render-report path end to end (real telemetry).
+        try { createWindow('about:blank'); } catch (e) { log(`[shell] probe window failed: ${e.message}`); }
+      }
+      // The office page needs a few seconds to boot and report its renderer
+      // state through office:visibility; then write and quit.
+      setTimeout(async () => {
+        let result;
+        try { result = await writeDiagnosticsBundleInto(probeDir); } catch (e) {
+          result = { ok: false, code: 'EXPORT_FAILED', error: e && e.message ? e.message : String(e) };
+        }
+        try {
+          const summary = diagnosticsBundle.collectRuntimeSummary();
+          fs.writeFileSync(path.join(probeDir, 'probe-result.json'), JSON.stringify({
+            ok: result.ok,
+            code: result.code || null,
+            error: result.error || null,
+            path: result.path || null,
+            bytes: result.bytes || 0,
+            bytesHuman: result.bytesHuman || null,
+            files: result.files ? result.files.map((f) => ({ name: f.name, bytes: f.bytes })) : [],
+            officeDiagnosticsPresent: !!diagnosticsBundle.collectOfficeDiagnostics(),
+            render: summary.render,
+            sync: summary.sync,
+            boundCount: summary.sessions ? summary.sessions.boundCount : null,
+            roles: summary.sessions ? summary.sessions.roles : null,
+          }, null, 2));
+        } catch (e) { log(`[shell] export probe result write failed: ${e.message}`); }
+        setTimeout(() => app.quit(), 300);
+      }, 6000);
+      return;
+    }
     // Splash on EVERY boot, not just guided first-run: without it Windows
     // users stare at a blank screen for the whole runtime boot (AV scans the
     // runtime's thousands of files). It closes in createWindow().

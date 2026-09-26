@@ -964,3 +964,86 @@ test('latch → 「重试渲染」后注入的美术贴图仍在：家具仍是�
   assert.equal(view.diagnostics().officeTextureCount, flatAssetIds.length, '贴图计数与 boot 一致');
   assert.deepEqual(destroyed, [], '整条恢复链都没释放页面注入的贴图');
 });
+
+// ---------------------------------------------------------------------------
+// ⑥ P2 诊断包（2026-09-26）: the renderer report carries optional fps /
+// renderProfile telemetry over the SAME office:visibility invoke — strictly
+// validated, additive only (legacy 3-key payloads normalize identically).
+// ---------------------------------------------------------------------------
+
+test('module: the renderer report accepts optional fps/renderProfile and stores fresh telemetry', () => {
+  const { module, lines } = makeLoggingModule();
+
+  // valid: fps + renderProfile ride the report
+  const first = module.noteVisibility({
+    viewId: 'v',
+    visible: true,
+    renderer: { mode: 'webgl', diagnosticCode: null, recoveryAttempts: 0, fps: 59.86, renderProfile: 'full' },
+  });
+  assert.equal(first.ok, true);
+  assert.equal(module.diagnostics().renderer.fps, 59.9, 'fps is kept at one decimal');
+  assert.equal(module.diagnostics().renderer.renderProfile, 'full');
+  // the log dedup stays on the (mode, code, attempts) tuple: the first report
+  // logged, and a pure-fps jitter must update the state WITHOUT a log line
+  assert.equal(lines.filter((l) => l.includes('[office] renderer')).length, 1);
+  module.noteVisibility({ viewId: 'v', visible: true, renderer: { mode: 'webgl', diagnosticCode: null, recoveryAttempts: 0, fps: 58.2, renderProfile: 'full' } });
+  assert.equal(module.diagnostics().renderer.fps, 58.2, 'telemetry refreshes');
+  assert.equal(lines.filter((l) => l.includes('[office] renderer')).length, 1, 'no log line for a fps-only change');
+
+  // legacy payloads still normalize to the exact 3-key shape (no fps key)
+  module.noteVisibility({ viewId: 'v', visible: true, renderer: { mode: 'static', diagnosticCode: 'LOW_FPS_PERSISTENT', recoveryAttempts: 0 } });
+  assert.deepEqual(module.diagnostics().renderer,
+    { mode: 'static', diagnosticCode: 'LOW_FPS_PERSISTENT', recoveryAttempts: 0 });
+  assert.equal(lines.filter((l) => l.includes('[office] renderer')).length, 2, 'the latch tuple change IS logged');
+});
+
+test('module: renderer report telemetry is strictly validated (bad values reject the payload)', () => {
+  const { module } = makeLoggingModule();
+  // the transport gate: validateOfficeIpcPayload rejects malformed renderer
+  // reports; noteVisibility itself swallows a malformed report (visibility
+  // still applies) — same split as the 2026-09-24 latch fix pinned.
+  const ok = (renderer) => officeModule.validateOfficeIpcPayload('office:visibility', { visible: true, renderer }).ok;
+  assert.equal(ok({ mode: 'webgl', diagnosticCode: null, recoveryAttempts: 0, fps: 0 }), true, 'fps=0 is valid (stalled renderer)');
+  assert.equal(ok({ mode: 'webgl', diagnosticCode: null, recoveryAttempts: 0, fps: 240 }), true, 'fps at the bound');
+  assert.equal(ok({ mode: 'webgl', diagnosticCode: null, recoveryAttempts: 0, fps: 240.5 }), false, 'fps above the bound rejected');
+  assert.equal(ok({ mode: 'webgl', diagnosticCode: null, recoveryAttempts: 0, fps: -1 }), false, 'negative fps rejected');
+  assert.equal(ok({ mode: 'webgl', diagnosticCode: null, recoveryAttempts: 0, fps: 'fast' }), false, 'non-numeric fps rejected');
+  assert.equal(ok({ mode: 'webgl', diagnosticCode: null, recoveryAttempts: 0, renderProfile: 'ultra' }), false, 'unknown profile rejected');
+  assert.equal(ok({ mode: 'webgl', diagnosticCode: null, recoveryAttempts: 0, renderProfile: 'low-cost' }), true, 'low-cost profile valid');
+  assert.equal(ok({ mode: 'webgl', diagnosticCode: null, recoveryAttempts: 0, evil: 1 }), false, 'unknown keys still rejected');
+});
+
+test('page: rendererStateOf adds fps/renderProfile only when the renderer provides them', () => {
+  const calls = [];
+  const bridge = {
+    getState: async () => ({ employees: [] }),
+    notifyVisibility: (visible, renderer) => { calls.push([visible, renderer]); },
+  };
+  const base = { mode: 'webgl', diagnosticCode: null, recoveryAttempts: 0 };
+  const renderer = { diagnostics: () => ({ ...base }) };
+  const page = officePage.createOfficePageController({ bridge, renderer });
+
+  // bare 3-key diagnostics → the historical shape byte-for-byte (no fps key)
+  page.handleVisibility(true);
+  assert.deepEqual(calls.at(-1), [true, base]);
+
+  // full renderer diagnostics → fps (from the monitor's lastFps) + profile
+  renderer.diagnostics = () => ({
+    ...base,
+    renderProfile: 'low-cost',
+    fps: { windows: 3, lowWindows: 0, lastFps: 47.56, degraded: false },
+  });
+  page.handleVisibility(true);
+  assert.deepEqual(calls.at(-1), [true, { ...base, renderProfile: 'low-cost', fps: 47.6 }]);
+
+  // a renderer without fps telemetry keeps the legacy shape (no undefined key)
+  renderer.diagnostics = () => ({ ...base, renderProfile: 'full', fps: null });
+  page.handleVisibility(true);
+  assert.deepEqual(calls.at(-1), [true, { ...base, renderProfile: 'full' }]);
+  assert.equal('fps' in calls.at(-1)[1], false, 'no fps key instead of a null/undefined one');
+
+  // diagnostics() throwing never breaks the visibility call
+  renderer.diagnostics = () => { throw new Error('boom'); };
+  page.handleVisibility(true);
+  assert.deepEqual(calls.at(-1), [true, null]);
+});
