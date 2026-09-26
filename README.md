@@ -131,7 +131,7 @@ npm run build:mac  # macOS Apple Silicon 包
 - `src/`：桌面壳与运行时集成。
 - `photo/`：README 与宣传素材。
 
-项目架构与设计背景见 [DESIGN.md](DESIGN.md) 和 [总纲.md](总纲.md)；历史规划文档不等同于当前发布承诺。
+项目架构与设计背景见 [DESIGN.md](DESIGN.md)；历史规划文档不等同于当前发布承诺。
 
 ## 开源与素材
 

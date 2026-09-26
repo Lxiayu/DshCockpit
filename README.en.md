@@ -116,7 +116,7 @@ Bug reports, interaction ideas, documentation, character animation, and code con
 - `src/`: desktop shell and runtime integration.
 - `photo/`: README and promotional assets.
 
-See [DESIGN.md](DESIGN.md) and [总纲.md](总纲.md) for architecture and design background. Historical plans do not promise currently released features.
+See [DESIGN.md](DESIGN.md) for architecture and design background. Historical plans do not promise currently released features.
 
 ## License and assets
 
