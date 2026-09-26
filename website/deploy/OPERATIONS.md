@@ -1,6 +1,6 @@
 # 服务器运维（2026-09-26）
 
-站点：http://dshcockpit.site （同时支持 www）；当前 HTTP 已部署。HTTPS 尚未配置，服务器访问 GitHub 和 Let's Encrypt 超时，维护者已要求暂缓处理出站网络。
+站点：http://dshcockpit.site （同时支持 www）；当前 HTTP 已部署。自有 SSL 证书已安装，服务器内部 HTTPS 校验通过；公网 HTTPS 尚未连通，等待确认云防火墙／安全组 443 入站。服务器访问 GitHub 和 Let's Encrypt 超时。
 
 ## 路径
 
@@ -26,7 +26,17 @@ sudo systemctl enable --now dsh-release-sync.timer
 
 ## HTTPS
 
-确认服务器可访问证书服务后再申请证书，配置 Nginx 443、自动续期与 HTTP 跳转。certbot 已安装，尚未申请证书；不要在证书有效前强制跳转 HTTPS。
+已安装维护者提供的 TrustAsia 证书，覆盖 dshcockpit.site 和 www.dshcockpit.site，证书与私钥公钥匹配。到期时间为 2026-11-17 16:59:59 UTC（北京时间 11 月 18 日 00:59:59），需在到期前更新；当前没有自动续期。
+
+- 证书：`/www/server/panel/vhost/cert/dshcockpit.site/fullchain.pem`
+- 私钥：同目录 `privkey.pem`，root 所有，权限 600；不得提交仓库。
+- 配置备份：`/var/backups/dshcockpit/nginx-before-tls.conf`
+- 已开启 TLS 1.2/1.3，Nginx 配置校验与 reload 成功。
+- 服务器内部以域名和正常证书校验访问 127.0.0.1:443 返回 200。
+- 本地公网 curl 和浏览器连接失败，抓包窗口未捕获到对应 443 请求。系统 UFW 已放行 443；云防火墙／安全组和客户端线路仍需排查，尚不能确认具体拦截位置。
+- 保留 HTTP，不启用强制跳转，待公网 HTTPS 正常后再配置。
+
+参考文章 https://zhuanlan.zhihu.com/p/374584044 建议修改 hosts。2026-09-26 使用 curl --resolve 保留域名与证书校验，尝试 GitHub/API 多个 IP（含公共 DNS 查询结果）及 release-assets 域名，均在 TCP 443 超时，因此未持久修改 hosts。此办法未解决当前网络问题；COS 仅为未验证备选，尚未开通或产生相关服务成本。
 
 ## 更新网站
 
