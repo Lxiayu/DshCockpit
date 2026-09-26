@@ -1,56 +1,45 @@
-﻿# 发布到 GitHub（便携 zip 方案）
+# 发布流程（v0.4.0 起）
 
-**发布物是便携 zip**（大型 Windows 开源项目的通行做法，如 MaaAssistantArknights 的 `MAA-*-win-x64.zip`）：用户下载 → 解压 → 双击根目录的 `DshCockpit.exe` 即用。无需安装器、无需管理员权限、不会被 NSIS 固态压缩卡住。用户也可以从源码启动（README 有 `npm start` 说明）。
+发布由 **GitHub Actions** 完成：推 `v*` tag → 自动构建 → 自动创建 Release。本地只做验证与打 tag。
 
-发布后，已安装的壳会在启动/每 4 小时自动检查更新（electron-updater 读取 GitHub Releases 的 `latest.yml`），展示更新说明并提供「立即重启」。
+## 1. 发版前（本地）
 
-## 前置
-
-1. 一个 GitHub 仓库（如 `dsh-cockpit`）；
-2. 一个 **Personal Access Token**，权限勾选 `repo`（[生成 PAT](https://github.com/settings/tokens) 或 `gh auth login`）；
-3. 本机可访问 GitHub。
-
-## 首次发布（Windows 便携 zip）
-
-```powershell
-# 1. 创建仓库（用 gh CLI，或网页新建后跳过）
-gh repo create dsh-cockpit --public --description "DshCockpit — DeepSeek Harness desktop shell (portable)"
-
-# 2. 设置发布目标 + Token（electron-builder.yml 用环境变量读取，无需改配置）
-$env:DSH_REPO_OWNER = "<你的 GitHub 用户名>"
-$env:DSH_REPO_NAME = "dsh-cockpit"
-$env:GH_TOKEN      = "ghp_xxx"   # 或先执行 gh auth login
-
-# 3. 生成内置运行时种子（打包前执行一次；已存在则跳过）
-node scripts/prepare-runtime.js
-
-# 4. 构建并发布（上传 zip + latest.yml 到 GitHub Releases）
-cd dsh-cockpit
-npm run publish:win
+```bash
+npm test                     # 全量单元测试（1514 项）——CI 不再跑测试，本地这一步是唯一门禁
+npm run build                # 可选：本地出包，跑一遍产物闸门（verify-dist）
 ```
 
-发布成功后 Release 页会有 `v0.1.0`：
-- `DshCockpit-0.1.0-win-x64.zip`（便携包，解压即用）
-- `latest.yml` + `*.zip.blockmap`（electron-updater 更新源）
+确认三处版本一致：`package.json` 的 `version`（当前 `0.4.0`）、`runtimeVersion`（内置运行时，当前 `0.1.5-rc.2`）、
+`.github/release-body.md`（发布正文，只写「本版新增/修改/性能」）。
 
-## 后续版本更新
+## 2. 打 tag 并推送（触发构建）
 
-改 `package.json` 的 `version`（如 `0.1.1`）→ 重新执行 `scripts/prepare-runtime.js`（如需随包更新内置运行时版本）→ `npm run publish:win` → 已装壳自动收到更新。
+```bash
+git tag -a v0.4.1 -m "v0.4.1 — 一句话主题"      # tag 注释会出现在仓库的 tag 列表里
+git push origin master --follow-tags            # 推 master 与 tag；tag 触发 release-mac / release-win
+```
 
-## 常用命令
+> 若 tag 已推过、需要改内容：`git tag -d <tag> && git tag -a <tag> -m … && git push --force origin <tag>`。
+> 强制推 tag 会**重跑构建**并覆盖 Release 资产，属预期行为。
 
-| 命令 | 说明 |
-|---|---|
-| `node scripts/prepare-runtime.js` | 生成 `vendor/runtime/<version>` 内置运行时种子 |
-| `npm run build:win` | 构建便携 zip（`dist/DshCockpit-<ver>-win-x64.zip`） |
-| `npm run build:win:dir` | 只构建未打包目录（快速冒烟） |
-| `npm run build:win:nsis` | 按需构建 NSIS 安装器（默认不用，见 electron-builder.yml） |
-| `npm run publish:win` | 构建并发布到 GitHub Releases |
-| `npm start` | 从源码运行（无需打包） |
+## 3. CI 做什么（`release-mac.yml` / `release-win.yml`）
 
-## 注意
+1. `npm install` → `scripts/prepare-runtime.js --version $runtimeVersion`（有缓存，冷装约 10~20 分钟）
+2. `scripts/build.js --mac|--win … --publish never`
+3. **产物闸门**：`verify-dist`（asar 内创作块必须为 0 / 生产表面清单齐备 / 条目数上限）+ `e2e-smoke`
+   （打包产物冷启动 → 等 boot URL → 探 HTTP 200）
+4. 通过后 `softprops/action-gh-release` 创建/更新 Release，正文取 `.github/release-body.md`
 
-- **未签名**：exe 会触发 SmartScreen「未知发布者」（社区项目常见，见 README）；要消除需购买 Authenticode 证书（`CSC_LINK` 环境变量）。
-- **更新说明**：electron-updater 会把 GitHub Release 正文当作更新说明展示在「立即重启」对话框里，发布时写清变更。
-- **版本线**：`version` 必须递增（electron-updater 按 semver 比较）。
-- **macOS**：在 macOS 上执行 `npm run publish:mac`（需 Developer ID 签名 + 公证，配置见 electron-builder.yml 注释）。
+失败排查：`gh run list` → `gh run view <id> --log-failed`。冒烟失败时日志会打印打包产物的壳日志
+（含运行时版本、DSH_HOME、退出码），据此判断是运行时没起来还是产物缺件。
+
+## 4. 发布后
+
+- 下载 Windows / macOS 产物做真机验证（Windows 清单见 `docs/strategy/2026-09-24-windows-perf-audit.md` 的 V1–V10）
+- 应用内自动更新：安装版走 `latest.yml` / `latest-mac.yml`（Release 资产里必须包含这两个文件与 blockmap）
+
+## 5. 注意
+
+- **未签名**：Windows 首次安装会有 SmartScreen 提示，macOS 首次打开需右键「打开」。证书就绪后填 `CSC_LINK` 等 secrets 即可。
+- **内置运行时**以 `package.json.runtimeVersion` 为准；本机若已安装更新版本，壳会优先使用本机版本。
+- 单元测试不在发布流水线内；定时 `upstream-compat` 会跑测试并**邮件汇报**结果，不阻塞发布。

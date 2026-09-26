@@ -191,17 +191,29 @@
 
 ## 9. 打包与分发
 
-- electron-builder：Win **NSIS** 安装包 + mac **DMG**（+ zip 供自动更新）。
-- **运行时目录不进 asar、不进安装包**（保证独立更新）。
-- 签名：Windows 代码签名证书（过 SmartScreen）；macOS Developer ID + notarization（过 Gatekeeper）。未签名只能本机自用。
-- 原生模块（sharp / koffi / node-pty / node-addon-require-builtin）按平台随运行时一起分发（N-API，Node ≥ 18 均可加载）。
-- 网络：electron 二进制与 electron-builder 下载走镜像/代理环境变量（国内可用 npmmirror）。
+- electron-builder 双平台：Windows **NSIS 安装版**（`-win-x64.exe`，应用内自动更新）+ **便携 zip**；
+  macOS arm64 **dmg + zip**，另有 **slim 轨**（不含内置运行时，约省 190MB）。
+- **内置运行时**：唯一来源是 `package.json.runtimeVersion`（当前 `0.1.5-rc.2`），
+  `scripts/prepare-runtime.js --version <该值>` 安装到 `vendor/runtime/<version>`，
+  随包分发到 `Resources/runtime/<version>`（**不进 asar**，便于独立更新与本地替换）。
+  壳启动时优先使用本机已安装的**更新**版本（用户升级过则用新的），无本机安装时回落到内置版本。
+- **CI 发布**：`.github/workflows/release-mac.yml` / `release-win.yml`，`v*` tag 推送触发；
+  产物闸门两道——`scripts/verify-dist.js`（asar 内**创作块 0** / 生产表面清单 / 条目上限）与
+  `scripts/e2e-smoke.js`（打包产物冷启动 → 等 boot URL → 探 HTTP 200）；通过后由 `softprops/action-gh-release`
+  发布，正文取 `.github/release-body.md`。
+- **产物不含创作工具链**：编辑器 / 工作台 / 生成脚本 / 内容树由 `electron-builder.js` 的 `files` 排除，
+  `verify-dist` 的负向断言兜底（防未来回流）。
+- **签名**：当前为**未签名发布**（Windows 会有 SmartScreen 提示，macOS 首次需右键「打开」）；
+  Windows 证书 / Apple Developer ID 就绪后填入 `CSC_LINK` 等 secrets 即可，无需改代码。
+- 单元测试**不在发布流水线内**（CI runner 的工具链/图形会话差异过大）；测试由定时
+  `upstream-compat` 工作流跑（`continue-on-error` + 30 分钟超时）并把结论**邮件汇报**，不阻塞发布。
+- 原生模块（sharp / koffi / node-pty / node-addon-require-builtin）按平台随运行时一起分发（N-API）。
 
 ---
 
 ## 10. 已验证的 CLI 事实（0.1.0-rc.6 勘察 + 0.1.5-rc.2 复核）
 
-- `dsh --version` → `0.1.0-rc.6`，exit 0。
+- `dsh --version` → `0.1.0-rc.6`，exit 0；**出厂内置版本以 `package.json.runtimeVersion` 为准（当前 `0.1.5-rc.2`）**。
 - web 应用 flag：`--host <host>`、`--port <port>`（**`0` = OS 分配**）、`--trusted-host <authority...>`、`--no-open`；`--host 0.0.0.0` 被安全拒绝。
 - 启动时 stdout 打印：`dsh web: http://127.0.0.1:<port>/?token=<launchToken>`（可选 ` (LAN: ...)` 后缀）——端口解析依据；**0.1.2 起 URL 带进程级鉴权 token**。
 - 默认端口 3080（`dsh-cmdline`：`port: !!js ctx.webStartup.port ?? 3080`）。
@@ -432,3 +444,32 @@ preload（`src/preload.js`）向 dsh web 页面注入一个悬浮组件（暗色
 - 兼容模式（HTTP）默认开启是为了微信/抖音内打开链接可达，代价是局域网明文；设置页明确提示，公共网络勿开启；关闭后恢复 TLS，仅系统浏览器需手动继续访问。
 
 **测试**：`test/remote-control.test.js`（7 项）：cookie 剥离、加密持久化与重载、401/配对/一次性/代理/WS 管道/撤销全链路（含 Origin 重写与 IP 会话兜底断言）、运行时未就绪 503、防爆破锁定、`setRuntimeUrl` 状态跟踪、兼容模式纯 HTTP 全链路（无 Secure cookie + IP 会话兜底）。全套 `npm test` 66 项通过。
+
+### 阶段 5 — 虚拟办公室（✅ v0.4.0 发布）
+- [x] 办公室合入主仓（589 文件）与 M5 事件接线（真 harness → 模块 → 页面/渲染）
+- [x] 右栏六块信息架构 + 审批收件箱（低/中行内批准；高危模态只提供「仅本次批准」）
+- [x] 5 座位绑定：根会话 → 调度员；子代理按可分类元数据 → 研究员/编码员/评审员/协作者
+- [x] 中英双语（办公室/左栏/驾驶舱 HUD）、锁屏唤醒自愈、图层与工位正确性
+- [x] 性能：静态画面零重绘、诊断环去重、仿真时钟有界补步、Windows 杀软面（子进程/整目录扫描）
+- [x] 运维：崩溃诊断一键导出、素材复现链 CLI（`asset-provenance`）、上游兼容工作流改为邮件汇报
+- [x] 出包：asar 内创作块 0；内置运行时 `0.1.5-rc.2`
+
+---
+
+## 13. 虚拟办公室（v0.4.0）
+
+- **单一逻辑时钟**：主进程按 `TICK_MS=16` 推进仿真；页面不做自己的时间推进（渲染只按快照推送驱动）。
+- **事件入口**：harness 的 `session/follow`（根会话）与事件瀑布（审批/提问）→ `main.js` 翻译层
+  （`turn/start|end`、`tool/call`、`assistant/message` 的逐轮 usage、子代理座位事件）→ 办公室模块。
+  子代理会话按 `{kind:'subagent', parentSessionId, childSessionId, mode}` 地址跟随；序号断档由
+  `session/page` 重读 + `ingestHarnessSnapshot`（continuation / baseline restart）治愈。
+- **座位与绑定**：员工 = orchestrator / researcher / coder / reviewer / collaborator，
+  工位 desk-1…desk-5；绑定优先级 manual > root-default > heuristic；未分类子代理进单 FIFO。
+- **渲染**：Pixi（webgl → canvas → static 阶梯）；地面绘制顺序按 `(y+height)` painter 序，
+  坐姿角色按工位栈重挂；低帧只降 `renderProfile`、末档才静态，并提供「重试渲染」；
+  未呈现（锁屏/息屏）期间不计入低帧判据，唤醒自动恢复。
+- **右栏（office.html）**：今日用量 / 员工状态 / 待你处理 / 时间线（逐轮 token 归属）/ 员工今日工作记录 / 页脚；
+  文案走 `src/i18n.js` 双语表，模块输出稳定键、页面按键查表。
+- **审批**：危险分级 low/medium/high（判据对齐运行时权限模型）；高风险模态列出步骤、影响与**真实命令原文**，
+  回答经 `$events/result`（与 IM 同一实现）。
+- **隐私边界**：任务正文、工具参数、会话 id 不进入办公室视图；快照字段经隐私白名单投影。
