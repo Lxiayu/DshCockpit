@@ -1,26 +1,26 @@
 {
   "schema": 1,
   "package": "@deepseek-ai/dsh",
-  "version": "0.1.5-rc.2",
+  "version": "0.2.0-rc.2",
   "platform": "win32-x64",
   "ok": true,
-  "startedAt": "2026-09-16T13:43:29.282Z",
-  "finishedAt": "2026-09-16T13:44:41.643Z",
+  "startedAt": "2026-10-03T08:43:39.948Z",
+  "finishedAt": "2026-10-03T08:45:12.871Z",
   "gates": {
     "install": {
       "ok": true,
-      "ms": 62491,
+      "ms": 84590,
       "reason": ""
     },
     "dumpConfig": {
       "ok": true,
-      "ms": 175,
+      "ms": 217,
       "reason": ""
     },
     "healthCheck": {
       "ok": true,
       "reason": "",
-      "ms": 6380
+      "ms": 3642
     }
   },
   "reason": ""
