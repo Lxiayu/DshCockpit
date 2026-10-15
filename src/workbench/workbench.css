@@ -1,0 +1,1063 @@
+/* src/workbench/workbench.css — the Workbench M0 shell (three panes). */
+
+/* Design tokens. Every colour the shell uses lives here, in two themes, so the
+   contrast test (studio/test/contrast.test.js) can check the pairs the UI actually
+   renders — and so a theme switch cannot leave a surface behind. */
+:root {
+  --wb-bg: #f4f6f9;
+  --wb-panel: #ffffff;
+  --wb-line: #d9e0e8;
+  --wb-line-soft: #e8edf3;
+  --wb-ink: #22303c;
+  --wb-dim: #5d6b7a;
+  --wb-accent: #2b66a8;
+  --wb-accent-soft: #eaf2fb;
+  --wb-ok: #17794a;
+  --wb-bad: #b8362f;
+  --wb-warn: #9a6410;
+  --wb-slot: #23282e;
+  --wb-on-accent: #ffffff;
+  --wb-radius: 8px;
+  --wb-radius-sm: 6px;
+  --wb-shadow: 0 1px 2px rgba(18, 32, 48, 0.06), 0 8px 24px rgba(18, 32, 48, 0.05);
+  --wb-zebra: #f8fafc;
+  --wb-hover: #f1f5fa;
+  --wb-stage-bg: #eef1f5;
+  --wb-stage-grid: #dde3ea;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --wb-bg: #161b21;
+    --wb-panel: #1d232b;
+    --wb-line: #303a45;
+    --wb-line-soft: #262e38;
+    --wb-ink: #e6ecf3;
+    --wb-dim: #a3b0bf;
+    --wb-accent: #78b0ea;
+    --wb-accent-soft: #22303f;
+    --wb-ok: #5cc98d;
+    --wb-bad: #f08a84;
+    --wb-warn: #e0b25f;
+    --wb-slot: #0f1318;
+    --wb-on-accent: #101a24;
+    --wb-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px rgba(0, 0, 0, 0.35);
+    --wb-zebra: #212832;
+    --wb-hover: #242c36;
+    --wb-stage-bg: #12171d;
+    --wb-stage-grid: #1d252e;
+  }
+}
+/* an explicit choice wins over the system preference (the toggle in the topbar) */
+body[data-theme="light"] {
+  --wb-bg: #f4f6f9; --wb-panel: #ffffff; --wb-line: #d9e0e8; --wb-line-soft: #e8edf3;
+  --wb-ink: #22303c; --wb-dim: #5d6b7a; --wb-accent: #2b66a8; --wb-accent-soft: #eaf2fb;
+  --wb-ok: #17794a; --wb-bad: #b8362f; --wb-warn: #9a6410; --wb-on-accent: #ffffff;
+  --wb-shadow: 0 1px 2px rgba(18, 32, 48, 0.06), 0 8px 24px rgba(18, 32, 48, 0.05);
+  --wb-zebra: #f8fafc; --wb-hover: #f1f5fa;
+  --wb-stage-bg: #eef1f5; --wb-stage-grid: #dde3ea;
+}
+body[data-theme="dark"] {
+  --wb-bg: #161b21; --wb-panel: #1d232b; --wb-line: #303a45; --wb-line-soft: #262e38;
+  --wb-ink: #e6ecf3; --wb-dim: #a3b0bf; --wb-accent: #78b0ea; --wb-accent-soft: #22303f;
+  --wb-ok: #5cc98d; --wb-bad: #f08a84; --wb-warn: #e0b25f; --wb-on-accent: #101a24;
+  --wb-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px rgba(0, 0, 0, 0.35);
+  --wb-zebra: #212832; --wb-hover: #242c36;
+  --wb-stage-bg: #12171d; --wb-stage-grid: #1d252e;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--wb-bg);
+  color: var(--wb-ink);
+  font: 13px/1.5 -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+#wb-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  background: var(--wb-panel);
+  border-bottom: 1px solid var(--wb-line);
+  box-shadow: var(--wb-shadow);
+  z-index: 3;
+  flex: 0 0 auto;
+}
+#wb-topbar strong { letter-spacing: 0.2px; }
+#wb-topbar strong { font-size: 14px; }
+.wb-note { color: var(--wb-dim); font-size: 12px; }
+#wb-status { color: var(--wb-accent); font-size: 12px; font-variant-numeric: tabular-nums; }
+#wb-topbar-spacer { flex: 1 1 auto; }
+.wb-rail-btn {
+  border: 1px solid var(--wb-line); background: var(--wb-panel); color: var(--wb-dim);
+  border-radius: 6px; width: 28px; height: 24px; cursor: pointer; font-size: 12px; line-height: 1;
+}
+.wb-rail-btn:hover { border-color: var(--wb-accent); color: var(--wb-accent); }
+.wb-rail-btn[aria-expanded="false"] { background: var(--wb-bg); }
+/* gap #1: the history's ↶/↷. "Disabled" is information here — there is nothing to
+   undo yet — so it reads as quiet, not broken (existing tokens only). */
+.wb-rail-btn:disabled { opacity: 0.45; cursor: default; }
+.wb-rail-btn:disabled:hover { border-color: var(--wb-line); color: var(--wb-dim); }
+#wb-history { display: inline-flex; gap: 4px; }
+
+/* The shell is a Codex-style workbench: both side panes collapse to a rail (and the
+   right rail doubles as a tab switcher), so the preview field can take the whole
+   window when a task needs the room. The state lives in body classes + CSS vars. */
+body {
+  --wb-left-w: 268px;
+  --wb-right-w: 440px;
+  --wb-rail-w: 40px;
+}
+body.wb-left-collapsed { --wb-left-w: var(--wb-rail-w); }
+body.wb-right-collapsed { --wb-right-w: var(--wb-rail-w); }
+#wb-columns {
+  flex: 1 1 auto;
+  display: grid;
+  /* activity bar · content tree · work area · inspector */
+  grid-template-columns: var(--wb-activity-w) var(--wb-left-w) minmax(0, 1fr) var(--wb-right-w);
+  /* the row must be TOLD to fill: an implicit auto row sizes to content, which collapsed the
+     work area to 123px on the canvas pages (the only children there are the chip strip and the
+     stage, and neither has an intrinsic height) */
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  transition: grid-template-columns 120ms ease;
+}
+body { --wb-activity-w: 56px; }
+
+/* ---- the activity bar: six tasks, one page each ---- */
+#wb-activitybar {
+  grid-column: 1; grid-row: 1;
+  display: flex; flex-direction: column; gap: 2px; padding: 8px 4px;
+  background: var(--wb-panel); border-right: 1px solid var(--wb-line);
+}
+.wb-page-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 7px 2px; border: 1px solid transparent; border-radius: var(--wb-radius-sm);
+  background: none; color: var(--wb-dim); cursor: pointer; font: inherit;
+}
+.wb-page-btn:hover { background: var(--wb-hover); color: var(--wb-ink); }
+.wb-page-btn[aria-pressed="true"] {
+  background: var(--wb-accent-soft); color: var(--wb-accent); border-color: var(--wb-accent);
+}
+.wb-page-icon { font-size: 15px; line-height: 1; }
+.wb-page-label { font-size: 10.5px; }
+#wb-left { grid-column: 2; grid-row: 1; }
+#wb-center { grid-column: 3; grid-row: 1; }
+#wb-right { grid-column: 4; grid-row: 1; }
+body.wb-left-collapsed #wb-left, body.wb-left-collapsed #wb-rail-left { grid-column: 2; grid-row: 1; }
+body.wb-right-collapsed #wb-right, body.wb-right-collapsed #wb-rail-right { grid-column: 4; grid-row: 1; }
+body.wb-left-collapsed #wb-left, body.wb-right-collapsed #wb-right { padding: 0; border-right-width: 1px; overflow: hidden; }
+body.wb-left-collapsed #wb-left > *:not(.wb-pane-rail),
+body.wb-right-collapsed #wb-right > *:not(.wb-pane-rail) { display: none; }
+.wb-pane-head {
+  display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px;
+}
+.wb-pane-title { font-weight: 600; font-size: 13px; }
+.wb-pane-sub { color: var(--wb-dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+#tree-toolbar { display: flex; gap: 6px; margin-bottom: 6px; }
+#tree-toolbar input { flex: 1 1 auto; min-width: 0; }
+#tree-toolbar button { width: 28px; padding: 0; }
+/* (the standing tree hints were removed in R2-B2: they taught the same thing twice) */
+#wb-rail-left, #wb-rail-right { display: none; }
+body.wb-left-collapsed #wb-rail-left, body.wb-right-collapsed #wb-rail-right {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0;
+  background: var(--wb-panel); border-right: 1px solid var(--wb-line);
+}
+
+body.wb-right-collapsed #wb-rail-right { border-right: none; border-left: 1px solid var(--wb-line); }
+
+
+
+.wb-rail-expand, .wb-rail-tab {
+  width: 26px; height: 26px; border: 1px solid var(--wb-line); background: var(--wb-panel);
+  border-radius: 6px; color: var(--wb-dim); cursor: pointer; font-size: 12px; line-height: 1;
+}
+.wb-rail-expand:hover, .wb-rail-tab:hover { border-color: var(--wb-accent); color: var(--wb-accent); }
+.wb-rail-tab[aria-pressed="true"] { border-color: var(--wb-accent); color: var(--wb-accent); background: #eef4fb; }
+.wb-rail-label { writing-mode: vertical-rl; color: var(--wb-dim); font-size: 11px; letter-spacing: 2px; }
+
+/* ---- left: content tree ---- */
+#wb-left {
+  background: var(--wb-panel);
+  border-right: 1px solid var(--wb-line);
+  padding: 10px 12px;
+  min-height: 0;
+  scrollbar-width: thin;
+  /* three fixed sections + one scrolling tree: the palette is always in reach, and a
+     hundred-file project cannot push it out of the window */
+  display: flex; flex-direction: column; overflow: hidden;
+}
+#wb-left #tree-root { flex: 1 1 auto; overflow: auto; min-height: 90px; }
+#wb-left .wb-pane-head,
+#wb-left #tree-toolbar, #wb-left .wb-library-head, #wb-left #tree-summary { flex: 0 0 auto; }
+#wb-left, #wb-right, .wb-panel table { border-collapse: collapse; }
+.wb-panel thead th {
+  text-align: left; font-weight: 600; color: var(--wb-dim); font-size: 11.5px;
+  border-bottom: 1px solid var(--wb-line); padding: 4px 6px; position: sticky; top: 0;
+  background: var(--wb-panel);
+}
+.wb-panel tbody tr:nth-child(even) { background: var(--wb-zebra); }
+.wb-panel tbody td { border-bottom: 1px solid var(--wb-line-soft); padding: 3px 6px; }
+.wb-panel tbody tr:hover { background: var(--wb-hover); }
+.wb-empty {
+  display: block; padding: 18px 12px; text-align: center; color: var(--wb-dim);
+  border: 1px dashed var(--wb-line); border-radius: var(--wb-radius); margin: 8px 0; font-size: 12.5px;
+}
+:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 1px; border-radius: 4px; }
+.wb-table-wrap { scrollbar-color: var(--wb-line) transparent; }
+#wb-left h3, .wb-panel h3, .wb-panel h4 { margin: 0 0 8px; font-size: 13px; }
+/* ---- IDE-style file tree ---- */
+#tree-root { font-size: 12.5px; outline: none; }
+.tree-row {
+  display: flex; align-items: center; gap: 4px; padding: 1px 4px 1px 2px; border-radius: 4px;
+  cursor: pointer; white-space: nowrap; user-select: none;
+}
+.tree-row:hover { background: #f0f3f7; }
+.tree-row.selected { background: #e4eefb; }
+.tree-row.focused { box-shadow: inset 0 0 0 1px var(--wb-accent); }
+.tree-row.dim { opacity: 0.45; }
+.tree-twisty { width: 12px; text-align: center; color: var(--wb-dim); font-size: 9px; flex: 0 0 12px; }
+.tree-icon { flex: 0 0 14px; text-align: center; }
+.tree-name { overflow: hidden; text-overflow: ellipsis; }
+.tree-size { margin-left: auto; color: var(--wb-dim); font-size: 10.5px; font-variant-numeric: tabular-nums; padding-left: 8px; }
+.tree-children { display: block; }
+.tree-dir { display: block; }
+.tree-file {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--wb-ink);
+  font: inherit;
+}
+.tree-file:hover { background: #eef2f7; }
+.tree-file.selected { background: #dce8f5; color: var(--wb-accent); font-weight: 600; }
+
+/* ---- left: the furniture library (drag source for the canvas) ---- */
+.wb-library-head { margin-bottom: 6px; }
+/* the palette is a scene-page tool (T13): other pages give the whole left pane to the tree */
+body:not([data-page="scene"]) .wb-library-head,
+body:not([data-page="scene"]) #library-root { display: none; }
+.wb-tree-head { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--wb-line); }
+#library-root {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px;
+  flex: 0 0 auto; max-height: 30vh; overflow: auto; padding: 2px;
+}
+.library-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  border: 1px solid var(--wb-line); border-radius: var(--wb-radius-sm);
+  background: var(--wb-panel); padding: 4px; cursor: grab; text-align: center;
+}
+.library-tile:hover { border-color: var(--wb-accent); }
+.library-tile:active { cursor: grabbing; }
+.library-tile img {
+  width: 100%; height: 44px; object-fit: contain; pointer-events: none;
+  background: var(--wb-stage-bg); border-radius: 4px;
+}
+.library-tile span {
+  font-size: 10.5px; color: var(--wb-dim); line-height: 1.2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+
+/* ---- center: the WORK AREA (page chips · page main view · the stage as dock) ---- */
+#wb-center {
+  min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 8px;
+  padding: 8px 10px 8px 0;
+}
+#wb-tabs {
+  flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  background: transparent; border-bottom: 1px solid var(--wb-line); padding: 0 0 6px;
+}
+#wb-tabs .wb-tab { display: none; }
+body[data-page="scene"] #wb-tabs [data-page="scene"],
+body[data-page="observe"] #wb-tabs [data-page="observe"],
+body[data-page="animation"] #wb-tabs [data-page="animation"],
+body[data-page="behaviour"] #wb-tabs [data-page="behaviour"],
+body[data-page="dialogue"] #wb-tabs [data-page="dialogue"],
+body[data-page="quality"] #wb-tabs [data-page="quality"] { display: inline-block; }
+/* T10: a page that owns MORE than one sub-view shows them as a segmented control, so the
+   chip row reads as "this page's views" instead of a strip of unrelated panels. The chips
+   keep their id/class/contract; only the grouping is new. (The chips inside stay
+   page-scoped by the [data-page] rules above, so the group follows them.) */
+#wb-tabs .wb-tab-group {
+  display: none; align-items: center; gap: 2px;
+  padding: 2px; border: 1px solid var(--wb-line); border-radius: var(--wb-radius-sm);
+  background: var(--wb-zebra);
+}
+body[data-page="quality"] #wb-tabs .wb-tab-group { display: flex; }
+.wb-tab-group-label { font-size: 11px; color: var(--wb-dim); padding: 0 6px 0 4px; white-space: nowrap; }
+.wb-tab-group .wb-tab { border-color: transparent; background: transparent; }
+.wb-tab-group .wb-tab[aria-pressed="true"] {
+  background: var(--wb-accent); border-color: var(--wb-accent); color: var(--wb-on-accent);
+}
+.wb-tab-group .wb-tab:hover:not([aria-pressed="true"]) { border-color: var(--wb-accent); color: var(--wb-accent); }
+#wb-mainview { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.wb-page { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.wb-page[hidden] { display: none; }
+.wb-page > .wb-panel { flex: 1 1 auto; min-height: 0; }
+/* canvas pages: the page container is empty and the stage takes the main view.
+   T11 removed 观测 from this rule: the observe page is no longer a canvas page — it owns
+   a work area (the employee table + the console) and keeps the stage as a live dock. */
+body[data-page="scene"] #wb-mainview { display: none; }
+/* the dock is a COLUMN: its own toolbar (T11), then the stage, then nothing else. A page
+   switch still only flips layout — the dock's node is never moved or reloaded. */
+#wb-dock { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* T11: the 观测 page's dock is the ENLARGED dock of the target design (§2.1: 运行坞放大视图).
+   The picture is what you watch while the table ticks, so it takes a real share of the
+   center — and it yields that share back when the problems strip or the console needs the
+   height, instead of crushing the table to a couple of rows. */
+/* 观测 page: the table takes the top, the picture keeps a REAL share of the work area. The
+   dock used to SHRINK under the table + an open problems strip until a fit clamped at the
+   15% floor — a "panorama" that showed nothing, which is the exact complaint this round
+   started from. Fixed basis instead of shrinkable; the table scrolls instead. */
+body[data-page="observe"] #wb-center #wb-dock { flex: 0 0 52vh; min-height: 320px; }
+
+/* ---- the problems strip ---- */
+#wb-problems {
+  flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0;
+  border: 1px solid var(--wb-line); border-radius: var(--wb-radius-sm); background: var(--wb-panel);
+}
+#wb-problems-head {
+  display: flex; align-items: center; gap: 8px; padding: 3px 8px; flex: 0 0 auto;
+}
+#wb-problems-head strong { font-size: 12px; }
+#btn-problems-toggle {
+  border: 0; background: none; color: var(--wb-dim); cursor: pointer; font: inherit; padding: 0 4px;
+}
+#btn-problems-toggle[aria-expanded="false"] { transform: rotate(-90deg); }
+#wb-problems-spacer { flex: 1 1 auto; }
+#wb-problems-body { overflow: auto; max-height: 26vh; padding: 0 8px 6px; }
+body.wb-problems-collapsed #wb-problems-body { display: none; }
+.wb-problem-group {
+  display: flex; align-items: baseline; gap: 8px; padding: 2px 4px; border-radius: 4px;
+  cursor: pointer; font-size: 12px;
+}
+.wb-problem-group:hover { background: var(--wb-hover); }
+.wb-problem-group .wb-problem-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.wb-problem-sev {
+  flex: 0 0 auto; border-radius: 999px; padding: 0 7px; font-size: 10.5px; border: 1px solid var(--wb-line);
+}
+.wb-problem-sev.red { color: var(--wb-bad); border-color: var(--wb-bad); }
+.wb-problem-sev.yellow { color: var(--wb-warn); border-color: var(--wb-warn); }
+.wb-problem-sev.note { color: var(--wb-dim); }
+.wb-problem-count { color: var(--wb-dim); }
+.wb-problem-source { color: var(--wb-dim); font-size: 11px; margin-left: auto; }
+.wb-problem-details { padding: 0 0 4px 22px; }
+.wb-problem-finding {
+  display: block; width: 100%; text-align: left; border: 0; background: none; cursor: pointer;
+  color: var(--wb-dim); font: inherit; font-size: 11.5px; padding: 1px 4px; border-radius: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wb-problem-finding:hover { background: var(--wb-hover); color: var(--wb-ink); }
+/* non-canvas pages: the stage becomes a DOCK — the SAME node, never removed or reloaded, so
+   the running simulation is never thrown away (that is why it stays in the DOM) */
+body:not([data-page="scene"]):not([data-page="observe"]) #wb-dock { flex: 0 0 26vh; min-height: 170px; }
+#stage {
+  flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column;
+  border: 1px solid var(--wb-line); border-radius: var(--wb-radius);
+  background: var(--wb-stage-bg); overflow: hidden;
+}
+#stage-toolbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 8px; background: var(--wb-panel); border-bottom: 1px solid var(--wb-line);
+}
+#stage-toolbar .wb-stage-group {
+  display: flex; align-items: center; gap: 4px; padding-right: 8px;
+  border-right: 1px solid var(--wb-line-soft);
+}
+#stage-toolbar .wb-stage-group:last-child { border-right: 0; padding-right: 0; }
+/* ---- T11: the DOCK's own toolbar — the ONE host for the playback controls ----
+   The canvas toolbar above answers "what do I do to the canvas"; this one answers "what is
+   the simulation doing" — 播放 / 单步 / 重开 / 倍速 and the live status line, exactly once
+   in the whole window (they used to sit on the canvas toolbar, which meant two toolbars
+   each carrying half of the run controls). It is dock chrome: visible on every page, in
+   every stage mode, because the dock itself is never removed. */
+.wb-dock-toolbar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px; flex-wrap: nowrap;
+  padding: 5px 8px; background: var(--wb-panel); border-bottom: 1px solid var(--wb-line);
+}
+.wb-dock-toolbar .wb-stage-group { display: flex; align-items: center; gap: 4px; }
+.wb-dock-toolbar .action-loop-label { display: flex; align-items: center; gap: 4px; color: var(--wb-dim); font-size: 12px; }
+/* gap #4: the same shape for the canvas toolbar's display switches (they moved here
+   from the inspector) */
+#stage-toolbar .action-loop-label { display: flex; align-items: center; gap: 4px; color: var(--wb-dim); font-size: 12px; cursor: pointer; }
+#dock-toolbar #preview-status {
+  flex: 1 1 auto; min-width: 0; color: var(--wb-ink); font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#stage-toolbar button, #stage-statusbar button, #dock-toolbar button {
+  padding: 3px 9px; border: 1px solid var(--wb-line); border-radius: 5px;
+  background: var(--wb-panel); color: var(--wb-ink); cursor: pointer; font: inherit; font-size: 12px;
+}
+#stage-toolbar button:hover, #dock-toolbar button:hover { border-color: var(--wb-accent); color: var(--wb-accent); }
+#stage-toolbar select, #dock-toolbar select { padding: 2px 4px; }
+.wb-stage-mode[aria-pressed="true"] {
+  background: var(--wb-accent); border-color: var(--wb-accent); color: var(--wb-on-accent); font-weight: 600;
+}
+#stage-zoom { min-width: 42px; text-align: center; font-variant-numeric: tabular-nums; }
+#stage-viewport {
+  position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; cursor: grab;
+  background-color: var(--wb-stage-bg);
+  background-image:
+    linear-gradient(to right, var(--wb-stage-grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--wb-stage-grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+#stage-viewport.wb-panning { cursor: grabbing; }
+#stage-viewport.wb-drop-active {
+  outline: 2px dashed var(--wb-accent); outline-offset: -6px; background-color: var(--wb-accent-soft);
+}
+#stage-world {
+  position: absolute; left: 0; top: 0; width: 1280px; height: 840px;
+  transform-origin: 0 0; transform: translate(0, 0) scale(1);
+}
+#stage-scene-layer { position: absolute; inset: 0; }
+#scene-canvas { display: block; width: 100%; height: 100%; }
+#preview-slot, #bench-slot { position: absolute; inset: 0; background: #ffffff; overflow: hidden; }
+#bench-frame { display: block; width: 100%; height: 100%; border: 0; background: #ffffff; }
+/* three layers, one coordinate space; the mode decides which one is live */
+#stage[data-mode="edit"] #bench-slot { display: none; }
+#stage[data-mode="run"] #bench-slot { display: none; }
+#stage[data-mode="bench"] #stage-scene-layer { display: none; }
+#stage[data-mode="bench"] #preview-slot { display: none; }
+#preview-frame { display: block; width: 100%; height: 100%; border: 0; background: #ffffff; }
+/* the mode decides which layer is live — one source of truth, no JS toggling */
+#stage[data-mode="edit"] #preview-slot { display: none; }
+#stage[data-mode="run"] #stage-scene-layer { display: none; }
+/* gap #3: the comparison layer. It is a fourth layer in the same world (so the
+   view transform carries it) and it answers to #stage[data-compare] the way the
+   other layers answer to #stage[data-mode]: the JS sets a flag, the CSS decides.
+   It only shows over the RUN picture — in edit mode the scene canvas draws its
+   own graph, and two graphs on one screen is noise, not comparison. */
+#stage-compare-layer {
+  position: absolute; inset: 0; pointer-events: none; display: none;
+}
+#stage[data-compare="on"][data-mode="run"] #stage-compare-layer { display: block; }
+#stage-compare-layer svg { display: block; width: 100%; height: 100%; }
+/* the three kinds of mark, all tokens: the DERIVED graph (accent), the
+   workstations (warn), the LIVE employees (ink, ringed so they read over any
+   furniture) — no wash over the product's own picture: comparison, not a
+   screenshot filter */
+.wb-compare-edge { stroke: var(--wb-accent); stroke-width: 2; opacity: 0.55; }
+.wb-compare-node { fill: var(--wb-accent); opacity: 0.8; }
+.wb-compare-station { fill: none; stroke: var(--wb-warn); stroke-width: 2; }
+.wb-compare-employee { fill: var(--wb-ink); stroke: var(--wb-on-accent); stroke-width: 1.5; }
+/* T11: the run group and the status line moved OUT of #stage into the dock's own toolbar
+   (#dock-toolbar), so these two edit-mode rules are gone: the playback controls and the
+   live status are dock chrome now, reachable from every page in every mode. */
+#stage[data-mode="run"] #stage-edit-group { display: none; }
+#stage[data-mode="bench"] #stage-edit-group { display: none; }
+/* gap #4: the display switches moved here from the inspector's 画布显示 block. They
+   draw on the EDIT layer only, so the group is edit-mode-only — in run/bench mode the
+   scene layer (and its walk points, obstacles and seats) is not on screen at all. */
+#stage[data-mode="run"] #stage-display-group { display: none; }
+#stage[data-mode="bench"] #stage-display-group { display: none; }
+#stage[data-mode="bench"] #canvas-status { display: none; }
+#stage[data-mode="run"] #canvas-status { display: none; }
+#stage-empty {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  text-align: center; pointer-events: none; max-width: 420px;
+  border: 1px dashed var(--wb-line); border-radius: var(--wb-radius);
+  padding: 16px 18px; background: var(--wb-panel); box-shadow: var(--wb-shadow);
+}
+#stage-empty[hidden] { display: none; }
+.wb-stage-empty-title { margin: 0 0 4px; font-weight: 600; }
+#stage-statusbar {
+  display: flex; align-items: center; gap: 10px; padding: 4px 8px; min-height: 26px;
+  background: var(--wb-panel); border-top: 1px solid var(--wb-line);
+  overflow: hidden; white-space: nowrap;
+}
+#stage-statusbar > span { overflow: hidden; text-overflow: ellipsis; }
+#stage-spacer { flex: 1 1 auto; }
+
+/* ---- right: inspector tabs ---- */
+#wb-right {
+  background: var(--wb-panel);
+  border-left: 1px solid var(--wb-line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+#wb-inspector-head {
+  display: flex; align-items: baseline; gap: 8px; padding: 8px 10px 0;
+}
+#inspector-tool { color: var(--wb-dim); font-size: 11.5px; }
+#inspector-empty { padding: 2px 12px; }
+body:not(.wb-inspector-empty) #inspector-empty { display: none; }
+/* (the chip strip lives in the work area now — see #wb-center above) */
+/* the page names come from the activity bar, so the group labels are gone */
+.wb-tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 2px 10px;
+  border: 1px solid var(--wb-line);
+  border-radius: 999px;
+  background: var(--wb-panel);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+.wb-tab[aria-pressed="true"] { background: var(--wb-accent); border-color: var(--wb-accent); color: var(--wb-on-accent); font-weight: 600; }
+.wb-tab:hover:not([aria-pressed="true"]) { border-color: var(--wb-accent); color: var(--wb-accent); }
+
+/* T10: the 质检 page's own bar. It sits above the four sub-views and stays put when a
+   chip is pressed, so ONE "run everything" action is always reachable — the page chrome,
+   not one panel's button. */
+.wb-qa-bar {
+  flex: 0 0 auto;
+  border: 1px solid var(--wb-line); border-radius: var(--wb-radius-sm);
+  background: var(--wb-panel); padding: 6px 10px;
+}
+.wb-qa-bar-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.wb-qa-bar-head h3 { margin: 0; font-size: 12.5px; }
+.wb-qa-bar .wb-hint { margin: 4px 0 0; }
+#qa-bar-spacer { flex: 1 1 auto; }
+#btn-qa-run-all {
+  padding: 3px 12px; border: 1px solid var(--wb-accent); border-radius: 5px;
+  background: var(--wb-accent); color: var(--wb-on-accent); cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 600;
+}
+#btn-qa-run-all:hover { opacity: 0.92; }
+#btn-qa-run-all[disabled] { opacity: 0.5; cursor: default; }
+#qa-run-status { font-variant-numeric: tabular-nums; }
+#qa-run-status.bad { color: var(--wb-bad); font-weight: 600; }
+#qa-run-status.ok { color: var(--wb-ok); font-weight: 600; }
+/* the ⋯ disclosure: the .dshpack controls stay in the DOM (ids unchanged), only the
+   reveal changes — the disclosure starts CLOSED. */
+.wb-more-btn {
+  padding: 2px 9px; border: 1px solid var(--wb-line); border-radius: 999px;
+  background: var(--wb-panel); color: var(--wb-dim); cursor: pointer; font: inherit; font-size: 13px;
+}
+.wb-more-btn:hover { border-color: var(--wb-accent); color: var(--wb-accent); }
+.wb-more-btn[aria-expanded="true"] { border-color: var(--wb-accent); color: var(--wb-accent); }
+#pack-more-box[hidden] { display: none; }
+#pack-more-body { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+
+.wb-panel { flex: 1 1 auto; overflow: auto; padding: 10px 12px; min-height: 0; }
+.wb-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+.wb-panel-head:first-child { margin-top: 0; }
+.wb-panel-head h3, .wb-panel-head h4 { margin: 0; }
+.wb-panel button {
+  padding: 4px 10px;
+  border: 1px solid var(--wb-line);
+  border-radius: 5px;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+}
+.wb-panel button:hover { border-color: var(--wb-accent); color: var(--wb-accent); }
+.wb-panel button[disabled] { opacity: 0.5; cursor: default; }
+
+.wb-summary { color: var(--wb-dim); font-size: 12px; margin: 6px 0; }
+.wb-hint { color: var(--wb-dim); font-size: 12px; }
+.wb-pre {
+  background: #f2f4f7;
+  border: 1px solid var(--wb-line);
+  border-radius: 5px;
+  padding: 8px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.wb-table-wrap { max-height: 320px; overflow: auto; border: 1px solid var(--wb-line); border-radius: 5px; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th, td { padding: 3px 7px; border-bottom: 1px solid #edf0f3; text-align: left; white-space: nowrap; }
+th { position: sticky; top: 0; background: #fafbfc; font-weight: 600; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+tr.red td { background: #fdecec; color: var(--wb-bad); font-weight: 600; }
+tr.green td.state { color: var(--wb-ok); font-weight: 600; }
+td.state { font-weight: 600; }
+td.state.ok { color: var(--wb-ok); }
+td.state.bad { color: var(--wb-bad); }
+
+/* selected-entry geometry block */
+.wb-entry { margin-top: 12px; border-top: 1px dashed var(--wb-line); padding-top: 8px; }
+.wb-entry .wb-kv { display: grid; grid-template-columns: 92px 1fr; gap: 2px 8px; font-size: 12px; }
+.wb-entry .wb-kv dt { color: var(--wb-dim); }
+.wb-entry .wb-kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+.wb-entry .bad { color: var(--wb-bad); font-weight: 600; }
+.wb-entry .ok { color: var(--wb-ok); }
+
+/* gallery */
+.gallery-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 2px 0; }
+.gallery-row .name { flex: 0 0 240px; font-variant-numeric: tabular-nums; }
+.gallery-row .delta { font-variant-numeric: tabular-nums; }
+.gallery-row.ok .delta { color: var(--wb-ok); }
+.gallery-row.bad .delta { color: var(--wb-bad); font-weight: 600; }
+/* ---- P1 asset passport panel (studio entry) ---- */
+.gallery-row.warn .delta { color: var(--wb-warn); font-weight: 600; }
+#passport-table td:first-child { font-variant-numeric: tabular-nums; }
+#passport-table tr.ok td:nth-child(2) { color: var(--wb-ok); }
+#passport-table tr.warn td:nth-child(2) { color: var(--wb-warn); font-weight: 600; }
+#passport-table tr.bad td:nth-child(2) { color: var(--wb-bad); font-weight: 600; }
+#pack-import-box { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+#pack-import-box input[type="text"] { flex: 1 1 180px; min-width: 140px; }
+/* ---- P2 scene panel (studio entry) ---- */
+#scene-table td:nth-child(1) { white-space: nowrap; }
+#scene-table tr.bad td:nth-child(1) { color: var(--wb-bad); font-weight: 600; }
+#scene-table tr.warn td:nth-child(1) { color: var(--wb-warn); font-weight: 600; }
+#scene-table td:nth-child(3) { font-size: 12px; }
+/* ---- scene canvas (UI #1) ---- */
+#scene-canvas-wrap { position: relative; width: 100%; aspect-ratio: 1280 / 840; background: #ffffff;
+  border: 1px solid var(--wb-line); overflow: hidden; }
+#scene-canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+#scene-canvas-overlay { position: absolute; inset: 0; pointer-events: none; }
+/* gap #5: the drag landing preview. It lives in the scene layer's overlay (the same
+   world coordinates as the canvas), so it pans and zooms with the picture. The art
+   is the furniture itself, on a soft accent wash so a light-coloured asset still
+   reads against the light scene — recognisable, clearly not placed. `bad` is the
+   validator's verdict: the drop would be refused. */
+#scene-drag-ghost {
+  position: absolute; pointer-events: none; opacity: 0.8;
+  background: var(--wb-accent-soft);
+  outline: 2px dashed var(--wb-accent); outline-offset: -2px;
+}
+#scene-drag-ghost[hidden] { display: none; }
+#scene-drag-ghost img { display: block; width: 100%; height: 100%; }
+#scene-drag-ghost.bad {
+  outline: 3px solid var(--wb-bad);
+  /* a token-derived wash (no new literal colour): the refusal is felt before it is read */
+  background: color-mix(in srgb, var(--wb-bad) 22%, transparent);
+  opacity: 0.9;
+}
+#canvas-selection { color: var(--wb-accent); font-variant-numeric: tabular-nums; }
+#canvas-status.bad { color: var(--wb-bad); font-weight: 600; }
+#canvas-status.warn { color: var(--wb-warn); }
+/* ---- the selected item's property panel (T6) ----
+   A compact form, not a second document: it takes only the height it needs and leaves the
+   scrolling to the scene check underneath it (two auto-sized panels in one flex column
+   would each grab half the inspector and neither would be usable). */
+#panel-item { flex: 0 0 auto; }
+#item-prop-meta { margin: 4px 0 6px; overflow-wrap: anywhere; }
+#item-prop-form { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 5px 8px; align-items: center; }
+.wb-prop-row { display: contents; }
+.wb-prop-row > span { color: var(--wb-dim); font-size: 12px; }
+#item-prop-form input {
+  font: inherit; font-size: 12px; padding: 2px 6px; width: 100%; min-width: 0;
+  border: 1px solid var(--wb-line); border-radius: var(--wb-radius-sm);
+  background: var(--wb-panel); color: var(--wb-ink);
+}
+#item-prop-form input:focus-visible { border-color: var(--wb-accent); }
+/* a value the transaction cannot carry: visibly inert, never a dead control */
+#item-prop-name { color: var(--wb-dim); background: var(--wb-zebra); }
+#item-prop-hidden { justify-self: start; width: auto; }
+#item-name-note { margin: 4px 0 0; }
+#item-prop-status { margin: 6px 0 0; }
+#item-prop-status.bad { color: var(--wb-bad); font-weight: 600; }
+/* ---- behaviour graph canvas (UI #2 · T8: a full-width graph editor) ----
+   The panel is a column so the canvas can take the height the work area gives it: the
+   canvas backing store follows the wrap (devicePixelRatio aware, see graphResizeCanvas in
+   workbench.js), so the wrap grows without stretching the drawing. */
+#graph-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+#graph-canvas-wrap {
+  position: relative; flex: 1 1 auto; min-height: 260px; margin: 6px 0;
+  background: var(--wb-panel); border: 1px solid var(--wb-line);
+  border-radius: var(--wb-radius-sm); overflow: hidden;
+}
+#graph-canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; display: block; }
+#graph-canvas-wrap.wb-panning #graph-canvas { cursor: grabbing; }
+#graph-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+#graph-zoom { min-width: 44px; text-align: center; color: var(--wb-dim); font-variant-numeric: tabular-nums; }
+#graph-status.bad { color: var(--wb-bad); font-weight: 600; }
+#graph-status.warn { color: var(--wb-warn); }
+/* the create step under the toolbar: type + id, nothing else — the fields are edited in
+   the inspector once the node exists */
+#graph-add-form { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 6px 0; padding: 6px 8px; border: 1px dashed var(--wb-line); border-radius: var(--wb-radius-sm); background: var(--wb-zebra); }
+#graph-add-form[hidden] { display: none; }
+.graph-add-row { display: flex; align-items: center; gap: 4px; color: var(--wb-dim); font-size: 12px; }
+.graph-add-row select, .graph-add-row input { font: inherit; font-size: 12px; padding: 2px 6px; border: 1px solid var(--wb-line); border-radius: var(--wb-radius-sm); background: var(--wb-panel); color: var(--wb-ink); }
+#graph-add-id { width: 130px; }
+/* the selected node's fields, in the INSPECTOR (T8): the same compact form the scene
+   page's property panel uses — generated per node type from the schema's field list. It
+   is the only panel this page owns, so it takes the column height (and its own scroll)
+   instead of leaving the inspector empty below it. */
+#panel-item-graph { flex: 1 1 auto; }
+#graph-node-meta { margin: 4px 0 6px; overflow-wrap: anywhere; }
+#graph-node-form { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 5px 8px; align-items: center; }
+#graph-node-form input, #graph-node-form select {
+  font: inherit; font-size: 12px; padding: 2px 6px; width: 100%; min-width: 0;
+  border: 1px solid var(--wb-line); border-radius: var(--wb-radius-sm);
+  background: var(--wb-panel); color: var(--wb-ink);
+}
+#graph-node-form input:focus-visible, #graph-node-form select:focus-visible { border-color: var(--wb-accent); }
+#graph-node-form input[type="checkbox"] { justify-self: start; width: auto; }
+#graph-node-status { margin: 6px 0 0; }
+#graph-node-status.bad { color: var(--wb-bad); font-weight: 600; }
+#graph-node-detail { max-height: 180px; overflow: auto; margin: 6px 0 0; }
+/* ---- splitters + command palette (P8) ---- */
+.wb-splitter {
+  position: fixed; top: 38px; bottom: 0; width: 6px; margin-left: -3px; cursor: col-resize;
+  background: transparent; z-index: 4;
+}
+.wb-splitter:hover, .wb-splitter:focus-visible { background: var(--wb-accent); opacity: 0.35; outline: none; }
+.wb-splitter[data-dragging="true"] { background: var(--wb-accent); opacity: 0.6; }
+body.wb-left-collapsed #wb-splitter-left, body.wb-right-collapsed #wb-splitter-right { display: none; }
+#wb-palette {
+  position: fixed; inset: 0; background: rgba(18, 26, 34, 0.35); z-index: 10;
+  display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh;
+}
+#wb-palette[hidden] { display: none; }
+#wb-palette-card {
+  width: min(560px, 92vw); background: var(--wb-panel); border: 1px solid var(--wb-line);
+  border-radius: 12px; box-shadow: var(--wb-shadow); overflow: hidden;
+}
+#wb-palette-input {
+  width: 100%; border: none; border-bottom: 1px solid var(--wb-line); padding: 12px 14px;
+  font: inherit; font-size: 14px; background: var(--wb-panel); color: var(--wb-ink);
+}
+#wb-palette-input:focus { outline: none; }
+#wb-palette-list { list-style: none; margin: 0; padding: 6px; max-height: 46vh; overflow: auto; }
+.wb-palette-item {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px; cursor: pointer;
+}
+.wb-palette-item[aria-selected="true"] { background: var(--wb-accent-soft); }
+.wb-palette-item .wb-palette-group { margin-left: auto; color: var(--wb-dim); font-size: 11px; }
+.wb-palette-item.disabled { opacity: 0.5; cursor: not-allowed; }
+#wb-palette-hint { margin: 0; padding: 8px 14px 10px; border-top: 1px solid var(--wb-line-soft); }
+#preview-telemetry { font-variant-numeric: tabular-nums; }
+
+/* ---- preview runner (P7) ---- */
+#preview-table { width: 100%; font-size: 12px; }
+#preview-table td { padding: 2px 4px; font-variant-numeric: tabular-nums; }
+#preview-status.bad { color: var(--wb-bad); font-weight: 600; }
+#preview-session, #preview-data { width: 130px; }
+#preview-data { flex: 1 1 auto; min-width: 120px; }
+#panel-preview .wb-panel-head { flex-wrap: wrap; }
+/* ---- T11: the 观测 page — a full-width employee table + a segmented console ----
+   The panel is the page's work area (#page-view-observe), not an inspector column, so it
+   is a column of its own: the table head, the TABLE (full width, its own scroll), the page
+   hint, then the console's four collapsed sections. */
+#preview-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+#preview-table-wrap {
+  flex: 1 1 auto; min-height: 84px; max-height: 46vh; overflow: auto;
+  border: 1px solid var(--wb-line); border-radius: var(--wb-radius-sm);
+}
+#preview-follow-status { font-variant-numeric: tabular-nums; }
+#preview-follow-status.bad { color: var(--wb-bad); }
+#btn-preview-unfollow[hidden] { display: none; }
+#btn-preview-unfollow {
+  padding: 2px 10px; border: 1px solid var(--wb-accent); border-radius: 999px;
+  background: var(--wb-panel); color: var(--wb-accent); cursor: pointer; font: inherit; font-size: 12px;
+}
+#btn-preview-unfollow:hover { background: var(--wb-accent); color: var(--wb-on-accent); }
+/* a row is a follow affordance (handover §6-5): hover says so, the followed row is marked */
+#preview-table tbody tr { cursor: pointer; }
+#preview-table tbody tr:hover td { background: var(--wb-hover); }
+#preview-table tbody tr.preview-row-followed td { background: var(--wb-accent-soft); }
+#preview-table tbody tr.preview-row-followed td:first-child { color: var(--wb-accent); font-weight: 600; }
+#preview-table tbody tr.preview-row-followed td:first-child::after { content: ' ◉'; color: var(--wb-accent); }
+/* the console's four jobs: 一键脚本 / 手动发送事件 / 遥测 / 诊断包, each behind its own
+   disclosure, all starting CLOSED, arranged in a grid so the closed state costs two rows
+   instead of four — the first screen stays the picture + the table. */
+#preview-console {
+  flex: 0 0 auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px; margin: 6px 0 0;
+}
+.wb-console-section {
+  min-width: 0; border: 1px solid var(--wb-line); border-radius: var(--wb-radius-sm);
+  background: var(--wb-panel);
+}
+.wb-console-head {
+  display: flex; align-items: center; gap: 6px; width: 100%; padding: 4px 8px;
+  border: 0; background: transparent; color: var(--wb-ink); cursor: pointer;
+  font: inherit; font-size: 12px; text-align: left;
+}
+.wb-console-head:hover { color: var(--wb-accent); }
+.wb-console-chevron { flex: 0 0 auto; color: var(--wb-dim); transition: transform 120ms ease; }
+.wb-console-head[aria-expanded="true"] { color: var(--wb-accent); }
+.wb-console-head[aria-expanded="true"] .wb-console-chevron { transform: rotate(90deg); color: var(--wb-accent); }
+.wb-console-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-console-body { padding: 4px 8px 8px; border-top: 1px solid var(--wb-line-soft); }
+.wb-console-body[hidden] { display: none; }
+.wb-console-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.wb-console-row .wb-pre { flex: 1 1 100%; }
+@media (max-width: 1180px) { #preview-console { grid-template-columns: minmax(0, 1fr); } }
+/* ---- dialogue corpus (P7 · T9: a full-width corpus editor) ----
+   The page is a column: the head, the status line, the add row and the 试说一句 row are
+   page chrome; the ROW in the middle is the topics rail (narrow) + the entry table (the
+   rest of the width). The entry editor lives in the inspector (#panel-item-dialogue) and
+   the bubble lives on the dock (#wb-dock) — both below. */
+#dialogue-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+#dialogue-columns { display: flex; gap: 8px; flex: 1 1 auto; min-height: 0; margin: 6px 0; }
+/* the rail: one topic per row, each carrying its entry count, the current one marked */
+#dialogue-topics {
+  flex: 0 0 152px; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  overflow: auto; padding: 3px; border: 1px solid var(--wb-line);
+  border-radius: var(--wb-radius-sm); background: var(--wb-zebra);
+}
+#dialogue-topics .dialogue-topic {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  border: 1px solid transparent; background: transparent; border-radius: var(--wb-radius-sm);
+  padding: 3px 7px; cursor: pointer; font: inherit; font-size: 12px; text-align: left; color: var(--wb-ink);
+}
+#dialogue-topics .dialogue-topic:hover { border-color: var(--wb-accent); color: var(--wb-accent); }
+#dialogue-topics .dialogue-topic[aria-pressed="true"] {
+  border-color: var(--wb-accent); color: var(--wb-accent);
+  background: var(--wb-accent-soft); font-weight: 600;
+}
+#dialogue-topics .dialogue-topic-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#dialogue-topics .dialogue-topic-count { color: var(--wb-dim); font-variant-numeric: tabular-nums; font-size: 11px; }
+#dialogue-topics .dialogue-topic[aria-pressed="true"] .dialogue-topic-count { color: var(--wb-accent); }
+/* the entry table takes the rest of the width, and scrolls on its own */
+#dialogue-entries-wrap {
+  flex: 1 1 auto; min-width: 0; overflow: auto;
+  border: 1px solid var(--wb-line); border-radius: var(--wb-radius-sm);
+}
+#dialogue-table { width: 100%; font-size: 12px; }
+#dialogue-table td { padding: 2px 4px; vertical-align: top; }
+#dialogue-table td.dialogue-condition { color: var(--wb-dim); }
+#dialogue-table tr.dialogue-source-character td:first-child::after { content: ' ·覆盖'; color: var(--wb-accent); font-size: 10px; }
+/* the row the inspector is editing: the table and the inspector can never disagree */
+#dialogue-table tr.dialogue-row-selected td { background: var(--wb-accent-soft); }
+#dialogue-table tr.dialogue-row-selected td:first-child { color: var(--wb-accent); font-weight: 600; }
+#dialogue-add { display: flex; gap: 6px; margin: 6px 0; }
+#dialogue-add input[type="text"] { flex: 1 1 auto; }
+#dialogue-add input[type="number"] { width: 64px; }
+/* the CSV import is a bulk operation: it waits behind a ⋯ that starts CLOSED (the same
+   disclosure shape the 质检 page's .dshpack controls use) */
+#dialogue-csv-box { display: flex; align-items: flex-end; gap: 6px; margin: 6px 0; }
+#dialogue-csv-box[hidden] { display: none; }
+#dialogue-csv { flex: 1 1 auto; min-width: 0; font: 11.5px/1.4 ui-monospace, monospace; }
+#dialogue-status.bad { color: var(--wb-bad); font-weight: 600; }
+#dialogue-status.warn { color: var(--wb-warn); }
+/* the selected line's editor, in the INSPECTOR: the same compact form the graph node
+   editor uses. It is the only panel this page owns, so it takes the column height. */
+#panel-item-dialogue { flex: 1 1 auto; }
+#dialogue-item-meta { margin: 4px 0 6px; overflow-wrap: anywhere; }
+#dialogue-item-form { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 5px 8px; align-items: center; }
+#dialogue-item-form textarea, #dialogue-item-form input {
+  font: inherit; font-size: 12px; padding: 2px 6px; width: 100%; min-width: 0;
+  border: 1px solid var(--wb-line); border-radius: var(--wb-radius-sm);
+  background: var(--wb-panel); color: var(--wb-ink); resize: vertical;
+}
+#dialogue-item-form textarea:focus-visible, #dialogue-item-form input:focus-visible { border-color: var(--wb-accent); }
+/* the id is read-only here: changing an id is creating a line, not editing one */
+#dialogue-item-id { color: var(--wb-dim); background: var(--wb-zebra); }
+#dialogue-item-status { margin: 6px 0 0; }
+#dialogue-item-status.bad { color: var(--wb-bad); font-weight: 600; }
+/* 试说一句's bubble: an overlay ON the runtime dock, where the characters are on screen.
+   The dock is the positioning context; the bubble hangs off its lower edge and hides
+   itself after the corpus's own limits.bubbleMs (workbench.js). It never reaches into the
+   dock's office frame — it is one node in the dock, above the stage. */
+#wb-dock { position: relative; border-radius: var(--wb-radius); }
+#wb-dock.wb-bubble-speaking { outline: 2px solid var(--wb-accent); outline-offset: -2px; }
+.wb-bubble-overlay {
+  position: absolute; left: 10px; right: 10px; bottom: 30px; z-index: 2;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  pointer-events: none; max-width: min(560px, 92%);
+}
+.wb-bubble-overlay[hidden] { display: none; }
+.wb-bubble-who {
+  font-size: 10.5px; font-weight: 600; color: var(--wb-on-accent); background: var(--wb-accent);
+  border-radius: 999px; padding: 0 8px; line-height: 16px;
+}
+.wb-bubble-line {
+  border-left: 3px solid var(--wb-accent); border-radius: 0 var(--wb-radius-sm) var(--wb-radius-sm) 0;
+  background: var(--wb-panel); color: var(--wb-ink); font-size: 13px; font-weight: 600;
+  padding: 4px 10px; box-shadow: var(--wb-shadow);
+}
+.wb-bubble-meta {
+  font-size: 10.5px; color: var(--wb-dim); background: var(--wb-panel);
+  border: 1px solid var(--wb-line); border-radius: 999px; padding: 0 8px;
+}
+/* ---- timeline (UI #3, T7: ONE timeline for the whole 动作 page) ---- */
+/* The block is 动作-PAGE chrome: it sits above #panel-actions and #panel-bench, so both
+   sub-views share this one node and the frame axis is never duplicated. */
+#page-view-animation > .wb-timeline-block,
+#page-view-animation > .wb-danger-zone { flex: 0 0 auto; }
+.wb-timeline-block {
+  border: 1px solid var(--wb-line); border-radius: var(--wb-radius-sm);
+  background: var(--wb-panel); padding: 6px 10px 8px;
+}
+#timeline-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 4px 0 2px; }
+#timeline-toolbar .action-loop-label { display: flex; align-items: center; gap: 4px; color: var(--wb-dim); font-size: 12px; }
+.timeline-spacer { flex: 1 1 auto; }
+.timeline-frame-label { color: var(--wb-dim); font-size: 12px; }
+#timeline-frame-duration {
+  width: 88px; padding: 2px 4px; border: 1px solid var(--wb-line); border-radius: 4px;
+  font: inherit; font-size: 12px; color: var(--wb-ink); background: var(--wb-panel);
+}
+#timeline-frame-duration:disabled { color: var(--wb-dim); background: var(--wb-zebra); }
+#timeline-frame-name { font-variant-numeric: tabular-nums; }
+#timeline-inserts { position: relative; height: 14px; }
+.timeline-insert {
+  position: absolute; bottom: 0; transform: translateX(-9px);
+  min-width: 18px; padding: 0 3px; border: 1px dashed var(--wb-line); border-radius: 9px;
+  background: var(--wb-panel); color: var(--wb-dim); font-size: 10px; line-height: 12px; cursor: pointer;
+}
+.timeline-insert:hover { color: var(--wb-accent); border-color: var(--wb-accent); }
+#bench-timeline { position: relative; height: 56px; margin: 4px 0 2px; background: var(--wb-zebra);
+  border: 1px solid var(--wb-line); border-radius: 6px; overflow: hidden; cursor: ew-resize; outline: none; }
+#bench-timeline:focus-visible { box-shadow: inset 0 0 0 2px var(--wb-accent); }
+#timeline-track { position: absolute; inset: 0; display: flex; }
+.timeline-segment { position: relative; border-right: 1px solid var(--wb-line); min-width: 2px; cursor: grab; }
+.timeline-segment:last-child { border-right: none; }
+.timeline-segment.current { background: var(--wb-accent-soft); }
+/* the selected frame is the one ←/→ reorders and the duration input writes */
+.timeline-segment.selected { box-shadow: inset 0 0 0 2px var(--wb-accent); }
+.timeline-segment.drag-over { border-color: var(--wb-accent); border-style: dashed; }
+.timeline-segment .timeline-frame-label { position: absolute; top: 3px; left: 4px; font-size: 10px; color: var(--wb-dim); font-variant-numeric: tabular-nums; }
+.timeline-event { position: absolute; top: 22px; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 9px solid var(--wb-accent); transform: translateX(-5px); }
+.timeline-event span { position: absolute; top: 10px; left: -18px; font-size: 9.5px; color: var(--wb-accent); white-space: nowrap; }
+.timeline-note { position: absolute; bottom: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-bad); transform: translateX(-3px); }
+.timeline-note.praise { background: var(--wb-ok); }
+.timeline-note.fix { background: var(--wb-bad); }
+#timeline-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--wb-accent); pointer-events: none; }
+#timeline-hint { margin: 4px 0 0; }
+
+/* ---- the DANGER ZONE (T7): writes to production are marked and double-clicked ---- */
+.wb-danger-zone {
+  border: 1px solid var(--wb-bad); border-radius: var(--wb-radius-sm);
+  background: var(--wb-panel); padding: 6px 10px 8px; margin-top: 4px;
+}
+.wb-danger-zone .wb-panel-head { margin-top: 0; }
+.wb-danger-zone .wb-panel-head h4 { color: var(--wb-bad); }
+#danger-buttons { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+#danger-buttons button {
+  padding: 4px 12px; border: 1px solid var(--wb-bad); border-radius: 5px;
+  background: var(--wb-panel); color: var(--wb-bad); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+#danger-buttons button:hover { border-color: var(--wb-bad); color: var(--wb-on-accent); background: var(--wb-bad); }
+/* armed = the first click landed: the second one performs the write */
+#danger-buttons button.armed { background: var(--wb-bad); color: var(--wb-on-accent); }
+#danger-buttons button[disabled] { opacity: 0.5; cursor: default; }
+/* ---- P3 review bench (studio entry) ---- */
+#bench-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.bench-frame.current { border-color: var(--wb-accent); box-shadow: 0 0 0 2px #e4eefb; }
+#bench-strip { display: flex; gap: 6px; overflow-x: auto; padding: 6px 0 10px; }
+.bench-frame { position: relative; flex: 0 0 auto; width: 88px; border: 1px solid var(--wb-line); background: repeating-conic-gradient(#f0f2f5 0% 25%, #ffffff 0% 50%) 50% / 12px 12px; }
+.bench-frame img { display: block; width: 88px; height: 88px; object-fit: contain; }
+.bench-frame.bad { border-color: var(--wb-bad); }
+.bench-frame .bench-ghost { position: absolute; inset: 0; opacity: 0.35; }
+.bench-frame .bench-ghost + img { position: relative; }
+.bench-foot { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed var(--wb-accent); }
+.bench-marker { position: absolute; width: 7px; height: 7px; margin-left: -3px; border-radius: 50%; }
+.bench-marker.bench-centroid { background: var(--wb-bad); opacity: 0.85; }
+.bench-marker.bench-median { background: var(--wb-ok); opacity: 0.85; border-radius: 1px; }
+.bench-frame figcaption { font-size: 10px; color: var(--wb-dim); text-align: center; padding: 2px 0; font-variant-numeric: tabular-nums; }
+#bench-note-form { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+#bench-note-form input[type="number"] { width: 64px; }
+#bench-note-form input[type="text"] { flex: 1 1 200px; }
+#bench-notes .gallery-row .name { flex: 0 0 150px; }
+
+#passport-ledger .wb-panel-head { margin-top: 8px; }
+#gallery-files { margin-top: 8px; font-size: 11px; color: var(--wb-dim); }
+#gallery-files img { display: block; max-width: 100%; margin: 4px 0; border: 1px solid var(--wb-line); }
+
+/* ---- M1 action editor ---- */
+#action-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+#action-toolbar .action-loop-label { display: flex; align-items: center; gap: 4px; color: var(--wb-dim); font-size: 12px; }
+#action-playback { color: var(--wb-accent); font-size: 12px; font-variant-numeric: tabular-nums; }
+/* the frame cards' list (#action-timeline) is gone (T7): the page's single timeline above
+   edits AND scrubs, so the duplicate axis and its styles are not carried over. */
+
+#action-import { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+#action-import input[type="text"] {
+  flex: 1 1 180px;
+  padding: 4px 6px;
+  border: 1px solid var(--wb-line);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 12px;
+}
+#action-import-result { margin-top: 6px; }
+#action-import-result img { max-width: 160px; max-height: 160px; border: 1px solid var(--wb-line); background: #fff; }
+#action-import-result .import-row { display: flex; gap: 10px; align-items: flex-start; }
+#action-import-result .import-kv { display: grid; grid-template-columns: 110px 1fr; gap: 1px 8px; font-size: 12px; }
+#action-import-result .import-kv dt { color: var(--wb-dim); }
+#action-import-result .import-kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+#action-import-result .bad { color: var(--wb-bad); font-weight: 600; }
+#action-import-result .ok { color: var(--wb-ok); font-weight: 600; }
+#action-new-form { display: flex; gap: 6px; margin: 6px 0; align-items: center; }
+#action-new-form input[type="text"] {
+  flex: 1 1 200px;
+  padding: 4px 6px;
+  border: 1px solid var(--wb-line);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 12px;
+}
+#action-new-form select { padding: 3px 6px; border: 1px solid var(--wb-line); border-radius: 5px; font: inherit; }
+
+/* ---- R5: the generation page's pipeline panel --------------------------------
+   One workspace: a compact form, the stage table, the cache view, the QC report,
+   the run log and the triage queue. Every colour here is an existing token
+   (ok/warn/bad are already contrast-checked as text on --wb-panel), and every
+   row is a native button — the whole panel is keyboard-reachable by construction. */
+#pipeline-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 6px 10px;
+  align-items: end;
+  margin: 6px 0;
+}
+#pipeline-form .pipeline-field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--wb-dim); }
+#pipeline-form .pipeline-field > span { white-space: nowrap; }
+#pipeline-form input[type="text"], #pipeline-form select {
+  padding: 4px 6px;
+  border: 1px solid var(--wb-line);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 12px;
+  background: var(--wb-panel);
+  color: var(--wb-ink);
+}
+#pipeline-form .pipeline-checks { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 12px; }
+#pipeline-form .pipeline-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+#pipeline-stages-table td:nth-child(3) { font-weight: 600; white-space: nowrap; }
+#pipeline-stages-table tr.ok td:nth-child(3) { color: var(--wb-ok); }
+#pipeline-stages-table tr.warn td:nth-child(3) { color: var(--wb-warn); }
+#pipeline-stages-table tr.bad td:nth-child(3) { color: var(--wb-bad); }
+#pipeline-stages-table tr.pipeline-off td { color: var(--wb-dim); }
+#pipeline-stages-table tr.selected td { background: var(--wb-accent-soft); }
+#pipeline-stages-table td:nth-child(5) { white-space: normal; max-width: 420px; }
+#pipeline-cache-rows, #pipeline-qc-findings, #pipeline-triage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+.pipeline-cache-row, .pipeline-finding, .pipeline-triage-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  white-space: pre-line;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 5px 8px;
+}
+.pipeline-cache-row.ok, .pipeline-finding.ok { color: var(--wb-ok); }
+.pipeline-cache-row.warn, .pipeline-finding.warn { color: var(--wb-warn); }
+.pipeline-cache-row.bad, .pipeline-finding.bad { color: var(--wb-bad); font-weight: 600; }
+.pipeline-finding .pipeline-fix { display: block; font-weight: 400; color: var(--wb-dim); }
+.pipeline-triage-row.ok { color: var(--wb-ok); }
+.pipeline-triage-row.bad { color: var(--wb-bad); }
+.pipeline-triage-row.selected { border-color: var(--wb-accent); background: var(--wb-accent-soft); }
+#pipeline-triage-detail { border-top: 1px dashed var(--wb-line); padding-top: 8px; margin-top: 4px; }
+#pipeline-triage-detail .pipeline-field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--wb-dim); margin: 6px 0; }
+#pipeline-triage-note {
+  padding: 4px 6px;
+  border: 1px solid var(--wb-line);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 12px;
+  resize: vertical;
+}

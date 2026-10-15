@@ -1,7 +1,8 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "sleeping",
   "loop": false,
+  "pingPong": false,
   "direction": "none",
   "frames": [
     {
@@ -12,5 +13,7 @@
   "geometry": {
     "footLine": 296,
     "tolerancePx": 1
-  }
+  },
+  "tags": [],
+  "events": []
 }

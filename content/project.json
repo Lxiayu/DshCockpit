@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "whale-office",
+  "label": "鲸鱼娘办公室",
+  "kind": "scene-authoring",
+  "createdAt": "2026-09-27T00:00:00.000Z",
+  "layout": {
+    "characters": [
+      { "id": "whale-girl", "path": "characters/whale-girl" }
+    ],
+    "scenes": [
+      { "id": "flat", "path": "scenes/flat" }
+    ],
+    "graphs": [],
+    "dialogues": [
+      "shared/dialogue",
+      "characters/whale-girl/dialogue"
+    ],
+    "provenance": [
+      "characters/whale-girl/provenance"
+    ]
+  }
+}

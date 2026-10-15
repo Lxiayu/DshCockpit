@@ -16,6 +16,14 @@ ANALYSIS-REPORT.md
 .office-editor-data/
 .workbench-data/
 content/build/
+# Office Studio（2026-10-15 工作台合并）：studio/ 自己的用户目录、内容寻址
+# 缓存与可再生产物；.mimosa/ 是本机代理运行状态。均不入库。
+.studio-data/
+.studio-cache/
+studio/build/
+studio/content/
+content/incoming/
+.mimosa/
 # 注：docs/ 在本仓库整体忽略（既有约定）；office 测试实际读取的
 # docs/specs|research|superpowers 少数文件用 git add -f 强制纳入，
 # 与 docs/compat/** 的处理方式一致。

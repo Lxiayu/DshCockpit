@@ -6,6 +6,7 @@
   "runtimeVersion": "0.1.5-rc.2",
   "scripts": {
     "start": "electron .",
+    "office:workbench": "electron scripts/office-workbench.js",
     "build": "node scripts/build.js --publish never",
     "build:win": "node scripts/build.js --win --publish never",
     "build:win:dir": "node scripts/build.js --win dir --publish never",

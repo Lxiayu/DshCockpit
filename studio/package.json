@@ -1,0 +1,16 @@
+{
+  "name": "dsh-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DshCockpit authoring studio — one image + a prompt to a usable asset set, with provenance, QC and a preview runner. Reuses the workbench kernel in ../src/workbench/** and the product runtime read-only.",
+  "main": "main.js",
+  "scripts": {
+    "studio": "node ../node_modules/electron/cli.js .",
+    "test": "node --test test/*.test.js",
+    "test:unit": "node --test test/studio-services.test.js test/boundary.test.js",
+    "boot-check": "node --test test/studio-startup.test.js",
+    "provenance": "node bin/provenance.js"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

@@ -1,7 +1,8 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "walk-up",
   "loop": true,
+  "pingPong": false,
   "direction": "up",
   "frames": [
     {
@@ -64,5 +65,9 @@
   "geometry": {
     "footLine": 296,
     "tolerancePx": 1
-  }
+  },
+  "tags": [
+    "walk"
+  ],
+  "events": []
 }

@@ -52,13 +52,15 @@ test('report working-back: the 2026-09-22 publish chain ends in this repo', () =
   assert.equal(latest.backupExistsInRepo, true, 'the newest backup lives in content/build/backups here');
 });
 
-test('chain honesty: generation/publish tools are marked traceable-in-history, not fabricated', () => {
+test('chain honesty: generation tools are marked traceable-in-history, not fabricated', () => {
   const r = provenance.reportAction('walk-up', animations, anchors);
   const byStep = Object.fromEntries(r.chain.map((s) => [s.step, s]));
   assert.equal(byStep['2 抠像'].status, 'traceable', 'remove-bg.py is in the main repo');
   assert.equal(byStep['3 归一化'].status, 'traceable', 'normalize-character.py is in the main repo');
   assert.equal(byStep['1 生成'].status, 'traceable-in-history', 'gen-frames.js left the repo (P5-2); git-verified recoverable');
-  assert.equal(byStep['4 发布'].status, 'traceable-in-history', 'action-publisher.js left the repo (P5); git-verified recoverable');
+  // 2026-10-15 工作台合并：action-publisher.js 随 src/workbench/** 回到主仓，
+  // 在盘状态即 traceable（git 历史 2041757^ 降级为兜底）；gen-* 生成工具仍未回归。
+  assert.equal(byStep['4 发布'].status, 'traceable', 'action-publisher.js is back on disk (workbench merge); git history stays the fallback');
   // the per-asset generation parameters were NEVER recorded — say so, every time
   assert.match(byStep['1 生成'].gap, /未随资产记录/);
 });

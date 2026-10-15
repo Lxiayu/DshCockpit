@@ -47,6 +47,9 @@ const INDEX_OUT = path.join(ROOT, 'docs', 'strategy', '2026-09-26-asset-provenan
 // （p5 夹具/工具边清理）。s1 仓 /Users/xia/program/dsh/DshCockpit-s1 为只读
 // 参照，本 CLI 绝不写它。
 // ---------------------------------------------------------------------------
+// 2026-10-15 工作台合并：src/workbench/lib/action-publisher.js（P5 删除，
+// deletedIn 2041757）随 src/workbench/** 回归主仓，不再是"丢失工具"——
+// toolChainStatus 现在实测在盘（traceable），2041757^ 仅作 git 兜底。
 const LOST_TOOLS = [
   {
     tool: 'scripts/gen-img.js',
@@ -75,13 +78,6 @@ const LOST_TOOLS = [
     affected: ['anchors-only 的一代行走帧（若重新启用）'],
     deletedIn: 'ebf8e59',
     recoverFrom: ['git show 44ed956:scripts/apply-walk-sequence.js', '/Users/xia/program/dsh/DshCockpit-s1/scripts/apply-walk-sequence.js（只读）'],
-  },
-  {
-    tool: 'src/workbench/lib/action-publisher.js',
-    role: '发布（publishAction：全仓唯一允许写生产字节的路径；写 provenance 台账 + backup）',
-    affected: ['content → pack 的发布同步（全部动作）'],
-    deletedIn: '2041757',
-    recoverFrom: ['git show 2041757^:src/workbench/lib/action-publisher.js', '/Users/xia/program/dsh/DshCockpit-s1/src/workbench/lib/（只读）'],
   },
   {
     tool: 'scripts/office-assets/validate-character-pack.js',

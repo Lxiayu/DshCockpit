@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Office Workbench</title>
+  <link rel="stylesheet" href="./workbench.css" />
+</head>
+<body data-page="scene">
+  <header id="wb-topbar">
+    <button type="button" id="btn-toggle-left" class="wb-rail-btn" aria-expanded="true" title="收起/展开左栏（⌘/Ctrl+B）" aria-controls="wb-left" data-i18n-title="btn.toggleLeft">◧</button>
+    <strong id="wb-title" data-i18n="app.title">虚拟场景工作台</strong>
+    <span id="wb-status" aria-live="polite"></span>
+    <!-- gap #1: the history's own controls. Disabled is the honest state (there is
+         nothing to undo yet), and the tooltip names the step each button would
+         perform — both are set by refreshHistoryUi() from the stack itself. -->
+    <span id="wb-history" role="group" aria-label="编辑历史" data-i18n-aria-label="history.groupAria">
+      <button type="button" id="btn-history-undo" class="wb-rail-btn" disabled>↶</button>
+      <button type="button" id="btn-history-redo" class="wb-rail-btn" disabled>↷</button>
+    </span>
+    <span id="wb-topbar-spacer"></span>
+    <button type="button" id="btn-lang" class="wb-rail-btn" title="语言 / Language" aria-label="语言" data-i18n-title="btn.language" data-i18n-aria-label="btn.language">中</button>
+    <button type="button" id="btn-theme" class="wb-rail-btn" title="主题：跟随系统 / 浅色 / 深色" data-i18n-title="btn.themeTitle">◐</button>
+    <button type="button" id="btn-toggle-right" class="wb-rail-btn" aria-expanded="true" title="收起/展开右栏（⌘/Ctrl+J）" aria-controls="wb-right" data-i18n-title="btn.toggleRight">◨</button>
+  </header>
+  <main id="wb-columns">
+    <nav id="wb-activitybar" aria-label="制作任务" data-i18n-aria-label="shell.activityBar">
+      <!-- Six tasks, one page each. A page OWNS the work area: the canvas pages give it to
+           the stage, the others show their own table/timeline/canvas full width and get the
+           stage as a live dock. Nothing is removed from the DOM, so switching pages can
+           never reload — or lose — the running simulation. -->
+      <button type="button" id="page-scene" class="wb-page-btn" data-page="scene" aria-pressed="true" title="场景：摆布局（画布为主视图）"><span class="wb-page-icon">▣</span><span class="wb-page-label" data-i18n="page.scene">场景</span></button>
+      <button type="button" id="page-animation" class="wb-page-btn" data-page="animation" aria-pressed="false" title="动作：帧序与逐帧检查"><span class="wb-page-icon">▤</span><span class="wb-page-label" data-i18n="page.animation">动作</span></button>
+      <button type="button" id="page-behaviour" class="wb-page-btn" data-page="behaviour" aria-pressed="false" title="行为：行为图画布"><span class="wb-page-icon">⌥</span><span class="wb-page-label" data-i18n="page.behaviour">行为</span></button>
+      <button type="button" id="page-dialogue" class="wb-page-btn" data-page="dialogue" aria-pressed="false" title="语料：对话文案"><span class="wb-page-icon">❝</span><span class="wb-page-label" data-i18n="page.dialogue">语料</span></button>
+      <button type="button" id="page-generation" class="wb-page-btn" data-page="generation" aria-pressed="false" title="生成：流水线 S0–S8（计划/执行/缓存/QC/分诊）"><span class="wb-page-icon">⌺</span><span class="wb-page-label" data-i18n="page.generation">生成</span></button>
+      <button type="button" id="page-quality" class="wb-page-btn" data-page="quality" aria-pressed="false" title="质检：校验报告与基线"><span class="wb-page-icon">✓</span><span class="wb-page-label" data-i18n="page.quality">质检</span></button>
+      <button type="button" id="page-observe" class="wb-page-btn" data-page="observe" aria-pressed="false" title="观测：仿真观测（运行坞画面 + 全宽员工表）"><span class="wb-page-icon">◉</span><span class="wb-page-label" data-i18n="page.observe">观测</span></button>
+    </nav>
+    <aside id="wb-left" aria-label="内容资源树" data-i18n-aria-label="shell.leftPane">
+      <!-- the drag palette first: this is what you pull onto the canvas -->
+      <div class="wb-pane-head wb-library-head">
+        <span class="wb-pane-title" data-i18n="pane.library">素材库</span>
+        <span class="wb-pane-sub" id="library-summary"></span>
+      </div>
+      <div id="library-root" role="list" aria-label="素材库（生产只读，拖到画布上放进布局）" data-i18n-aria-label="library.aria"><p class="wb-hint" data-i18n="status.loading">载入中…</p></div>
+      <div class="wb-pane-head wb-tree-head">
+        <span class="wb-pane-title" data-i18n="pane.content">内容工程</span>
+        <span class="wb-pane-sub" id="tree-summary"></span>
+      </div>
+      <div id="tree-toolbar">
+        <input type="text" id="tree-filter" data-i18n-placeholder="pane.tree.filter" data-i18n-aria-label="pane.tree.filter" placeholder="过滤文件…" aria-label="过滤文件" />
+        <button type="button" id="btn-tree-collapse" title="全部折叠" data-i18n-title="pane.tree.collapseAll">⊟</button>
+        <button type="button" id="btn-tree-expand" title="全部展开" data-i18n-title="pane.tree.expandAll">⊞</button>
+      </div>
+      <div id="tree-root" role="tree" tabindex="0" aria-label="文件树" title="↑↓ 移动 · →/← 展开收起 · Enter 选中 · 把文件拖到画布上" data-i18n-aria-label="shell.fileTreeAria" data-i18n-title="shell.treeTitle"><p class="wb-hint" data-i18n="status.loading">载入中…</p></div>
+
+    </aside>
+    <section id="wb-center" aria-label="工作区" data-i18n-aria-label="shell.workArea">
+      <nav id="wb-tabs" role="tablist" aria-label="当前页面的子视图" data-i18n-aria-label="shell.tablist">
+        <button type="button" id="tab-scene" class="wb-tab" data-page="scene" aria-pressed="false" data-i18n="tab.scene">场景</button>
+        <button type="button" id="tab-preview" class="wb-tab" data-page="observe" aria-pressed="false" data-i18n="tab.preview">运行</button>
+        <button type="button" id="tab-actions" class="wb-tab" data-page="animation" aria-pressed="false" data-i18n="tab.actions">动作</button>
+        <button type="button" id="tab-bench" class="wb-tab" data-page="animation" aria-pressed="false" data-i18n="tab.bench">动作检查</button>
+        <button type="button" id="tab-graph" class="wb-tab" data-page="behaviour" aria-pressed="false" data-i18n="tab.graph">行为图</button>
+        <button type="button" id="tab-dialogue" class="wb-tab" data-page="dialogue" aria-pressed="false" data-i18n="tab.dialogue">对话文案</button>
+        <!-- R5: the generation page's ONE sub-view. The pipeline panel drives the real
+             engine (plan / run / cache / QC / triage) — the same chain bin/pipeline.js
+             runs, through the studio:* services, never a re-implementation. -->
+        <button type="button" id="tab-pipeline" class="wb-tab" data-page="generation" aria-pressed="false" data-i18n="tab.pipeline">流水线</button>
+        <!-- T10: the 质检 page's four read-only reports are ONE page's sub-views, so its
+             four chips are wrapped in a segmented control (the same ids, the same class —
+             only their grouping changes). A page chips its own sub-views; nothing is
+             duplicated and no id is renamed. -->
+        <div class="wb-tab-group" role="group" aria-label="质检（四份只读报告）" data-i18n-aria-label="tabgroup.reports.aria">
+          <span class="wb-tab-group-label" data-i18n="group.reports">报告</span>
+          <button type="button" id="tab-assets" class="wb-tab" data-page="quality" aria-pressed="false" data-i18n="tab.assets">素材校验</button>
+          <button type="button" id="tab-geometry" class="wb-tab" data-page="quality" aria-pressed="false" data-i18n="tab.geometry">几何报表</button>
+          <button type="button" id="tab-gallery" class="wb-tab" data-page="quality" aria-pressed="false" data-i18n="tab.gallery">视觉基线</button>
+          <button type="button" id="tab-passport" class="wb-tab" data-page="quality" aria-pressed="false" data-i18n="tab.passport">素材溯源</button>
+        </div>
+      </nav>
+      <div id="wb-mainview">
+        <div id="page-view-scene" class="wb-page" data-page-view="scene"></div>
+        <div id="page-view-animation" class="wb-page" data-page-view="animation" hidden>
+          <!-- T7: the 动作 page is ONE page with ONE timeline. #panel-actions (编辑器) and
+               #panel-bench (检查) are two sub-views of it, so the timeline, its controls
+               and the danger zone are PAGE chrome: switching chips keeps this one node, and
+               the frame axis is never duplicated. The old #action-timeline frame-card list
+               rendered the SAME frames a second time and is gone — the single timeline
+               below edits AND scrubs. -->
+          <section id="action-timeline-block" class="wb-timeline-block" aria-label="动作时间轴（页内唯一）" data-i18n-aria-label="timeline.block.aria">
+            <div class="wb-panel-head">
+              <h4 data-i18n="head.timeline">时间轴（每格宽度＝该帧时长 · 拖拽或 ←/→ 调序 · 帧序＝数组顺序）</h4>
+              <span id="timeline-action" class="wb-note"></span>
+            </div>
+            <div id="timeline-toolbar">
+              <button type="button" id="btn-timeline-play" data-i18n="btn.timelinePlay" title="播放/暂停（空格）" data-i18n-title="timeline.playTitle">▶ 播放</button>
+              <button type="button" id="btn-timeline-step" data-i18n="btn.timelineStep">⏭ 下一帧</button>
+              <button type="button" id="btn-timeline-reset" data-i18n="btn.timelineReset">⏮ 回到 0</button>
+              <label class="action-loop-label"><span data-i18n="btn.timelineSpeed">速度</span>
+                <select id="timeline-speed" aria-label="播放速度" data-i18n-aria-label="timeline.speedAria">
+                  <option value="0.5">0.5×</option>
+                  <option value="1" selected>1×</option>
+                  <option value="2">2×</option>
+                </select>
+              </label>
+              <span id="timeline-readout" class="wb-note">—</span>
+              <span class="timeline-spacer"></span>
+              <label class="timeline-frame-label" for="timeline-frame-duration" data-i18n="timeline.duration">选中帧时长（ms，留空＝包默认）</label>
+              <input type="number" id="timeline-frame-duration" min="50" max="5000" step="10" disabled />
+              <span id="timeline-frame-name" class="wb-note"></span>
+            </div>
+            <div id="timeline-inserts" aria-label="插入位置" data-i18n-aria-label="timeline.insertsAria"></div>
+            <div id="bench-timeline" role="slider" tabindex="0" aria-label="动作时间轴" data-i18n-aria-label="timeline.aria" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+              <div id="timeline-track"></div>
+              <div id="timeline-playhead"></div>
+            </div>
+            <p id="timeline-hint" class="wb-hint" data-i18n="timeline.hint"></p>
+          </section>
+
+          <section id="panel-actions" class="wb-panel" hidden aria-label="动作编辑器" data-i18n-aria-label="panel.actions.aria">
+          <div class="wb-panel-head">
+            <h3 data-i18n="head.actionsEditor">动作编辑器（帧序 = 数组序，文件名不参与排序）</h3>
+            <select id="action-select" aria-label="选择动作" data-i18n-aria-label="actions.selectAria"></select>
+            <button type="button" id="btn-action-new" data-i18n="btn.actionNew">新建动作…</button>
+          </div>
+          <div id="action-new-form" hidden>
+            <input type="text" id="action-new-id" placeholder="动作 id（kebab-case，如 walk-dance）" data-i18n-placeholder="actions.newIdPlaceholder" />
+            <select id="action-new-direction" aria-label="朝向" data-i18n-aria-label="actions.newDirectionAria">
+              <option value="left">left</option>
+              <option value="right">right</option>
+              <option value="up">up</option>
+              <option value="down">down</option>
+              <option value="none">none</option>
+            </select>
+            <button type="button" id="btn-action-create" data-i18n="actions.create">创建</button>
+            <button type="button" id="btn-action-cancel-new" data-i18n="actions.cancelNew">取消</button>
+          </div>
+          <p id="action-summary" class="wb-summary"></p>
+          <div id="action-toolbar">
+            <button type="button" id="btn-action-play" title="在预览场用真实渲染路径播放草稿序列" data-i18n-title="actions.playTitle" data-i18n="actions.play">▶ 播放</button>
+            <button type="button" id="btn-action-step" title="逐帧推进预览" data-i18n-title="actions.stepTitle" data-i18n="actions.step">⏭ 逐帧</button>
+            <button type="button" id="btn-action-stop" data-i18n="actions.stop">⏹ 停止</button>
+            <label class="action-loop-label"><span data-i18n="actions.loop">循环</span> <input type="checkbox" id="action-loop" /></label>
+            <span id="action-playback" class="wb-note"></span>
+          </div>
+          <p class="wb-hint" data-i18n="actions.oneTimelineHint">帧序与时长在上方时间轴上改（拖动或 ←/→ 调序、点一段后改时长）——本页只有这一条时间轴。</p>
+          <div class="wb-panel-head">
+            <h4 data-i18n="head.importFrames">导入帧（自动归一化：等比缩放 + 鞋线对齐，不改美术内容）</h4>
+          </div>
+          <div id="action-import">
+            <input type="text" id="action-import-path" placeholder="源 PNG 路径（只读源，如 photo/…）" data-i18n-placeholder="actions.importPathPlaceholder" />
+            <input type="text" id="action-import-name" placeholder="目标文件名（默认自动编号）" data-i18n-placeholder="actions.importNamePlaceholder" />
+            <button type="button" id="btn-action-import-preview" data-i18n="actions.importPreview">归一化预览</button>
+            <button type="button" id="btn-action-import-insert" disabled data-i18n="actions.importInsert">插入到时间轴</button>
+          </div>
+          <div id="action-import-result"></div>
+          <div class="wb-panel-head">
+            <h4 data-i18n="head.actionPublishCheck">发布校验（帧几何 · 鞋线 ±1px / 可见高 ±2px）</h4>
+            <button type="button" id="btn-action-validate" data-i18n="btn.revalidate">重新校验</button>
+          </div>
+          <div class="wb-table-wrap">
+            <table id="action-validation-table">
+              <thead>
+                <tr><th data-i18n="table.action.hash">#</th><th data-i18n="table.action.frame">帧</th><th data-i18n="table.action.footLine">鞋线</th><th data-i18n="table.action.dFootLine">Δ鞋线</th><th data-i18n="table.action.visibleHeight">可见高</th><th data-i18n="table.action.dHeight">Δ高</th><th data-i18n="table.action.duration">时长</th><th data-i18n="table.action.state">状态</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <pre id="action-publish-result" class="wb-pre">尚未发布（发布 = 校验全绿 → 备份 → 写 resources/** → 记 provenance）</pre>
+          </section>
+
+          <section id="panel-bench" class="wb-panel" hidden aria-label="动作检查" data-i18n-aria-label="panel.bench.aria">
+          <p id="bench-unavailable" class="wb-hint" hidden>
+            <span data-i18n="bench.studioOnly">动作检查面板只在 studio 入口可用：在 studio/ 目录运行</span> <code>npm run studio</code><span data-i18n="bench.unavailableSuffix">。</span>
+          </p>
+          <div id="bench-body">
+            <div class="wb-panel-head">
+              <h3 data-i18n="head.bench">动作检查（逐帧 · 脚线/质心 · 上一帧残影 · 按帧号批注）</h3>
+              <select id="bench-action" aria-label="选择动作" data-i18n-aria-label="bench.selectActionAria"></select>
+              <button type="button" id="btn-bench-refresh" data-i18n="btn.refresh">刷新</button>
+            </div>
+            <p id="bench-summary" class="wb-summary"></p>
+            <div id="bench-toolbar">
+              <label class="action-loop-label"><span data-i18n="bench.toolbarOnion">上一帧残影</span> <input type="checkbox" id="bench-onion" /></label>
+              <label class="action-loop-label"><span data-i18n="bench.toolbarFoot">脚线</span> <input type="checkbox" id="bench-footline" checked /></label>
+              <label class="action-loop-label"><span data-i18n="bench.toolbarCentroid">质心</span> <input type="checkbox" id="bench-centroid" /></label>
+              <label class="action-loop-label">ping-pong <input type="checkbox" id="bench-pingpong" /></label>
+            </div>
+            <p class="wb-hint" data-i18n="bench.sharedTimelineHint">时间轴是本页上方的那一条（与动作编辑器共用）：拖动或 ←/→ 调序、点一段改时长、点 ＋ 选插入位置；播放头走过的帧会在这里高亮。</p>
+            <div id="bench-strip" aria-label="帧条" data-i18n-aria-label="bench.stripAria"></div>
+            <div class="wb-panel-head">
+              <h4 data-i18n="head.benchNotes">按帧号批注（可导出 JSON，交给下一轮生成或人工修图）</h4>
+            </div>
+            <div id="bench-note-form">
+              <input type="number" id="bench-note-frame" min="0" value="0" aria-label="帧号" data-i18n-aria-label="bench.noteFrameAria" />
+              <select id="bench-note-severity" aria-label="级别" data-i18n-aria-label="bench.noteSeverityAria">
+                <option value="note">note</option>
+                <option value="fix">fix</option>
+                <option value="praise">praise</option>
+              </select>
+              <input type="text" id="bench-note-text" placeholder="批注内容（绑定帧号；帧顺序变化后会被标记为失效）" data-i18n-placeholder="bench.noteTextPlaceholder" />
+              <button type="button" id="btn-bench-note-add" data-i18n="bench.noteAdd">添加批注</button>
+              <button type="button" id="btn-bench-note-export" data-i18n="bench.noteExport">导出批注 JSON</button>
+            </div>
+            <div id="bench-notes"></div>
+            <div class="wb-panel-head">
+              <h4 data-i18n="head.benchGaps">能力缺口检查</h4>
+              <button type="button" id="btn-bench-gaps" data-i18n="btn.revalidate">重新检查</button>
+            </div>
+            <pre id="bench-gaps" class="wb-pre">尚未检查</pre>
+          </div>
+          </section>
+
+          <!-- The DANGER ZONE (T7). Publishing and the v1→v2 migration rewrite PRODUCTION
+               bytes under resources/** — they used to sit in the toolbars, one stray click
+               away from a duration edit. They now live here, in a red-bordered block shared
+               by both sub-views, and each one needs a SECOND click to run (no native
+               confirm(), which would block this window's own probe/evidence path). -->
+          <section id="action-danger-zone" class="wb-danger-zone" aria-label="危险操作区（写生产）" data-i18n-aria-label="danger.zone.aria">
+            <div class="wb-panel-head">
+              <h4 data-i18n="danger.title">危险操作区：写生产（resources/**）</h4>
+              <span class="wb-note" data-i18n="danger.note">每次执行都先备份、校验不通过则不落盘；按钮要点两次才运行。</span>
+            </div>
+            <div id="danger-buttons">
+              <button type="button" id="btn-action-publish" data-i18n="danger.publish" title="校验全绿才写 resources/**；先备份，失败不落盘" data-i18n-title="danger.publishTitle">发布到 resources/**</button>
+              <button type="button" id="btn-bench-migrate" data-i18n="danger.migrate" title="v1 → v2（先备份，无变更不落盘）" data-i18n-title="danger.migrateTitle">迁移到 v2</button>
+              <button type="button" id="btn-bench-publish" data-i18n="danger.publishKernel" title="真发布内核：校验全绿才写 resources/**，先备份" data-i18n-title="danger.publishKernelTitle">发布（真发布内核）</button>
+            </div>
+          </section>
+        </div>
+        <div id="page-view-behaviour" class="wb-page" data-page-view="behaviour" hidden>
+          <section id="panel-graph" class="wb-panel" hidden aria-label="行为图编辑器" data-i18n-aria-label="panel.graph.aria">
+          <p id="graph-unavailable" class="wb-hint" hidden>
+            <span data-i18n="graph.studioOnly">行为图面板只在 studio 入口可用：在 studio/ 目录运行</span> <code>npm run studio</code><span data-i18n="bench.unavailableSuffix">。</span>
+          </p>
+          <div id="graph-body">
+            <div class="wb-panel-head">
+              <h3 data-i18n="head.graph">行为图（拖动摆放 · 右缘拉出连线 · 节点字段在检查器改）</h3>
+              <select id="graph-file" aria-label="选择图文件" data-i18n-aria-label="graph.fileAria"></select>
+              <button type="button" id="btn-graph-reload" data-i18n="btn.refresh">重新载入</button>
+              <button type="button" id="btn-graph-save" data-i18n="btn.save" title="检查通过才写盘；先备份">保存</button>
+            </div>
+            <p id="graph-status" class="wb-hint">载入中…</p>
+            <!-- T8: the canvas is the page. It keeps its 1280×720 logical space but the
+                 backing store follows the wrap (devicePixelRatio aware), so the wrap can
+                 grow with the work area without stretching the drawing. The view below is
+                 a canvas transform: wheel zooms at the cursor, dragging the EMPTY canvas
+                 pans, 适应 fits every node on screen. Node positions stay in meta.layout
+                 (presentation only) — the view never touches the graph. -->
+            <div id="graph-canvas-wrap">
+              <canvas id="graph-canvas" width="1280" height="720" aria-label="行为图画布（滚轮缩放 · 空白处拖动平移 · 拖节点右缘拉出连线）" data-i18n-aria-label="graph.canvasAria"></canvas>
+            </div>
+            <div id="graph-toolbar">
+              <label class="action-loop-label"><span data-i18n="graph.portsLabel">连线标签</span> <input type="checkbox" id="graph-show-ports" checked /></label>
+              <button type="button" id="btn-graph-fit" data-i18n="btn.graphFit" title="把所有节点收进视野（这张图自己的「适应」）" data-i18n-title="graph.fitTitle">适应</button>
+              <span id="graph-zoom" class="wb-note" aria-live="off">100%</span>
+              <button type="button" id="btn-graph-add-node" data-i18n="btn.graphAddNode" title="按 schema 的类型表加一个节点（必填字段填默认值），位置取当前视野中心" data-i18n-title="graph.addTitle">加节点…</button>
+              <button type="button" id="btn-graph-delete" data-i18n="btn.graphDelete" title="删掉选中的连线；没有选中连线时删掉选中的节点及其连线" data-i18n-title="graph.deleteTitle">删除</button>
+              <button type="button" id="btn-graph-validate" data-i18n="btn.validate" title="闭集/端口/环检查" data-i18n-title="graph.validateTitle">检查</button>
+              <button type="button" id="btn-graph-run" data-i18n="btn.run" title="跑固定步数并列出轨迹与效果" data-i18n-title="graph.runTitle">运行</button>
+              <button type="button" id="btn-graph-diff" title="与 behavior-scheduler 对照" data-i18n-title="graph.diffTitle" data-i18n="graph.diff">差异报告</button>
+              <button type="button" id="btn-graph-layout" title="按类型自动排布（只改 meta.layout）" data-i18n-title="graph.layoutTitle" data-i18n="graph.layout">自动排版</button>
+            </div>
+            <!-- the create step: opened by 加节点…, closed by 创建/取消. Only the node
+                 types the SCHEMA accepts are offered (the options are built from the same
+                 table the boundary test pins against src/office/behavior-graph/schema.js). -->
+            <div id="graph-add-form" hidden>
+              <label class="graph-add-row" for="graph-add-type"><span data-i18n="graph.add.type">类型</span>
+                <select id="graph-add-type" aria-label="新节点类型（schema 接受的类型）" data-i18n-aria-label="graph.addTypeAria"></select>
+              </label>
+              <label class="graph-add-row" for="graph-add-id"><span data-i18n="graph.add.id">节点 id</span>
+                <input type="text" id="graph-add-id" data-i18n-placeholder="graph.add.idPlaceholder" placeholder="例如 do-2" autocomplete="off" />
+              </label>
+              <button type="button" id="btn-graph-add-confirm" data-i18n="btn.graphAddConfirm">创建</button>
+              <button type="button" id="btn-graph-add-cancel" data-i18n="btn.graphAddCancel">取消</button>
+              <span class="wb-note" data-i18n="graph.add.note">只列 schema 接受的类型；必填字段按 schema 默认值填好，之后在检查器里改。</span>
+            </div>
+            <p class="wb-hint" data-i18n="graph.canvas.hint">滚轮＝以光标为中心缩放 · 拖动空白处＝平移 · 拖动节点＝摆放 · 从节点右缘拖到另一个节点左缘＝连线 · 点一下连线选中它，Delete 删除。</p>
+            <pre id="graph-run-result" class="wb-pre">尚未运行（运行 = 固定步数 + 固定 seed，结果可复现）</pre>
+            <pre id="graph-diff-result" class="wb-pre">尚未对比</pre>
+          </div>
+          </section>
+        </div>
+        <div id="page-view-dialogue" class="wb-page" data-page-view="dialogue" hidden>
+          <!-- T9: 语料页是全宽编辑器。话题收进左侧窄栏（rail），条目表占满主区，条目编辑
+               搬到检查器（#panel-item-dialogue，在 #wb-right 里），CSV 导入收进 ⋯，
+               「试说一句」的气泡直接叠在下方运行坞上。所有 id 不变。 -->
+          <section id="panel-dialogue" class="wb-panel" hidden aria-label="对话语料库" data-i18n-aria-label="panel.dialogue.aria">
+          <p id="dialogue-unavailable" class="wb-hint" hidden>
+            <span data-i18n="dialogue.studioOnly">语料面板只在 studio 入口可用：在 studio/ 目录运行</span> <code>npm run studio</code><span data-i18n="bench.unavailableSuffix">。</span>
+          </p>
+          <div id="dialogue-body">
+            <div class="wb-panel-head">
+              <h3 data-i18n="head.dialogue">对话文案（角色专属优先，缺失时回落公共文案）</h3>
+              <select id="dialogue-layer" aria-label="语料层" data-i18n-aria-label="dialogue.layerAria">
+                <option value="base" data-i18n="dialogue.layerBase">公共文案 shared/dialogue</option>
+                <option value="character" data-i18n="dialogue.layerCharacter">角色专属 characters/&lt;id&gt;/dialogue</option>
+              </select>
+              <button type="button" id="btn-dialogue-reload" data-i18n="btn.refresh">重新载入</button>
+              <button type="button" id="btn-dialogue-save" data-i18n="btn.save" title="检查通过才写盘；先备份">保存</button>
+            </div>
+            <p id="dialogue-status" class="wb-hint">载入中…</p>
+            <!-- the rail + the table: one flex row, the rail is a fixed narrow column -->
+            <div id="dialogue-columns">
+              <div id="dialogue-topics" aria-label="话题（左侧窄栏，点一个看它的台词）" data-i18n-aria-label="dialogue.topicsAria"></div>
+              <div id="dialogue-entries-wrap">
+                <table id="dialogue-table">
+                  <thead><tr><th data-i18n="table.dialogue.id">id</th><th data-i18n="table.dialogue.text">台词</th><th data-i18n="table.dialogue.weight">权重</th><th data-i18n="table.dialogue.conditions">条件</th><th></th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+            <div id="dialogue-add">
+              <input type="text" id="dialogue-new-text" placeholder="新台词（例如：米缸还有半缸）" data-i18n-placeholder="dialogue.newTextPlaceholder" />
+              <input type="number" id="dialogue-new-weight" value="1" min="1" max="20" aria-label="权重" data-i18n-aria-label="dialogue.newWeightAria" />
+              <button type="button" id="btn-dialogue-add" data-i18n="dialogue.add">加入选中 topic</button>
+            </div>
+            <!-- the CSV import is a bulk operation, not something you do while reading a
+                 topic: it collapses behind a ⋯ that starts CLOSED (same shape as the
+                 素材包 disclosure on the 质检 page). The textarea and the button keep
+                 their ids — only their visibility changed. -->
+            <div class="wb-panel-head">
+              <h4 data-i18n="head.dialogueCsv">批量导入（CSV 列：id,topic,text,weight[,if.xxx]）</h4>
+              <button type="button" id="btn-dialogue-csv-more" class="wb-more-btn" aria-expanded="false" aria-controls="dialogue-csv-box"
+                      data-i18n-title="btn.dialogueCsvMore" data-i18n-aria-label="btn.dialogueCsvMore" title="展开 CSV 导入">⋯</button>
+            </div>
+            <div id="dialogue-csv-box" hidden>
+              <textarea id="dialogue-csv" rows="3" placeholder="id,topic,text,weight&#10;zz-01,pantry,米缸还有半缸,3" data-i18n-placeholder="dialogue.csvPlaceholder"></textarea>
+              <button type="button" id="btn-dialogue-csv" data-i18n="btn.import">导入</button>
+            </div>
+            <!-- 试说一句: the bubble itself is NOT here — it is overlaid on the runtime
+                 dock (#wb-dock), where the characters are on screen. -->
+            <div class="wb-panel-head">
+              <h4 data-i18n="head.dialogueSay">试说一句（按运行时规则挑选）</h4>
+              <button type="button" id="btn-dialogue-say" data-i18n="btn.dialogueSay">换一句</button>
+              <input type="text" id="dialogue-say-seed" value="preview-1" aria-label="随机种子" data-i18n-aria-label="dialogue.saySeedAria" />
+            </div>
+            <p class="wb-hint" data-i18n="dialogue.say.hint">同一 seed 出同一句；说出的气泡直接叠在下方运行坞的底沿上（高亮运行坞），按语料 limits.bubbleMs 自动消失。</p>
+          </div>
+          </section>
+        </div>
+        <!-- R5: the generation page — the S0–S8 pipeline as a real panel. One sub-view
+             (the pipeline chip), because the page IS one workspace: pick an asset, see
+             the plan, run it, read the QC report, work the triage queue. Everything
+             below is driven by the engine in the main process (studio/lib/pipeline/**)
+             through the studio:* services; this page re-implements none of it. -->
+        <div id="page-view-generation" class="wb-page" data-page-view="generation" hidden>
+          <section id="panel-pipeline" class="wb-panel" hidden aria-label="生成流水线（S0–S8）" data-i18n-aria-label="panel.pipeline.aria">
+          <p id="pipeline-unavailable" class="wb-hint" hidden>
+            <span data-i18n="pipeline.studioOnly">流水线面板只在 studio 入口可用：在 studio/ 目录运行</span> <code>npm run studio</code><span data-i18n="bench.unavailableSuffix">。</span>
+          </p>
+          <div id="pipeline-body">
+            <p class="wb-hint" data-i18n="pipeline.note">检查什么：把「做一套素材」变成一条可复现的链——接收 → 抠像 → QC → 归一化 → 入包，每一步内容寻址（改一步只重跑那一步），每次失败进人工分诊队列。何时跑：新素材交付后、复现失败时、或想知道「现在跑会动哪些段」。</p>
+
+            <div class="wb-panel-head">
+              <h3 data-i18n="head.pipeline">生成流水线（S0–S8）</h3>
+              <span id="pipeline-status" class="wb-note" aria-live="polite"></span>
+            </div>
+            <div id="pipeline-form">
+              <label class="pipeline-field" for="pipeline-action"><span data-i18n="pipeline.form.action">动作</span>
+                <select id="pipeline-action" aria-label="选择动作" data-i18n-aria-label="pipeline.form.actionAria"></select>
+              </label>
+              <label class="pipeline-field" for="pipeline-only"><span data-i18n="pipeline.form.only">只跑这些段（--only）</span>
+                <input type="text" id="pipeline-only" placeholder="S4,S5" data-i18n-placeholder="pipeline.form.onlyPlaceholder" aria-label="只跑这些段" data-i18n-aria-label="pipeline.form.onlyAria" />
+              </label>
+              <label class="pipeline-field" for="pipeline-params"><span data-i18n="pipeline.form.params">参数（--params JSON）</span>
+                <input type="text" id="pipeline-params" placeholder='{"packCanvas":384}' data-i18n-placeholder="pipeline.form.paramsPlaceholder" aria-label="参数 JSON" data-i18n-aria-label="pipeline.form.paramsAria" />
+              </label>
+              <label class="pipeline-field" for="pipeline-reference"><span data-i18n="pipeline.form.reference">参考图（--reference，可选）</span>
+                <input type="text" id="pipeline-reference" placeholder="/path/to/reference.png" data-i18n-placeholder="pipeline.form.referencePlaceholder" aria-label="参考图路径" data-i18n-aria-label="pipeline.form.referenceAria" />
+              </label>
+              <label class="pipeline-field" for="pipeline-delivery"><span data-i18n="pipeline.form.delivery">交付目录（--dir，可选）</span>
+                <input type="text" id="pipeline-delivery" placeholder="/path/to/delivery" data-i18n-placeholder="pipeline.form.deliveryPlaceholder" aria-label="交付目录" data-i18n-aria-label="pipeline.form.deliveryAria" />
+              </label>
+              <span class="pipeline-checks">
+                <label class="action-loop-label"><input type="checkbox" id="pipeline-force" /> <span data-i18n="pipeline.form.force">忽略缓存（--force）</span></label>
+                <label class="action-loop-label"><input type="checkbox" id="pipeline-publish" /> <span data-i18n="pipeline.form.publish">入包 S8（写 resources/**）</span></label>
+                <label class="action-loop-label"><input type="checkbox" id="pipeline-record" /> <span data-i18n="pipeline.form.record">参数入账（.params.json）</span></label>
+              </span>
+              <span class="pipeline-actions">
+                <button type="button" id="btn-pipeline-plan" data-i18n="btn.pipelinePlan">计划（只算不跑）</button>
+                <button type="button" id="btn-pipeline-run" data-i18n="btn.pipelineRun">执行</button>
+                <button type="button" id="btn-pipeline-triage-refresh" data-i18n="btn.pipelineTriageRefresh">刷新分诊</button>
+                <button type="button" id="btn-pipeline-passport" data-i18n="btn.pipelinePassport">素材护照</button>
+              </span>
+            </div>
+            <p class="wb-hint" data-i18n="pipeline.form.hint">计划＝引擎的干走（resolvePlan）：会跑哪些段、哪些命中缓存、为什么；执行＝同一条链真跑（runPipeline），每段的记录实时进日志。S8 写生产目录，要点开「入包」勾选才进链。</p>
+
+            <div class="wb-panel-head">
+              <h4 data-i18n="pipeline.head.stages">段与依赖（S0–S8）</h4>
+              <span id="pipeline-plan-summary" class="wb-note"></span>
+            </div>
+            <div class="wb-table-wrap">
+              <table id="pipeline-stages-table">
+                <thead>
+                  <tr>
+                    <th data-i18n="table.pipeline.stage">段</th>
+                    <th data-i18n="table.pipeline.name">名称</th>
+                    <th data-i18n="table.pipeline.status">状态</th>
+                    <th data-i18n="table.pipeline.depends">依赖</th>
+                    <th data-i18n="table.pipeline.why">为什么</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+
+            <div class="wb-panel-head">
+              <h4 data-i18n="pipeline.head.cache">缓存：会跑哪些段、哪些命中、为什么</h4>
+              <span id="pipeline-cache-stats" class="wb-note"></span>
+            </div>
+            <div id="pipeline-cache-rows" role="list" aria-label="缓存视图" data-i18n-aria-label="pipeline.cacheAria"></div>
+
+            <div class="wb-panel-head">
+              <h4 data-i18n="pipeline.head.qc">QC 报告（红黄绿）</h4>
+              <span id="pipeline-qc-verdict" class="wb-note"></span>
+            </div>
+            <div id="pipeline-qc-findings" role="list" aria-label="QC 明细" data-i18n-aria-label="pipeline.qcAria"></div>
+
+            <div class="wb-panel-head">
+              <h4 data-i18n="pipeline.head.log">执行日志</h4>
+            </div>
+            <pre id="pipeline-log" class="wb-pre" aria-label="执行日志" data-i18n-aria-label="pipeline.logAria">尚未执行</pre>
+
+            <div class="wb-panel-head">
+              <h4 data-i18n="pipeline.head.triage">人工分诊队列</h4>
+              <span id="pipeline-triage-file" class="wb-note"></span>
+            </div>
+            <div id="pipeline-triage-list" role="list" aria-label="分诊队列" data-i18n-aria-label="pipeline.triageAria"></div>
+            <div id="pipeline-triage-detail">
+              <p id="pipeline-triage-detail-text" class="wb-hint" data-i18n="pipeline.triage.none">未选中分诊条目。点上面队列里的一条看「哪一步、什么原因、建议、已重试几次」。</p>
+              <label class="pipeline-field" for="pipeline-triage-note"><span data-i18n="pipeline.triage.noteLabel">解决说明（必填：改了什么）</span>
+                <textarea id="pipeline-triage-note" rows="2" data-i18n-placeholder="pipeline.triage.notePlaceholder" placeholder="例如：用真抠像帧换掉了 walk-left-b03"></textarea>
+              </label>
+              <button type="button" id="btn-pipeline-triage-resolve" data-i18n="btn.pipelineTriageResolve">解决这一条</button>
+              <span id="pipeline-triage-resolve-status" class="wb-note" aria-live="polite"></span>
+            </div>
+          </div>
+          </section>
+        </div>
+        <div id="page-view-quality" class="wb-page" data-page-view="quality" hidden>
+          <!-- T10: the 质检 page merges the four read-only reports into ONE page with
+               in-page sub-views. The four chips above (素材校验/几何报表/视觉基线/素材溯源)
+               are now ONE page's segmented control, so the page owns its chrome: the
+               segmented label above the chips, this page-level bar (ONE "run everything"
+               action + its status line) and a one-line "what this checks / when to run it"
+               note in every sub-view. The four panels, their tables and their ids are
+               unchanged — only how they group and what runs together. -->
+          <section id="qa-page-bar" class="wb-qa-bar" aria-label="质检（四份只读报告）" data-i18n-aria-label="tabgroup.reports.aria">
+            <div class="wb-qa-bar-head">
+              <h3 data-i18n="qa.title">质检（四份只读报告）</h3>
+              <span id="qa-bar-spacer"></span>
+              <button type="button" id="btn-qa-run-all" data-i18n="btn.qaRunAll" title="素材校验 + 几何报表 + 发布校验，一次跑完，结果统一进底部问题栏">▶ 运行全部校验</button>
+              <span id="qa-run-status" class="wb-note" aria-live="polite"></span>
+            </div>
+            <p class="wb-hint" data-i18n="qa.pageHint">本页只读：四个子视图都不改 content/**，只报事实。切子视图不会重新加载任何东西。</p>
+          </section>
+          <section id="panel-assets" class="wb-panel" hidden aria-label="素材校验器" data-i18n-aria-label="panel.assets.aria">
+          <div class="wb-panel-head">
+            <h3 data-i18n="head.assets">素材校验器（catalog 逐条）</h3>
+            <button type="button" id="btn-refresh-assets" data-i18n="btn.revalidate">重新校验</button>
+          </div>
+          <p class="wb-hint" data-i18n="qa.note.assets">检查什么：catalog 里每个条目在生产 PNG 上的存在/解码/alpha/路径/contentBbox 漂移。何时跑：改了 props 素材或 catalog 声明之后。</p>
+          <p id="asset-summary" class="wb-summary"></p>
+          <div class="wb-table-wrap">
+            <table id="asset-table">
+              <thead>
+                <tr><th data-i18n="table.asset.entry">条目</th><th data-i18n="table.asset.exists">存在</th><th data-i18n="table.asset.decode">解码</th><th data-i18n="table.asset.alpha">alpha</th><th data-i18n="table.asset.path">路径</th><th data-i18n="table.asset.bbox">bbox 漂移</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="wb-panel-head">
+            <h3 data-i18n="head.publishCheck">发布校验（content/**）</h3>
+            <button type="button" id="btn-publish" data-i18n="assets.runPublish">运行发布校验</button>
+          </div>
+          <pre id="publish-result" class="wb-pre">尚未运行</pre>
+          </section>
+
+          <section id="panel-geometry" class="wb-panel" hidden aria-label="几何报表" data-i18n-aria-label="panel.geometry.aria">
+          <div class="wb-panel-head">
+            <h3 data-i18n="head.geometry">行走帧几何</h3>
+            <button type="button" id="btn-refresh-geometry" data-i18n="btn.measure">重新测量</button>
+          </div>
+          <p class="wb-hint" data-i18n="qa.note.geometry">检查什么：walk-left/right 每帧的鞋线与可见高，与自身中位数比较（鞋线 ±1px、可见高 ±2px），并核对声明值是否还等于实测值。何时跑：导入或发布帧之后、跑视觉基线之前。</p>
+          <p id="geometry-summary" class="wb-summary"></p>
+          <div class="wb-table-wrap">
+            <table id="geometry-table">
+              <thead>
+                <tr><th data-i18n="table.geometry.frame">帧</th><th data-i18n="table.geometry.anchor">锚点</th><th data-i18n="table.geometry.footLine">鞋线</th><th data-i18n="table.geometry.visibleHeight">可见高</th><th data-i18n="table.geometry.visibleWidth">可见宽</th><th data-i18n="table.geometry.aspect">宽高比</th><th data-i18n="table.geometry.dFootLine">Δ鞋线</th><th data-i18n="table.geometry.dHeight">Δ高</th><th data-i18n="table.geometry.state">状态</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div id="entry-geometry" class="wb-entry" aria-label="选中条目几何" data-i18n-aria-label="geometry.tableAria">
+            <h4 data-i18n="scene.entryGeometryTitle">选中条目</h4>
+            <p class="wb-hint" data-i18n="scene.canvasHint">在预览场点选素材，或在左侧资源树选择文件</p>
+            <div id="entry-geometry-body"></div>
+          </div>
+          </section>
+
+          <section id="panel-gallery" class="wb-panel" hidden aria-label="视觉基线（截图对比）" data-i18n-aria-label="head.gallery">
+          <div class="wb-panel-head">
+            <h3 data-i18n="head.gallery">视觉基线（截图对比）</h3>
+            <button type="button" id="btn-generate-gallery" data-i18n="btn.generateBaseline">生成基线截图并对比上一轮</button>
+          </div>
+          <p class="wb-hint" data-i18n="qa.note.gallery">检查什么：把「看起来对」变成可比的事实——3 档场景布局 + walk 帧拼条截图，与上一轮做像素差/尺寸差。何时跑：布局或帧改动后、准备对外演示前。</p>
+          <p class="wb-hint" data-i18n="qa.note.galleryOutput">产出 content/build/gallery/（工具自己的输出，不是内容源）：场景布局 ×3 档窗口（1582×955 / 1280×840 / 1100×760）+ walk-left/right 各 5 帧拼条 ×2 档缩放（1×/2×）。</p>
+          <p id="gallery-progress" class="wb-summary"></p>
+          <div id="gallery-diff"></div>
+          <div id="gallery-files"></div>
+          </section>
+
+          <section id="panel-passport" class="wb-panel" hidden aria-label="素材溯源与项目" data-i18n-aria-label="panel.passport.aria">
+          <p id="passport-unavailable" class="wb-hint" hidden>
+            <span data-i18n="passport.studioOnly">素材溯源面板只在 studio 入口可用：在 studio/ 目录运行</span> <code>npm run studio</code><span data-i18n="passport.legacySuffix">（旧入口 `npm run office:workbench` 不带 studio:* 服务）。</span>
+          </p>
+          <div id="passport-body">
+            <p class="wb-hint" data-i18n="qa.note.passport">检查什么：一套素材「怎么来的、能不能复现」——生成 → 抠像 → 归一化 → 发布 → 磁盘校验，外加生成参数台账。何时跑：交接、复现失败、或发布后想证明链路没断。</p>
+            <div class="wb-panel-head">
+              <h3 data-i18n="head.project">项目（project.json）</h3>
+              <button type="button" id="btn-project-refresh" data-i18n="btn.refresh">重新读取</button>
+            </div>
+            <p id="passport-project" class="wb-summary">载入中…</p>
+
+            <div class="wb-panel-head">
+              <h3 data-i18n="head.provenance">素材溯源（五个环节）</h3>
+              <input type="text" id="passport-asset" value="walk-left" aria-label="素材 id" data-i18n-aria-label="passport.assetAria" />
+              <button type="button" id="btn-passport-report" data-i18n="btn.query">查询</button>
+            </div>
+            <p class="wb-hint" data-i18n="passport.statusNote">状态说明：可追溯 / 仅历史可证 / 链路丢失 / 未记录。
+              五个环节 = 生成 → 抠像 → 归一化 → 发布 → 磁盘校验。</p>
+            <p id="passport-summary" class="wb-summary"></p>
+            <div class="wb-table-wrap">
+              <table id="passport-table">
+                <thead>
+                  <tr><th data-i18n="table.passport.segment">段</th><th data-i18n="table.passport.status">状态</th><th data-i18n="table.passport.evidence">证据</th><th data-i18n="table.passport.notes">备注</th></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div id="passport-findings"></div>
+            <div id="passport-ledger"></div>
+
+            <!-- T10: the .dshpack round-trip / export / import controls are not something
+                 you touch while reading provenance, so they collapse behind a ⋯ disclosure.
+                 The controls and their ids survive unchanged — only their visibility does.
+                 The disclosure starts CLOSED and re-opens for as long as the page lives. -->
+            <div class="wb-panel-head" id="pack-more-head">
+              <h3 data-i18n="head.pack">素材包 .dshpack（导入导出后内容必须逐字节一致）</h3>
+              <button type="button" id="btn-pack-more" class="wb-more-btn" aria-expanded="false" aria-controls="pack-more-box"
+                      data-i18n-title="btn.packMore" data-i18n-aria-label="btn.packMore" title="展开 .dshpack 导入导出">⋯</button>
+            </div>
+            <div id="pack-more-box" hidden>
+            <div id="pack-more-body">
+              <button type="button" id="btn-pack-roundtrip" data-i18n="btn.roundTrip" title="导出→导入到临时目录→逐文件比对 sha256">往返校验</button>
+              <button type="button" id="btn-pack-export" data-i18n="btn.export" title="导出到 content/build/packs/<项目 id>.dshpack（导出前跑密钥形状扫描）">导出</button>
+            </div>
+            <pre id="pack-roundtrip-result" class="wb-pre">尚未校验（往返校验 = 导出真资产 → 导入 → 每个文件的 sha256 必须一致）</pre>
+            <div id="pack-import-box">
+              <input type="text" id="pack-import-path" placeholder=".dshpack 路径" aria-label="导入包路径" data-i18n-placeholder="passport.importPathPlaceholder" data-i18n-aria-label="passport.importPathPlaceholder" />
+              <input type="text" id="pack-import-dest" placeholder="导入目标目录" aria-label="导入目标目录" data-i18n-placeholder="passport.importDestPlaceholder" data-i18n-aria-label="passport.importDestPlaceholder" />
+              <button type="button" id="btn-pack-import" data-i18n="btn.import">导入</button>
+              <label class="action-loop-label"><span data-i18n="pack.overwrite">覆盖</span> <input type="checkbox" id="pack-import-overwrite" /></label>
+            </div>
+            <pre id="pack-import-result" class="wb-pre">尚未导入</pre>
+            </div>
+          </div>
+          </section>
+        </div>
+        <div id="page-view-observe" class="wb-page" data-page-view="observe">
+          <!-- T11: the 观测 page is a simulation OBSERVATORY, and it is the first page
+               that is NOT a canvas page: it owns a work area. Two regions, both always on
+               screen at once — the DOCK below keeps the picture (the product's own runtime
+               view; the same node on every page, so a page switch never moves or reloads
+               it), and this work area carries what you read while watching: the employee
+               table at the full width of the window, then the console's four jobs as four
+               collapsed sections. The first screen is therefore the picture + the table,
+               not a wall of forms. Every id below is the id it has always been — the probe
+               and the command palette look them up by id, never by position. -->
+          <section id="panel-preview" class="wb-panel" hidden aria-label="仿真观测（员工表 + 控制台）" data-i18n-aria-label="panel.preview.aria">
+          <p id="preview-unavailable" class="wb-hint" hidden>
+            <span data-i18n="preview.studioOnly">预览运行器只在 studio 入口可用：在 studio/ 目录运行</span> <code>npm run studio</code><span data-i18n="bench.unavailableSuffix">。</span>
+          </p>
+          <div id="preview-body">
+            <div class="wb-panel-head">
+              <h4 id="preview-employee-head" data-i18n="observe.employeeHead">员工表（点一行＝把画面聚焦到该员工）</h4>
+              <span id="preview-follow-status" class="wb-note"></span>
+              <button type="button" id="btn-preview-unfollow" data-i18n-title="btn.previewUnfollow" data-i18n="btn.previewUnfollow" hidden>取消跟随</button>
+              <!-- gap #3: the edit/run comparison. It overlays the DERIVED navigation
+                   graph and the workstations on the dock's runtime picture (and the
+                   live employee dots on top of those), so the two layers can be read
+                   against each other. The button is a stage view flag, exactly like
+                   the mode — #stage[data-compare] is the only source of truth. -->
+              <button type="button" id="btn-stage-compare" class="wb-stage-mode" aria-pressed="false"
+                      title="对照：在运行画面上叠加派生的行走点图与工位" data-i18n-title="stage.compareTitle" data-i18n="stage.compare">对照</button>
+              <span id="compare-status" class="wb-note"></span>
+            </div>
+            <!-- the table is the page's main view: 6 columns, full width of the work area,
+                 scrolling inside its own wrap (the panel around it never has to). A row
+                 click FOLLOWS that employee — handover §6-5: the dock's view zooms onto its
+                 position and stays with it; the row says so, and 取消跟随 returns to the
+                 panorama. The tool owns the view, the product owns the simulation. -->
+            <div class="wb-table-wrap" id="preview-table-wrap">
+              <table id="preview-table">
+                <thead><tr><th>员工</th><th>活动</th><th>相位</th><th>结果</th><th>移动阶段</th><th>位置</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p class="wb-hint" data-i18n="observe.pageHint">画面在下方运行坞里（切页面不重载，切回来看还是同一帧）；播放/单步/重开/倍速在运行坞自己的工具条上，整个窗口只有这一处。点员工表的一行＝把画面聚焦到该员工并跟着它走，再点一次或按「取消跟随」回到全景。</p>
+            <!-- the console's four jobs, four COLLAPSED sections behind one grid (each its
+                 own disclosure, all starting closed): 一键脚本 / 手动发送事件 / 遥测 / 诊断包.
+                 The ids are unchanged — only their visibility is. -->
+            <div id="preview-console">
+              <section class="wb-console-section" id="preview-section-script" aria-label="一键脚本" data-i18n-aria-label="preview.sectionScriptAria">
+                <button type="button" class="wb-console-head" id="btn-preview-section-script" aria-expanded="false" aria-controls="preview-script-box"
+                        data-i18n-aria-label="btn.consoleScript" aria-label="展开一键脚本">
+                  <span class="wb-console-chevron" aria-hidden="true">▸</span>
+                  <span class="wb-console-title" id="preview-script-head" data-i18n="preview.scenario.head">一键脚本（模拟一段会话）</span>
+                </button>
+                <div class="wb-console-body" id="preview-script-box" hidden>
+                  <div class="wb-console-row">
+                    <button type="button" id="btn-preview-scenario-complete" data-i18n="preview.scenarioComplete">任务完成</button>
+                    <button type="button" id="btn-preview-scenario-failed" data-i18n="preview.scenarioFailed">任务失败</button>
+                    <button type="button" id="btn-preview-scenario-approval" data-i18n="preview.scenarioApproval">等待审批</button>
+                  </div>
+                  <!-- the script RESULT gets its own line: the status line above tracks live
+                       state and is re-rendered by every refresh, so a result written there
+                       disappears -->
+                  <p id="preview-scenario-result" class="wb-hint" data-i18n="preview.scenario.none">尚未运行脚本</p>
+                </div>
+              </section>
+              <section class="wb-console-section" id="preview-section-events" aria-label="手动发送事件" data-i18n-aria-label="preview.sectionEventsAria">
+                <button type="button" class="wb-console-head" id="btn-preview-section-events" aria-expanded="false" aria-controls="preview-events-box"
+                        data-i18n-aria-label="btn.consoleEvents" aria-label="展开手动发送事件">
+                  <span class="wb-console-chevron" aria-hidden="true">▸</span>
+                  <span class="wb-console-title" id="preview-event-head" data-i18n="observe.eventHead">手动发送事件</span>
+                </button>
+                <div class="wb-console-body" id="preview-events-box" hidden>
+                  <div class="wb-console-row">
+                    <select id="preview-event-type" aria-label="事件类型" data-i18n-aria-label="preview.eventTypeAria">
+                      <option value="agent/status">agent/status</option>
+                      <option value="tool/call">tool/call</option>
+                      <option value="tool/result">tool/result</option>
+                      <option value="turn/end">turn/end</option>
+                      <option value="approval/asked">approval/asked</option>
+                      <option value="approval/answered">approval/answered</option>
+                    </select>
+                    <input type="text" id="preview-session" value="sess-studio" aria-label="会话 id" data-i18n-aria-label="preview.sessionAria" />
+                    <input type="text" id="preview-data" placeholder='data JSON，如 {"status":"running"}' aria-label="事件数据" data-i18n-placeholder="preview.eventDataPlaceholder" data-i18n-aria-label="preview.eventDataAria" />
+                    <button type="button" id="btn-preview-inject" data-i18n="preview.inject">注入</button>
+                  </div>
+                </div>
+              </section>
+              <section class="wb-console-section" id="preview-section-telemetry" aria-label="页面遥测" data-i18n-aria-label="preview.sectionTelemetryAria">
+                <button type="button" class="wb-console-head" id="btn-preview-section-telemetry" aria-expanded="false" aria-controls="preview-telemetry-box"
+                        data-i18n-aria-label="btn.consoleTelemetry" aria-label="展开页面遥测">
+                  <span class="wb-console-chevron" aria-hidden="true">▸</span>
+                  <span class="wb-console-title" id="preview-telemetry-head" data-i18n="observe.telemetryHead">页面遥测（渲染后端 / 空闲重绘 / 页面自查）</span>
+                </button>
+                <div class="wb-console-body" id="preview-telemetry-box" hidden>
+                  <div class="wb-console-row">
+                    <button type="button" id="btn-preview-telemetry" data-i18n="telemetry.read">读取遥测</button>
+                  </div>
+                  <p id="preview-telemetry" class="wb-hint" data-i18n="telemetry.none">尚未读取（读取的是预览页自己报告的事实：渲染后端、空闲每秒重绘次数、页面诊断）</p>
+                </div>
+              </section>
+              <section class="wb-console-section" id="preview-section-bundle" aria-label="诊断包" data-i18n-aria-label="preview.sectionBundleAria">
+                <button type="button" class="wb-console-head" id="btn-preview-section-bundle" aria-expanded="false" aria-controls="preview-bundle-box"
+                        data-i18n-aria-label="btn.consoleBundle" aria-label="展开诊断包">
+                  <span class="wb-console-chevron" aria-hidden="true">▸</span>
+                  <span class="wb-console-title" id="preview-export-head" data-i18n="observe.bundleHead">诊断包（导出前脱敏并扫描密钥样式）</span>
+                </button>
+                <div class="wb-console-body" id="preview-bundle-box" hidden>
+                  <div class="wb-console-row">
+                    <button type="button" id="btn-preview-export" data-i18n="btn.exportBundle">导出诊断包</button>
+                  </div>
+                  <pre id="preview-export-result" class="wb-pre">尚未导出</pre>
+                </div>
+              </section>
+            </div>
+          </div>
+          </section>
+        </div>
+      </div>
+      <!-- THE PROBLEMS STRIP (T12's tail, and the surface every validator writes into):
+           one line while it is clean, grouped by CODE when it is not — twelve rows of the
+           same SCENE_FURNITURE_OVERLAP used to bury the one useful summary. Each finding
+           carries a target, so clicking it jumps to the page/tab/item it is about. -->
+      <section id="wb-problems" aria-label="问题" data-i18n-aria-label="problems.title">
+        <div id="wb-problems-head">
+          <button type="button" id="btn-problems-toggle" aria-expanded="true" title="折叠/展开问题列表" data-i18n-title="cmd.problemsToggle">▾</button>
+          <strong id="problems-title" data-i18n="problems.title">问题</strong>
+          <span id="problems-summary" class="wb-note">无问题</span>
+          <span id="wb-problems-spacer"></span>
+          <span id="problems-sources" class="wb-note"></span>
+        </div>
+        <div id="wb-problems-body" role="list" aria-label="按代码聚合的问题" data-i18n-aria-label="problems.titleAria"></div>
+      </section>
+      <section id="wb-dock" aria-label="运行码头（常驻画面，切页面不重载）" data-i18n-aria-label="stage.dockAria">
+        <!-- T11: THE DOCK'S OWN TOOLBAR — the ONE host for the playback controls: 播放 / 单步 /
+             重开 / 倍速 and the live status line, exactly once, reachable from every page (the
+             dock is never removed from the DOM). The canvas toolbar keeps only what you do TO
+             THE CANVAS — modes, fit/zoom, the edit layer's save/reload. -->
+        <div id="dock-toolbar" class="wb-dock-toolbar">
+          <div class="wb-stage-group" id="stage-run-group" role="group" aria-label="运行预览" data-i18n-aria-label="stage.runAria">
+            <button type="button" id="btn-preview-play" data-i18n="btn.play">▶ 播放</button>
+            <button type="button" id="btn-preview-step" data-i18n="btn.step">⏭ 单步</button>
+            <button type="button" id="btn-preview-restart" title="用同一 seed 重建仿真（可复现）" data-i18n-title="stage.restartTitle" data-i18n="stage.restart">重开</button>
+            <label class="action-loop-label"><span data-i18n="stage.speedLabel">倍速</span>
+              <select id="preview-speed" aria-label="倍速" data-i18n-aria-label="stage.speedAria">
+                <option value="1">1×</option>
+                <option value="2">2×</option>
+                <option value="4">4×</option>
+                <option value="0.5">0.5×</option>
+              </select>
+            </label>
+          </div>
+          <span id="preview-status" class="wb-hint">尚未启动</span>
+        </div>
+        <div id="stage" data-mode="edit" data-compare="off">
+        <div id="stage-toolbar">
+          <div class="wb-stage-group" id="stage-mode-group" role="group" aria-label="画布模式" data-i18n-aria-label="stage.modeAria">
+            <button type="button" id="btn-stage-mode-edit" class="wb-stage-mode" aria-pressed="true" title="编辑布局：拖动摆放 · 方向键微调 · 左侧文件树可直接拖进来" data-i18n-title="stage.modeEditTitle" data-i18n="stage.modeEdit">编辑</button>
+            <button type="button" id="btn-stage-mode-run" class="wb-stage-mode" aria-pressed="false" title="运行：产品自己的渲染（真 office 模块）" data-i18n-title="stage.modeRunTitle" data-i18n="stage.modeRun">运行</button>
+            <button type="button" id="btn-stage-mode-bench" class="wb-stage-mode" aria-pressed="false" title="草稿预览：动作编辑器正在编辑的帧序（未发布，独立画面）" data-i18n-title="stage.modeBenchTitle" data-i18n="stage.modeBench">草稿</button>
+          </div>
+          <div class="wb-stage-group" id="stage-view-group" role="group" aria-label="视图" data-i18n-aria-label="stage.viewAria">
+            <button type="button" id="btn-stage-fit" title="适应窗口（⌘/Ctrl+0）" data-i18n-title="stage.fitTitle" data-i18n="stage.fit">适应</button>
+            <button type="button" id="btn-stage-zoom-out" title="缩小（⌘/Ctrl+−）" data-i18n-title="stage.zoomOutTitle">−</button>
+            <span id="stage-zoom" class="wb-note">100%</span>
+            <button type="button" id="btn-stage-zoom-in" title="放大（⌘/Ctrl+=）" data-i18n-title="stage.zoomInTitle">＋</button>
+            <button type="button" id="btn-stage-reset" title="复位视图（回到 100% 左上）" data-i18n-title="stage.resetTitle" data-i18n="stage.reset">复位</button>
+          </div>
+          <div class="wb-stage-group" id="stage-edit-group" role="group" aria-label="布局" data-i18n-aria-label="stage.editAria">
+            <button type="button" id="btn-canvas-save" data-i18n="btn.saveLayout" title="校验通过才写盘；先备份">保存布局</button>
+            <button type="button" id="btn-canvas-reload" data-i18n="btn.refresh" title="丢弃未保存改动，重新读盘">重新载入</button>
+          </div>
+          <!-- gap #4: the canvas display switches live on the CANVAS toolbar, next to
+               the layout actions they belong to — they used to sit in the inspector's
+               画布显示 block, two gazes away from the picture they change. They are
+               edit-layer controls, so the group shows in edit mode only (the scene
+               layer is the only one they draw on). -->
+          <div class="wb-stage-group" id="stage-display-group" role="group" aria-label="画布显示" data-i18n-aria-label="stage.displayAria">
+            <label class="action-loop-label"><span data-i18n="scene.showGraph">行走点</span> <input type="checkbox" id="canvas-show-graph" /></label>
+            <label class="action-loop-label"><span data-i18n="scene.showObstacles">障碍</span> <input type="checkbox" id="canvas-show-obstacles" checked /></label>
+            <label class="action-loop-label"><span data-i18n="scene.showSeats">坐席</span> <input type="checkbox" id="canvas-show-seats" checked /></label>
+          </div>
+        </div>
+        <div id="stage-viewport" tabindex="0" aria-label="画布视口（滚轮缩放 · 空白处拖动平移）" data-i18n-aria-label="stage.viewportAria">
+          <div id="stage-world">
+            <div id="stage-scene-layer">
+              <canvas id="scene-canvas" width="1280" height="840" aria-label="场景画布" data-i18n-aria-label="stage.sceneCanvasAria"></canvas>
+              <div id="scene-canvas-overlay">
+                <!-- gap #5: the drag landing preview. A sibling of the canvas in the
+                     scene layer, so it shares the world's coordinate space and the
+                     view transform; `bad` is the validator's verdict, seen before
+                     the drop. The drop itself is unchanged — still the only writer. -->
+                <div id="scene-drag-ghost" hidden></div>
+              </div>
+            </div>
+            <!-- visibility comes from #stage[data-mode] — a `hidden` attribute here would
+                 keep the office layer hidden in RUN mode too (the probe caught exactly that:
+                 both layers read display:none and the canvas went blank) -->
+            <!-- The ACTION DRAFT has its own frame (T2): the action editor stages an
+                 edited play order and reloads this one freely, while #preview-slot keeps
+                 running the real simulation untouched (its frame is never reloaded).
+                 It boots ?pack=wb-staged, which the protocol handler serves from the
+                 staged draft with a production fallback — so a draft can never leak into
+                 the runtime layer. -->
+            <div id="bench-slot">
+              <iframe id="bench-frame" src="./preview/office.html?pack=wb-staged" title="动作草稿预览（编辑中的帧序）" data-i18n-title="stage.benchFrameTitle"></iframe>
+            </div>
+            <div id="preview-slot">
+              <!-- Same-origin tool-served copy of the product office page
+                   (workbench://local/preview/office.html): the protocol handler answers
+                   its saved-layout route with the read-only content/scenes/flat/layout.json
+                   baseline, and the subframe receives the REAL office bridge through the
+                   window preload. -->
+              <!-- NO ?editor=1: the product's layout editor opens a wall of chrome whose
+                   saves the tool route refuses anyway. RUN mode shows the product's plain
+                   RUNTIME view; editing the layout is the studio canvas's job (EDIT mode),
+                   so there is exactly one editor in the window. -->
+              <iframe id="preview-frame" src="./preview/office.html?pack=deepseek-default" title="办公室运行预览（office 页 · flat 场景 · 运行时视图）" data-i18n-title="stage.previewFrameTitle"></iframe>
+            </div>
+            <!-- gap #3: the EDIT/RUN comparison layer. Same coordinate space as the
+                 three layers below (it is a sibling inside #stage-world, so the view
+                 transform carries it), and its visibility has ONE source of truth like
+                 the mode: #stage[data-compare]. It carries the DERIVED navigation graph,
+                 the workstations and the live employee dots over the runtime picture —
+                 which is how you read "where does it walk" against "what does the
+                 product draw" without leaving the run view. -->
+            <div id="stage-compare-layer" aria-hidden="true"></div>
+          </div>
+          <div id="stage-empty" hidden>
+            <p class="wb-stage-empty-title" data-i18n="stage.emptyTitle">画布是空的</p>
+            <p class="wb-hint" data-i18n="stage.emptyHint">把左侧文件树里的东西拖进来：家具图片放进布局，动作帧看逐帧，layout/scene/zones 打开场景工具，.vgraph 打开行为图。</p>
+          </div>
+        </div>
+        <div id="stage-statusbar">
+          <span id="stage-hint" class="wb-note">编辑模式：拖动物件摆放 · 方向键微调 · ⌘/Ctrl+0 适应窗口</span>
+          <span id="canvas-status" class="wb-hint">未选中。点画布里的物件选中；拖动或方向键移动；违规会当场报出并拒绝保存。</span>
+          <span id="stage-spacer"></span>
+          <span id="canvas-selection" class="wb-note"></span>
+        </div>
+        </div>
+        <!-- T9: 「试说一句」的气泡叠在运行坞上：高亮坞体、气泡压在坞的底沿，带着台词
+             和是谁在说，按语料 limits.bubbleMs 自己消失。这是坞外面的覆盖层——坞里的
+             office 页面不被打扰，也不与它通信。 -->
+        <div id="dialogue-bubble-overlay" class="wb-bubble-overlay" hidden>
+          <span id="dialogue-bubble-who" class="wb-bubble-who"></span>
+          <div id="dialogue-bubble" class="wb-bubble-line">尚未说话</div>
+          <span id="dialogue-bubble-meta" class="wb-bubble-meta"></span>
+        </div>
+      </section>
+    </section>
+    <aside id="wb-right" aria-label="检查器" data-i18n-aria-label="pane.inspector">
+      <div id="wb-inspector-head">
+        <span class="wb-pane-title" data-i18n="pane.inspector">检查器</span>
+        <span id="inspector-tool" class="wb-pane-sub"></span>
+      </div>
+      <!-- T6: the selected item's numeric properties. The canvas stays the direct
+           manipulation surface (drag · arrows · the buttons in the scene check below);
+           this is the type-a-value surface. Both use the SAME write path — stageEdit →
+           sceneEdit (试算 → 校验 → 重画) — and neither writes a file: 保存布局 is the only
+           writer. 场景 owns TWO inspector panels, this one and #panel-scene. -->
+      <section id="panel-item" class="wb-panel" hidden aria-label="选中物件属性" data-i18n-aria-label="panel.item.aria">
+        <div class="wb-panel-head">
+          <h3 data-i18n="head.item">选中物件</h3>
+        </div>
+        <p id="item-none" class="wb-hint" data-i18n="item.none">未选中物件。点中间画布里的物件选中它，这里就能直接改数值。</p>
+        <div id="item-body" hidden>
+          <p class="wb-hint" data-i18n="item.hint">键入后按「应用」才改草稿（试算 → 校验 → 重画）；这里不写盘，写盘归「保存布局」。</p>
+          <!-- read-only: what the canvas has selected, and whether it carries unsaved edits -->
+          <p id="item-prop-meta" class="wb-note"></p>
+          <form id="item-prop-form" novalidate>
+            <label class="wb-prop-row" for="item-prop-x"><span data-i18n="item.x">横向 x</span>
+              <input type="number" id="item-prop-x" step="0.001" min="0" max="1" inputmode="decimal" />
+            </label>
+            <label class="wb-prop-row" for="item-prop-y"><span data-i18n="item.y">纵向 y</span>
+              <input type="number" id="item-prop-y" step="0.001" min="0" max="1" inputmode="decimal" />
+            </label>
+            <label class="wb-prop-row" for="item-prop-scale"><span data-i18n="item.scale">缩放</span>
+              <input type="number" id="item-prop-scale" step="0.01" min="0.2" max="3" inputmode="decimal" />
+            </label>
+            <label class="wb-prop-row" for="item-prop-layer"><span data-i18n="item.layer">层级</span>
+              <input type="number" id="item-prop-layer" step="1" min="-9999" max="9999" inputmode="numeric" />
+            </label>
+            <!-- gap #2: the layer is DEPTH, and the number alone says nothing about
+                 what covers what. The band line under the field names the band the
+                 typed value lands in (lib/depth-bands.js over the schema's own
+                 defaults), and the ladder is the whole vocabulary. -->
+            <p id="item-layer-band" class="wb-note"></p>
+            <label class="wb-prop-row" for="item-prop-name"><span data-i18n="item.name">名字</span>
+              <input type="text" id="item-prop-name" readonly />
+            </label>
+            <label class="wb-prop-row" for="item-prop-hidden"><span data-i18n="item.hidden">隐藏</span>
+              <input type="checkbox" id="item-prop-hidden" />
+            </label>
+          </form>
+          <p id="item-name-note" class="wb-hint" data-i18n="item.nameNote"></p>
+          <div class="wb-panel-head">
+            <button type="button" id="item-prop-apply" data-i18n="btn.itemApply">应用</button>
+            <button type="button" id="item-prop-reset" data-i18n="btn.itemReset">回填当前值</button>
+          </div>
+          <p id="item-prop-status" class="wb-hint"></p>
+        </div>
+      </section>
+      <!-- T8: the behaviour page's node editor. It is the SAME idea as #panel-item above
+           (the work area manipulates directly, the inspector types values), and it follows
+           the same rules: editing stages a draft, and 保存 stays the only writer — through
+           the validated graphSave path, which refuses an invalid graph with the validator's
+           own message. #graph-node-detail (the raw JSON of the node) moved here from the
+           work-area panel, whose job is the canvas, not a form. -->
+      <section id="panel-item-graph" class="wb-panel" hidden aria-label="行为图节点属性" data-i18n-aria-label="panel.itemGraph.aria">
+        <div class="wb-panel-head">
+          <h3 data-i18n="head.graphNode">选中节点</h3>
+        </div>
+        <p id="graph-node-none" class="wb-hint" data-i18n="graph.node.none">未选中节点。点画布里的节点选中它，这里改字段；写盘仍归「保存」。</p>
+        <div id="graph-node-body" hidden>
+          <p class="wb-hint" data-i18n="graph.node.hint">改完按「应用字段」才进草稿（校验不过会按校验器的原话拒绝并撤回）；这里不写盘，写盘归「保存」。</p>
+          <p id="graph-node-meta" class="wb-note"></p>
+          <form id="graph-node-form" novalidate></form>
+          <div class="wb-panel-head">
+            <button type="button" id="graph-node-apply" data-i18n="btn.graphNodeApply">应用字段</button>
+            <button type="button" id="graph-node-refill" data-i18n="btn.graphNodeRefill">回填当前值</button>
+          </div>
+          <p id="graph-node-status" class="wb-hint"></p>
+          <pre id="graph-node-detail" class="wb-pre">点画布里的节点查看字段</pre>
+        </div>
+      </section>
+      <!-- T9: 语料页的选中条目编辑器。和 #panel-item-graph 同一个形状：工作区（表格）
+           负责直接操作，检查器负责键入数值；两条路都走向同一个写入路径——
+           dialogueEdit（试算 → 校验 → 暂存），保存仍是唯一的写盘者。 -->
+      <section id="panel-item-dialogue" class="wb-panel" hidden aria-label="选中台词" data-i18n-aria-label="panel.itemDialogue.aria">
+        <div class="wb-panel-head">
+          <h3 data-i18n="head.dialogueItem">选中台词</h3>
+        </div>
+        <p id="dialogue-item-none" class="wb-hint" data-i18n="dialogue.item.none">未选中台词。点主区表格里的一行选中它，这里改内容；写盘仍归「保存」。</p>
+        <div id="dialogue-item-body" hidden>
+          <p class="wb-hint" data-i18n="dialogue.item.hint">改完按「应用」才进暂存（校验不过会按校验器的原话拒绝）；这里不写盘，写盘归「保存」。</p>
+          <p id="dialogue-item-meta" class="wb-note"></p>
+          <form id="dialogue-item-form" novalidate>
+            <label class="wb-prop-row" for="dialogue-item-text"><span data-i18n="dialogue.item.text">台词</span>
+              <textarea id="dialogue-item-text" rows="3" data-i18n-placeholder="dialogue.item.textPlaceholder" placeholder="这句台词会原样显示在气泡里"></textarea>
+            </label>
+            <label class="wb-prop-row" for="dialogue-item-weight"><span data-i18n="dialogue.item.weight">权重</span>
+              <input type="number" id="dialogue-item-weight" min="1" max="20" step="1" inputmode="numeric" />
+            </label>
+            <label class="wb-prop-row" for="dialogue-item-if"><span data-i18n="dialogue.item.if">条件</span>
+              <input type="text" id="dialogue-item-if" data-i18n-placeholder="dialogue.item.ifPlaceholder" placeholder="timeOfDay=morning, peerActivity=working" />
+            </label>
+            <label class="wb-prop-row" for="dialogue-item-id"><span data-i18n="dialogue.item.id">id（只读）</span>
+              <input type="text" id="dialogue-item-id" readonly />
+            </label>
+          </form>
+          <p class="wb-hint" data-i18n="dialogue.item.ifNote">条件支持 timeOfDay / peerActivity / taskActive / activity / phase / taskOutcome / scene / zone / weather；写成 key=value（逗号分隔），也接受 {"timeOfDay":"morning"}。</p>
+          <div class="wb-panel-head">
+            <button type="button" id="dialogue-item-apply" data-i18n="btn.dialogueItemApply">应用</button>
+            <button type="button" id="dialogue-item-refill" data-i18n="btn.dialogueItemRefill">回填当前值</button>
+          </div>
+          <p id="dialogue-item-status" class="wb-hint"></p>
+        </div>
+      </section>
+      <!-- the inspector is contextual: on pages whose panels live in the work area there is
+           nothing to inspect yet, and saying so beats an unexplained empty column. T11:
+           the 观测 page joined that group — its console is the page's own work area now,
+           so what is left to inspect there is nothing, and the sentence stops claiming
+           otherwise. -->
+      <p id="inspector-empty" class="wb-hint" data-i18n="inspector.empty">这个页面没有检查器内容。检查器显示的是"选中对象"的属性：切到「场景」页点选画布里的物件、「行为」页点选节点、「语料」页点选一行台词。</p>
+      <section id="panel-scene" class="wb-panel" aria-label="场景编辑与校验" data-i18n-aria-label="panel.scene.aria">
+      <p id="scene-unavailable" class="wb-hint" hidden>
+        <span data-i18n="scene.studioOnly">场景面板只在 studio 入口可用：在 studio/ 目录运行</span> <code>npm run studio</code><span data-i18n="bench.unavailableSuffix">。</span>
+      </p>
+      <div id="scene-body">
+        <!-- gap #4: the inspector's orientation paragraph is gone. It restated what
+             the canvas status line already says (点画布里的物件选中；拖动或方向键移动；
+             违规会当场报出) plus what the check section's own head says. The canvas
+             toolbar now carries the display switches they describe. -->
+        <div class="wb-panel-head">
+          <h4 data-i18n="head.item">选中物件</h4>
+          <button type="button" id="btn-canvas-smaller" title="缩小选中物件" data-i18n-title="scene.canvasSmallerTitle" data-i18n="scene.canvasSmaller">缩小 −</button>
+          <span id="canvas-scale-label" class="wb-note">1.00</span>
+          <button type="button" id="btn-canvas-bigger" title="放大选中物件" data-i18n-title="scene.canvasBiggerTitle" data-i18n="scene.canvasBigger">放大 +</button>
+          <button type="button" id="btn-canvas-hide" title="隐藏/显示选中物件（不渲染但保留在草稿里）" data-i18n-title="scene.canvasHideTitle" data-i18n="scene.canvasHide">隐藏/显示</button>
+          <button type="button" id="btn-canvas-remove" title="从布局里删除选中物件（先备份，校验不通过则拒绝）" data-i18n-title="scene.canvasRemoveTitle" data-i18n="scene.canvasRemove">删除物件</button>
+        </div>
+        <div class="wb-panel-head">
+          <h3 data-i18n="head.sceneCheck">场景检查（工位悬空 / 家具重叠 / 入口被堵 / 障碍过期）</h3>
+          <button type="button" id="btn-scene-report" data-i18n="btn.revalidate">重新校验</button>
+        </div>
+        <p id="scene-summary" class="wb-summary"></p>
+        <div class="wb-table-wrap">
+          <table id="scene-table">
+            <thead>
+              <tr><th data-i18n="table.scene.severity">级别</th><th data-i18n="table.scene.code">代码</th><th data-i18n="table.scene.detail">说明</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="wb-panel-head">
+          <h3 data-i18n="head.sceneWaypoints">可行走点图（按区域自动生成，不手画线）</h3>
+          <button type="button" id="btn-scene-waypoints" data-i18n="scene.waypointsGenerate">生成行走点图</button>
+          <button type="button" id="btn-scene-waypoints-export" disabled data-i18n="scene.waypointsExport">导出 JSON</button>
+        </div>
+        <p id="scene-waypoints" class="wb-summary"></p>
+
+        <div class="wb-panel-head">
+          <h3 data-i18n="head.sceneZones">重建碰撞区（依据当前布局更新 zones.obstacles）</h3>
+          <button type="button" id="btn-scene-sync" title="先试算：列出新增/删除/移动，不写盘" data-i18n-title="scene.syncDryRunTitle" data-i18n="scene.syncDryRun">试算</button>
+          <button type="button" id="btn-scene-sync-write" disabled data-i18n="scene.syncWrite">确认写入 zones.json</button>
+        </div>
+        <pre id="scene-sync-result" class="wb-pre">尚未试算（改动布局后 zones.json 会与布局不一致：工具会报出来，这里可一键重建）</pre>
+      </div>
+      </section>
+    </aside>
+  </main>
+  <div id="wb-splitter-left" class="wb-splitter" role="separator" aria-orientation="vertical" tabindex="0" aria-label="调整左栏宽度" data-i18n-aria-label="splitter.left"></div>
+  <div id="wb-splitter-right" class="wb-splitter" role="separator" aria-orientation="vertical" tabindex="0" aria-label="调整右栏宽度" data-i18n-aria-label="splitter.right"></div>
+  <div id="wb-palette" hidden>
+    <div id="wb-palette-card" role="dialog" aria-modal="true" aria-label="命令面板" data-i18n-aria-label="palette.label">
+      <input type="text" id="wb-palette-input" placeholder="搜索命令…（例如：场景 / scene / 预览）" autocomplete="off" data-i18n-placeholder="palette.placeholder" />
+      <ul id="wb-palette-list" role="listbox" aria-label="命令列表" data-i18n-aria-label="stage.paletteListAria"></ul>
+      <p id="wb-palette-hint" class="wb-hint" data-i18n="palette.hint">↑↓ 选择 · Enter 执行 · Esc 关闭 · ⌘/Ctrl+K 打开</p>
+    </div>
+  </div>
+  <div id="wb-rail-left" hidden>
+    <button type="button" class="wb-rail-expand" data-rail="left" title="展开左栏（⌘/Ctrl+B）" data-i18n-title="stage.railExpandLeft">▶</button>
+    <span class="wb-rail-label" data-i18n="pane.content">内容工程</span>
+  </div>
+  <div id="wb-rail-right" hidden>
+    <button type="button" class="wb-rail-expand" data-rail="right" title="展开右栏（⌘/Ctrl+J）" data-i18n-title="stage.railExpandRight">◀</button>
+    <button type="button" class="wb-rail-tab" data-tab="tab-scene" title="场景" data-i18n-title="tab.scene">▣</button>
+    <button type="button" class="wb-rail-tab" data-tab="tab-preview" title="运行" data-i18n-title="tab.preview">◉</button>
+    <button type="button" class="wb-rail-tab" data-tab="tab-actions" title="动作" data-i18n-title="tab.actions">▤</button>
+    <button type="button" class="wb-rail-tab" data-tab="tab-bench" title="动作检查" data-i18n-title="tab.bench">▶</button>
+    <button type="button" class="wb-rail-tab" data-tab="tab-assets" title="素材校验" data-i18n-title="tab.assets">✓</button>
+    <button type="button" class="wb-rail-tab" data-tab="tab-graph" title="行为图" data-i18n-title="tab.graph">⌥</button>
+    <button type="button" class="wb-rail-tab" data-tab="tab-dialogue" title="对话文案" data-i18n-title="tab.dialogue">❝</button>
+    <button type="button" class="wb-rail-tab" data-tab="tab-pipeline" title="流水线" data-i18n-title="tab.pipeline">⌺</button>
+    <button type="button" class="wb-rail-tab" data-tab="tab-geometry" title="几何报表" data-i18n-title="tab.geometry">⌗</button>
+    <button type="button" class="wb-rail-tab" data-tab="tab-gallery" title="视觉基线" data-i18n-title="tab.gallery">▦</button>
+    <button type="button" class="wb-rail-tab" data-tab="tab-passport" title="素材溯源" data-i18n-title="tab.passport">◈</button>
+  </div>
+  <script src="./i18n.js"></script>
+  <!-- app/ modules: classic scripts in load order, each a dual module (window.wb* for the
+       page, module.exports for the Node tests) — no bundler, no build step. -->
+  <script src="./app/stage.js"></script>
+  <script src="./app/history.js"></script>
+  <script src="./app/history-controller.js"></script>
+  <script src="./app/store.js"></script>
+  <script src="./app/problems.js"></script>
+  <script src="./app/pipeline-model.js"></script>
+  <script src="./app/compare.js"></script>
+  <script src="./lib/depth-bands.js"></script>
+  <script src="./lib/drop-ghost.js"></script>
+  <script src="./workbench.js"></script>
+</body>
+</html>

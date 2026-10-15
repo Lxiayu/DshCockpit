@@ -1,24 +1,27 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "working-back",
   "loop": true,
+  "pingPong": false,
   "direction": "none",
   "frames": [
     {
       "file": "assets/animations/working/back/working-back-04.png",
-      "durationMs": 350
+      "durationMs": null
     },
     {
       "file": "assets/animations/working/back/working-back-05.png",
-      "durationMs": 350
+      "durationMs": null
     },
     {
       "file": "assets/animations/working/back/working-back-06.png",
-      "durationMs": 350
+      "durationMs": null
     }
   ],
   "geometry": {
     "footLine": 296,
     "tolerancePx": 1
-  }
+  },
+  "tags": [],
+  "events": []
 }

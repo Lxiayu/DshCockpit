@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "id": "local-behaviour",
+  "meta": {
+    "label": "本地行为（近似调度器）",
+    "description": "P6 示例图：按节拍挑活动、停留、再来一遍"
+  },
+  "variables": [
+    {
+      "name": "idleStreak",
+      "scope": "employee",
+      "type": "number",
+      "value": 0
+    }
+  ],
+  "nodes": [
+    {
+      "id": "beat",
+      "type": "trigger",
+      "every": 1000
+    },
+    {
+      "id": "mark",
+      "type": "variable",
+      "write": {
+        "name": "idleStreak",
+        "value": 1
+      }
+    },
+    {
+      "id": "do",
+      "type": "action",
+      "do": "activity.set",
+      "resource": "roaming"
+    },
+    {
+      "id": "rest",
+      "type": "wait",
+      "ms": 3000
+    },
+    {
+      "id": "again",
+      "type": "wait",
+      "ms": 1000
+    }
+  ],
+  "edges": [
+    {
+      "from": "beat",
+      "to": "mark"
+    },
+    {
+      "from": "mark",
+      "to": "do"
+    },
+    {
+      "from": "do",
+      "to": "rest"
+    },
+    {
+      "from": "rest",
+      "to": "again"
+    },
+    {
+      "from": "again",
+      "to": "do"
+    }
+  ]
+}
