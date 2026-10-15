@@ -19,6 +19,9 @@
 //   positive: the production office surface AND the runtime materials
 //             (resources/office/layout-editor/** furniture, resources/characters/**)
 //             MUST ship — the exclusion list must never eat production assets.
+// 2026-10-15 工作台合并（s1 → 本仓）：负向清单扩容——studio/**（工作台本体）、
+//   src/office/behavior-graph/**（产品不引用的纯模块）、src/office/layout-editor.js
+//   （content-validator 依赖，删除前版本回归）出现即失败；既有正向断言一条未放宽。
 // Existing positive assertions are never relaxed by this; the asar checks are
 // additive gates (win zip/win-unpacked + mac .app/zip all run them).
 'use strict';
@@ -36,8 +39,13 @@ const RUNTIME_RE = /^resources\/runtime\/[^\\/]+\/node_modules\/@deepseek-ai\/ds
 
 // Must NOT appear inside app.asar. Prefixes match whole path segments; exact
 // paths match the full entry name.
+// 2026-10-15 工作台合并：studio/（工作台本体）与 src/office/behavior-graph/
+// （产品当前不引用的纯模块解释器）随合并回归在盘，加入负向清单——产物里出现
+// 即判失败，与 electron-builder.js 的对应排除双向钉死。
 const FORBIDDEN_ASAR_PREFIXES = [
   'src/workbench/',
+  'studio/',
+  'src/office/behavior-graph/',
   'src/office/fixtures/character-pack/',
 ];
 const FORBIDDEN_ASAR_PATHS = [
@@ -87,6 +95,9 @@ const REQUIRED_ASAR_PATHS = [
 // 3,327 with the authoring block; 52 authoring entries excluded) + 10% headroom
 // so future legitimate additions do not trip the gate, while a wholesale
 // authoring-block regression (hundreds of entries) still fails loudly.
+// 2026-10-15 工作台合并后重核：实测 3,283（studio/、src/workbench/、
+// src/office/behavior-graph/、src/office/layout-editor.js 全部被排除挡住，
+// 与合并前逐条目一致）——上限保持 3603 不上调（对实测值约 +9.8% 余量）。
 const ASAR_ENTRY_BUDGET = 3603;
 
 // extraResources materials the office view needs at runtime (name prefixes in
