@@ -131,6 +131,10 @@ npm run build:mac  # macOS Apple Silicon 包
 - `src/`：桌面壳与运行时集成。
 - `photo/`：README 与宣传素材。
 
+### 创作工作台（开发者工具，不随产品发布）
+
+本仓内置 `studio/` 与 `src/workbench/`：一套给维护者用的内容创作工作台（角色动作、场景布局、对话语料的生成、校验与发布内核，`cd studio && npm run studio` 或 `npm run office:workbench` 启动）。它是**开发期工具，不随产品发布**——打包配置与产物校验都将创作树排除在正式安装包之外。用法与边界见 [studio/README.md](studio/README.md)。
+
 项目架构与设计背景见 [DESIGN.md](DESIGN.md)；历史规划文档不等同于当前发布承诺。
 
 ## 开源与素材
