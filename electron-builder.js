@@ -43,7 +43,17 @@ const config = {
     //  ⚠ 同名陷阱：extraResources 里的 resources/office/layout-editor/ 是生产
     //  家具素材源（layout-assets.js catalog 的渲染输入），与此处的
     //  src/office/layout-editor.js 同名不同物，严禁按名字清目录/加排除。
+    // 2026-10-15 工作台合并（s1 → 本仓）：创作树整体回归，排除只增不减——
+    //   - src/workbench/** 的 P5-2 排除继续有效（该树随合并回来，仍不进包）；
+    //   - studio/** 是工作台本体（Electron 工具 + 引擎 + CLI + 文档 + 测试）；
+    //   - src/office/behavior-graph/** 是纯模块行为图解释器，产品代码当前不
+    //     引用它（与 src/office/** 既有生产语义无关），同样不进包；
+    //   - src/office/layout-editor.js 随 content-validator 的依赖回归在盘
+    //     （取产品 P5-2 删除前版本，仍复用 layout-schema.js 单一事实源），
+    //     本行排除原样保留。
     '!src/workbench/**',
+    '!studio/**',
+    '!src/office/behavior-graph/**',
     '!src/office/layout-editor.js',
     '!src/office/playground.html',
     '!src/office/playground-page.js',
