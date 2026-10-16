@@ -44,8 +44,10 @@ const INDEX_OUT = path.join(ROOT, 'docs', 'strategy', '2026-09-26-asset-provenan
 // ---------------------------------------------------------------------------
 // 已知"链断点"登记（2026-09-26 盘点；每条都给找回锚点，运行时复核）
 // 断点来源：commit ebf8e59（p5-2 创作块清出主仓，能力留 s1）与 2041757
-// （p5 夹具/工具边清理）。s1 仓 /Users/xia/program/dsh/DshCockpit-s1 为只读
-// 参照，本 CLI 绝不写它。
+// （p5 夹具/工具边清理）。
+// 2026-10-16 S1 目录收编：s1 工作树已并入本仓，其独有工具收入本机保险箱
+// archive/s1-dev/（不入库、不进包）。找回锚点因此由"s1 仓只读路径"改为
+// 保险箱路径；git 锚点（44ed956:…）仍是唯一的持久来源。
 // ---------------------------------------------------------------------------
 // 2026-10-15 工作台合并：src/workbench/lib/action-publisher.js（P5 删除，
 // deletedIn 2041757）随 src/workbench/** 回归主仓，不再是"丢失工具"——
@@ -56,28 +58,28 @@ const LOST_TOOLS = [
     role: '生成（生图 API 调用：gpt-image-2，key 仅从 env/ ~/.dsh-secrets.env 读入，绝不打印）',
     affected: ['expressions/*', 'walk/*（一代帧）'],
     deletedIn: 'ebf8e59',
-    recoverFrom: ['git show 44ed956:scripts/gen-img.js', '/Users/xia/program/dsh/DshCockpit-s1/scripts/gen-img.js（只读）'],
+    recoverFrom: ['git show 44ed956:scripts/gen-img.js', 'archive/s1-dev/scripts/gen-img.js（本机保险箱，不入库）'],
   },
   {
     tool: 'scripts/gen-frames.js',
     role: '生成（M3 缺口再生成流水线：参考图压缩 → /images/edits → 网格切片 → 去白底 → 归一化预校验）',
     affected: ['walk/{down,left,right,up}（二代 b 系列，2026-09-21）'],
     deletedIn: 'ebf8e59',
-    recoverFrom: ['git show 44ed956:scripts/gen-frames.js', '/Users/xia/program/dsh/DshCockpit-s1/scripts/gen-frames.js（只读）'],
+    recoverFrom: ['git show 44ed956:scripts/gen-frames.js', 'archive/s1-dev/scripts/gen-frames.js（本机保险箱，不入库）'],
   },
   {
     tool: 'scripts/gen-props.js',
     role: '生成（根目录环境道具 prop-*.png 的生成器）',
     affected: ['resources/office/prop-*.png（除 flat/ 与 layout-editor/ 外的根目录道具）'],
     deletedIn: 'ebf8e59',
-    recoverFrom: ['git show 44ed956:scripts/gen-props.js', '/Users/xia/program/dsh/DshCockpit-s1/scripts/gen-props.js（只读）'],
+    recoverFrom: ['git show 44ed956:scripts/gen-props.js', 'archive/s1-dev/scripts/gen-props.js（本机保险箱，不入库）'],
   },
   {
     tool: 'scripts/apply-walk-sequence.js',
     role: '拼装（M3/E5a 行走序列拼装：passing/C 系卡片帧的输入映射）',
     affected: ['anchors-only 的一代行走帧（若重新启用）'],
     deletedIn: 'ebf8e59',
-    recoverFrom: ['git show 44ed956:scripts/apply-walk-sequence.js', '/Users/xia/program/dsh/DshCockpit-s1/scripts/apply-walk-sequence.js（只读）'],
+    recoverFrom: ['git show 44ed956:scripts/apply-walk-sequence.js', 'archive/s1-dev/scripts/apply-walk-sequence.js（本机保险箱，不入库）'],
   },
   {
     tool: 'scripts/office-assets/validate-character-pack.js',

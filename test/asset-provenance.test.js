@@ -36,11 +36,14 @@ test('report walk-up: content edit source matches the pack; publish ledger is re
   const ledger = r.provenance[0];
   assert.match(ledger.entry, /2026-09-21T18-35-36-468Z-walk-up\.json$/);
   assert.ok(ledger.publishedAt.startsWith('2026-09-21'), 'the 2026-09-21 b-series regeneration is on record');
-  // the ledger was written in the s1 era: its backup lives OUTSIDE this repo
-  // (read-only reference), and the CLI must say so honestly
-  assert.equal(ledger.backupExistsInRepo, false);
+  // 2026-10-16 S1 目录收编：s1 的 content/build（含这条台账的备份）整体并入本仓，
+  // 因此"备份不在本仓"不再成立——事实变了，断言随之更新，不掩盖。
+  // 台账里记录的绝对路径仍是 s1 时代的（历史事实，不回改），所以
+  // backupDirPointsOutsideRepo 依旧为真；backupExistsAtRecordedPath 也仍可达
+  // （回退分支是 backupExistsInRepo）。这一版断言在 s1 目录被删除后依然成立。
+  assert.equal(ledger.backupExistsInRepo, true, 's1 收编后，s1 时代的备份随 content/build 落到本仓');
   assert.equal(ledger.backupExistsAtRecordedPath, true, 'recorded backup dir is reachable');
-  assert.equal(ledger.backupDirPointsOutsideRepo, true);
+  assert.equal(ledger.backupDirPointsOutsideRepo, true, '台账记录的仍是 s1 时代路径（历史事实）');
 });
 
 test('report working-back: the 2026-09-22 publish chain ends in this repo', () => {
