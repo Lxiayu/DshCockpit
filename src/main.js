@@ -116,82 +116,6 @@ if (process.env.DSH_DESKTOP_USER_DATA) {
 }
 
 // ---------------------------------------------------------------------------
-// Office Animation Playground (Task 4 / SPEC-06) — development-only.
-// Frozen default is OFF (`officePlaygroundEnabled=false`); the only way to run
-// it is the explicit dev/evidence override below. No Harness, no IPC business
-// events, no office-state persistence: the page is fully self-contained.
-// ---------------------------------------------------------------------------
-const OFFICE_PLAYGROUND_ENABLED = false;
-const OFFICE_PLAYGROUND_SCHEME = 'office-playground';
-function officePlaygroundEnabled() {
-  return OFFICE_PLAYGROUND_ENABLED || process.env.DSH_DESKTOP_OFFICE_PLAYGROUND === '1';
-}
-function registerOfficePlaygroundScheme() {
-  // Must be called before app ready; serving is registered in openOfficePlayground.
-  protocol.registerSchemesAsPrivileged([
-    {
-      scheme: OFFICE_PLAYGROUND_SCHEME,
-      privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
-    },
-  ]);
-}
-function openOfficePlayground() {
-  if (!officePlaygroundEnabled()) {
-    log('[office] playground disabled (officePlaygroundEnabled=false)');
-    return { ok: false, code: 'OFFICE_PLAYGROUND_DISABLED' };
-  }
-  const officeRoot = path.join(__dirname, 'office');
-  const packRoot = path.join(officeRoot, 'fixtures', 'character-pack');
-  const builtinPackRoot = path.join(officeCharactersRoot(), 'deepseek-default');
-  const nodeModulesRoot = path.join(__dirname, '..', 'node_modules');
-  const serveFile = (abs, type) => new Response(fs.readFileSync(abs), {
-    headers: { 'content-type': type, 'access-control-allow-origin': `${OFFICE_PLAYGROUND_SCHEME}://local` },
-  });
-  const contentTypeFor = (abs) => {
-    if (abs.endsWith('.html')) return 'text/html; charset=utf-8';
-    if (abs.endsWith('.css')) return 'text/css; charset=utf-8';
-    if (abs.endsWith('.js')) return 'text/javascript; charset=utf-8';
-    if (abs.endsWith('.json')) return 'application/json; charset=utf-8';
-    if (abs.endsWith('.png')) return 'image/png';
-    return 'application/octet-stream';
-  };
-  protocol.handle(OFFICE_PLAYGROUND_SCHEME, (request) => {
-    const url = new URL(request.url);
-    if (url.hostname !== 'local') return new Response('not found', { status: 404 });
-    const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
-    const routes = [
-      { prefix: 'node_modules/', root: nodeModulesRoot },
-      { prefix: 'pack/', root: packRoot },
-      { prefix: 'builtin/', root: builtinPackRoot },
-      { prefix: '', root: officeRoot },
-    ];
-    for (const route of routes) {
-      if (!rel.startsWith(route.prefix)) continue;
-      const relPath = rel.slice(route.prefix.length);
-      const abs = path.resolve(route.root, relPath);
-      if (!abs.startsWith(path.resolve(route.root) + path.sep) || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
-        return new Response('not found', { status: 404 });
-      }
-      return serveFile(abs, contentTypeFor(abs));
-    }
-    return new Response('not found', { status: 404 });
-  });
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 840,
-    useContentSize: true,
-    title: 'Office Animation Playground (dev)',
-    backgroundColor: '#1c2430',
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
-  });
-  win.webContents.setBackgroundThrottling(false); // no throttled wall-clock drift
-  win.loadURL(`${OFFICE_PLAYGROUND_SCHEME}://local/playground.html`);
-  log('[office] playground window opened (development-only)');
-  return { ok: true };
-}
-registerOfficePlaygroundScheme(); // privileged scheme declaration must precede app ready
-
-// ---------------------------------------------------------------------------
 // Office runtime view (Task 7 / SPEC-07) — feature-flagged, default OFF.
 // Frozen default is OFF (`officeRuntimeEnabled=false`, plan stage gate 5); the
 // env override exists only for development/evidence runs. One office module
@@ -5503,9 +5427,6 @@ if (!gotLock) {
       spawnRuntime();
     }
     if (process.env.DSH_DESKTOP_OPEN_SETTINGS === '1') createSettingsWindow();
-    // Dev-only Office Animation Playground (SPEC-06): opt-in via env; the
-    // playground stays off by default (officePlaygroundEnabled=false).
-    if (process.env.DSH_DESKTOP_OPEN_PLAYGROUND === '1') openOfficePlayground();
     // Office runtime view (SPEC-07) — **默认视图 = 办公室**（用户拍板：M6 P5.2
     // "默认视图 = office"、rev2 P1-2 "启动自动 openOfficeView()"）。左栏一键切回
     // 会话工作台，切走后办公室继续在后台活着（仿真不冻结）。
