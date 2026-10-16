@@ -29,7 +29,7 @@ description: 给「虚拟场景创作工作台」（本仓库的 studio/）做�
 ## 三、你的工作循环
 
 ```bash
-cd /Users/xia/program/dsh/DshCockpit-s1/studio
+cd /Users/xia/program/dsh/DshCockpit/studio
 
 # 0) 先看现状：能不能做、有没有红灯
 node bin/agent.js capabilities                 # 可用操作（也可 --json 给程序读）
