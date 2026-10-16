@@ -27,3 +27,13 @@ content/incoming/
 # 注：docs/ 在本仓库整体忽略（既有约定）；office 测试实际读取的
 # docs/specs|research|superpowers 少数文件用 git add -f 强制纳入，
 # 与 docs/compat/** 的处理方式一致。
+
+# S1 开发目录收编（2026-10-16）：s1 的素材树、证据截图与保险箱目录整体
+# 落到本仓工作树，但一律不入库——本仓是公开仓，且这些内容不进发行包
+# （electron-builder 白名单只有 src/**/*，其余目录天然排除）。
+# photo/ 下已有的 10 个宣传素材仍在库（gitignore 不影响已跟踪文件）。
+photo/
+evidence/
+output/
+archive/
+.claude/
