@@ -284,13 +284,15 @@ function createWindowManager(deps) {
     createRailView();
     syncShellViews();
     harnessView.webContents.loadURL(url);
-    // Show + start deferred services when the page is truly paintable (no white
-    // flash). ready-to-show is a BrowserWindow event tied to ITS webContents,
+    // Show the main window when the page is truly paintable (no white flash).
+    // ready-to-show is a BrowserWindow event tied to ITS webContents,
     // so the shell listens on the harness view's first non-empty paint. The
     // timeout fallback covers Windows GPU / older-Electron combos that never
     // emit the paint event, and a did-fail-load retry recovers transient load
-    // failures. Without the fallback a stuck main window would leave deferred
-    // services (token poll, scheduler, balance, compaction, …) disabled forever.
+    // failures.
+    // v0.6（WP3）：延迟服务**不再**由 paint 触发 —— 改由 onRuntimeHealthy
+    //（runtime 健康是它们的真实前置；办公室默认视图下 harness 视图只是占位）。
+    // "runtime 永远起不来"的服务保活兜底移到了壳侧（main.js 45s 定时器）。
     let mainShown = false;
     let mainShowFallbackTimer = null;
     const createT0 = Date.now();
@@ -301,7 +303,6 @@ function createWindowManager(deps) {
       mainWindow.show();
       closeLoading();
       log(`[perf] main window paintable in ${Date.now() - createT0}ms`);
-      startDeferredServices();
     };
     harnessView.webContents.once('did-first-visually-non-empty-paint', showMainWhenReady);
     harnessView.webContents.once('dom-ready', () => { setTimeout(showMainWhenReady, 120); });
@@ -628,8 +629,11 @@ function createWindowManager(deps) {
     return { ok: true, offset: cockpitOffset };
   }
 
-  /** Runtime just became healthy: open/refresh the main window + cockpit. */
+  /** Runtime just became healthy: open/refresh the main window + cockpit.
+   *  v0.6（WP3）：延迟服务在这里启动（runtime 健康是它们的真实前置）；
+   *  startDeferredServices 幂等（deferredServicesStarted 守卫在壳侧）。 */
   function onRuntimeHealthy(bootUrl) {
+    startDeferredServices();
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (harnessView && !harnessView.webContents.isDestroyed()) harnessView.webContents.loadURL(bootUrl);
       createCockpitWindow();

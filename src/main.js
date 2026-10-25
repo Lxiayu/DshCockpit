@@ -5970,23 +5970,37 @@ if (!gotLock) {
     // runtime's thousands of files). It closes in createWindow().
     try { createLoadingWindow(); } catch (err) { log('[shell] loading window failed: ' + err.message); }
     setLoading(t(lang(), 'loading.boot'));
+    // v0.6（WP3）首帧解耦：主窗口**先行**。办公室是默认视图且不依赖 dsh runtime
+    //（Team 真实链路才需要），却曾经陪 runtime 走完整条启动链（安装检查 → spawn
+    // → 健康探测 → onRuntimeHealthy → 才建窗）。现在 splash 之后立即开窗：
+    // harness 视图先载 about:blank 占位，runtime 健康后由 onRuntimeHealthy 的
+    // "窗口已存在"分支换真 URL 并开 cockpit；办公室视图紧接着上屏。
+    // guided 安装流程照常可退出 app（窗口存在不妨碍 quit）。
+    let mainWindowsUp = false;
+    try { createWindow('about:blank'); mainWindowsUp = true; } catch (err) { log(`[shell] early main window failed: ${err.message}`); }
+    // 默认视图立即上屏（openOfficeView 幂等；原来在 await 之后）。
+    if (officeRuntimeEnabled() && process.env.DSH_DESKTOP_OPEN_OFFICE !== '0') openOfficeView();
     const runtimeReady = await ensureRuntimeWithGuide();
     // The guided flow may have quit the app (user choice / fatal error);
     // never continue a torn-down app (write-after-end crashes).
     if (quitting) return;
     if (runtimeReady) {
-      // The guided flow may have just closed its loading window; with no main
-      // window open yet, window-all-closed would otherwise quit the app while
-      // the runtime is still booting (M15). Hold quit until the window opens.
-      setMainWindowPending(true);
+      // 窗口已开（隐藏 → paint 后显示），window-all-closed 不会再在 runtime
+      // 启动期间触发；仅"早开窗失败"的罕见路径保留 M15 的退出钳制。
+      if (!mainWindowsUp) setMainWindowPending(true);
       spawnRuntime();
+      // v0.6（WP3）：延迟服务改由 runtime-healthy 触发（window-manager 的
+      // onRuntimeHealthy）。兜底：runtime 永远起不来时，45s 后仍要启动服务
+      //（接替原"harness paint 15s 强制显示"的服务保活职责；幂等）。
+      setTimeout(startDeferredServices, 45_000);
     }
     if (process.env.DSH_DESKTOP_OPEN_SETTINGS === '1') createSettingsWindow();
     // Office runtime view (SPEC-07) — **默认视图 = 办公室**（用户拍板：M6 P5.2
     // "默认视图 = office"、rev2 P1-2 "启动自动 openOfficeView()"）。左栏一键切回
     // 会话工作台，切走后办公室继续在后台活着（仿真不冻结）。
-    // `DSH_DESKTOP_OPEN_OFFICE=0` 回到"会话工作台优先"（调试 / 灰度回退用）；
-    // `=1` 与默认同义，保留给开发与证据运行显式声明。
+    // v0.6（WP3）：openOfficeView 已**提前**到 splash 之后（await 之前）——
+    // 办公室不依赖 runtime，首帧不等 dsh；`DSH_DESKTOP_OPEN_OFFICE=0` 仍是
+    // "会话工作台优先"的调试/灰度回退开关（早开的那次调用同样尊重它）。
     // 2026-09-25 唤醒自愈（P1，长稳缺陷「显示器唤醒/解锁后画面不自愈」）：
     // powerMonitor 的锁屏/息屏挂起/系统挂起信号（lock-screen / unlock-screen /
     // suspend / resume）→ window-manager.setOfficePresentationSuspended →
@@ -6006,7 +6020,6 @@ if (!gotLock) {
       probeFile: process.env.DSH_OFFICE_POWER_PROBE || null,
       readFileSync: (file) => fs.readFileSync(file, 'utf8'),
     });
-    if (officeRuntimeEnabled() && process.env.DSH_DESKTOP_OPEN_OFFICE !== '0') openOfficeView();
 
     // token widget: one collect per tick shared by the widget and the cost
     // center (M7: avoid double full scans every 5s).
