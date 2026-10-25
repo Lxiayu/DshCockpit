@@ -92,6 +92,14 @@ const TICK_MS = 16;
 // the two-view limit, and nothing is pushed while every view is hidden (the
 // paused clock stops advancing, so the due check never fires).
 const PUSH_INTERVAL_MS = TICK_MS;
+// v0.6（WP4）快照版本化推送：场景静止时不再每 tick 全量构建+脱敏+IPC。
+//   - ANIMATION_GRANULARITY_MS：慢速多帧动画（working-back 3 帧；walk 由位置
+//     变化天然驱动；其余动画单帧——2026-10-26 对生产包逐项核对）按此粒度
+//     进签名，静止场景最多 4 次/秒。
+//   - SNAPSHOT_HEARTBEAT_MS：心跳兜底 —— 订阅方（renderer/诊断）至多 1s
+//     收到一次快照，防止任何未纳入签名的字段静默冻结。
+const ANIMATION_GRANULARITY_MS = 250;
+const SNAPSHOT_HEARTBEAT_MS = 1000;
 // P1 运行时体检（2026-09-26，性能专项实测缺陷）：性能专项测得仿真时钟只跑到
 // 实时 0.83x——start() 的 setInterval 每 16ms 只推进 1 步，主进程事件循环被
 // 其它工作（IPC/GC/窗口）拖慢时 fire 间隔变长，logicalMs 增长恒为 16ms/fire，
@@ -668,6 +676,8 @@ function createOfficeModule(options = {}) {
   const visibleViews = new Set();
   const listeners = new Set();
   let lastPushAtMs = null;
+  let lastPushSignature = null; // v0.6（WP4）：上一次推送的内容签名（null = 从未推过）
+  let lastPushedUsageBlock = null; // v0.6（WP4）：上次推送时的 usage 块（对象身份判变：注入即整体替换）
   let autoTimer = null;
 
   // ---- P1 运行时体检：仿真时钟节流诊断（start() 驱动器专属） ----------------
@@ -4104,10 +4114,65 @@ function createOfficeModule(options = {}) {
     stopClockProbes();
   }
 
+  /**
+   * v0.6（WP4）内容签名：只覆盖**渲染可见**的标量（FNV-1a，整数哈希）。
+   * 全量构建（resolveAnimation/registry/排序/脱敏/深冻结）比这里贵两个数量级，
+   * 因此用一次廉价遍历换取"静止场景零构建"。
+   * 未纳入签名的字段由 SNAPSHOT_HEARTBEAT_MS 兜底（至多 1s 陈旧）。
+   * 刻意**不含**：logicalMs（每 tick 必变，会让跳过失效）、animationElapsedMs
+   *（时间派生，经粒度桶进签名）。
+   */
+  function contentSignature() {
+    let hash = 0x811c9dc5;
+    const mix = (n) => { hash = (hash ^ (typeof n === 'number' && Number.isFinite(n) ? (n | 0) : 0)) * 0x01000193; };
+    const mixId = (str) => {
+      let h = 2166136261;
+      if (typeof str === 'string' && str !== '') {
+        for (let i = 0; i < str.length && i < 24; i += 1) h = (h ^ str.charCodeAt(i)) * 0x01000193;
+      }
+      return h | 0;
+    };
+    mix(Math.floor(logicalMs / ANIMATION_GRANULARITY_MS)); // 慢速多帧动画粒度
+    mix(isPaused() ? 1 : 0);
+    mix(mixId(JSON.stringify(globalSync))); // 聚合同步态（小对象）
+    mix(usageBlock === lastPushedUsageBlock ? 0 : 1); // usage 以对象身份判变（注入即整体替换）
+    mix(activityLog.length); mix(activityLog.length > 0 ? activityLog[activityLog.length - 1].atMs : 0);
+    mix(diagnostics.length); mix(diagnostics.length > 0 ? diagnostics[diagnostics.length - 1].atMs : 0);
+    mix(pendingInvalid ? 1 : 0);
+    mix(pendingItems.size); // 待处理卡（数量 + id 集；上限 PENDING_LIMIT，遍历廉价）
+    for (const id of pendingItems.keys()) mix(mixId(id));
+    for (const rec of employees.values()) {
+      // 位置是**归一化场景坐标**（0~1），渲染时放大到整屏 —— 行走速度可低至
+      // ~0.001/tick（2026-10-26 实测）。1e-4 量化保证任何屏幕上可见的位移
+      //（≥0.2px@2000px 宽）都翻转签名；静止位置恒定不推。
+      mix(Math.round(rec.position.x * 10000));
+      mix(Math.round(rec.position.y * 10000));
+      mix(mixId(rec.facing));
+      mix(mixId(rec.state.activity)); mix(mixId(rec.state.runtime));
+      mix(mixId(rec.state.movement)); mix(mixId(rec.state.queue));
+      mix(mixId(rec.marker));
+      mix(rec.bubble ? rec.bubble.untilMs : 0);
+      mix(rec.resultUntilMs === null ? 0 : rec.resultUntilMs);
+      mix(rec.lastResult ? rec.lastResult.atMs : 0);
+      mix(rec.toolKind ? mixId(rec.toolKind) : 0);
+      mix(rec.teamPhase ? mixId(rec.teamPhase) : 0);
+      mix(rec.transition ? mixId(rec.transition.kind + ':' + rec.transition.phase) : 0);
+      mix(rec.taskSeq || 0);
+      mix(Math.floor(rec.animationElapsedMs / ANIMATION_GRANULARITY_MS));
+    }
+    return hash | 0;
+  }
+
   function pushSnapshot() {
     const due = lastPushAtMs === null || logicalMs - lastPushAtMs >= PUSH_INTERVAL_MS;
     if (!due || listeners.size === 0) return;
+    // v0.6（WP4）：签名未变且未到心跳 → 跳过全量构建+脱敏+推送（静止场景从
+    // 62 次/秒降到至多 4 次/秒动画粒度 + 1 次/秒心跳）。
+    const signature = contentSignature();
+    if (signature === lastPushSignature && logicalMs - lastPushAtMs < SNAPSHOT_HEARTBEAT_MS) return;
     lastPushAtMs = logicalMs;
+    lastPushSignature = signature;
+    lastPushedUsageBlock = usageBlock;
     const snapshot = state();
     for (const listener of listeners) {
       try { listener(snapshot); } catch { /* listener errors never break the clock */ }

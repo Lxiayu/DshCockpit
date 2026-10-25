@@ -316,20 +316,32 @@ test('a running clock pushes throttled snapshots to subscribers so the view stay
   assert.ok(uniqueTicks.size >= 2, 'pushes carry advancing simulated time');
 });
 
-test('a running clock pushes one snapshot per tick so the view paints at tick rate (M2 2026-09-16)', async () => {
+test('a running clock pushes per tick WHILE SOMETHING MOVES (M2 2026-09-16; v0.6 WP4 stationary skip)', async () => {
+  // v0.6 语义：推送频率 = "有可见变化"的频率。行走（segment 每 tick 插值）必须
+  // 每 tick 推（渲染器按推送绘制，Pixi ticker 停用是契约）；**静止**场景跳到
+  // 动画粒度+心跳（office-snapshot-push-skip.test.js 覆盖）。
+  // 因此本测试先造一个必然在走的场景（running 会话 → task-start 移动相位），
+  // 再测真实时钟窗口内的推送频率 —— 否则夹具恰好静止会把 M2 误读成回归。
   const module = makeModule({ reducedMotion: false });
+  // 先让调度器把员工安置到稳定位置，再等一次漫游行走开始（确定性：同步 tick，
+  // 不用真实时钟）。行走期间（segment 每 tick 插值 → 签名每 tick 变）每个
+  // tick 必须推送恰好一次 —— 这是 M2 的原意（渲染器按推送绘制）。
+  tickFor(module, 500);
+  tickUntil(module, () => module.state().employees.some((e) => e.movement === 'moving'), 240000);
+  assert.ok(
+    module.state().employees.some((e) => e.movement === 'moving'),
+    'fixture must have a walker (roam/task move phase) before measuring cadence',
+  );
   const pushes = [];
   const unsubscribe = module.subscribe((snapshot) => pushes.push(snapshot.simulatedAtMs));
-  module.start();
-  // 320ms at TICK_MS=16 is ~20 due ticks. The renderer paints on snapshot
-  // pushes (its Pixi ticker is stopped by contract), so the push cadence IS
-  // the view frame rate: the old 100ms throttle quantized walking to ~10fps.
-  // >= 12 keeps a wide margin on both sides: RED under the 100ms throttle
-  // (~3 pushes), GREEN under per-tick pushes (~20).
-  await new Promise((resolve) => setTimeout(resolve, 320));
-  module.stop();
+  let fired = 0;
+  while (fired < 30 && module.state().employees.some((e) => e.movement === 'moving')) {
+    module.debugClockFire(); // 与生产 setInterval 同一条批末推送路径
+    fired += 1;
+  }
   unsubscribe();
-  assert.ok(pushes.length >= 12, `expected per-tick pushes (~20 in 320ms), got ${pushes.length}`);
+  assert.ok(fired >= 8, `fixture must sustain a walk for >= 8 ticks (got ${fired})`);
+  assert.equal(pushes.length, fired, `every tick with movement must push exactly once (${pushes.length}/${fired})`);
   const deltas = pushes.slice(1).map((at, i) => at - pushes[i]);
   assert.ok(deltas.every((d) => d > 0), 'pushed simulated time strictly advances');
 });
