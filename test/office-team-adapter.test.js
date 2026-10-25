@@ -255,7 +255,8 @@ test('team-office: artifact/available maps to a coarse kind hint only (no id, no
     assert.equal(blob.includes(forbidden), false, `must not carry ${forbidden}`);
   }
   assert.deepEqual(Object.keys(fact).sort(), [
-    'artifactKind', 'atMs', 'evidence', 'identity', 'jobStatus', 'kind', 'outcome', 'reason', 'role', 'seat',
+    'artifactKind', 'atMs', 'evidence', 'identity', 'jobStatus', 'kind', 'outcome',
+      'phase', 'reason', 'role', 'seat',
   ]);
 });
 

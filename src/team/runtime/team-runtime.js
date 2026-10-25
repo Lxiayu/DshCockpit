@@ -35,6 +35,7 @@ const {
   EVIDENCE_MAX_CHARS,
   EVIDENCE_RE,
   ATTENTION_REASON_RE,
+  PROGRESS_PHASE_RE,
   runIdFor,
   artifactIdFor,
   digestFor,
@@ -94,6 +95,7 @@ function newRun(jobId, role, planEntry) {
     producedArtifactIds: [],
     terminalEvidence: null,
     attention: null,
+    progress: null,
   };
 }
 
@@ -107,6 +109,7 @@ function cloneState(state) {
       producedArtifactIds: [...run.producedArtifactIds],
       terminalEvidence: run.terminalEvidence ? { ...run.terminalEvidence } : null,
       attention: run.attention ? { ...run.attention } : null,
+      progress: run.progress ? { ...run.progress } : null,
     };
   }
   const artifacts = {};
@@ -178,6 +181,14 @@ function fold(state, fact) {
       run.terminalEvidence = { source: fact.evidence, reason: outcome, atMs: fact.atMs };
       break;
     }
+    case 'run/progress': {
+      // v0.6（WP2）：只记最新 phase（历史在 append-only fact log 里）——
+      // 状态面是"现在在干什么"，不是过程日志。
+      const run = next.runs[fact.role];
+      if (!run) break;
+      run.progress = { phase: fact.phase, atMs: fact.atMs };
+      break;
+    }
     case 'run/attention': {
       const run = next.runs[fact.role];
       if (!run) break;
@@ -237,6 +248,7 @@ function frozenState(state) {
       producedArtifactIds: Object.freeze([...run.producedArtifactIds]),
       terminalEvidence: run.terminalEvidence ? Object.freeze({ ...run.terminalEvidence }) : null,
       attention: run.attention ? Object.freeze({ ...run.attention }) : null,
+      progress: run.progress ? Object.freeze({ ...run.progress }) : null,
     });
   }
   const artifacts = {};
@@ -503,6 +515,25 @@ function createTeamRuntime(options = {}) {
     return applied(fact, convergence);
   }
 
+  /** v0.6（WP2）：过程可见性 —— 记一条 run/progress（只存最新，重复 phase 幂等）。 */
+  function noteRunProgress({ role, phase } = {}) {
+    if (state.jobId === null) return rejected('JOB_NOT_CREATED');
+    if (!roleEntry(role)) return rejected('UNKNOWN_ROLE');
+    const run = runOf(role);
+    if (!run) return rejected('UNKNOWN_RUN');
+    if (TERMINAL_RUN_STATUSES.includes(run.status)) return rejected('RUN_ALREADY_TERMINAL');
+    if (run.status === 'pending') return rejected('RUN_NOT_DISPATCHED');
+    // phase 必须是粗粒度 token（闭集校验在执行层 schema；这里保证不是模型文本）。
+    if (typeof phase !== 'string' || !PROGRESS_PHASE_RE.test(phase)) {
+      return rejected('INVALID_PROGRESS_PHASE');
+    }
+    // 连续相同 phase → duplicate（不追加 fact；与后端去重同一纪律，纵深防御）。
+    if (run.progress && run.progress.phase === phase) return duplicate();
+    if (!guardFactBudget()) return rejected('FACTS_LIMIT_REACHED');
+    const fact = appendFact({ jobId: state.jobId, role, type: 'run/progress', atMs: now(), phase });
+    return applied(fact);
+  }
+
   function requestCancel({ role } = {}) {
     if (state.jobId === null) return rejected('JOB_NOT_CREATED');
     if (!roleEntry(role)) return rejected('UNKNOWN_ROLE');
@@ -586,6 +617,7 @@ function createTeamRuntime(options = {}) {
     noteArtifact,
     noteRunTerminal,
     noteRunAttention,
+    noteRunProgress,
     requestCancel,
     noteCancelAcknowledged,
     // 查询

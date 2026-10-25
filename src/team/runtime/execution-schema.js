@@ -28,13 +28,16 @@ const crypto = require('node:crypto');
 
 const EXECUTION_SCHEMA_VERSION = 1;
 
-// ---- 事件类型（最小集合；`execution/progress` 刻意不加入） --------------------
+// ---- 事件类型（最小集合） ------------------------------------------------------
 //
-// 契约 §5.2：`execution/progress` 没有真实消费方，因此**不加入** —— 不做
-// "看起来完整"的无意义事件。
+// v0.6（WP2）加入 `execution/progress`：当初"刻意不加入"的理由是**没有真实消费方**
+//（不做"看起来完整"的无意义事件）；现在消费方出现了（办公室座位的过程短语），
+// 因此加入 —— 但只携带一个闭集 phase（见 PROGRESS_PHASES），工具参数/正文仍然
+// 结构性禁止（字段白名单不变，progress 只多一个 phase）。
 const EXECUTION_EVENT_TYPES = Object.freeze([
   'execution/started',
   'execution/artifact',
+  'execution/progress',
   'execution/attention',
   'execution/completed',
   'execution/failed',
@@ -59,8 +62,20 @@ const CONTROL_EXECUTION_EVENT_TYPES = Object.freeze([
 const NON_TERMINAL_EXECUTION_EVENT_TYPES = Object.freeze([
   'execution/started',
   'execution/artifact',
+  'execution/progress',
   'execution/attention',
   'execution/crashed',
+]);
+
+// ---- progress phase 闭集（v0.6 WP2） -------------------------------------------
+//
+// provider 中立的 9 个过程短语键。**与 src/office/runtime/tool-phrases.js 的
+// PHRASE_KEYS 是同一集合**（office 侧用 PHRASE_KEYS 渲染 i18n；本层用闭集校验）。
+// 本层不能 require office 路径（纯度门），因此各持一份 ——
+// test/worker-execution-contract.test.js 的漂移钉保证两份永不漂移。
+const PROGRESS_PHASES = Object.freeze([
+  'typing', 'search', 'retrieval', 'terminal', 'command', 'edit', 'browse',
+  'asking', 'other',
 ]);
 
 // 执行事实 → Team 结果类（只有终态事件有此映射）。
@@ -74,7 +89,8 @@ const TERMINAL_OUTCOME_BY_EVENT_TYPE = Object.freeze({
 const DEFAULT_REASON_BY_EVENT_TYPE = Object.freeze({
   'execution/started': null,
   'execution/artifact': null,
-  'execution/attention': null,          // attention 必须显式给 reason（见下）
+  'execution/progress': null,            // progress 不是"需要人处理"的信号，无 reason
+  'execution/attention': null,           // attention 必须显式给 reason（见下）
   'execution/completed': 'ok',
   'execution/failed': 'failed',
   'execution/cancel-requested': 'requested',
@@ -115,6 +131,7 @@ const EXECUTION_CODES = Object.freeze([
   'EXEC_DUPLICATE',
   'EXEC_OUT_OF_ORDER',
   'EXEC_REASON_INVALID',
+  'EXEC_PHASE_INVALID',
   'EXEC_ARTIFACT_KIND_UNKNOWN',
   'EXEC_DIGEST_INVALID',
   'EXEC_LOCATION_INVALID',
@@ -161,9 +178,12 @@ const EXECUTION_EVENT_FIELDS = Object.freeze([
   'kind',
   'digest',
   'locationRef',
+  'phase',
 ]);
 // 只有 artifact 事件允许携带 kind / digest / locationRef。
 const ARTIFACT_ONLY_FIELDS = Object.freeze(['kind', 'digest', 'locationRef']);
+// 只有 progress 事件允许携带 phase（且必填、必在闭集内）。
+const PROGRESS_ONLY_FIELDS = Object.freeze(['phase']);
 
 // artifact kind 白名单与 Team 契约**同口径**（research-notes / review-findings）。
 // 这里是执行层的**独立**接受契约常量：executor 的 kind 必须属于团队闭环允许的槽位，
@@ -240,6 +260,11 @@ function validateExecutionEvent(event) {
         && event[key] !== null && event[key] !== undefined) {
       return rejected('EXEC_UNKNOWN_FIELD');
     }
+    // progress 专属字段同理：只有 progress 事件可以带 phase（幂等允许 null）。
+    if (PROGRESS_ONLY_FIELDS.includes(key) && event.type !== 'execution/progress'
+        && event[key] !== null && event[key] !== undefined) {
+      return rejected('EXEC_UNKNOWN_FIELD');
+    }
   }
   // 身份形状（派生句柄；raw id 无法通过）。
   if (typeof event.jobRef !== 'string' || !EXEC_JOB_REF_RE.test(event.jobRef)) {
@@ -268,6 +293,12 @@ function validateExecutionEvent(event) {
       return rejected('EXEC_LOCATION_INVALID');
     }
   }
+  // progress 专属字段：phase 必填且必须在闭集内（缺省/null/越集 → EXEC_PHASE_INVALID）。
+  if (event.type === 'execution/progress') {
+    if (typeof event.phase !== 'string' || !PROGRESS_PHASES.includes(event.phase)) {
+      return rejected('EXEC_PHASE_INVALID');
+    }
+  }
   // reason：可省略/为 null（用类型默认值）；给出时必须是粗粒度 token。
   let reason = DEFAULT_REASON_BY_EVENT_TYPE[event.type];
   if (event.reason !== undefined && event.reason !== null) {
@@ -293,6 +324,7 @@ function validateExecutionEvent(event) {
     kind: event.kind === undefined ? null : event.kind,
     digest: event.digest === undefined ? null : event.digest,
     locationRef: event.locationRef === undefined ? null : event.locationRef,
+    phase: event.phase === undefined ? null : event.phase,
   });
   return Object.freeze({
     ok: true,
@@ -359,6 +391,7 @@ function teamActionForExecutionEvent(event) {
   switch (event.type) {
     case 'execution/started': return 'start-run';
     case 'execution/artifact': return 'note-artifact';
+    case 'execution/progress': return 'note-progress';
     case 'execution/attention': return 'note-attention';
     case 'execution/completed':
     case 'execution/failed':
@@ -378,6 +411,7 @@ module.exports = {
   NON_TERMINAL_EXECUTION_EVENT_TYPES,
   TERMINAL_OUTCOME_BY_EVENT_TYPE,
   DEFAULT_REASON_BY_EVENT_TYPE,
+  PROGRESS_PHASES,
   CRASH_DEFAULT_TEAM_ACTION,
   CRASH_UNRECOVERABLE_EVIDENCE,
   EXECUTION_DIGEST_PREFIX,
@@ -394,6 +428,7 @@ module.exports = {
   EXEC_REASON_MAX_CHARS,
   EXECUTION_EVENT_FIELDS,
   ARTIFACT_ONLY_FIELDS,
+  PROGRESS_ONLY_FIELDS,
   EXECUTION_ARTIFACT_KINDS,
   sha256Hex,
   execJobRefFor,

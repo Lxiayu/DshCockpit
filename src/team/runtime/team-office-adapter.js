@@ -22,6 +22,7 @@ const {
   EVIDENCE_RE,
   EVIDENCE_MAX_CHARS,
   ATTENTION_REASON_RE,
+  PROGRESS_PHASE_RE,
   JOB_STATUSES,
   DEFAULT_ATTEMPT,
   runIdFor,
@@ -47,6 +48,7 @@ const TEAM_ROLE_TO_SEAT = Object.freeze({
 // Office 侧允许出现的事实种类（白名单；未知 kind 一律拒绝）。
 const OFFICE_FACT_KINDS = Object.freeze([
   'run-started',
+  'run-progress',
   'run-attention',
   'run-terminal',
   'artifact-available',
@@ -66,6 +68,7 @@ const ADAPTER_CODES = Object.freeze([
   'TEAM_OUTCOME_UNKNOWN',
   'TEAM_EVIDENCE_REQUIRED',
   'TEAM_ATTENTION_REASON_INVALID',
+  'TEAM_PROGRESS_PHASE_INVALID',
   'TEAM_ARTIFACT_KIND_UNKNOWN',
   'TEAM_JOB_STATUS_UNKNOWN',
 ]);
@@ -76,6 +79,7 @@ const TEAM_FACT_TO_OFFICE_KIND = Object.freeze({
   'job/created': null,
   'run/dispatched': null,
   'run/started': 'run-started',
+  'run/progress': 'run-progress',
   'artifact/available': 'artifact-available',
   'run/attention': 'run-attention',
   'run/completed': 'run-terminal',
@@ -129,6 +133,7 @@ function accepted(kind, identity, fields) {
         reason: fields.reason === undefined ? null : fields.reason,
         artifactKind: fields.artifactKind === undefined ? null : fields.artifactKind,
         jobStatus: fields.jobStatus === undefined ? null : fields.jobStatus,
+        phase: fields.phase === undefined ? null : fields.phase,
       }),
     ]),
   });
@@ -188,7 +193,8 @@ function createTeamOfficeAdapter(options = {}) {
     if (atMs === null) return rejected('TEAM_FACT_SHAPE_INVALID');
 
     // 座位范围的事实：必须能显式映射到座位。
-    const seatScoped = officeKind === 'run-started' || officeKind === 'run-attention'
+    const seatScoped = officeKind === 'run-started' || officeKind === 'run-progress'
+      || officeKind === 'run-attention'
       || officeKind === 'run-terminal' || officeKind === 'cancel-requested'
       || officeKind === 'cancel-acknowledged';
     let role = null;
@@ -214,6 +220,15 @@ function createTeamOfficeAdapter(options = {}) {
       case 'cancel-requested':
       case 'cancel-acknowledged':
         return accepted(officeKind, identity, { atMs, seat });
+
+      case 'run-progress': {
+        // v0.6（WP2）：phase 只能是粗粒度 token（闭集校验在 office 侧的呈现词表）。
+        const phase = teamFact.phase;
+        if (typeof phase !== 'string' || phase === '' || !PROGRESS_PHASE_RE.test(phase)) {
+          return rejected('TEAM_PROGRESS_PHASE_INVALID');
+        }
+        return accepted(officeKind, identity, { atMs, seat, phase });
+      }
 
       case 'run-attention': {
         const reason = teamFact.reason;

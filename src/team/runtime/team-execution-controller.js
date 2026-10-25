@@ -165,6 +165,8 @@ function createTeamExecutionController(options = {}) {
         return team.startRun({ role, consumedArtifactIds: consumedArtifactIdsFor(role) });
       case 'execution/artifact':
         return team.noteArtifact({ role, kind: event.kind });
+      case 'execution/progress':
+        return team.noteRunProgress({ role, phase: event.phase });
       case 'execution/attention':
       case 'execution/crashed': {
         const reason = event.type === 'execution/crashed'

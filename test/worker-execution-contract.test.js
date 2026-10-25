@@ -47,6 +47,7 @@ function eventFor(type, extra = {}) {
     ...(type === 'execution/attention' ? { reason: 'needs-approval' } : {}),
     ...(type === 'execution/crashed' ? { reason: 'executor-crashed' } : {}),
     ...(type === 'execution/artifact' ? { kind: 'research-notes' } : {}),
+    ...(type === 'execution/progress' ? { phase: 'search' } : {}),
     ...extra,
   };
 }
@@ -105,10 +106,11 @@ function requiresOf(source) {
 // 1. 词表与身份派生
 // ===========================================================================
 
-test('exec-contract: the event vocabulary is frozen and matches the contract (9 types)', () => {
+test('exec-contract: the event vocabulary is frozen and matches the contract (10 types)', () => {
   assert.deepEqual([...schema.EXECUTION_EVENT_TYPES], [
     'execution/started',
     'execution/artifact',
+    'execution/progress',
     'execution/attention',
     'execution/completed',
     'execution/failed',
@@ -117,9 +119,9 @@ test('exec-contract: the event vocabulary is frozen and matches the contract (9 
     'execution/cancelled',
     'execution/crashed',
   ]);
-  // `execution/progress` **刻意不加入**（无真实消费方）。
-  assert.equal(schema.EXECUTION_EVENT_TYPES.includes('execution/progress'), false,
-    'progress must NOT be added without a real consumer (§5.2)');
+  // v0.6（WP2）：`execution/progress` 加入 —— 消费方已出现（办公室座位过程短语），
+  // 只携带闭集 phase；工具参数/正文仍然结构性禁止。
+  assert.equal(schema.EXECUTION_EVENT_TYPES.includes('execution/progress'), true);
   assert.ok(Object.isFrozen(schema.EXECUTION_EVENT_TYPES));
   // 终态只有三个；控制回执绝不是终态。
   assert.deepEqual([...schema.TERMINAL_EXECUTION_EVENT_TYPES],
@@ -165,6 +167,39 @@ test('exec-contract: identity handles are deterministic derived refs (raw ids ne
   assert.equal(typeof schema.executionRefFor(JOB, RUN, 42), 'string');
 });
 
+test('exec-contract v0.6: PROGRESS_PHASES is the shared phrase vocabulary (drift pin)', () => {
+  // 本层与 office/tool-phrases 各持一份闭集（本层不能 require office 路径 —— 纯度门），
+  // 这个钉子保证两份永不漂移。
+  const { PHRASE_KEYS } = require('../src/office/runtime/tool-phrases.js');
+  assert.deepEqual([...schema.PROGRESS_PHASES], [...PHRASE_KEYS]);
+  for (const phase of schema.PROGRESS_PHASES) {
+    const verdict = schema.validateExecutionEvent(eventFor('execution/progress', { phase }));
+    assert.equal(verdict.ok, true, `phase ${phase} must validate`);
+  }
+});
+
+test('exec-contract v0.6: progress requires a closed-set phase; other events cannot carry one', () => {
+  // 缺 phase → EXEC_PHASE_INVALID（progress 的 phase 是必填）。
+  const missing = schema.validateExecutionEvent(eventFor('execution/progress', { phase: undefined }));
+  assert.equal(missing.ok, false);
+  assert.equal(missing.code, 'EXEC_PHASE_INVALID');
+  // 闭集之外的 phase（例如把**原始工具名**当 phase 塞进来）→ EXEC_PHASE_INVALID。
+  // 这是隐私边界的行为级保证：工具名/参数不可能经 phase 溜进事件。
+  const raw = schema.validateExecutionEvent(eventFor('execution/progress', { phase: 'bash' }));
+  assert.equal(raw.ok, false);
+  assert.equal(raw.code, 'EXEC_PHASE_INVALID');
+  // 非 progress 事件带 phase → EXEC_UNKNOWN_FIELD（白名单）。
+  const smuggled = schema.validateExecutionEvent(eventFor('execution/started', { phase: 'search' }));
+  assert.equal(smuggled.ok, false);
+  assert.equal(smuggled.code, 'EXEC_UNKNOWN_FIELD');
+  // 归一化幂等：phase 字段被显式补齐后再校验仍合法。
+  const once = schema.validateExecutionEvent(eventFor('execution/progress'));
+  assert.equal(once.ok, true);
+  assert.equal(once.event.phase, 'search');
+  const twice = schema.validateExecutionEvent(once.event);
+  assert.equal(twice.ok, true, `idempotent revalidation: ${twice.code}`);
+});
+
 test('exec-contract: crash policy is an explicit decision, not "it depends"', () => {
   assert.equal(schema.CRASH_DEFAULT_TEAM_ACTION, 'attention');
   // crash 不是终态事件类型 —— 因此它**不可能**产生 Team terminal fact。
@@ -206,7 +241,7 @@ test('exec-contract: validation is idempotent (a normalized event validates agai
 });
 
 test('exec-contract: unknown event types fail closed (no guessed event)', () => {
-  const unknown = schema.validateExecutionEvent(eventFor('execution/progress'));
+  const unknown = schema.validateExecutionEvent(eventFor('execution/heartbeat'));
   assert.equal(unknown.ok, false);
   assert.equal(unknown.code, 'EXEC_EVENT_TYPE_UNKNOWN');
   assert.equal(unknown.event, null, 'a rejected event must not carry a normalized event');
@@ -392,7 +427,7 @@ test('exec-contract: the conversion table maps every event to exactly one team a
   assert.equal(schema.teamActionForExecutionEvent({ type: 'execution/crashed' }), 'note-attention');
   assert.notEqual(schema.teamActionForExecutionEvent({ type: 'execution/crashed' }), 'note-terminal');
   // 未知 → null（fail-closed 上游）。
-  assert.equal(schema.teamActionForExecutionEvent({ type: 'execution/progress' }), null);
+  assert.equal(schema.teamActionForExecutionEvent({ type: 'execution/heartbeat' }), null);
   assert.equal(schema.teamActionForExecutionEvent(null), null);
 });
 
@@ -564,7 +599,7 @@ test('exec-contract: no module introduces a second fact log or a second terminal
   // 全仓只有一处 Team 事实作者：team-runtime 的 facts()（已在 team-runtime-v0 门禁里断言）。
   // 这里再断言：Team 事实类型集合没有被执行层扩张。
   assert.deepEqual([...team.schema.FACT_TYPES], [
-    'job/created', 'run/dispatched', 'run/started', 'artifact/available',
+    'job/created', 'run/dispatched', 'run/started', 'run/progress', 'artifact/available',
     'run/completed', 'run/failed', 'run/cancelled', 'run/attention',
     'run/cancel-requested', 'run/cancel-acknowledged',
     'job/completed', 'job/failed', 'job/cancelled', 'job/attention',

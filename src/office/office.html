@@ -1484,7 +1484,14 @@
           cancelled: 'office.team.status.cancelled',
           attention: 'office.team.status.attention',
         };
-        return tr(map[status.jobStatus] || 'office.team.status.running');
+        let label = tr(map[status.jobStatus] || 'office.team.status.running');
+        // v0.6（WP2）：running 时附当前 phase 的呈现短语（闭集键 → 既有
+        // office.staff.currentTool.* 家族；键形状外的值一律忽略 —— renderer 不猜）。
+        if (status.jobStatus === 'running' && typeof status.progressPhase === 'string'
+            && /^[a-z][a-z0-9_-]{0,31}$/.test(status.progressPhase)) {
+          label += ' · ' + tr('office.staff.currentTool.' + status.progressPhase);
+        }
+        return label;
       }
       function renderTeamBlock() {
         const status = teamStatusCache;

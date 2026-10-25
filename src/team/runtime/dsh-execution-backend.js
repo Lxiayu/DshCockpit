@@ -107,6 +107,14 @@ const DSH_EXECUTION_MAPPING = Object.freeze([
     covered: true,
   }),
   Object.freeze({
+    dshFact: 'tool call (tool/call)',
+    source: 'v0.6（WP2）：data.name 经注入的 phaseForTool（壳持有 tool-phrases 词表）折成 '
+      + '闭集 phase → execution/progress；未注入则保持跳过（无消费方不产事实）。'
+      + '参数/正文永不读取。',
+    mapsTo: 'execution/progress',
+    covered: true,
+  }),
+  Object.freeze({
     dshFact: 'artifact',
     source: 'v1（2026-10-25 拍板）：壳侧本地 materializer —— transport.artifactFor() 在 '
       + 'turn/end completed 前提供 {digest, locationRef}；dsh journal 本身仍无产物事件',
@@ -185,15 +193,26 @@ function coarseReasonOf(raw) {
  * **fail-closed**：映射不到就返回 `{ type: null, code: null }`（"只 canonical 化、不产事实"，
  * 与 adapter 的 `mapEnvelope` 默认分支同一立场）。
  */
-function mapDshJournalEvent(raw) {
+function mapDshJournalEvent(raw, phaseForTool) {
   if (!raw || typeof raw.type !== 'string' || raw.type === '') {
     return Object.freeze({ type: null, reason: null, code: 'EXEC_EVENT_SHAPE_INVALID' });
   }
   if (raw.type === 'turn/start') {
     return Object.freeze({ type: 'execution/started', reason: null, code: null });
   }
+  if (raw.type === 'tool/call') {
+    // v0.6（WP2）：过程可见性 —— 工具名经注入的 phaseForTool 折成**闭集 phase**
+    //（连续相同 phase 由 pullEvents 去重）。只取 data.name（pre-0.1.5 为 data.tool）；
+    // data.arguments / 正文**永不读取**（与既有隐私纪律一致）。
+    if (!phaseForTool) return Object.freeze({ type: null, reason: null, code: null });
+    const data = raw.data && typeof raw.data === 'object' && raw.data !== null ? raw.data : null;
+    const toolName = data && typeof data.name === 'string' && data.name !== '' ? data.name
+      : (data && typeof data.tool === 'string' && data.tool !== '' ? data.tool : null);
+    if (!toolName) return Object.freeze({ type: null, reason: null, code: null });
+    return Object.freeze({ type: 'execution/progress', reason: null, phase: phaseForTool(toolName), code: null });
+  }
   if (raw.type !== 'turn/end') {
-    // 其它一切（tool/call、assistant/message、turn/usage、subagent/*…）在此**不**产生执行事件。
+    // 其它一切（assistant/message、turn/usage、subagent/*…）在此**不**产生执行事件。
     return Object.freeze({ type: null, reason: null, code: null });
   }
   const reason = coarseReasonOf(raw);
@@ -292,6 +311,9 @@ function createDshExecutionBackend(options = {}) {
   const transport = options.transport && typeof options.transport.follow === 'function'
     && typeof options.transport.cancel === 'function' ? options.transport : null;
   const sessionFor = typeof options.sessionFor === 'function' ? options.sessionFor : null;
+  // v0.6（WP2）：工具名 → 闭集 phase 的映射由**宿主注入**（壳持有 tool-phrases 词表；
+  // 本层保持零 office 依赖）。未注入时 tool/call 保持"跳过"（无消费方就不产事实）。
+  const phaseForTool = typeof options.phaseForTool === 'function' ? options.phaseForTool : null;
 
   const runs = new Map();
   let startCalls = 0;
@@ -365,6 +387,8 @@ function createDshExecutionBackend(options = {}) {
       lastJournalSeq: null,
       // v0.6（WP1b）：流耗尽合成 crashed 只发一次（幂等标志）。
       exhausted: false,
+      // v0.6（WP2）：连续相同 phase 去重（fact 音量护栏；resume 后延续）。
+      lastPhase: null,
     });
     log(`[dsh-backend] startRun ${role} -> ${handle.handleId} (session bound in-process only)`);
     return handle;
@@ -387,6 +411,8 @@ function createDshExecutionBackend(options = {}) {
       ...(mapped.kind !== undefined ? { kind: mapped.kind } : {}),
       ...(mapped.digest !== undefined ? { digest: mapped.digest } : {}),
       ...(mapped.locationRef !== undefined ? { locationRef: mapped.locationRef } : {}),
+      // progress 专属字段（只有 progress 映射会带；schema 只在 progress 事件上放行）。
+      ...(mapped.phase !== undefined ? { phase: mapped.phase } : {}),
     };
     const checked = validateExecutionEvent(raw);
     if (!checked.ok) throw execError(checked.code, 'dsh backend produced an invalid execution event');
@@ -510,8 +536,14 @@ function createDshExecutionBackend(options = {}) {
           continue;
         }
         if (rawSeq !== null) state.lastJournalSeq = rawSeq;
-        const mapped = mapDshJournalEvent(next.value);
+        const mapped = mapDshJournalEvent(next.value, phaseForTool);
         if (!mapped.type) { skipped += 1; continue; }
+        // v0.6（WP2）：连续相同 phase 去重 —— N 次"同类工具调用"只产生 1 条 progress。
+        if (mapped.type === 'execution/progress' && mapped.phase === state.lastPhase) {
+          skipped += 1;
+          continue;
+        }
+        if (mapped.type === 'execution/progress') state.lastPhase = mapped.phase;
         state.deliveredJournalEvents += 1;
         // 终态 completed 之前先物化 artifact（入 emissionQueue，下两次拉取按序交付）。
         await materializeArtifactsBeforeTerminal(state, mapped);
@@ -671,6 +703,7 @@ function createDshExecutionBackend(options = {}) {
       transportInjected: transport !== null,
       sessionHook: typeof (transport && transport.resolveSession) === 'function' || sessionFor !== null,
       materializerHook: hasMaterializer,
+      progressHook: phaseForTool !== null,
       producibleEventTypes: Object.freeze(producible),
       unsupportedEventTypes: Object.freeze(hasMaterializer ? [] : ['execution/artifact']),
       supportsRecover: false,

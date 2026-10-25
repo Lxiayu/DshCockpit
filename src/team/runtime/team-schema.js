@@ -43,10 +43,15 @@ const ARTIFACT_DIGEST_PREFIX = 'art-sha256:';
 
 // ---- 事件类型（append-only fact log） ---------------------------------------
 
+// v0.6（WP2）：progress phase 的 token 形状（闭集校验在执行层 schema 与 office 侧；
+// 本层只保证"是粗粒度 token，不是模型文本"）。
+const PROGRESS_PHASE_RE = /^[a-z][a-z0-9_-]{0,31}$/;
+
 const FACT_TYPES = Object.freeze([
   'job/created',
   'run/dispatched',
   'run/started',
+  'run/progress',
   'artifact/available',
   'run/completed',
   'run/failed',
@@ -88,6 +93,7 @@ const ERROR_CODES = Object.freeze([
   'INVALID_OUTCOME',
   'TERMINAL_EVIDENCE_REQUIRED',
   'INVALID_ATTENTION_REASON',
+  'INVALID_PROGRESS_PHASE',
   'CANCEL_NOT_REQUESTED',
   'DUPLICATE',
   'FACTS_LIMIT_REACHED',
@@ -209,6 +215,7 @@ module.exports = {
   ARTIFACT_ID_PREFIX,
   ARTIFACT_DIGEST_PREFIX,
   FACT_TYPES,
+  PROGRESS_PHASE_RE,
   JOB_CONVERGENCE_FACT_BY_STATUS,
   ERROR_CODES,
   TEAM_V0_PLAN,

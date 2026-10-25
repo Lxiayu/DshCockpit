@@ -74,7 +74,7 @@ const { SETTINGS_BOUNDS: PERSISTED_SETTINGS_BOUNDS } = require('./runtime/office
 // pure office runtime modules so the panel, the pending cards and main.js
 // share one implementation.
 const { classifyRisk, RISK_ORDER } = require('./runtime/approval-risk.js');
-const { toolPhraseZhOf, toolPhraseKeyOf, questionSummaryZh } = require('./runtime/tool-phrases.js');
+const { toolPhraseZhOf, toolPhraseKeyOf, questionSummaryZh, PHRASE_KEYS, PHRASE_ZH } = require('./runtime/tool-phrases.js');
 // P4 (spec §3 block 5 / §8 P4 行): the selected employee's 今日工作记录 aggregates
 // the module's own real sources (activity log, per-turn usage attribution, tool
 // facts) scoped to a real calendar day. The day key comes from the SAME pure
@@ -625,6 +625,7 @@ function createOfficeModule(options = {}) {
       resultUntilMs: null,
       lastResult: null,
       toolKind: null,
+      teamPhase: null, // v0.6（WP2）：Team run 的当前 phase 键（呈现优先于 toolKind）
       animationElapsedMs: 0,
       state: createOfficeState(),
       turnCounter: 0,
@@ -2113,7 +2114,7 @@ function createOfficeModule(options = {}) {
   // onBindingCreated（否则会把 running 座位错误标成 queued）；重复 terminal 命中
   // "已释放"→ no-op（不二次释放）。
   const TEAM_FACT_KINDS = Object.freeze([
-    'run-started', 'run-attention', 'run-terminal', 'artifact-available',
+    'run-started', 'run-progress', 'run-attention', 'run-terminal', 'artifact-available',
     'cancel-requested', 'cancel-acknowledged', 'job-status', 'adapter-rejected',
   ]);
   const TEAM_TERMINAL_OUTCOMES = Object.freeze(['completed', 'failed', 'cancelled']);
@@ -2124,6 +2125,7 @@ function createOfficeModule(options = {}) {
     'TEAM_ROLE_UNKNOWN', 'TEAM_SEAT_UNMAPPED', 'TEAM_SEAT_UNKNOWN',
     'TEAM_OUTCOME_UNKNOWN', 'TEAM_EVIDENCE_REQUIRED', 'TEAM_ATTENTION_REASON_INVALID',
     'TEAM_ARTIFACT_KIND_UNKNOWN', 'TEAM_JOB_STATUS_UNKNOWN',
+    'TEAM_PROGRESS_PHASE_INVALID',
   ]);
 
   function teamRejected(code) {
@@ -2156,7 +2158,7 @@ function createOfficeModule(options = {}) {
   const TEAM_STATUS_SOURCE = 'team-runtime';
   const TEAM_ROLES = Object.freeze(['researcher', 'reviewer']);
   const TEAM_FACT_TYPES = Object.freeze([
-    'job/created', 'run/dispatched', 'run/started', 'artifact/available',
+    'job/created', 'run/dispatched', 'run/started', 'run/progress', 'artifact/available',
     'run/completed', 'run/failed', 'run/cancelled', 'run/attention',
     'run/cancel-requested', 'run/cancel-acknowledged',
     'job/completed', 'job/failed', 'job/cancelled', 'job/attention',
@@ -2164,14 +2166,14 @@ function createOfficeModule(options = {}) {
   // 座位范围的事实必须带 role（run-started / run-attention / run-terminal /
   // cancel-requested / cancel-acknowledged）。
   const TEAM_SEAT_SCOPED_KINDS = Object.freeze([
-    'run-started', 'run-attention', 'run-terminal', 'cancel-requested', 'cancel-acknowledged',
+    'run-started', 'run-progress', 'run-attention', 'run-terminal', 'cancel-requested', 'cancel-acknowledged',
   ]);
   // 本入口可能发出的全部稳定拒绝码（白名单；测试断言"发出的码 ⊆ 这个集合"）。
   const TEAM_REJECTION_CODES = Object.freeze([
     'TEAM_FACT_SHAPE_INVALID', 'TEAM_FACT_UNKNOWN_KIND', 'TEAM_IDENTITY_REQUIRED',
     'TEAM_IDENTITY_INVALID', 'TEAM_SEAT_UNKNOWN', 'TEAM_SEAT_CONFLICT',
     'TEAM_BINDING_REJECTED', 'TEAM_RUN_UNKNOWN', 'TEAM_OUTCOME_UNKNOWN',
-    'TEAM_EVIDENCE_REQUIRED', 'TEAM_JOB_STATUS_UNKNOWN',
+    'TEAM_EVIDENCE_REQUIRED', 'TEAM_JOB_STATUS_UNKNOWN', 'TEAM_PHASE_UNKNOWN',
   ]);
 
   /** 返回 { identity, runHandle } 或 null（null = 身份不合法，调用方 fail-closed）。 */
@@ -2262,6 +2264,22 @@ function createOfficeModule(options = {}) {
         return Object.freeze({
           ok: true, code: null, status: bound.binding ? 'bound' : 'queued', seat: fact.seat,
         });
+      }
+
+      case 'run-progress': {
+        // v0.6（WP2）：过程可见性 —— phase 必须在**呈现词表**闭集内（PHRASE_KEYS），
+        // 任何工具名/模型文本在这里被挡下（fail-closed，不猜不放大词表）。
+        if (!PHRASE_KEYS.includes(fact.phase)) return teamRejected('TEAM_PHASE_UNKNOWN');
+        const bound = registry.getBindingForSession(runHandle);
+        if (!bound) return teamRejected('TEAM_RUN_UNKNOWN');
+        if (bound.releasedAt !== null) return Object.freeze({ ok: true, code: null, status: 'duplicate' });
+        const rec = employees.get(bound.employeeId);
+        if (!rec) return teamRejected('TEAM_SEAT_UNKNOWN');
+        // 只更新"现在在干什么"；不改 runtime 状态、不重绑、不释放。
+        rec.teamPhase = fact.phase;
+        noteDiagnostic('TEAM_RUN_PROGRESS');
+        pushSnapshot();
+        return Object.freeze({ ok: true, code: null, status: 'progress', seat: bound.employeeId });
       }
 
       case 'run-attention': {
@@ -3301,8 +3319,11 @@ function createOfficeModule(options = {}) {
         // currentTool.* key behind the phrase — the page renders per language
         // from the key (the module owns the vocabulary; office-page.js stays
         // require-free).
-        toolPhraseKey: rec.toolKind ? toolPhraseKeyOf(rec.toolKind) : null,
-        toolPhrase: rec.toolKind ? toolPhraseZhOf(rec.toolKind) : null,
+        // v0.6（WP2）：Team run 的 phase 键优先（闭集，直接命中词表）；
+        // legacy harness 路径仍走 toolKind → 词表折算。两者同一呈现词汇。
+        toolPhraseKey: rec.teamPhase || (rec.toolKind ? toolPhraseKeyOf(rec.toolKind) : null),
+        toolPhrase: rec.teamPhase ? (PHRASE_ZH[rec.teamPhase] || PHRASE_ZH.other)
+          : (rec.toolKind ? toolPhraseZhOf(rec.toolKind) : null),
         taskSeq: rec.taskSeq || 0,
         // P4 (spec §3 block 5): the selected employee's 今日工作记录 (null when
         // the record is empty — see safeDayRecord).

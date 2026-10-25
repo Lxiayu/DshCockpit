@@ -392,6 +392,17 @@ function officeTeamRealStatus() {
   for (const [role, run] of Object.entries(state.runs)) {
     if (run && run.status === 'attention') { attentionRole = role; break; }
   }
+  // v0.6（WP2）：当前活跃 run 的 phase（闭集键；一次只有一个活跃 run —— v0 plan
+  // 顺序执行）。renderer 只做呈现词表命中，不做任何状态推断。
+  let progressPhase = null;
+  if (state.status === 'running') {
+    for (const run of Object.values(state.runs)) {
+      if (run && run.status === 'running' && run.progress && typeof run.progress.phase === 'string') {
+        progressPhase = run.progress.phase;
+        break;
+      }
+    }
+  }
   return Object.freeze({
     ok: true, code: null,
     enabled: officeTeamUiEnabled(),
@@ -400,6 +411,7 @@ function officeTeamRealStatus() {
     // 限定名而非简写：tdz-guard 的惰性正则会把更早的 createAssetPack({...}) 块
     // 吞到这里的裸标识符（函数局部值）。见 v0.4 批次同类注记。
     attentionRole: attentionRole,
+    progressPhase: progressPhase,
   });
 }
 
@@ -564,8 +576,12 @@ function startTeamRealWithTopic({ office, topic, log, deps = {} } = {}) {
     });
     const teamRuntimeModule = require('./team/runtime/index.js');
     const runtime = teamRuntimeModule.createTeamRuntime({ clock: wallClock });
+    // v0.6（WP2）：过程可见性 —— 壳持有 tool-phrases 词表，把 dsh 工具名折成
+    // 闭集 phase 注入后端（内核保持零 office 依赖；未注入则 tool/call 保持跳过）。
+    const { toolPhraseKeyOf } = require('./office/runtime/tool-phrases.js');
     const backend = teamRuntimeModule.dshBackend.createDshExecutionBackend({
       clock: wallClock, transport,
+      phaseForTool: (toolName) => toolPhraseKeyOf(toolName),
     });
     // adapter：把后端包成 executor 端口形状（observe/cancel/resume 直通；recover 显式 unsupported）。
     const executor = Object.freeze({

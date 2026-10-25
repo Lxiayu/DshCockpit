@@ -516,3 +516,45 @@ test('team-real wiring WP1: resumeTeam 拒绝不在 attention 的实例（无旁
   assert.equal(verdict.ok, false);
   assert.equal(verdict.code, 'NOT_IN_ATTENTION');
 });
+
+test('team-real wiring WP2: journal tool calls surface as run/progress and the seat phrase', async () => {
+  const journals = [
+    [ // researcher：工具调用 → progress（bash/npm 同 phase 去重，web-search 换 phase）
+      RS_JE('turn/start', {}, 1),
+      RS_JE('tool/call', { name: 'bash', arguments: { cmd: 'SECRET-PROGRESS-ARG' } }, 2),
+      RS_JE('tool/call', { name: 'npm', arguments: {} }, 3),
+      RS_JE('tool/call', { name: 'web-search', arguments: { q: 'x' } }, 4),
+      RS_JE('assistant/message', { content: [{ type: 'text', text: '# 研究笔记（带工具调用）' }] }, 5),
+      RS_JE('turn/end', { reason: { kind: 'completed' } }, 6),
+    ],
+    [ // reviewer
+      RS_JE('turn/start', {}, 1),
+      RS_JE('turn/end', { reason: { kind: 'completed' } }, 2),
+    ],
+  ];
+  const deps = makeScriptedDeps({ journals });
+  const office = makeOffice();
+  const box = loadMainWiring(ON_ENV);
+  const real = box.attach(office, () => {}, deps);
+  assert.ok(real);
+  await real.whenDone;
+  assert.equal(real.runtime.state().status, 'completed');
+  const run = real.runtime.state().runs.researcher;
+  assert.equal(run.progress.phase, 'retrieval', 'latest phase wins (bash/npm deduped to command, then web-search)');
+  assert.deepEqual(
+    real.runtime.facts().filter((f) => f.type === 'run/progress').map((f) => f.phase),
+    ['command', 'retrieval'],
+    '3 tool calls → exactly 2 progress facts (dedupe)',
+  );
+  // office 座位短语（真实 office-module 投影，闭集键命中呈现词表）。
+  const seat = office.state().employees.find((e) => e.employeeId === 'researcher');
+  assert.equal(seat.toolPhraseKey, 'retrieval');
+  assert.equal(seat.toolPhrase, '检索');
+  // 隐私：工具参数与查询词不进 Team 事实、不进 office 快照。
+  const factsJson = JSON.stringify(real.runtime.facts());
+  const officeJson = JSON.stringify(office.state());
+  for (const needle of ['SECRET-PROGRESS-ARG', 'bash', 'npm', 'web-search']) {
+    assert.equal(factsJson.includes(needle), false, `facts must not carry ${needle}`);
+    assert.equal(officeJson.includes(needle), false, `office snapshot must not carry ${needle}`);
+  }
+});

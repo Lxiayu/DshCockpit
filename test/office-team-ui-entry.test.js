@@ -417,7 +417,9 @@ test('team-ui: the topic never reaches Team facts, status, or the office snapsho
   // status 返回：既不含主题原文（值级），也**根本没有** topic 字段（结构级 ——
   // 值级断言在 env 主题为空时会漏检，负向变异 U6 实测教训）。
   const statusResult = await ipc.call('shell:team', { action: 'status' });
-  assert.equal('topic' in statusResult, false, 'status must not carry a topic field at all');
+  assert.equal('topic' in statusResult, false, 'status must not carry a topic field at all')
+  // v0.6（WP2）：status 面新增 progressPhase（闭集键或 null —— renderer 只呈现不推断）。
+  assert.equal('progressPhase' in statusResult, true);;
   const status = JSON.stringify(statusResult);
   assert.equal(status.includes('TOPIC-SECRET-XYZ'), false);
   // office 快照。
