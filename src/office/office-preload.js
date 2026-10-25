@@ -125,6 +125,11 @@ contextBridge.exposeInMainWorld('officeBridge', {
   // respondToRuntime path (approval: 'allowed-once'|'rejected'; question: the
   // answers batch); {action:'detail', id} resolves the spec §4 detailRef.
   pending: (payload) => invokeAllowed('office:pending', payload),
+  // Harness v0.5：Team 任务发起入口。**shell 自有通道**（与 getTheme/onTheme 同一
+  // 模式），刻意不走 office 命名空间 —— 那个通道集合已冻结为 8 个，且"发起/恢复
+  // Team 任务"是壳拥有的控制而非办公室投影。载荷：{action:'status'} |
+  // {action:'start', topic} | {action:'resume'}。
+  team: (payload) => ipcRenderer.invoke('shell:team', payload),
   onVisibilityPush: (listener) => {
     if (typeof listener === 'function') visibilityListeners.add(listener);
     return () => visibilityListeners.delete(listener);

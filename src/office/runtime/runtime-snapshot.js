@@ -18,6 +18,10 @@
 //   (not below the current watermark, not below request.fromSequence-1)
 // - eventsSince must be same-epoch, same-session canonical envelopes,
 //   strictly increasing, and all > snapshot.sequence
+// - an envelope's additive `pairingHandle` (adapter-derived, replay-safe
+//   subagent pairing) must be absent, null, or the redacted proxy shape; any
+//   other value rejects the whole envelope — a privacy gate, so a raw runId can
+//   never ride in through a replay list
 // - on accept the snapshot sequence becomes the new contiguous watermark,
 //   buffered events <= sequence are discarded, and only the same-epoch
 //   remainder replays in strict order
@@ -169,8 +173,8 @@ function createSnapshotResponse({
 // -----------------------------------------------------------------------------
 
 // Validates one canonical envelope produced by the Office adapter. The
-// envelope is an adapter-derived artifact (eventId/sessionEpoch are never
-// Harness facts); validating shape here keeps snapshot merges honest.
+// envelope is an adapter-derived artifact (eventId/sessionEpoch/pairingHandle
+// are never Harness facts); validating shape here keeps snapshot merges honest.
 function validateEnvelope(value, expected = {}) {
   if (!isPlainObject(value)) return valid('ENVELOPE_SHAPE_INVALID');
   if (value.schemaVersion !== SCHEMA_VERSION) return valid('ENVELOPE_SHAPE_INVALID');
@@ -179,6 +183,16 @@ function validateEnvelope(value, expected = {}) {
   }
   if (typeof value.sessionId !== 'string' || value.sessionId === '') return valid('ENVELOPE_SHAPE_INVALID');
   if (typeof value.sessionEpoch !== 'string' || value.sessionEpoch === '') return valid('ENVELOPE_SHAPE_INVALID');
+  // Additive adapter-derived field (v1). Absent or null = "no pairable run
+  // handle" (the fail-closed default). Any OTHER value must be the redacted
+  // proxy shape: this is a privacy gate as much as a shape check — it stops a
+  // raw runId smuggled in through an eventsSince list from reaching downstream
+  // facts.
+  if (value.pairingHandle !== undefined && value.pairingHandle !== null) {
+    if (typeof value.pairingHandle !== 'string' || !/^run-sha256:[0-9a-f]{16}$/.test(value.pairingHandle)) {
+      return valid('ENVELOPE_PAIRING_HANDLE_INVALID');
+    }
+  }
   if (!Number.isInteger(value.sequence) || value.sequence < 0) return valid('ENVELOPE_SHAPE_INVALID');
   if (typeof value.eventType !== 'string' || value.eventType === '') return valid('ENVELOPE_SHAPE_INVALID');
   if (!isPlainObject(value.payload)) return valid('ENVELOPE_SHAPE_INVALID');

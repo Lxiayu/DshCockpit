@@ -167,6 +167,46 @@ test('validateEnvelope requires the full canonical shape', () => {
   assert.equal(snapshotModule.validateEnvelope(wrongEpoch, { sessionEpoch: 'adapter-e1' }).code, 'ENVELOPE_EPOCH_MISMATCH');
 });
 
+test('validateEnvelope accepts only the redacted proxy shape as a pairing handle', () => {
+  const epoch = 'adapter-e1';
+  const base = envelope(3, epoch);
+  // Absent (a v1/foreign envelope) and explicit null are both valid: the
+  // fail-closed "no pairable run handle" default.
+  assert.equal(snapshotModule.validateEnvelope(base).ok, true, 'absent handle is valid');
+  assert.equal(snapshotModule.validateEnvelope({ ...base, pairingHandle: null }).ok, true, 'null handle is valid');
+  // The real proxy shape passes.
+  assert.equal(
+    snapshotModule.validateEnvelope({ ...base, pairingHandle: 'run-sha256:0123456789abcdef' }).ok,
+    true
+  );
+  // Anything else rejects the envelope — including a raw runId smuggled in
+  // through a replay list (this is a privacy gate, not just a shape check).
+  for (const bad of [
+    'run-private-raw-id',            // a raw Harness runId
+    'run-sha256:0123456789ABCDEF',   // wrong case
+    'run-sha256:0123456789abcde',    // too short
+    'run-sha256:0123456789abcdef0',  // too long
+    'sha256:' + 'a'.repeat(64),      // an eventId, not a pairing handle
+    '', 42, true, ['x'], { raw: 'x' },
+  ]) {
+    assert.equal(
+      snapshotModule.validateEnvelope({ ...base, pairingHandle: bad }).code,
+      'ENVELOPE_PAIRING_HANDLE_INVALID',
+      `must reject ${JSON.stringify(bad)}`
+    );
+  }
+});
+
+test('a snapshot whose eventsSince carries a raw runId is rejected whole', () => {
+  const epoch = 'adapter-e1';
+  const verdict = snapshotModule.validateSnapshotMessage(snapshotMessage({
+    requestId: 'r1', sessionId: 'sess-fixture', sessionEpoch: epoch, sequence: 2,
+    eventsSince: [{ ...envelope(3, epoch), pairingHandle: 'run-private-raw-id' }],
+  }), { requestId: 'r1', sessionId: 'sess-fixture', sessionEpoch: epoch, watermark: 2, minSequence: 2 });
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.code, 'EVENTS_SINCE_INVALID');
+});
+
 // --- Snapshot facts whitelist -------------------------------------------------
 
 test('sanitizeSnapshotFacts maps whitelisted runtime states only', () => {

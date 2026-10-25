@@ -49,6 +49,28 @@
     <!-- ② 员工状态行（spec §3 block 2）：状态徽标 + 去标识化任务标题 + 当前工具短语 + 需要你角标。
          P4 打磨②：下方常驻的「方向键移动焦点…」说教提示收进列表的 title/aria-label
          （鼠标悬停与读屏均可发现），不再占一行视觉空间。 -->
+    <!-- ⓪ 团队任务（Harness v0.5 首次体验最小版）：默认隐藏，shell:team status 报告
+         enabled 时才显示。输入主题（用户唯一文本，U3）→ 开始；活动时显示粗粒度状态；
+         attention（需要你处理）时给「继续」按钮 —— 控制走 shell:team → main →
+         controller → Team 命令，与 office:cancel 同构；页面不因此成为事实作者，
+         主题/正文永不进入快照（渲染仍只消费 office:state 推送的快照）。 -->
+    <section id="team-block" data-i18n-aria="office.panel.teamAria" hidden>
+      <div class="block-head">
+        <h2 data-i18n="office.panel.teamAria"></h2>
+      </div>
+      <form id="team-start-form" class="team-start-form">
+        <input id="team-topic-input" type="text" maxlength="2000"
+               data-i18n-placeholder="office.team.topicPlaceholder" />
+        <button id="team-start-button" type="submit" data-i18n="office.team.start"></button>
+      </form>
+      <p id="team-status-line" class="hint" hidden></p>
+      <div id="team-active-row" class="team-active-row" hidden>
+        <span id="team-status-text"></span>
+        <button id="team-resume-button" type="button" data-i18n="office.team.resume" hidden></button>
+      </div>
+      <p id="team-error-line" class="hint" hidden></p>
+    </section>
+
     <section id="employee-list-block" data-i18n-aria="office.panel.staffBlockAria">
       <ul id="employee-list" role="listbox" data-i18n-aria="office.panel.staffListAria" data-i18n-title="office.panel.staffListAria"></ul>
     </section>
@@ -515,6 +537,8 @@
             // P2 blocks (① usage, ③ pending inbox) ride the same ~10Hz cadence.
             renderUsageBlock(snapshot);
             renderPendingBlock(snapshot);
+            // v0.5：团队卡的控制面状态随同节奏刷新（本地 IPC；无活动时为一次空查询）。
+            refreshTeamStatus();
           }
         },
       });
@@ -1433,6 +1457,87 @@
       // the static DOM copy and re-renders the panel immediately; the dynamic
       // VM text re-localizes through the localize closure reading the CURRENT
       // lang (and would re-localize within one ~10Hz render anyway).
+      // -------------------------------------------------------------------
+      // Harness v0.5：团队任务卡（首次体验最小版）。
+      // 团队活动状态是**壳的控制面状态**（不在 office 快照里 —— 快照只含投影），
+      // 因此这里经 shell:team status 拉取：挂载时一次 + 每次快照渲染节流时一次
+      // （本地 IPC，成本可忽略）+ 每次 start/resume 之后一次。渲染是纯函数式的：
+      // 返回什么画什么，出错画 team-error-line，绝不本地猜测状态。
+      // -------------------------------------------------------------------
+      const teamEls = {
+        block: document.getElementById('team-block'),
+        form: document.getElementById('team-start-form'),
+        topic: document.getElementById('team-topic-input'),
+        start: document.getElementById('team-start-button'),
+        statusLine: document.getElementById('team-status-line'),
+        activeRow: document.getElementById('team-active-row'),
+        statusText: document.getElementById('team-status-text'),
+        resume: document.getElementById('team-resume-button'),
+        errorLine: document.getElementById('team-error-line'),
+      };
+      let teamStatusCache = null;
+      function teamStatusLabel(status) {
+        if (!status || !status.active) return '';
+        const map = {
+          completed: 'office.team.status.completed',
+          failed: 'office.team.status.failed',
+          cancelled: 'office.team.status.cancelled',
+          attention: 'office.team.status.attention',
+        };
+        return tr(map[status.jobStatus] || 'office.team.status.running');
+      }
+      function renderTeamBlock() {
+        const status = teamStatusCache;
+        if (!status || !status.enabled) { teamEls.block.hidden = true; return; }
+        teamEls.block.hidden = false;
+        const idle = !status.active || ['completed', 'failed', 'cancelled'].includes(status.jobStatus);
+        teamEls.form.hidden = !idle;
+        teamEls.activeRow.hidden = idle;
+        teamEls.resume.hidden = !(status.active && status.jobStatus === 'attention');
+        teamEls.statusText.textContent = idle ? '' : teamStatusLabel(status);
+        teamEls.statusLine.hidden = true;
+        teamEls.errorLine.hidden = true;
+      }
+      async function refreshTeamStatus() {
+        if (typeof bridge.team !== 'function') { teamStatusCache = null; renderTeamBlock(); return; }
+        try {
+          const status = await bridge.team({ action: 'status' });
+          teamStatusCache = status && status.ok ? status : null;
+        } catch { teamStatusCache = null; }
+        renderTeamBlock();
+      }
+      teamEls.form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        teamEls.errorLine.hidden = true;
+        const topic = teamEls.topic.value.trim();
+        if (topic === '') {
+          teamEls.errorLine.textContent = tr('office.team.error.topicRequired');
+          teamEls.errorLine.hidden = false;
+          return;
+        }
+        teamEls.start.disabled = true;
+        try {
+          const result = await bridge.team({ action: 'start', topic });
+          if (!result || result.ok !== true) {
+            teamEls.errorLine.textContent = tr('office.team.error.startFailed');
+            teamEls.errorLine.hidden = false;
+          } else {
+            teamEls.topic.value = '';
+          }
+        } catch {
+          teamEls.errorLine.textContent = tr('office.team.error.startFailed');
+          teamEls.errorLine.hidden = false;
+        } finally {
+          teamEls.start.disabled = false;
+          refreshTeamStatus();
+        }
+      });
+      teamEls.resume.addEventListener('click', async () => {
+        teamEls.resume.disabled = true;
+        try { await bridge.team({ action: 'resume' }); } catch { /* 状态由 refresh 呈现 */ }
+        finally { teamEls.resume.disabled = false; refreshTeamStatus(); }
+      });
+      refreshTeamStatus();
       function renderAll() {
         const snapshot = latestSnapshot;
         if (!snapshot) {

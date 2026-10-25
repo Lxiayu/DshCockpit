@@ -904,6 +904,34 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
       if (typeof bridge.interrupt !== 'function') return { ok: false, code: 'BRIDGE_MISSING' };
       return bridge.interrupt({ employeeId });
     },
+
+    // ---------------------------------------------------------------------
+    // Harness v0.5：Team 任务发起（首次体验最小版）。
+    //
+    // 边界：这三个方法发的是**用户意图（控制）**，走 shell:team → main →
+    // controller → Team 命令 —— 与 dispatch/cancel 完全同构。页面**不**因此成为
+    // 事实作者：Team 事实仍只来自执行事件；渲染仍只消费快照。
+    // 主题是用户输入的**唯一**文本（U3），这里只做形状收敛（非空、去首尾空白、
+    // 长度上限），不生成、不改写。
+    // ---------------------------------------------------------------------
+    async teamStatus() {
+      if (typeof bridge.team !== 'function') return { ok: false, code: 'BRIDGE_MISSING' };
+      return bridge.team({ action: 'status' });
+    },
+
+    async teamStart(topic) {
+      if (typeof bridge.team !== 'function') return { ok: false, code: 'BRIDGE_MISSING' };
+      const text = typeof topic === 'string' ? topic.trim() : '';
+      if (text === '') return { ok: false, code: 'TOPIC_REQUIRED' };
+      // 与壳侧 OFFICE_TEAM_UI_TOPIC_MAX 同值（2000）：双端一致，单端改需同步。
+      if (text.length > 2000) return { ok: false, code: 'TOPIC_TOO_LONG' };
+      return bridge.team({ action: 'start', topic: text });
+    },
+
+    async teamResume() {
+      if (typeof bridge.team !== 'function') return { ok: false, code: 'BRIDGE_MISSING' };
+      return bridge.team({ action: 'resume' });
+    },
   };
 }
 

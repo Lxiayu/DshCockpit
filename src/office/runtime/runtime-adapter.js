@@ -33,13 +33,25 @@
 // - pause/resume are unproven (forced false); Office urgent preempt is a
 //   queue-controller composition, never a native Harness operation.
 // - subagent runId is an internal pairing handle ONLY: it never reaches
-//   downstream facts as its raw value. A stable redacted proxy
-//   `run-sha256:<16 hex>` (SHA-256 over the raw runId) is used as the
-//   technical identifier in `runtime/subagent-start|end` facts and in the
-//   activeRuns open-run set; start/end of the same Harness run share the
-//   proxy. Non-identifier-looking runIds (whitespace, proven secrets,
-//   >255 chars) fail closed to `null`, and a `null` proxy never tracks or
-//   closes a run.
+//   downstream facts as its raw value. The adapter derives a stable redacted
+//   proxy `run-sha256:<16 hex>` (SHA-256 over the raw runId) ONCE, at first
+//   ingest of the raw event, and stores it on the canonical envelope as the
+//   adapter-derived `pairingHandle` field. That is what makes start/end pairing
+//   survive every replay path: `runtime/subagent-start|end` facts read
+//   `envelope.pairingHandle` and NEVER re-derive from the (possibly redacted)
+//   rawData — so a buffered event drained later, or a canonical envelope
+//   replayed through an office:runtime-snapshot `eventsSince` list, pairs
+//   exactly like a live one. Non-identifier-looking runIds (whitespace, proven
+//   secrets, >255 chars) fail closed to `null`, and a `null` handle never
+//   tracks or closes a run (the run simply stays untracked rather than
+//   ingesting PII).
+//
+//   Why the handle lives on the envelope and not in a buffer sidecar: a sidecar
+//   only covers the events THIS adapter buffered. It cannot help when the
+//   adapter restarts, or when the only thing available is a canonical envelope
+//   list from another producer (the `eventsSince` contract). Putting the
+//   derived handle on the envelope makes pairing a property of the canonical
+//   record itself, so there is no second class of replay that still loses it.
 
 const crypto = require('node:crypto');
 
@@ -49,7 +61,11 @@ const snapshotModule = require('./runtime-snapshot.js');
 // （0.1.5 `data.name` / pre-0.1.5 `data.tool` 双形状，见 mapEnvelope tool/call）。
 const { toolNameOfJournalData } = require('./tool-phrases.js');
 
-const ADAPTER_VERSION = 'task6-runtime-adapter-1';
+// v2: the canonical envelope gained the adapter-derived `pairingHandle` field
+// (replay-safe subagent pairing). The envelope `schemaVersion` stays 1: the
+// field is additive with a fail-closed default (absent/null = unpairable), so a
+// v1 envelope stays valid and degrades safely instead of hard-failing.
+const ADAPTER_VERSION = 'task6-runtime-adapter-2';
 const EPOCH_PREFIX = 'adapter-';
 const EVENT_ID_PREFIX = 'sha256:';
 
@@ -58,6 +74,9 @@ const DEDUPE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const BUFFER_MAX_EVENTS = 64;
 const BUFFER_TTL_MS = 2 * 1000; // 2 seconds
 const MAX_PAYLOAD_BYTES = 64 * 1024;
+// Bounded identity-keyed raw-handle ledger (see rawChildHandleFor). Same
+// discipline as the dedupe LRU: bounded, in-memory, main-process only.
+const RAW_HANDLE_CAPACITY = 512;
 
 // Research-report proven Harness Agent controls. pause/resume are forced
 // false (unproven). 'preempt' is never a native Harness operation.
@@ -169,6 +188,23 @@ function createRuntimeAdapter(options = {}) {
   // first sighting, not the last hit.
   const dedupe = new Map();
 
+  // Identity-keyed raw child handles: `eventId -> raw child session id`, written
+  // ONCE when an envelope is built from raw input (subagent lifecycle events
+  // only) and read back through rawChildHandleFor(envelope).
+  //
+  // Why identity-keyed instead of "the raw event being ingested right now": the
+  // consumer's fact-application runs synchronously inside ingest(), so a
+  // buffered event drained later — or a replayed envelope — would be correlated
+  // with whichever raw event happens to be in flight. Keying by the envelope's
+  // own eventId makes correlation a property of the FACT'S identity, so
+  // live / drained / duplicated delivery all resolve the same child, and a
+  // canonical-only replay (never seen raw) resolves to null (fail-closed).
+  //
+  // Privacy: raw session ids stay inside this adapter (main process). They are
+  // never written to a fact, an envelope, diagnostics, the snapshot or state() —
+  // only the count is observable (state().rawHandleSize).
+  const rawChildHandles = new Map();
+
   function deriveEpoch(counterValue, atMs) {
     if (counterValue === 0 && coarse(options.epoch)) return options.epoch;
     return `${EPOCH_PREFIX}${counterValue}-${atMs.toString(36)}`;
@@ -201,10 +237,25 @@ function createRuntimeAdapter(options = {}) {
 
   // -- Emission helpers ----------------------------------------------------------
 
+  // Emission helpers.
+  //
+  // Every output carries `sessionId` (the adapter's own identity) so a consumer
+  // NEVER has to ask "which raw event is in flight" — the envelope identifies the
+  // producing event when there is one, and envelope-less facts (sync/status,
+  // snapshot facts, control receipts) still carry a trustworthy session.
+  //
+  // `rawData` is the payload the fact mapper reads for REDACTION-SAFE fields
+  // (tool/call's tool name, present in both the raw 0.1.5 `{name}` shape and the
+  // redacted `{tool}` shape). It is deliberately NOT used for anything that only
+  // exists in the raw input — the subagent pairing handle travels on the
+  // envelope, and the raw child handle is looked up by event identity
+  // (rawChildHandleFor), so the live path and every replay path produce
+  // identical facts.
   function buildOutput(envelope, rawData) {
     const { facts, diagnostics } = mapEnvelope(envelope, rawData);
     return Object.freeze({
       envelope,
+      sessionId,
       facts: Object.freeze(facts.map((fact) => Object.freeze(fact))),
       diagnostics: Object.freeze(diagnostics.map((diag) => Object.freeze(diag))),
     });
@@ -213,6 +264,7 @@ function createRuntimeAdapter(options = {}) {
   function emitFacts(facts) {
     onEvent(Object.freeze({
       envelope: null,
+      sessionId,
       facts: Object.freeze(facts.map((fact) => Object.freeze(fact))),
       diagnostics: Object.freeze([]),
     }));
@@ -310,12 +362,57 @@ function createRuntimeAdapter(options = {}) {
     return EVENT_ID_PREFIX + crypto.createHash('sha256').update(fingerprint, 'utf8').digest('hex');
   }
 
+  // Derives the adapter-owned pairing handle for ONE raw event, ONCE, at first
+  // ingest. Only the subagent lifecycle events carry a pairable run handle; every
+  // other event (and every unpairable runId) resolves to `null`, which downstream
+  // treats as "no pairing" — fail-closed, never a guess.
+  function pairingHandleOf(raw) {
+    if (raw.type !== 'subagent/start' && raw.type !== 'subagent/end') return null;
+    const data = isPlainObject(raw.data) ? raw.data : {};
+    return deriveRunProxy(data.runId);
+  }
+
+  // Remembers the RAW child session id for one envelope, keyed by the envelope's
+  // own eventId. Written only for subagent lifecycle events that actually carry a
+  // raw child id (regardless of whether the runId was pairable — an end with no
+  // runId still needs its child identity so the registry can apply its own
+  // fail-closed runId verification).
+  function rememberRawChildHandle(envelope, raw) {
+    if (raw.type !== 'subagent/start' && raw.type !== 'subagent/end') return;
+    const data = isPlainObject(raw.data) ? raw.data : {};
+    if (typeof data.id !== 'string' || data.id === '') return;
+    rawChildHandles.set(envelope.eventId, data.id);
+    if (rawChildHandles.size > RAW_HANDLE_CAPACITY) {
+      rawChildHandles.delete(rawChildHandles.keys().next().value);
+    }
+  }
+
+  /**
+   * The RAW child session id for a canonical envelope, or null.
+   *
+   * Identity-keyed (by `envelope.eventId`), never positional: a consumer holding
+   * an output can resolve the producing event's raw child handle without
+   * knowing (or guessing) which raw event is currently in flight. Returns null
+   * for an envelope this adapter never built from raw input — e.g. one arriving
+   * through a canonical `eventsSince` replay — which is the documented
+   * fail-closed path.
+   */
+  function rawChildHandleFor(envelope) {
+    if (!envelope || typeof envelope.eventId !== 'string') return null;
+    const handle = rawChildHandles.get(envelope.eventId);
+    return typeof handle === 'string' && handle !== '' ? handle : null;
+  }
+
   function buildEnvelope(raw, payloadInfo, eventId, sequence, sequenceSource, atMs) {
-    return Object.freeze({
+    const envelope = Object.freeze({
       schemaVersion: 1,
       eventId,
       sessionId,
       sessionEpoch,
+      // Adapter-derived (never a Harness fact). Carried on the envelope so the
+      // pairing survives buffered drain and canonical `eventsSince` replay; see
+      // the module header.
+      pairingHandle: pairingHandleOf(raw),
       sequence,
       eventType: raw.type,
       payload: Object.freeze(isPlainObject(payloadInfo.redactedPayload)
@@ -323,16 +420,21 @@ function createRuntimeAdapter(options = {}) {
       sequenceSource,
       receivedAt: new Date(atMs).toISOString(),
     });
+    // The raw child handle is remembered HERE (build time, from raw input) so it
+    // is available no matter when the fact is actually applied (immediately,
+    // after a buffered drain, or never).
+    rememberRawChildHandle(envelope, raw);
+    return envelope;
   }
 
   // -- Runtime mapping -------------------------------------------------------------
 
   // Maps one canonical envelope into Office runtime facts. Runtime facts read
-  // the redacted payload only, EXCEPT the subagent runId pairing handle: the
-  // raw runId is consumed internally to derive a stable redacted proxy
-  // (`run-sha256:<16 hex>`, SHA-256 over the raw value), which is what the
-  // downstream facts and activeRuns set actually carry — the raw Harness
-  // runId never leaves the adapter in a fact.
+  // the redacted payload only, EXCEPT the subagent pairing handle: it is read
+  // from the envelope's adapter-derived `pairingHandle` field (computed once at
+  // first raw ingest), NEVER re-derived from rawData — a replayed envelope's
+  // rawData is its already-redacted payload, so re-deriving would hash the
+  // redaction placeholder and break start/end pairing (see module header).
   // Only proven Harness semantics become facts; unknown reasons degrade to
   // attention with the coarse reason preserved. Never produces offline or
   // terminal guesses.
@@ -341,6 +443,8 @@ function createRuntimeAdapter(options = {}) {
     const diagnostics = [];
     const payload = isPlainObject(envelope.payload) ? envelope.payload : {};
     const raw = isPlainObject(rawData) ? rawData : {};
+    // Absent (a v1/foreign envelope) and null both mean "no pairable handle".
+    const pairingHandle = typeof envelope.pairingHandle === 'string' ? envelope.pairingHandle : null;
     switch (envelope.eventType) {
       case 'agent/status': {
         const status = coarse(payload.status);
@@ -410,7 +514,7 @@ function createRuntimeAdapter(options = {}) {
         break;
       }
       case 'subagent/start': {
-        const runId = runProxy(raw.runId);
+        const runId = pairingHandle;
         if (runId) activeRuns.add(runId);
         // `id` is the child session id. `role` is the candidate seat computed
         // by the shell's subagent classifier from structured metadata only and
@@ -428,7 +532,7 @@ function createRuntimeAdapter(options = {}) {
         break;
       }
       case 'subagent/end': {
-        const runId = runProxy(raw.runId);
+        const runId = pairingHandle;
         const stopReason = coarse(payload.stopReason);
         if (stopReason === 'completed' || stopReason === 'error' || stopReason === 'failed') {
           if (runId) activeRuns.delete(runId);
@@ -456,26 +560,6 @@ function createRuntimeAdapter(options = {}) {
         break; // unmapped types canonicalize without invented facts
     }
     return { facts, diagnostics };
-  }
-
-  // Derives the STABLE REDACTED PROXY used as the technical pairing handle
-  // for subagent runs. The raw Harness runId never appears in downstream
-  // facts, in the open-run set, or in diagnostics: the proxy is
-  // `run-sha256:<16 lower hex>` = sha256(rawRunId) truncated.
-  //
-  // Delegated to module-level deriveRunProxy() so Task 5/parent wiring can
-  // compute the exact same handle for its child-session registration.
-  // Design notes (SPEC-05 + privacy boundary):
-  // - Deterministic: identical raw runIds always produce the same proxy, so
-  //   paired start/end (and Task 5's registered handle) stay matched.
-  // - Correlation-safe: SHA-256 over a short identifier cannot be reversed
-  //   into the raw value without a preimage search; Office facts carry ONLY
-  //   the proxy.
-  // - Fail-closed: whitespace-bearing, oversized, or proven-secret-looking
-  //   ids return `null`; a `null` proxy never registers or closes a run
-  //   (the run simply stays untracked rather than ingesting PII).
-  function runProxy(value) {
-    return deriveRunProxy(value);
   }
 
   // -- Buffer helpers --------------------------------------------------------------
@@ -575,11 +659,13 @@ function createRuntimeAdapter(options = {}) {
     if (!result.ok) return result;
     // Surface sanitized snapshot facts FIRST (they describe the Office state
     // AT the snapshot sequence; eventsSince replay follows). The output is
-    // the standard { envelope: null, facts, diagnostics } channel — never a
-    // fabricated Harness envelope (no eventId/eventType/sequence).
+    // the standard { envelope: null, sessionId, facts, diagnostics } channel —
+    // never a fabricated Harness envelope (no eventId/eventType/sequence), but
+    // still carrying the session identity so the consumer never has to infer it.
     if (result.facts.length > 0 || result.factsDiagnostics.length > 0) {
       onEvent(Object.freeze({
         envelope: null,
+        sessionId,
         facts: result.facts,
         diagnostics: result.factsDiagnostics,
       }));
@@ -661,7 +747,7 @@ function createRuntimeAdapter(options = {}) {
   function describe() {
     return Object.freeze({
       adapterVersion: ADAPTER_VERSION,
-      derivedFields: Object.freeze(['eventId', 'sessionEpoch']),
+      derivedFields: Object.freeze(['eventId', 'sessionEpoch', 'pairingHandle']),
       epochPrefix: EPOCH_PREFIX,
     });
   }
@@ -676,6 +762,8 @@ function createRuntimeAdapter(options = {}) {
       adapterSequence: adapterCounter,
       bufferDepth: buffer.size,
       dedupeSize: dedupe.size,
+      // COUNT only — the raw child handles themselves are never observable.
+      rawHandleSize: rawChildHandles.size,
       activeRuns: Object.freeze([...activeRuns]),
       resync: resync ? Object.freeze({ ...resync }) : null,
     });
@@ -691,6 +779,10 @@ function createRuntimeAdapter(options = {}) {
     capability,
     describe,
     state,
+    // Identity-keyed raw-handle lookup (Phase B): the consumer resolves a
+    // fact's raw child handle from the FACT'S OWN envelope identity instead of
+    // guessing which raw event is in flight.
+    rawChildHandleFor,
   });
 }
 

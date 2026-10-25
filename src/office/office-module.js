@@ -24,8 +24,9 @@
 // - Raw Harness session/run ids stay INSIDE the main process as registry
 //   handles only. Subagent runIds are consumed as Task-6 PROXIES verbatim
 //   (`fact.runId`, already `run-sha256:*`); this module never re-hashes a
-//   proxy and only ever calls deriveRunProxy() on a raw id seen in raw
-//   Harness history (never on a fact).
+//   proxy. Since Phase B (2026-10-18) this module never derives a proxy itself:
+//   the adapter derives it once onto the envelope, and the raw child identity is
+//   resolved by event identity via adapter.rawChildHandleFor(envelope).
 // - Control buttons are REALLY wired since the 2026-09-25 UX must-fix (B1/G1):
 //   main.js injects a `controlRequest` seam (same injection pattern as
 //   `answerRequest`) that reuses the IM-proven Harness RPCs — cancel →
@@ -60,7 +61,7 @@ const { createEmployeeRegistry } = require('./runtime/employee-registry.js');
 const { createOfficeState, reduceOfficeState } = require('./runtime/state-reducer.js');
 const { createTransitionController } = require('./runtime/transition-controller.js');
 const { resolveAnimation } = require('./runtime/animation-controller.js');
-const { createRuntimeAdapter, deriveRunProxy } = require('./runtime/runtime-adapter.js');
+const { createRuntimeAdapter } = require('./runtime/runtime-adapter.js');
 const { CLASSIFIED_SEATS: CLASSIFIED_SUBAGENT_SEATS } = require('./runtime/subagent-classifier.js');
 const snapshotModule = require('./runtime/runtime-snapshot.js');
 const { createPrivacyRedactor } = require('./runtime/privacy-redactor.js');
@@ -467,6 +468,11 @@ function createOfficeModule(options = {}) {
     diagnosticsDedupWindowMs = DIAGNOSTICS_DEDUP_WINDOW_MS,
     // P1 运行时体检：墙钟驱动器补步上限（见 CLOCK_MAX_CATCH_UP_TICKS 注释）。
     clockMaxCatchUpTicks = CLOCK_MAX_CATCH_UP_TICKS,
+    // 2026-10-17 P2 诊断修复：壳持有的运行时版本（main.js 注入
+    // `manager.getInfo().activeVersion || bundledRuntimeVersion`）。它只被
+    // 透传给 runtime adapter 的 capability().runtimeVersion，用于诊断/体检；
+    // 不参与任何状态判定，也不进快照。未注入时保持 null。
+    runtimeVersion = null,
   } = options || {};
 
   const layout = layoutFixture
@@ -915,8 +921,10 @@ function createOfficeModule(options = {}) {
   // reverse lookup used at dispatch promotion — raw ids are never recovered
   // by parsing derived handle strings.
   const rootHandleByDerived = new Map();
-  // proxied subagent runId -> { childSessionId, parentSessionId }
-  const runsByProxy = new Map();
+  // 2026-10-18 清理：这里曾有一个 `runsByProxy`（proxy -> 子会话）账本，但它是**只写不读**
+  // 的死状态：全仓无读点、不暴露、不随 destroy() 清理（无界增长）。子会话身份的权威反查
+  // 由 registry.childSessionIdForRunId() 承担（它同时是唯一索引），因此该账本已删除 ——
+  // 不让两个映射表都声称负责身份关联。
   // P1 right-panel data blocks (spec §4). `usage` is assembled by main.js from
   // the shell's own caches (token-stats/cost/balance) and injected here; the
   // module never collects. `pending` is written from waterfall events
@@ -1377,8 +1385,12 @@ function createOfficeModule(options = {}) {
 
   // ---- adapter composition ---------------------------------------------------
 
-  function handleAdapterOutput(output, rawEvent) {
-    for (const fact of output.facts) applyFact(fact, output.envelope, rawEvent);
+  // 2026-10-18 Phase B（event identity）：adapter 的输出自带身份 —— `envelope`
+  // 标识产出该 fact 的事件（无对应事件时为 null），`sessionId` 恒存在。因此
+  // 消费者不再需要"当前正在 ingest 哪条 raw 事件"这一位置性假设。
+  function handleAdapterOutput(sessionId, output) {
+    const adapter = adapters.get(sessionId) || null;
+    for (const fact of output.facts) applyFact(fact, output, adapter);
     for (const diag of output.diagnostics) noteDiagnostic(diag.code || 'ADAPTER_DIAGNOSTIC');
     recomputeGlobalSync();
   }
@@ -1696,8 +1708,19 @@ function createOfficeModule(options = {}) {
     rec.transition = null;
   }
 
-  function applyFact(fact, envelope, rawEvent) {
-    const rawSessionId = rawEvent && rawEvent.sessionId ? rawEvent.sessionId : null;
+  /** 子代理 fact 的身份无法解析时的稳定诊断码（fail-closed 但**不静默**）：
+   *  - 只拿到 canonical 重放的 subagent/start（没有 raw child id 可登记）
+   *  - 配对了未知 handle 的 subagent/end（registry 里没有该 handle 的子会话，
+   *    且关联 raw 事件不可信）
+   * 两者都不得猜测子会话、不得按当前座位强行关闭，只留一条可观测诊断。 */
+  const SUBAGENT_IDENTITY_UNRESOLVED = 'SUBAGENT_IDENTITY_UNRESOLVED';
+
+  function applyFact(fact, output, adapter) {
+    const envelope = output && output.envelope ? output.envelope : null;
+    // 身份来自输出本身（adapter 的 session），不再来自位置性的 rawEvent。
+    const rawSessionId = output && typeof output.sessionId === 'string' && output.sessionId !== ''
+      ? output.sessionId
+      : null;
     switch (fact.type) {
       case 'runtime/fact': {
         if (!rawSessionId) return;
@@ -1760,7 +1783,13 @@ function createOfficeModule(options = {}) {
       }
       case 'runtime/cancelled': {
         if (!rawSessionId) return;
-        releaseTerminalNow(rawSessionId, `turn/end:${fact.evidence || 'cancelled'}`, 'cancelled');
+        // 2026-10-17 P2 诊断修复（evidence 所有权）：`runtime/cancelled.evidence`
+        // 由 adapter 一次性构造成**来源限定**的完整值（`turn/end:<reason>`）。
+        // 这里必须原样消费 —— 旧实现再拼一次前缀，产出
+        // `turn/end:turn/end:aborted`，污染 lastResult.reason 与 binding.lastEvidence。
+        // 规则（契约 §10）：evidence = `<source-event>:<coarse-reason>`，只在
+        // "同时知道来源事件与粗粒度原因"的那一层构造一次，下游永不重新限定。
+        releaseTerminalNow(rawSessionId, fact.evidence || 'turn/end:cancelled', 'cancelled');
         break;
       }
       case 'runtime/tool': {
@@ -1787,11 +1816,20 @@ function createOfficeModule(options = {}) {
       }
       case 'runtime/subagent-start': {
         if (!rawSessionId) return;
-        const rawChildId = rawEvent && rawEvent.data && typeof rawEvent.data.id === 'string' ? rawEvent.data.id : null;
-        if (!rawChildId) return;
-        // fact.runId is the Task-6 proxy: forwarded verbatim. Only when the
-        // adapter failed to proxy (null) do we derive from the raw value.
-        const runProxy = fact.runId || deriveRunProxy(rawEvent.data && rawEvent.data.runId);
+        // 2026-10-18 Phase B：raw child id 由 **envelope 身份**反查（adapter 在用
+        // 原始输入构建该 envelope 时按 eventId 记下），不再依赖"当前正在 ingest
+        // 哪条 raw 事件"。因此 live / buffer 补发 / 重复投递都解析到同一个子会话；
+        // 只以 canonical 形式重放（adapter 从未见过其原始输入）→ null →
+        // fail-closed（不登记、不猜、不按当前座位强行关闭）。
+        const rawChildId = adapter && typeof adapter.rawChildHandleFor === 'function'
+          ? adapter.rawChildHandleFor(envelope)
+          : null;
+        if (!rawChildId) {
+          noteDiagnostic(SUBAGENT_IDENTITY_UNRESOLVED);
+          return;
+        }
+        // fact.runId is the Task-6 proxy: forwarded verbatim (never re-derived).
+        const runProxy = fact.runId;
         const parentBinding = ensureRootBinding(rawSessionId);
         registry.registerChildSession({
           parentSessionId: rawSessionId,
@@ -1799,7 +1837,6 @@ function createOfficeModule(options = {}) {
           runId: runProxy,
           nowMs: logicalMs,
         });
-        if (runProxy) runsByProxy.set(runProxy, { childSessionId: rawChildId, parentSessionId: rawSessionId });
         // Classified seat (the shell matched bounded subagent metadata to one
         // of the three resident WORK seats): bind the child straight to that
         // seat — a free seat dispatches, a busy one queues FIFO. `orchestrator`
@@ -1856,18 +1893,31 @@ function createOfficeModule(options = {}) {
         break;
       }
       case 'runtime/subagent-end': {
-        const rawChildId = rawEvent && rawEvent.data && typeof rawEvent.data.id === 'string' ? rawEvent.data.id : null;
-        if (!rawChildId) return;
-        const runProxy = fact.runId || deriveRunProxy(rawEvent.data && rawEvent.data.runId);
+        // 2026-10-18 Phase B：子会话身份有两条**都是身份驱动**的来源，没有任何
+        // 位置性推断：
+        //   1. 配对 handle → registry 反查（replay 稳定，覆盖 live / 补发 / 重放）；
+        //   2. 该 fact 自己的 envelope 身份 → adapter 的 raw child handle 反查
+        //      （覆盖"终态没有可配对 runId"的合法情形）。
+        // 两条都拿不到 → fail-closed：不释放任何 binding、不按当前座位强行关闭。
+        // registry.subagentEnd 仍会用 runId 复核，因此不会误释放。
+        const runProxy = fact.runId;
+        const childSessionId = registry.childSessionIdForRunId(fact.runId)
+          || (adapter && typeof adapter.rawChildHandleFor === 'function'
+            ? adapter.rawChildHandleFor(envelope)
+            : null);
+        if (!childSessionId) {
+          noteDiagnostic(SUBAGENT_IDENTITY_UNRESOLVED);
+          return;
+        }
         if (fact.terminal === true) {
           const outcome = fact.outcome === 'failed' ? 'failed' : fact.outcome === 'cancelled' ? 'cancelled' : 'completed';
           if (outcome === 'cancelled') {
-            const childBinding = registry.getBindingForSession(rawChildId);
+            const childBinding = registry.getBindingForSession(childSessionId);
             if (!childBinding || childBinding.releasedAt !== null) {
               // Task 7B: the subagent is still QUEUED — cancel the waiting
               // item immediately (never dispatches, never takes the seat).
               const retained = registry.retainQueuedTerminal({
-                sessionId: rawChildId,
+                sessionId: childSessionId,
                 evidenceType: 'subagent-end',
                 outcome: 'cancelled',
                 runId: runProxy,
@@ -1877,14 +1927,14 @@ function createOfficeModule(options = {}) {
               else if (retained.code && retained.code.startsWith('RUN_ID_')) noteDiagnostic(retained.code);
               break;
             }
-            releaseTerminalNow(rawChildId, `subagent/end:${fact.stopReason || 'cancelled'}`, 'cancelled');
+            releaseTerminalNow(childSessionId, `subagent/end:${fact.stopReason || 'cancelled'}`, 'cancelled');
           } else {
-            const binding = registry.getBindingForSession(rawChildId);
+            const binding = registry.getBindingForSession(childSessionId);
             if (!binding || binding.releasedAt !== null) {
               // Task 7B: the subagent is still QUEUED — retain its terminal
               // outcome (runId verified fail closed by the registry).
               const retained = registry.retainQueuedTerminal({
-                sessionId: rawChildId,
+                sessionId: childSessionId,
                 evidenceType: 'subagent-end',
                 outcome,
                 runId: runProxy,
@@ -1897,9 +1947,9 @@ function createOfficeModule(options = {}) {
             beginResultPresentation(employees.get(binding.employeeId), {
               outcome,
               evidence: `subagent/end:${fact.stopReason || outcome}`,
-              sessionId: rawChildId,
+              sessionId: childSessionId,
               release: (at) => registry.subagentEnd({
-                sessionId: rawChildId,
+                sessionId: childSessionId,
                 runId: runProxy,
                 stopReason: fact.stopReason,
                 terminalEvidence: true,
@@ -2046,6 +2096,256 @@ function createOfficeModule(options = {}) {
         // handled by the caller via scheduler.markTaskReleased; the decide
         // loop picks the next local activity on the following tick.
       }
+    }
+  }
+
+  // ---- Team-to-Office 窄入口（第二阶段第 5 项） --------------------------------
+  //
+  // 契约：docs/specs/TEAM-RUNTIME-CONTRACT-v0.md §13
+  //
+  // 这个入口只接受 **Team-to-Office adapter 已经映射好的白名单事实**。它：
+  //   - **不**读 label / prompt / 任务正文（没有任何相关字段）；
+  //   - **不**判断依赖是否满足（那是 Team Runtime 的权威）；
+  //   - **不**创建或关闭 WorkerRun（只操作 office 自己的座位绑定）；
+  //   - **不**新增 reducer 状态或枚举 —— 全部复用既有 registry + reducer 路径。
+  //
+  // 幂等由既有不变式保证：重复 start 命中"已活跃绑定"→ 不重绑、不重跑
+  // onBindingCreated（否则会把 running 座位错误标成 queued）；重复 terminal 命中
+  // "已释放"→ no-op（不二次释放）。
+  const TEAM_FACT_KINDS = Object.freeze([
+    'run-started', 'run-attention', 'run-terminal', 'artifact-available',
+    'cancel-requested', 'cancel-acknowledged', 'job-status', 'adapter-rejected',
+  ]);
+  const TEAM_TERMINAL_OUTCOMES = Object.freeze(['completed', 'failed', 'cancelled']);
+  const TEAM_JOB_STATUSES = Object.freeze(['pending', 'running', 'attention', 'completed', 'failed', 'cancelled']);
+  // adapter 的稳定拒绝码白名单（不允许任意字符串进诊断环）。
+  const TEAM_ADAPTER_CODES = Object.freeze([
+    'TEAM_FACT_SHAPE_INVALID', 'TEAM_FACT_UNKNOWN_TYPE', 'TEAM_IDENTITY_REQUIRED',
+    'TEAM_ROLE_UNKNOWN', 'TEAM_SEAT_UNMAPPED', 'TEAM_SEAT_UNKNOWN',
+    'TEAM_OUTCOME_UNKNOWN', 'TEAM_EVIDENCE_REQUIRED', 'TEAM_ATTENTION_REASON_INVALID',
+    'TEAM_ARTIFACT_KIND_UNKNOWN', 'TEAM_JOB_STATUS_UNKNOWN',
+  ]);
+
+  function teamRejected(code) {
+    noteDiagnostic(code);
+    return Object.freeze({ ok: false, code, status: 'rejected' });
+  }
+
+  /**
+   * Office 窄入口**独立**的身份契约（2026-10-19 P1）。
+   *
+   * 为什么 office 自带一份常量而不是 import `src/team/*`：
+   *   1. 分层方向 —— office 是下层，不得反向依赖 Team 层；
+   *   2. 边界职责分离 —— adapter 负责"翻译"，本入口负责"拒绝伪造"。若直接复用
+   *      adapter 的常量，adapter 一改就会静默改变 office 的接受标准，两个边界就
+   *      合并成一个了；
+   *   3. 因此这里的形状/枚举是**本入口自己的接受契约**，与 adapter 的实现解耦。
+   *
+   * 硬规则（契约 §13.4）：
+   *   - runHandle 必须匹配 `^team-run-sha256:[0-9a-f]{16}$`（adapter 派生形状）；
+   *   - jobHandle 若存在必须匹配 `^team-job-sha256:[0-9a-f]{16}$`；
+   *   - statusSource 必须恒为 'team-runtime'；
+   *   - role 必须是允许的 Team Role（座位范围的事实不得为 null）；
+   *   - factType 必须是已知 Team fact 类型；
+   *   - seq 若存在必须是整数；
+   *   - **不**把 raw jobId / raw runId 当兼容格式放行；
+   *   - 不依赖 adapter 一定先被调用（外部调用者可以绕过 adapter 直接构造）。
+   */
+  const TEAM_RUN_HANDLE_RE = /^team-run-sha256:[0-9a-f]{16}$/;
+  const TEAM_JOB_HANDLE_RE = /^team-job-sha256:[0-9a-f]{16}$/;
+  const TEAM_STATUS_SOURCE = 'team-runtime';
+  const TEAM_ROLES = Object.freeze(['researcher', 'reviewer']);
+  const TEAM_FACT_TYPES = Object.freeze([
+    'job/created', 'run/dispatched', 'run/started', 'artifact/available',
+    'run/completed', 'run/failed', 'run/cancelled', 'run/attention',
+    'run/cancel-requested', 'run/cancel-acknowledged',
+    'job/completed', 'job/failed', 'job/cancelled', 'job/attention',
+  ]);
+  // 座位范围的事实必须带 role（run-started / run-attention / run-terminal /
+  // cancel-requested / cancel-acknowledged）。
+  const TEAM_SEAT_SCOPED_KINDS = Object.freeze([
+    'run-started', 'run-attention', 'run-terminal', 'cancel-requested', 'cancel-acknowledged',
+  ]);
+  // 本入口可能发出的全部稳定拒绝码（白名单；测试断言"发出的码 ⊆ 这个集合"）。
+  const TEAM_REJECTION_CODES = Object.freeze([
+    'TEAM_FACT_SHAPE_INVALID', 'TEAM_FACT_UNKNOWN_KIND', 'TEAM_IDENTITY_REQUIRED',
+    'TEAM_IDENTITY_INVALID', 'TEAM_SEAT_UNKNOWN', 'TEAM_SEAT_CONFLICT',
+    'TEAM_BINDING_REJECTED', 'TEAM_RUN_UNKNOWN', 'TEAM_OUTCOME_UNKNOWN',
+    'TEAM_EVIDENCE_REQUIRED', 'TEAM_JOB_STATUS_UNKNOWN',
+  ]);
+
+  /** 返回 { identity, runHandle } 或 null（null = 身份不合法，调用方 fail-closed）。 */
+  function validateTeamIdentity(fact) {
+    const identity = isPlainObject(fact.identity) ? fact.identity : null;
+    if (!identity) return null;
+    const runHandle = identity.runHandle;
+    // 座位范围的事实**必须**带合法 runHandle（office 要靠它找绑定）。
+    // 非座位范围的事实（job-status 是关于 Job 的，本就没有 run）允许 runHandle 为
+    // null；但**只要出现**就必须是 adapter 派生形状 —— 伪造一律拒绝。
+    const seatScoped = TEAM_SEAT_SCOPED_KINDS.includes(fact.kind);
+    if (seatScoped) {
+      if (typeof runHandle !== 'string' || !TEAM_RUN_HANDLE_RE.test(runHandle)) return null;
+    } else if (runHandle !== undefined && runHandle !== null) {
+      if (typeof runHandle !== 'string' || !TEAM_RUN_HANDLE_RE.test(runHandle)) return null;
+    }
+    if (identity.jobHandle !== undefined && identity.jobHandle !== null) {
+      if (typeof identity.jobHandle !== 'string' || !TEAM_JOB_HANDLE_RE.test(identity.jobHandle)) return null;
+    }
+    if (identity.statusSource !== TEAM_STATUS_SOURCE) return null;
+    const role = identity.role;
+    if (role !== null && role !== undefined && !TEAM_ROLES.includes(role)) return null;
+    if (TEAM_SEAT_SCOPED_KINDS.includes(fact.kind) && !TEAM_ROLES.includes(role)) return null;
+    if (!TEAM_FACT_TYPES.includes(identity.factType)) return null;
+    if (identity.seq !== undefined && identity.seq !== null && !Number.isInteger(identity.seq)) return null;
+    return { identity, runHandle };
+  }
+
+  function teamIdentityOf(fact) {
+    return validateTeamIdentity(fact);
+  }
+
+  function ingestTeamProjectionFact(fact) {
+    if (!isPlainObject(fact)) return teamRejected('TEAM_FACT_SHAPE_INVALID');
+    if (!TEAM_FACT_KINDS.includes(fact.kind)) return teamRejected('TEAM_FACT_UNKNOWN_KIND');
+    if (fact.kind === 'adapter-rejected') {
+      const code = TEAM_ADAPTER_CODES.includes(fact.code) ? fact.code : 'TEAM_FACT_SHAPE_INVALID';
+      return teamRejected(code);
+    }
+    // 身份缺失与身份非法是两个不同的失败，用两个稳定码区分（都进白名单）。
+    if (!isPlainObject(fact.identity)) return teamRejected('TEAM_IDENTITY_REQUIRED');
+    const resolved = teamIdentityOf(fact);
+    if (!resolved) return teamRejected('TEAM_IDENTITY_INVALID');
+    const { runHandle } = resolved;
+
+    switch (fact.kind) {
+      case 'run-started': {
+        if (!runHandle) return teamRejected('TEAM_IDENTITY_REQUIRED');
+        if (!EMPLOYEE_IDS.includes(fact.seat)) return teamRejected('TEAM_SEAT_UNKNOWN');
+        // 已有活跃绑定时分三种情况处理（**不**重绑、**不**重跑 onBindingCreated ——
+        // 否则会把 running 座位错误标成 queued）：
+        //   1. 同一座位 + 当前是 attention → 这是 Team 的**显式恢复**，落回 running；
+        //   2. 同一座位 + 其它状态 → 重复 start，幂等吸收；
+        //   3. 不同座位 → 一个 Run 不得改绑另一个座位，fail-closed。
+        const existing = registry.getBindingForSession(runHandle);
+        if (existing && existing.releasedAt === null) {
+          if (fact.seat !== existing.employeeId) return teamRejected('TEAM_SEAT_CONFLICT');
+          const boundRec = employees.get(existing.employeeId);
+          if (boundRec && boundRec.state.runtime === 'attention') {
+            // 显式恢复：同一个 WorkerRun 继续（Team 侧 runId 不变）。
+            reduce(boundRec, { type: 'runtime/fact', fact: 'running' });
+            noteDiagnostic('TEAM_RUN_RESUMED');
+            pushSnapshot();
+            return Object.freeze({ ok: true, code: null, status: 'resumed', seat: existing.employeeId });
+          }
+          return Object.freeze({ ok: true, code: null, status: 'duplicate', seat: existing.employeeId });
+        }
+        const bound = registry.bindSession({
+          employeeId: fact.seat,
+          sessionId: runHandle,
+          bindingSource: 'manual',
+          confidence: 1,
+          nowMs: logicalMs,
+        });
+        if (!bound.ok) return teamRejected('TEAM_BINDING_REJECTED');
+        if (bound.binding) {
+          // 与 office 自己的 applyFact 分类子代理路径保持同一模式：onBindingCreated
+          // **只调用一次**，并把 queue effects 一并交给它（内部会 queue.markRunning）。
+          // 这里曾额外调用 applyRegistryEffects(bound.effects) —— 那会**第二次**
+          // 执行 onBindingCreated，导致 'task-started' 记两条、taskSeq +2、
+          // openTurnUsage 开两个累加器（2026-10-22 体验验证实测发现并修复）。
+          onBindingCreated(bound.binding, bound.effects);
+          const rec = employees.get(fact.seat);
+          if (rec) reduce(rec, { type: 'runtime/fact', fact: 'running' });
+        }
+        noteDiagnostic('TEAM_RUN_STARTED');
+        pushSnapshot();
+        return Object.freeze({
+          ok: true, code: null, status: bound.binding ? 'bound' : 'queued', seat: fact.seat,
+        });
+      }
+
+      case 'run-attention': {
+        const bound = registry.getBindingForSession(runHandle);
+        if (!bound) return teamRejected('TEAM_RUN_UNKNOWN');
+        if (bound.releasedAt !== null) return Object.freeze({ ok: true, code: null, status: 'duplicate' });
+        const rec = employees.get(bound.employeeId);
+        if (!rec) return teamRejected('TEAM_SEAT_UNKNOWN');
+        // attention 是**非终态**：只改 runtime/activity 呈现，绝不释放。
+        reduce(rec, { type: 'runtime/fact', fact: 'attention', reason: fact.reason || null });
+        noteDiagnostic('TEAM_RUN_ATTENTION');
+        pushSnapshot();
+        return Object.freeze({ ok: true, code: null, status: 'attention', seat: bound.employeeId });
+      }
+
+      case 'run-terminal': {
+        if (!TEAM_TERMINAL_OUTCOMES.includes(fact.outcome)) return teamRejected('TEAM_OUTCOME_UNKNOWN');
+        const evidence = typeof fact.evidence === 'string' && fact.evidence !== '' ? fact.evidence : null;
+        if (!evidence) return teamRejected('TEAM_EVIDENCE_REQUIRED');
+        const bound = registry.getBindingForSession(runHandle);
+        if (!bound) return teamRejected('TEAM_RUN_UNKNOWN');
+        // 已释放 → 幂等 no-op（重复 terminal 绝不二次释放）。
+        if (bound.releasedAt !== null) {
+          return Object.freeze({ ok: true, code: null, status: 'duplicate' });
+        }
+        const rec = employees.get(bound.employeeId);
+        if (!rec) return teamRejected('TEAM_SEAT_UNKNOWN');
+        if (fact.outcome === 'cancelled') {
+          releaseTerminalNow(runHandle, evidence, 'cancelled');
+        } else {
+          beginResultPresentation(rec, {
+            outcome: fact.outcome,
+            evidence,
+            sessionId: runHandle,
+            release: (at) => registry.releaseBinding({
+              sessionId: runHandle, nowMs: at, evidence, outcome: fact.outcome,
+            }),
+          });
+        }
+        noteDiagnostic(fact.outcome === 'completed' ? 'TEAM_RUN_COMPLETED'
+          : fact.outcome === 'failed' ? 'TEAM_RUN_FAILED' : 'TEAM_RUN_CANCELLED');
+        pushSnapshot();
+        return Object.freeze({ ok: true, code: null, status: 'terminal', seat: bound.employeeId });
+      }
+
+      case 'cancel-requested': {
+        const bound = registry.getBindingForSession(runHandle);
+        if (!bound) return teamRejected('TEAM_RUN_UNKNOWN');
+        if (bound.releasedAt !== null) return Object.freeze({ ok: true, code: null, status: 'duplicate' });
+        const rec = employees.get(bound.employeeId);
+        if (!rec) return teamRejected('TEAM_SEAT_UNKNOWN');
+        // 请求 ≠ 终态：进入 cancellationPending，绑定保留。
+        reduce(rec, { type: 'control/cancel' });
+        noteDiagnostic('TEAM_CANCEL_REQUESTED');
+        pushSnapshot();
+        return Object.freeze({ ok: true, code: null, status: 'cancellationPending', seat: bound.employeeId });
+      }
+
+      case 'cancel-acknowledged': {
+        const bound = registry.getBindingForSession(runHandle);
+        if (!bound) return teamRejected('TEAM_RUN_UNKNOWN');
+        if (bound.releasedAt !== null) return Object.freeze({ ok: true, code: null, status: 'duplicate' });
+        const rec = employees.get(bound.employeeId);
+        if (!rec) return teamRejected('TEAM_SEAT_UNKNOWN');
+        // 回执 ≠ 终态：reducer 只产出 awaiting-terminal-evidence 效果，不改任何状态。
+        reduce(rec, { type: 'control/cancel-ack' });
+        return Object.freeze({ ok: true, code: null, status: 'awaiting-terminal-evidence', seat: bound.employeeId });
+      }
+
+      case 'artifact-available': {
+        // 粗粒度阶段提示：只发一条稳定诊断，不传 id/内容/路径，不进快照字段。
+        noteDiagnostic('TEAM_ARTIFACT_AVAILABLE');
+        return Object.freeze({ ok: true, code: null, status: 'noted' });
+      }
+
+      case 'job-status': {
+        if (!TEAM_JOB_STATUSES.includes(fact.jobStatus)) return teamRejected('TEAM_JOB_STATUS_UNKNOWN');
+        // root Job 只作汇总/诊断：**不**新增 office runtime 状态枚举、**不**占座位。
+        noteDiagnostic(`TEAM_JOB_${String(fact.jobStatus).toUpperCase()}`);
+        return Object.freeze({ ok: true, code: null, status: 'noted' });
+      }
+
+      default:
+        return teamRejected('TEAM_FACT_UNKNOWN_KIND');
     }
   }
 
@@ -3325,8 +3625,17 @@ function createOfficeModule(options = {}) {
     if (rec.segment) return 'walk'; // anchor interpolation walks by facing
     if (rec.state.movement === 'moving') return 'walk';
     if (rec.state.activity === 'sleeping') return 'sleeping';
+    // 2026-10-23 收口（工作包 A 复核发现）：attention 必须优先于 working。此前
+    // running 与 attention 共用 'working'，于是"等待确认"的角色和"正在工作"的角色
+    // **画面完全相同** —— 事实（runtime=attention）是忠实的，表现却把最重要的
+    // 信息吞掉了。角色包提供 warning 表情（asset-pack 的 attention 回退链：
+    // ['attention','warning','error','idle']），resolveAnimation({state:'attention'})
+    // 解析到 warning。
+    // 放在 walk / sleeping 之后、task-start/work 与 running 之前：行走中的角色仍然
+    // 显示行走（位置事实优先），落座后才显示 attention。
+    if (rec.state.runtime === 'attention') return 'attention';
     if (rec.transition && rec.transition.kind === 'task-start' && rec.transition.phase === 'work') return 'working';
-    if (rec.state.runtime === 'running' || rec.state.runtime === 'attention') return 'working';
+    if (rec.state.runtime === 'running') return 'working';
     if (rec.state.activity === 'chatting') return 'side';
     return 'idle';
   }
@@ -3347,10 +3656,9 @@ function createOfficeModule(options = {}) {
 
   // ---- public control surface ------------------------------------------------
 
-  // The adapter's onEvent fires synchronously inside ingest(); correlating
-  // facts with the CURRENT raw event (not the adapter-creation event) is what
-  // keeps raw session/run handles aligned per event.
-  let currentRawEvent = null;
+  // 2026-10-18 Phase B（event identity）：这里**不再**有"当前正在 ingest 的 raw
+  // 事件"。adapter 的输出自带身份（`envelope` 标识产出该 fact 的事件，`sessionId`
+  // 恒存在），子会话身份由 adapter 的 identity-keyed 反查提供 —— 位置性关联假设已删除。
 
   // 2026-09-24 resync fix: the DshCockpit-internal resync cycle now has a
   // REAL answerer. The adapter asks for a baseline whenever a forward gap
@@ -3392,7 +3700,11 @@ function createOfficeModule(options = {}) {
       adapter = createRuntimeAdapter({
         sessionId,
         clock,
-        onEvent: (output) => handleAdapterOutput(output, currentRawEvent),
+        // 2026-10-17 P2 诊断修复：把壳持有的运行时版本注入 adapter，让
+        // capability().runtimeVersion 如实报告所连运行时（体检/诊断价值）。
+        // 未注入（纯模块装配、单测）时保持 null —— 不猜版本。
+        runtimeVersion,
+        onEvent: (output) => handleAdapterOutput(sessionId, output),
         onMessage: (message) => handleAdapterMessage(sessionId, message),
       });
       adapters.set(sessionId, adapter);
@@ -3405,7 +3717,6 @@ function createOfficeModule(options = {}) {
       return Object.freeze({ status: 'rejected', code: 'EVENT_SHAPE_INVALID' });
     }
     const adapter = ensureAdapter(rawEvent.sessionId);
-    currentRawEvent = rawEvent;
     const result = adapter.ingest({
       type: rawEvent.type,
       seq: rawEvent.seq,
@@ -3486,12 +3797,10 @@ function createOfficeModule(options = {}) {
       const adapter = ensureAdapter(sessionId);
       let accepted = 0;
       for (const event of records) {
-        currentRawEvent = { sessionId, type: event.type, seq: event.seq, time: event.time, data: event.data };
         const res = adapter.ingest(event);
         if (res.status === 'accepted') accepted += 1;
         else if (res.status !== 'duplicate') note(`RESYNC_REPLAY_${res.code}`);
       }
-      currentRawEvent = null;
       recomputeGlobalSync();
       pushSnapshot();
       return Object.freeze({
@@ -3515,13 +3824,11 @@ function createOfficeModule(options = {}) {
       let accepted = 0;
       let duplicates = 0;
       for (const event of records) {
-        currentRawEvent = { sessionId, type: event.type, seq: event.seq, time: event.time, data: event.data };
         const res = existing.ingest(event);
         if (res.status === 'accepted') accepted += 1;
         else if (res.status === 'duplicate') duplicates += 1;
         else note(`RESYNC_REPLAY_${res.code}`);
       }
-      currentRawEvent = null;
       recomputeGlobalSync();
       pushSnapshot();
       const after = existing.state();
@@ -3588,7 +3895,6 @@ function createOfficeModule(options = {}) {
             index += 1;
             continue;
           }
-          currentRawEvent = { sessionId, type: event.type, seq: event.seq, time: event.time, data: event.data };
           const res = existing.ingest(event);
           if (res.status === 'accepted') {
             replayed += 1;
@@ -3608,7 +3914,6 @@ function createOfficeModule(options = {}) {
           index += 1;
         }
       }
-      currentRawEvent = null;
       if (firstSeq > before.watermark + 1) {
         // The re-read could not reach the gap start (log start / page bound):
         // the events in between are superseded by this baseline, not replayed.
@@ -3899,6 +4204,10 @@ function createOfficeModule(options = {}) {
     diagnostics: diagnosticsSnapshot,
     // P1 运行时体检：时钟节流归因块的直读入口（诊断/单测用，不新增 IPC）。
     clockDiagnostics,
+    // 2026-10-19 第二阶段第 5 项：Team-to-Office 窄入口。只接受 Team-to-Office
+    // adapter 已映射的白名单事实（见 TEAM-RUNTIME-CONTRACT-v0 §13）；不新增
+    // office:* IPC 通道，不改 reducer 枚举，不进快照字段。
+    ingestTeamProjectionFact,
     // P1 运行时体检：单次墙钟 fire 的手动驱动（诊断/单测用——确定性补步断言
     // 不依赖真实 setInterval 节奏）。
     debugClockFire: clockFire,
@@ -3907,6 +4216,13 @@ function createOfficeModule(options = {}) {
       promoted: activeRootHandles.size,
       pendingReverse: rootHandleByDerived.size,
     }),
+    // 2026-10-17 P2 诊断修复：runtimeVersion 注入路径的可观测入口（诊断/单测用，
+    // 与 debugRegistrySnapshot 同一模式；不新增 office:* 通道，不进快照）。
+    // 多会话时取第一个 adapter 的能力快照（同一模块注入同一版本）。
+    debugAdapterCapability: () => {
+      for (const adapter of adapters.values()) return adapter.capability();
+      return null;
+    },
     subscribe,
     destroy,
     layout,

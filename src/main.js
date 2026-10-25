@@ -129,6 +129,14 @@ if (process.env.DSH_DESKTOP_USER_DATA) {
 const OFFICE_RUNTIME_ENABLED = true;
 const OFFICE_RUNTIME_SCHEME = 'office-runtime';
 let officeModuleInstance = null;
+// 工作包 A：开发模式 Team 演示实例（仅当 DSH_DESKTOP_OFFICE_TEAM_DEMO=1 时非 null）。
+let officeTeamDemoInstance = null;
+// 工作包 A（Harness v0.3）：开发模式 **FakeExecutor 执行链路** 实例
+// （仅当 DSH_DESKTOP_OFFICE_TEAM_EXECUTOR_DEMO=1 时非 null；与上面的门互斥）。
+let officeTeamExecutorDemoInstance = null;
+// Harness v0.4（阶段1）：**真实 dsh 执行链路** 实例（仅当 DSH_DESKTOP_OFFICE_TEAM_REAL=1
+// 时非 null；与两个开发 fixture 门三方互斥）。
+let officeTeamRealInstance = null;
 let officeWindowManager = null; // late-bound: set right after createWindowManager()
 function getWindowManager() { return officeWindowManager; }
 
@@ -198,6 +206,477 @@ function ensureOfficeStateStore() {
 function officeStateSettingsOrNull() {
   try { return ensureOfficeStateStore().get().settings; } catch { return null; }
 }
+// 工作包 A（2026-10-22）：开发模式 Team→Office 体验接通开关。**默认关闭**：
+// 不设置时 `createTeamOfficeDemo` 根本不会被 require，普通启动路径零影响。
+// 它只驱动一个固定 Team 脚本（不连真实 Harness、不伪造 session、不读用户 prompt、
+// 不调用外部模型、不把 Team 事实写回 Harness）。
+function officeTeamDemoEnabled() {
+  return process.env.DSH_DESKTOP_OFFICE_TEAM_DEMO === '1';
+}
+
+/**
+ * 把**开发模式** Team 演示接到办公室组合根上（纯接线，见 team-office-demo.js）。
+ *
+ * 统一表述（与契约 §13 一致）：team-office-demo 是**开发期固定脚本 fixture**。它用
+ * Office logical clock 作为演示时间来源，用一个独立的 unref pump 定时器检查到期脚本
+ * 操作。生产 Team **不**依赖 Office 是否打开、是否可见、renderer 是否运行或 Office
+ * 是否 tick；真实生产接入必须来自真实 Worker / Harness execution evidence。
+ *
+ * 它不新增 IPC、不改 office-module 的既有行为，也**不**连真实 Harness、不伪造
+ * session、不读用户 prompt、不调用外部模型、不把 Team 事实写回 Harness。
+ */
+function attachOfficeTeamDemo(office, log) {
+  if (!officeTeamDemoEnabled()) return null;
+  let demo = null;
+  try {
+    const { createTeamOfficeDemo } = require('./team/runtime/team-office-demo.js');
+    demo = createTeamOfficeDemo({ office, log });
+    const attached = demo.attach();
+    if (!attached || attached.ok !== true) {
+      log(`[office] team demo attach refused: ${attached && attached.code}`);
+      return null;
+    }
+    log('[office] team demo attached (DSH_DESKTOP_OFFICE_TEAM_DEMO=1): fixed Team script -> bridge -> office.ingestTeamProjectionFact');
+  } catch (error) {
+    // 开发开关失败绝不影响办公室启动。
+    log(`[office] team demo attach failed: ${error && error.message}`);
+    return null;
+  }
+  return demo;
+}
+
+/** 反注册开发模式 Team 演示：清掉 pump 定时器（幂等）。Office 目前没有独立的销毁
+ *  路径（模块随进程生命周期存活），所以在 will-quit 的统一清理处调用；将来若加入
+ *  Office teardown，也应在那里调用同一个函数。 */
+function detachOfficeTeamDemo(log) {
+  if (!officeTeamDemoInstance) return false;
+  let ok = false;
+  try {
+    ok = officeTeamDemoInstance.detach().ok === true;
+  } catch (error) {
+    log(`[office] team demo detach failed: ${error && error.message}`);
+    return false;
+  }
+  officeTeamDemoInstance = null;
+  if (ok) log('[office] team demo detached (pump timer cleared)');
+  return ok;
+}
+
+// 工作包 A（Harness v0.3, 2026-10-23）：开发模式 **FakeExecutor 执行链路** 体验开关。
+// **默认关闭**：不设置时 `createTeamExecutorDemo` 根本不会被 require，普通启动路径零影响。
+//
+// 与上面那个门（DSH_DESKTOP_OFFICE_TEAM_DEMO）的语义区别 —— 两者**不可互换**：
+//   旧门：固定脚本 **直接调用 Team 命令**（事实作者 = fixture 自己）；
+//   新门：FakeExecutor 产出 ExecutionEvent → TeamExecutionController 转换
+//        （事实作者 = Team Runtime，且是执行证据的函数）。
+// 因此两个门**互斥**：同时设置会拒绝启动新入口（见 OFFICE_TEAM_DEMO_CONFLICT），
+// 避免"两套 fixture 同时 attach 到同一办公室"从而难以分辨谁写了事实。
+function officeTeamExecutorDemoEnabled() {
+  return process.env.DSH_DESKTOP_OFFICE_TEAM_EXECUTOR_DEMO === '1';
+}
+
+/** 两个开发门同时打开时的稳定码（测试钉住；不抛错、不改变办公室启动）。 */
+const OFFICE_TEAM_DEMO_CONFLICT = 'OFFICE_TEAM_DEMO_CONFLICT';
+
+/** 开发场景选择（可选；不设置时默认 happy）。 */
+function officeTeamExecutorDemoScenario() {
+  const raw = process.env.DSH_DESKTOP_OFFICE_TEAM_EXECUTOR_SCENARIO;
+  return typeof raw === 'string' && raw !== '' ? raw : 'happy';
+}
+
+/**
+ * 把**开发模式 FakeExecutor 执行链路**接到办公室组合根上（纯接线，见
+ * team-executor-demo.js）。它**不**连真实 Harness、不伪造 session、不读用户 prompt、
+ * 不调用外部模型、不把 Team 事实写回 Harness。
+ *
+ * 与旧 demo 的三处结构差异（这正是新增它的原因）：
+ *   1. **事实来源是执行事件**，不是固定脚本直接调 Team 命令；
+ *   2. 唯一转换点是 TeamExecutionController（旧 demo 没有转换层）；
+ *   3. producer 与 consumer 通过**同一个** bridge/窄入口相接，因此"Office 只是
+ *      projection 消费者"这一性质对新链路同样成立（有 headless 对照测试）。
+ *
+ * 它不新增 IPC、不改 office-module 的既有行为。
+ */
+function attachOfficeTeamExecutorDemo(office, log) {
+  if (!officeTeamExecutorDemoEnabled()) return null;
+  // 互斥：任何其它 Team 门（旧 fixture / 真实链路）同时打开时拒绝本入口
+  //（绝不"两个事实作者同时写同一办公室"）。
+  if (officeTeamDemoEnabled() || officeTeamRealEnabled()) {
+    log(`[office] team executor demo refused: ${OFFICE_TEAM_DEMO_CONFLICT} `
+      + '(TEAM_DEMO / TEAM_EXECUTOR_DEMO / TEAM_REAL are mutually exclusive)');
+    return null;
+  }
+  let demo = null;
+  try {
+    const scenario = officeTeamExecutorDemoScenario();
+    const { createTeamExecutorDemo, DEMO_SCENARIO_NAMES } = require('./team/runtime/team-executor-demo.js');
+    if (!DEMO_SCENARIO_NAMES.includes(scenario)) {
+      log(`[office] team executor demo refused: DEMO_SCENARIO_UNKNOWN (${scenario})`);
+      return null;
+    }
+    demo = createTeamExecutorDemo({ office, scenario, log });
+    const attached = demo.attach();
+    if (!attached || attached.ok !== true) {
+      log(`[office] team executor demo attach refused: ${attached && attached.code}`);
+      return null;
+    }
+    log(`[office] team executor demo attached (DSH_DESKTOP_OFFICE_TEAM_EXECUTOR_DEMO=1, scenario=${scenario}): `
+      + 'FakeExecutor -> TeamExecutionController -> team -> bridge -> office.ingestTeamProjectionFact');
+  } catch (error) {
+    // 开发开关失败绝不影响办公室启动。
+    log(`[office] team executor demo attach failed: ${error && error.message}`);
+    return null;
+  }
+  return demo;
+}
+
+// ===========================================================================
+// Harness v0.4（阶段1，2026-10-25 用户拍板）：**真实 dsh 会话后端**最小接入。
+//
+// 门：DSH_DESKTOP_OFFICE_TEAM_REAL=1 + DSH_DESKTOP_OFFICE_TEAM_TOPIC="<研究主题>"
+// 与两个开发 fixture 门（TEAM_DEMO / TEAM_EXECUTOR_DEMO）**三方互斥**。
+//
+// 链路（与离线测试里验证过的同一条代码路径）：
+//   用户主题（U3：唯一用户输入）
+//   → team-shell-transport（壳：建会话 + 固定模板 prompt + tee 捕获 + 本地 materializer）
+//   → dsh-execution-backend（execution/* 唯一作者）
+//   → TeamExecutionController（唯一转换点）
+//   → Team Runtime → team-office-bridge → office.ingestTeamProjectionFact → 快照
+//
+// 边界：raw sessionId 只在 transport/rpc 调用线上；prompt 只在壳→dsh 的参数里；
+// artifact 内容只落在 userData/team-artifacts/<jobId>/；三者都不进
+// ExecutionEvent / Team fact / Office 快照（离线测试逐条断言过）。
+// ===========================================================================
+function officeTeamRealEnabled() {
+  return process.env.DSH_DESKTOP_OFFICE_TEAM_REAL === '1';
+}
+
+/** 用户研究主题（U3 拍板：文本只来自用户输入）。 */
+function officeTeamRealTopic() {
+  const raw = process.env.DSH_DESKTOP_OFFICE_TEAM_TOPIC;
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
+/** 三个 Team fixture/real 门同时开多个时的稳定码（测试钉住）。 */
+const OFFICE_TEAM_GATE_CONFLICT = 'OFFICE_TEAM_GATE_CONFLICT';
+
+// ===========================================================================
+// Harness v0.5（首次体验最小版）：办公室里的 Team 任务发起入口。
+//
+// 通道选择：**shell:team**（shell 自有命名空间，与 shell:theme / shell:pick-folder
+// 同一模式）—— 刻意**不是** office:*：office:* 通道集合已冻结为 8 个（契约 §15.1），
+// 且"发起/恢复 Team 任务"是壳拥有的**控制**（不是办公室投影），注册在 main.js。
+//
+// 方向（与 office:cancel 同构）：renderer → IPC → main → controller → Team 命令。
+// renderer 仍然只消费快照；它发的是**用户意图**（控制），不是事实。
+//
+// 总门：DSH_DESKTOP_OFFICE_TEAM_UI=1（默认关）。这是**第四个**门，但它不产事实
+// 作者冲突 —— 它只是 startTeamRealWithTopic 的另一个入口，且与 env REAL 路径
+// 共享同一个单实例守卫（同一时刻只允许一个真实 Team）。
+// ===========================================================================
+function officeTeamUiEnabled() {
+  return process.env.DSH_DESKTOP_OFFICE_TEAM_UI === '1';
+}
+
+/** UI 发起主题的上限（与 quickask 的 4000 上限同思路，取更紧的 2000）。 */
+const OFFICE_TEAM_UI_TOPIC_MAX = 2000;
+
+/** 当前真实 Team 的状态摘要（不含主题原文 —— 用户文本不进任何状态面）。 */
+function officeTeamRealStatus() {
+  const instance = officeTeamRealInstance;
+  if (!instance) {
+    return Object.freeze({ ok: true, code: null, enabled: officeTeamUiEnabled(), active: false, jobStatus: null, attentionRole: null });
+  }
+  const state = instance.runtime.state();
+  let attentionRole = null;
+  for (const [role, run] of Object.entries(state.runs)) {
+    if (run && run.status === 'attention') { attentionRole = role; break; }
+  }
+  return Object.freeze({
+    ok: true, code: null,
+    enabled: officeTeamUiEnabled(),
+    active: true,
+    jobStatus: state.status,
+    // 限定名而非简写：tdz-guard 的惰性正则会把更早的 createAssetPack({...}) 块
+    // 吞到这里的裸标识符（函数局部值）。见 v0.4 批次同类注记。
+    attentionRole: attentionRole,
+  });
+}
+
+/**
+ * shell:team 的载荷校验（与 office-module 的 validateOfficeIpcPayload 同纪律：
+ * 普通对象、白名单 action、字段形状与上限；未知一律 fail-closed）。
+ */
+function validateShellTeamPayload(payload) {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { ok: false, code: 'PAYLOAD_INVALID' };
+  }
+  const action = payload.action;
+  if (action === 'status') return { ok: true, action };
+  if (action === 'start') {
+    const topic = typeof payload.topic === 'string' ? payload.topic.trim() : '';
+    if (topic === '') return { ok: false, code: 'TOPIC_REQUIRED' };
+    if (topic.length > OFFICE_TEAM_UI_TOPIC_MAX) return { ok: false, code: 'TOPIC_TOO_LONG' };
+    return { ok: true, action, topic };
+  }
+  if (action === 'resume') return { ok: true, action };
+  return { ok: false, code: 'ACTION_UNKNOWN' };
+}
+
+/** 注册 shell:team（在 shell IPC 区，与其它 shell:* 同段）。
+ *  startDeps 供离线测试注入（rpc/openFollow/artifactDir/clock）；生产留空 →
+ *  startTeamRealWithTopic 的真实默认（rpc wire + 专用 mux 流 + userData + 墙钟）。 */
+function registerShellTeamIpc(ipcMain, log, startDeps = {}) {
+  ipcMain.handle('shell:team', async (_event, payload) => {
+    const checked = validateShellTeamPayload(payload);
+    if (!checked.ok) {
+      log(`[office] shell:team refused: ${checked.code}`);
+      return Object.freeze({ ok: false, code: checked.code });
+    }
+    if (checked.action === 'status') return officeTeamRealStatus();
+    if (checked.action === 'start') {
+      if (!officeTeamUiEnabled()) {
+        return Object.freeze({ ok: false, code: 'TEAM_UI_DISABLED' });
+      }
+      // 与 env 真实门互斥（同一时刻只能有一个真实 Team；fixture 门在核心里再查一次）。
+      if (officeTeamRealEnabled()) {
+        return Object.freeze({ ok: false, code: 'TEAM_ALREADY_ACTIVE' });
+      }
+      const office = officeModuleInstance;
+      if (!office || typeof office.ingestTeamProjectionFact !== 'function') {
+        return Object.freeze({ ok: false, code: 'OFFICE_NOT_READY' });
+      }
+      const instance = startTeamRealWithTopic({ office, topic: checked.topic, log, deps: startDeps });
+      if (!instance) return Object.freeze({ ok: false, code: 'TEAM_START_FAILED' });
+      log(`[office] team started from UI (topic stays out of facts/logs)`);
+      return officeTeamRealStatus();
+    }
+    if (checked.action === 'resume') {
+      const instance = officeTeamRealInstance;
+      if (!instance) return Object.freeze({ ok: false, code: 'TEAM_NOT_ACTIVE' });
+      const state = instance.runtime.state();
+      const role = Object.entries(state.runs).find(([, run]) => run && run.status === 'attention');
+      if (!role) return Object.freeze({ ok: false, code: 'NOT_IN_ATTENTION' });
+      try {
+        const verdict = await instance.controller.resume(role[0]);
+        return Object.freeze({ ok: verdict.ok, code: verdict.ok ? null : verdict.code });
+      } catch (error) {
+        return Object.freeze({ ok: false, code: 'RESUME_FAILED' });
+      }
+    }
+    return Object.freeze({ ok: false, code: 'ACTION_UNKNOWN' });
+  });
+}
+
+/** 为一个 Team 会话开一条**专用** journal follow 流（与办公室自己的流分命名空间）。
+ *  返回 AsyncIterable<journalEvent>：帧到达才推进（真实流语义，无轮询、无定时器）。 */
+function openTeamFollowStream(sessionId) {
+  const mux = runtimeMux;
+  const streamId = `team-follow-${sessionId}`;
+  const queue = [];
+  const waiters = [];
+  let ended = false;
+  mux.onItem(streamId, (value) => {
+    // 与 ingestOfficeFollowFrame 同一取帧口径：snapshot 开窗 + 增量 event；
+    // assistant-stream 帧刻意忽略（tee 只关心 assistant/message 正文，而正文在
+    // journal 事件里，不在增量帧里）。
+    const events = [];
+    if (value && value.type === 'event' && value.event) events.push(value.event);
+    if (value && value.type === 'snapshot' && Array.isArray(value.records)) {
+      for (const record of value.records) {
+        if (record && record.type === 'event' && record.event) events.push(record.event);
+      }
+    }
+    for (const event of events) queue.push(event);
+    // 每条事件只唤醒**一个** waiter（一对一交付）。把全部 waiter 一次性唤醒是错的：
+    // 队列只有 1 条事件时第二个 waiter 会被错误地以 done 结束（离线测试实测抓到）。
+    while (waiters.length > 0 && queue.length > 0) {
+      const resolve = waiters.shift();
+      resolve({ value: queue.shift(), done: false });
+    }
+    if (value && value.type === 'end') {
+      ended = true;
+      while (waiters.length > 0) waiters.shift()({ value: undefined, done: true });
+    }
+  });
+  // 根会话地址（Team 自己建的会话都是根会话；地址形状见 follow-address.js:6-9）。
+  // mux 未 live 时 openStream 只是登记，ready 后自动重开（runtime-mux.js:258-259）。
+  mux.openStream(streamId, 'session/follow', { request: { address: { kind: 'session', sessionId } } });
+  return Object.freeze({
+    [Symbol.asyncIterator]: () => ({
+      next() {
+        if (queue.length > 0) return Promise.resolve({ value: queue.shift(), done: false });
+        if (ended) return Promise.resolve({ value: undefined, done: true });
+        // 等待交付：resolve 的形状由投递方决定（事件=done:false；流结束=done:true）。
+        return new Promise((resolve) => { waiters.push(resolve); });
+      },
+    }),
+  });
+}
+
+/**
+ * 装配真实执行链（env 入口）。deps 供离线测试注入（rpc / openFollow / artifactDir /
+ * clock）；生产默认：真实 rpc wire、专用 mux follow 流、userData/team-artifacts、
+ * 墙钟（真实路径的事实时间戳来自真实时间；demo fixture 才用办公室逻辑时钟）。
+ */
+function attachOfficeTeamReal(office, log, deps = {}) {
+  if (!officeTeamRealEnabled()) return null;
+  // 三方互斥：任何两个 Team 门同时开都拒绝真实入口（分辨不了"谁在写事实"）。
+  if (officeTeamDemoEnabled() || officeTeamExecutorDemoEnabled()) {
+    log(`[office] team real refused: ${OFFICE_TEAM_GATE_CONFLICT} `
+      + '(TEAM_DEMO / TEAM_EXECUTOR_DEMO / TEAM_REAL are mutually exclusive)');
+    return null;
+  }
+  const topic = officeTeamRealTopic();
+  if (!topic) {
+    log('[office] team real refused: TEAM_TOPIC_REQUIRED (set DSH_DESKTOP_OFFICE_TEAM_TOPIC)');
+    return null;
+  }
+  return startTeamRealWithTopic({ office, topic, log, deps });
+}
+
+/**
+ * 真实执行链的**核心装配**（v0.5：主题不再只来自 env —— UI 入口与 env 入口共用这一条）。
+ * 单实例守卫：同一时刻只允许一个真实 Team 在跑（officeTeamRealInstance）。
+ * 返回实例或 null（拒绝原因已由调用方/这里记日志）。
+ */
+function startTeamRealWithTopic({ office, topic, log, deps = {} } = {}) {
+  if (!office || typeof office.state !== 'function') return null;
+  if (typeof topic !== 'string' || topic.trim() === '') return null;
+  if (officeTeamRealInstance) {
+    log('[office] team real refused: TEAM_ALREADY_ACTIVE (one real team at a time)');
+    return null;
+  }
+  let stopped = false;
+  try {
+    const rpc = deps.rpc
+      || (() => {
+        const ru = getRuntimeUrl();
+        if (!ru) throw Object.assign(new Error('runtime offline'), { code: 'RUNTIME_OFFLINE' });
+        return createHarnessRpcWire(ru, harnessRpcDeps());
+      })();
+    const openFollow = deps.openFollow || ((sessionId) => openTeamFollowStream(sessionId));
+    const artifactDir = deps.artifactDir
+      || path.join(app.getPath('userData'), 'team-artifacts');
+    const wallClock = deps.clock || { nowMs: () => Date.now() };
+    const { createShellTeamTransport } = require('./team-shell-transport.js');
+    const transport = createShellTeamTransport({
+      rpc, openFollow, artifactDir, topic, log,
+    });
+    const teamRuntimeModule = require('./team/runtime/index.js');
+    const runtime = teamRuntimeModule.createTeamRuntime({ clock: wallClock });
+    const backend = teamRuntimeModule.dshBackend.createDshExecutionBackend({
+      clock: wallClock, transport,
+    });
+    // adapter：把后端包成 executor 端口形状（observe/cancel 直通；recover 显式 unsupported）。
+    const executor = Object.freeze({
+      startRun: (args) => backend.startRun(args),
+      observe: (handle) => backend.observe(handle),
+      cancel: (handle) => backend.cancel(handle),
+      unsupported: Object.freeze(['recover']),
+    });
+    const controller = teamRuntimeModule.createTeamExecutionController({
+      teamRuntime: runtime, executor, clock: wallClock,
+      jobId: deps.jobId || `team-real-${Date.now()}`,
+      log,
+    });
+    const bridge = teamRuntimeModule.createTeamOfficeBridge({
+      teamRuntime: runtime, office,
+      knownSeats: office.EMPLOYEE_IDS || undefined,
+      log,
+    });
+
+    /** 驱动循环：await 驱动（真实流语义 —— 事件到达才推进），无轮询。 */
+    async function drive() {
+      await controller.start();
+      for (;;) {
+        if (stopped) break;
+        await controller.dispatchReady();
+        const step = await controller.pumpOne(); // 阻塞等待下一条真实执行事件
+        if (step) bridge.pump();
+        const status = runtime.state().status;
+        if (['completed', 'failed', 'cancelled'].includes(status)) {
+          log(`[office] team real finished: ${status}`);
+          bridge.pump();
+          break;
+        }
+        if (status === 'attention') {
+          // v0.4 真实路径**不**自动 resume（attention 必须显式恢复；恢复 UI 属后续批次）。
+          log('[office] team real paused in attention — explicit resume is not wired in v0.4');
+          bridge.pump();
+          break;
+        }
+        if (!step) {
+          // 没有可拉取的会话（全部终态/未绑定）：再给 dispatchReady 一次机会，仍无进展则收。
+          const before = runtime.facts().length;
+          await controller.dispatchReady();
+          if (runtime.facts().length === before) break;
+        }
+      }
+    }
+    // fire-and-forget：失败只记日志，绝不影响办公室启动。
+    // whenDone 暴露给调用方/测试（**唯一**驱动者是这个循环 —— 不要在外面再并发泵同一个
+    // 迭代器，两个消费者会互相抢事件）。
+    const drivePromise = drive().catch((error) => log(`[office] team real drive failed: ${error && error.message}`));
+    log(`[office] team real attached: shell-transport -> dsh backend -> controller -> team -> office`);
+    const instance = Object.freeze({
+      whenDone: drivePromise,
+      detach() {
+        stopped = true;
+        if (officeTeamRealInstance === instance) officeTeamRealInstance = null;
+        return Object.freeze({ ok: true });
+      },
+      summary: () => Object.freeze({
+        transport: transport.summary(),
+        controller: controller.summary(),
+        bridge: bridge.summary(),
+        jobStatus: runtime.state().status,
+      }),
+      // 显式键而非简写：tdz-guard 的惰性正则会把上一个 createAssetPack({...}) 块
+      // 一路吞到这里的裸标识符（它们是函数局部值，不是顶层符号），限定名让它免检。
+      runtime: runtime,
+      controller: controller,
+      bridge: bridge,
+      transport: transport,
+    });
+    officeTeamRealInstance = instance;
+    return instance;
+  } catch (error) {
+    log(`[office] team real attach failed: ${error && error.message}`);
+    return null;
+  }
+}
+
+/** 反注册真实执行链：停驱动循环（幂等）。follow 流随 mux 生命周期关闭。 */
+function detachOfficeTeamReal(log) {
+  if (!officeTeamRealInstance) return false;
+  let ok = false;
+  try {
+    ok = officeTeamRealInstance.detach().ok === true;
+  } catch (error) {
+    log(`[office] team real detach failed: ${error && error.message}`);
+    return false;
+  }
+  officeTeamRealInstance = null;
+  if (ok) log('[office] team real detached (drive loop stopped)');
+  return ok;
+}
+
+/** 反注册 FakeExecutor 开发入口：清掉 pump 定时器（幂等）。语义与旧 demo 的 detach 相同。 */
+function detachOfficeTeamExecutorDemo(log) {
+  if (!officeTeamExecutorDemoInstance) return false;
+  let ok = false;
+  try {
+    ok = officeTeamExecutorDemoInstance.detach().ok === true;
+  } catch (error) {
+    log(`[office] team executor demo detach failed: ${error && error.message}`);
+    return false;
+  }
+  officeTeamExecutorDemoInstance = null;
+  if (ok) log('[office] team executor demo detached (pump timer cleared)');
+  return ok;
+}
+
 function officeRuntimeEnabled() {
   return (OFFICE_RUNTIME_ENABLED || process.env.DSH_DESKTOP_OFFICE_RUNTIME === '1')
     && process.env.DSH_DESKTOP_OFFICE_RUNTIME !== '0';
@@ -283,6 +762,10 @@ function ensureOfficeModule() {
       // usage block uses. Metadata-only — the simulation keeps its logical
       // clock; without this injection the record stays a session window.
       realClock: () => Date.now(),
+      // 2026-10-17 P2 诊断修复：运行时版本注入 office runtime adapter，让
+      // capability().runtimeVersion 如实报告所连运行时（诊断/体检）。只读字段，
+      // 不进快照、不参与状态判定。
+      runtimeVersion: activeRuntimeVersion(),
       // 2026-09-24 resync fix: the office module's runtime adapters ask for a
       // baseline (office:runtime-resync-request) whenever a forward seq gap
       // opens. main.js owns the durable-log re-read (session/page) and answers
@@ -310,6 +793,13 @@ function ensureOfficeModule() {
     officeModuleInstance.subscribe((snapshot) => {
       try { getWindowManager().broadcastToOfficeViews('office:state', snapshot); } catch { /* no views yet */ }
     });
+    // 工作包 A：开发模式 Team→Office 体验接通（默认关闭；见 officeTeamDemoEnabled）。
+    // 必须在 start() 之前 attach，这样第一个 tick 就能推进脚本。
+    officeTeamDemoInstance = attachOfficeTeamDemo(officeModuleInstance, log);
+    // 工作包 A（Harness v0.3）：开发模式 FakeExecutor 执行链路（默认关闭；与新门互斥）。
+    officeTeamExecutorDemoInstance = attachOfficeTeamExecutorDemo(officeModuleInstance, log);
+    // Harness v0.4（阶段1）：真实 dsh 执行链路（默认关闭；三个 Team 门互斥）。
+    officeTeamRealInstance = attachOfficeTeamReal(officeModuleInstance, log);
     officeModuleInstance.start();
   }
   return officeModuleInstance;
@@ -566,6 +1056,13 @@ const bootCheck = createBootCheck({
 });
 // R2: upstream compat status for the Updates page (read-only)
 const bundledRuntimeVersion = (() => { try { return require('../package.json').runtimeVersion || ''; } catch { return ''; } })();
+// 2026-10-17 P2 诊断修复：ACTIVE 运行时版本（回落到内置版本）的单一读取口。
+// office adapter 的 capability().runtimeVersion 与诊断包/compat 状态报的是同一个
+// 值；getInfo() 在运行时尚未就绪时会抛，这里容错回落到内置版本（诊断字段宁可为
+// 内置版本，也不让办公室启动失败）。
+function activeRuntimeVersion() {
+  try { return manager.getInfo().activeVersion || bundledRuntimeVersion; } catch { return bundledRuntimeVersion; }
+}
 const compatStatus = createCompatStatus({
   getSettings: () => settings.get(),
   getRuntimeVersion: () => manager.getInfo().activeVersion || bundledRuntimeVersion,
@@ -1686,6 +2183,8 @@ function registerIpc() {
   // page / rail pull the tables once and translate locally. Single source of
   // truth stays src/i18n.js; nothing is duplicated.
   ipcMain.handle('shell:get-i18n', () => ({ zh: STRINGS.zh, en: STRINGS.en }));
+  // Harness v0.5：办公室 Team 任务发起入口（shell 自有通道；见 registerShellTeamIpc）。
+  registerShellTeamIpc(ipcMain, log);
   ipcMain.handle('shell:pick-folder', async (_e, kind) => {
     const res = await dialog.showOpenDialog(pickDialogParent(), {
       properties: ['openDirectory', 'createDirectory'],
@@ -5576,6 +6075,12 @@ if (!gotLock) {
   });
 
   app.on('will-quit', () => {
+    // 开发模式 Team 演示的 pump 定时器（默认关闭；无实例时是 no-op）。
+    detachOfficeTeamDemo(log);
+    // 开发模式 FakeExecutor 执行链路的 pump 定时器（默认关闭；无实例时是 no-op）。
+    detachOfficeTeamExecutorDemo(log);
+    // 真实 dsh 执行链路的驱动循环（默认关闭；无实例时是 no-op）。
+    detachOfficeTeamReal(log);
     if (trayPeakTimer) { clearInterval(trayPeakTimer); trayPeakTimer = null; }
     if (runtimeHealthTimer) { clearInterval(runtimeHealthTimer); runtimeHealthTimer = null; }
     if (balanceTimer) { clearInterval(balanceTimer); balanceTimer = null; }

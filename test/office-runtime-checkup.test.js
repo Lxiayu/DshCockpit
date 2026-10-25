@@ -62,6 +62,21 @@ function diagEntries(module, code) {
   return module.diagnostics().diagnostics.filter((entry) => entry.code === code);
 }
 
+/** 收尾阶段新增的本地小工具（与其它 office 测试同一套驱动约定）。 */
+function empOf(module, employeeId) {
+  return module.state().employees.find((employee) => employee.employeeId === employeeId);
+}
+
+function tickForMs(module, ms) {
+  const steps = Math.round(ms / TICK_MS);
+  for (let i = 0; i < steps; i += 1) module.tickOnce();
+}
+
+/** 一条 durable journal 记录（session/follow + session/page 的同一形状）。 */
+function journalRecordOf(seq, type, data) {
+  return { type: 'event', event: { type, seq, time: 1000 + seq, data } };
+}
+
 // ---- 1) 诊断环退避 ----------------------------------------------------------
 
 /** 把三个分类座位占住，再排队第四个分类子代理（留一个可反复触发的
@@ -332,4 +347,85 @@ test('office:* IPC channels stay exactly eight (no new channel for the checkup w
     'office:state', 'office:dispatch', 'office:cancel', 'office:interrupt',
     'office:settings', 'office:diagnostics', 'office:visibility', 'office:pending',
   ]);
+});
+
+// ---- 4) 2026-10-17 收尾：运行时版本注入 + replay 路径的子代理配对 -----------
+
+test('P2: the injected runtime version reaches capability().runtimeVersion, null when absent', () => {
+  // 注入路径：main.js -> createOfficeModule({runtimeVersion}) -> ensureAdapter ->
+  // createRuntimeAdapter。只服务诊断/体检，不进快照、不参与状态判定。
+  const injected = makeHarness({ runtimeVersion: '0.1.5-rc.2' });
+  injected.feed('agent/status', { status: 'running' }); // 创建 adapter
+  const capability = injected.module.debugAdapterCapability();
+  assert.equal(capability.runtimeVersion, '0.1.5-rc.2');
+  assert.equal(capability.adapterVersion, 'task6-runtime-adapter-2');
+  assert.equal(capability.terminalEvidence, true);
+
+  // 未注入（纯模块装配 / 单测）→ null，绝不猜版本。
+  const bare = makeHarness();
+  bare.feed('agent/status', { status: 'running' });
+  assert.equal(bare.module.debugAdapterCapability().runtimeVersion, null);
+
+  // 还没有 adapter → null（不伪造能力快照）。
+  assert.equal(makeHarness().module.debugAdapterCapability(), null);
+});
+
+test('P0: a buffered subagent end drained by the resync backfill frees the seat (no stuck worker)', () => {
+  // 用户可见症状：子代理终态在断档窗口里被 buffer 吸收，补发后本应释放座位。
+  // 修复前重放会从**已脱敏**的 payload 重新派生配对 handle，得到占位符的哈希，
+  // registry 以 RUN_ID_MISMATCH 失败关闭 —— 座位卡在 running/bound。
+  const { module } = makeHarness();
+  const P = PARENT;
+  const ing = (type, seq, data) => module.ingestHarnessEvent({ sessionId: P, type, seq, time: seq, data });
+
+  assert.equal(ing('agent/status', 1, { status: 'running' }).status, 'accepted');
+  assert.equal(ing('subagent/start', 2, { id: 'child-gap', runId: 'child-gap', mode: 'one-shot', role: 'coder' }).status, 'accepted');
+  assert.equal(empOf(module, 'coder').runtime, 'running', 'the classified seat is working');
+
+  // seq 3 缺失 → 这条终态被 buffer 吸收（尚未应用）。
+  assert.equal(ing('subagent/end', 4, { id: 'child-gap', runId: 'child-gap', stopReason: 'completed' }).status, 'buffered');
+  assert.equal(empOf(module, 'coder').runtime, 'running', 'still running while the gap is open');
+
+  // 生产回填路径：原始 journal 记录交给 ingestHarnessSnapshot（continuation）。
+  const healed = module.ingestHarnessSnapshot({
+    sessionId: P,
+    records: [journalRecordOf(3, 'tool/call', { name: 'bash' })],
+  });
+  assert.equal(healed.ok, true);
+  assert.equal(healed.mode, 'continuation');
+
+  // 呈现窗口走完 → 绑定释放、座位回本地行为，且**没有** fail-closed 诊断。
+  tickForMs(module, 600);
+  assert.notEqual(
+    module.debugRegistrySnapshot().bindings.find((b) => b.employeeId === 'coder').releasedAt,
+    null,
+    'the drained end released the child binding'
+  );
+  assert.equal(empOf(module, 'coder').runtime, 'idle');
+  assert.deepEqual(diagEntries(module, 'RUN_ID_MISMATCH'), [], 'the pairing survived the replay');
+  assert.deepEqual(diagEntries(module, 'SUBAGENT_IDENTITY_UNRESOLVED'), []);
+});
+
+test('P0: a subagent fact whose identity cannot be resolved fails closed and is observable', () => {
+  // 一条子代理终态**没有可信的 raw child id**（例如只拿到 canonical 重放，或
+  // 0.1.5 journal 的裸 subagent/end 只带 runId）：模块不得猜子会话、不得按当前
+  // 座位强行关闭，但必须留下可观测诊断（fail-closed ≠ 静默）。
+  const { module } = makeHarness();
+  const P = PARENT;
+  const ing = (type, seq, data) => module.ingestHarnessEvent({ sessionId: P, type, seq, time: seq, data });
+  ing('agent/status', 1, { status: 'running' });
+  ing('subagent/start', 2, { id: 'child-live', runId: 'child-live', mode: 'one-shot', role: 'reviewer' });
+  assert.equal(empOf(module, 'reviewer').runtime, 'running');
+
+  // 无 `id` 的终态：配对 handle 存在，但没有任何可信的 child 身份。
+  ing('subagent/end', 3, { runId: 'run-never-registered', stopReason: 'completed' });
+  tickForMs(module, 600);
+  assert.equal(empOf(module, 'reviewer').runtime, 'running', '不得按当前座位强行关闭');
+  assert.equal(
+    module.debugRegistrySnapshot().bindings.find((b) => b.employeeId === 'reviewer').releasedAt,
+    null,
+    'the live child binding must survive an unresolvable foreign terminal'
+  );
+  assert.equal(diagEntries(module, 'SUBAGENT_IDENTITY_UNRESOLVED').length > 0, true,
+    'fail-closed must be observable, not silent');
 });

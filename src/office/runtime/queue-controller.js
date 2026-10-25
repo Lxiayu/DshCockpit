@@ -38,7 +38,11 @@ const ACTIVE_STATUSES = Object.freeze(['dispatching', 'running']);
 const PRIORITIES = Object.freeze(['normal', 'urgent']);
 const REQUESTED_BY = Object.freeze(['user', 'runtime']);
 const TERMINAL_OUTCOMES = Object.freeze(['completed', 'failed', 'cancelled']);
-const TERMINAL_EVIDENCE_TYPES = Object.freeze(['turn-end', 'subagent-end', 'session-end']);
+// Terminal-evidence sources the queue trusts. 2026-10-22 additive extension:
+// `execution` = the Worker Execution Contract's own terminal evidence
+// (`execution/<outcome>:<reason>`, see src/team/runtime/execution-schema.js).
+// Keep in sync with employee-registry's `evidenceTypeFrom`.
+const TERMINAL_EVIDENCE_TYPES = Object.freeze(['turn-end', 'subagent-end', 'session-end', 'execution']);
 
 function effect(type, fields) {
   return Object.freeze({ type, ...fields });

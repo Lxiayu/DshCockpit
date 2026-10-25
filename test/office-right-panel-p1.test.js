@@ -206,7 +206,14 @@ test('tool phrases: every phrase key exists in BOTH dictionaries with identical 
     assert.ok(i18nKey.startsWith('office.staff.currentTool.'), `phrase key out of the §6 family: ${i18nKey}`);
     assert.ok(typeof STRINGS.zh[i18nKey] === 'string' && STRINGS.zh[i18nKey] !== '', `zh missing ${i18nKey}`);
     assert.ok(typeof STRINGS.en[i18nKey] === 'string' && STRINGS.en[i18nKey] !== '', `en missing ${i18nKey}`);
+    // 2026-10-17 P1：纯内核自带 zh 短语表（不再 require 壳的 i18n，从而静态不再
+    // 触达 Electron）。内核保持零依赖，两张表的一致性由这个 shell 侧测试钉住 ——
+    // 内核模块本身不许 require i18n.js，所以漂移检查只能在这里做。
+    assert.equal(phrases.PHRASE_ZH[key], STRINGS.zh[i18nKey],
+      `kernel PHRASE_ZH must match the zh dictionary for ${i18nKey}`);
   }
+  assert.deepStrictEqual(Object.keys(phrases.PHRASE_ZH).sort(), [...phrases.PHRASE_KEYS].sort(),
+    'the kernel phrase table covers exactly the phrase keys');
   const zhKeys = Object.keys(STRINGS.zh).sort();
   const enKeys = Object.keys(STRINGS.en).sort();
   assert.deepStrictEqual(zhKeys, enKeys, 'zh/en dictionaries must cover the same keys');

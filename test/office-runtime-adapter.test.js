@@ -87,13 +87,15 @@ test('bare harness events canonicalize with upstream sequence and marked epoch',
   assert.equal(verdict.status, 'accepted');
   const env = verdict.envelope;
   assert.deepEqual(Object.keys(env), [
-    'schemaVersion', 'eventId', 'sessionId', 'sessionEpoch', 'sequence',
+    'schemaVersion', 'eventId', 'sessionId', 'sessionEpoch', 'pairingHandle', 'sequence',
     'eventType', 'payload', 'sequenceSource', 'receivedAt',
   ]);
   assert.equal(env.schemaVersion, 1);
   assert.match(env.eventId, /^sha256:[0-9a-f]{64}$/);
   assert.equal(env.sessionId, 'sess-fixture');
   assert.match(env.sessionEpoch, /^adapter-/);
+  // pairingHandle is adapter-derived and null for every non-subagent event.
+  assert.equal(env.pairingHandle, null);
   assert.equal(env.sequence, 17);
   assert.equal(env.eventType, 'tool/call');
   assert.deepEqual(env.payload, { tool: 'bash' });
@@ -490,11 +492,14 @@ test('accepted snapshot SURFACES its facts as canonical runtime facts (gap fix)'
   const factOutputs = emitted.filter((e) => e.envelope === null);
   const runtimeFacts = factOutputs.flatMap((e) => e.facts).filter((f) => f.type === 'runtime/fact');
   assert.deepEqual(runtimeFacts, [{ type: 'runtime/fact', fact: 'running' }]);
-  // The carrying output must not fabricate a Harness envelope/event.
+  // The carrying output must not fabricate a Harness envelope/event — but it
+  // MUST still carry the session identity (Phase B), so the consumer never has
+  // to infer it from whichever raw event happens to be in flight.
   const carrier = factOutputs.find((e) => e.facts.some((f) => f.type === 'runtime/fact'));
   assert.ok(carrier);
   assert.equal(carrier.envelope, null);
-  assert.deepEqual(Object.keys(carrier).sort(), ['diagnostics', 'envelope', 'facts']);
+  assert.equal(carrier.sessionId, 'sess-fixture');
+  assert.deepEqual(Object.keys(carrier).sort(), ['diagnostics', 'envelope', 'facts', 'sessionId']);
   // Existing behavior is untouched: watermark advances by replay (3 -> 4),
   // sync heals, and the buffered sequence replays in strict order.
   assert.equal(adapter.state().watermark, 4);
@@ -808,6 +813,275 @@ test('unpairable runIds fail closed: no open-run tracking, end carries null prox
   assert.deepEqual(emitted.at(-1).facts, [{ type: 'runtime/fact', fact: 'idle' }]);
 });
 
+// --- P0: replay-safe pairing handle -----------------------------------------
+//
+// The subagent pairing handle is derived ONCE from the raw input and stored on
+// the canonical envelope (`pairingHandle`, adapter-derived). Every replay path
+// then reads it from the envelope instead of re-deriving from rawData — whose
+// replayed value is the ALREADY-REDACTED payload (so re-deriving would hash
+// '[REDACTED:session-id]' and silently break start/end pairing).
+
+test('P0: the envelope carries the adapter-derived pairing handle for subagent events only', () => {
+  const { build } = createHarness();
+  const { adapter } = build();
+  const start = adapter.ingest(raw(1, 'subagent/start', { runId: 'run-h1', id: 'sess-c', mode: 'one-shot' }));
+  const end = adapter.ingest(raw(2, 'subagent/end', { runId: 'run-h1', stopReason: 'completed' }));
+  const tool = adapter.ingest(raw(3, 'tool/call', { tool: 'bash' }));
+  assert.match(start.envelope.pairingHandle, /^run-sha256:[0-9a-f]{16}$/);
+  assert.equal(start.envelope.pairingHandle, expectedRunProxy('run-h1'));
+  assert.equal(end.envelope.pairingHandle, start.envelope.pairingHandle, 'start/end share one handle');
+  assert.equal(tool.envelope.pairingHandle, null);
+  // The handle is a PROXY: the raw runId never appears in the canonical record.
+  assert.equal(JSON.stringify(start.envelope).includes('run-h1'), false);
+  // ... and it is declared as an adapter-derived field.
+  assert.deepEqual(adapter.describe().derivedFields, ['eventId', 'sessionEpoch', 'pairingHandle']);
+});
+
+test('P0: a buffered subagent end pairs with the live start after drainBuffer replay', () => {
+  const { build } = createHarness();
+  const { adapter, emitted } = build();
+  adapter.ingest(raw(1, 'subagent/start', { runId: 'run-h2', id: 'sess-c', provider: 'deepseek' }));
+  const liveProxy = emitted.flatMap((e) => e.facts).find((f) => f.type === 'runtime/subagent-start').runId;
+  // Forward jump: the end is buffered, then drained once the gap is filled.
+  const buffered = adapter.ingest(raw(3, 'subagent/end', { runId: 'run-h2', stopReason: 'completed' }));
+  assert.equal(buffered.status, 'buffered');
+  assert.equal(adapter.ingest(raw(2, 'agent/status', { status: 'running' })).status, 'accepted');
+  const end = emitted.flatMap((e) => e.facts).find((f) => f.type === 'runtime/subagent-end');
+  assert.equal(end.runId, liveProxy, 'drained end pairs with the live start');
+  assert.equal(end.terminal, true);
+  assert.equal(adapter.state().activeRuns.length, 0, 'the drained terminal closed the open run');
+});
+
+test('P0: a canonical eventsSince replay pairs identically to the live ingest', () => {
+  // Producer side: capture the envelopes the adapter would emit for seq 1..5.
+  const { build } = createHarness();
+  const live = build({ sessionId: 'sess-replay' });
+  const envs = [
+    live.adapter.ingest(raw(1, 'tool/call', { tool: 'bash' })).envelope,
+    live.adapter.ingest(raw(2, 'subagent/start', { runId: 'run-h3', id: 'sess-c', mode: 'one-shot' })).envelope,
+    live.adapter.ingest(raw(3, 'subagent/end', { runId: 'run-h3', stopReason: 'completed' })).envelope,
+    live.adapter.ingest(raw(4, 'tool/call', { tool: 'grep' })).envelope,
+    live.adapter.ingest(raw(5, 'tool/call', { tool: 'ls' })).envelope,
+  ];
+  const liveStart = live.emitted.flatMap((e) => e.facts).find((f) => f.type === 'runtime/subagent-start');
+
+  // Consumer side: a FRESH adapter that only ever sees the canonical envelopes
+  // (adapter restart / another process). The pairing handle travels with them.
+  const consumer = build({ sessionId: 'sess-replay', epoch: envs[0].sessionEpoch });
+  consumer.adapter.ingest(raw(1, 'tool/call', { tool: 'bash' })); // floor at seq 1
+  consumer.adapter.ingest(raw(5, 'tool/call', { tool: 'ls' })); // forward gap at 2..4
+  const pending = consumer.messages.at(-1);
+  assert.equal(pending.fromSequence, 2);
+  const merged = consumer.adapter.acceptSnapshot(snapshotMessage({
+    requestId: pending.requestId,
+    sessionId: 'sess-replay',
+    sessionEpoch: envs[0].sessionEpoch,
+    sequence: 1,
+    facts: {},
+    eventsSince: envs.slice(1),
+  }));
+  assert.equal(merged.ok, true, merged.code || '');
+  assert.equal(merged.leftover.length, 0);
+  const replayedStart = consumer.emitted.flatMap((e) => e.facts).find((f) => f.type === 'runtime/subagent-start');
+  const replayedEnd = consumer.emitted.flatMap((e) => e.facts).find((f) => f.type === 'runtime/subagent-end');
+  assert.equal(replayedStart.runId, liveStart.runId, 'replayed start keeps the live handle');
+  assert.equal(replayedEnd.runId, replayedStart.runId, 'replayed start/end still pair');
+  assert.equal(replayedEnd.terminal, true);
+  assert.equal(consumer.adapter.state().activeRuns.length, 0);
+});
+
+test('P0: a canonical envelope WITHOUT a pairing handle fails closed (no run tracked, no terminal)', () => {
+  const { build } = createHarness();
+  const live = build({ sessionId: 'sess-fc' });
+  const envs = [
+    live.adapter.ingest(raw(1, 'tool/call', { tool: 'bash' })).envelope,
+    live.adapter.ingest(raw(2, 'subagent/start', { runId: 'run-h4', id: 'sess-c', mode: 'one-shot' })).envelope,
+    live.adapter.ingest(raw(3, 'subagent/end', { runId: 'run-h4', stopReason: 'completed' })).envelope,
+    live.adapter.ingest(raw(4, 'tool/call', { tool: 'grep' })).envelope,
+    live.adapter.ingest(raw(5, 'tool/call', { tool: 'ls' })).envelope,
+  ];
+  // A v1-style / foreign envelope: no pairingHandle field at all.
+  const stripHandle = (env) => {
+    const { pairingHandle, ...rest } = env;
+    return Object.freeze({ ...rest });
+  };
+
+  const consumer = build({ sessionId: 'sess-fc', epoch: envs[0].sessionEpoch });
+  consumer.adapter.ingest(raw(1, 'tool/call', { tool: 'bash' }));
+  consumer.adapter.ingest(raw(5, 'tool/call', { tool: 'ls' }));
+  const pending = consumer.messages.at(-1);
+  const merged = consumer.adapter.acceptSnapshot(snapshotMessage({
+    requestId: pending.requestId,
+    sessionId: 'sess-fc',
+    sessionEpoch: envs[0].sessionEpoch,
+    sequence: 1,
+    facts: {},
+    eventsSince: envs.slice(1).map(stripHandle),
+  }));
+  assert.equal(merged.ok, true, 'an absent handle is a valid (fail-closed) envelope');
+  const replayed = consumer.emitted.flatMap((e) => e.facts);
+  const start = replayed.find((f) => f.type === 'runtime/subagent-start');
+  const end = replayed.find((f) => f.type === 'runtime/subagent-end');
+  assert.equal(start.runId, null, 'no handle -> no pairing, never a guessed proxy');
+  assert.equal(end.runId, null);
+  assert.equal(end.terminal, true, 'the stopReason is still terminal evidence for the FACT');
+  assert.equal(consumer.adapter.state().activeRuns.length, 0, 'a null handle never tracks a run');
+});
+
+test('P0: a malformed pairing handle rejects the whole envelope (privacy gate)', () => {
+  const { build } = createHarness();
+  const live = build({ sessionId: 'sess-bad' });
+  const startEnv = live.adapter.ingest(raw(1, 'subagent/start', { runId: 'run-h5', id: 'sess-c', mode: 'one-shot' })).envelope;
+
+  // A raw runId smuggled into a replay list must never reach downstream facts.
+  for (const bad of ['run-RAW-ID', 'run-sha256:zz', '', 42, { raw: 'x' }]) {
+    const consumer = build({ sessionId: 'sess-bad', epoch: startEnv.sessionEpoch });
+    consumer.adapter.ingest(raw(1, 'tool/call', { tool: 'bash' }));
+    consumer.adapter.ingest(raw(4, 'tool/call', { tool: 'grep' }));
+    const pending = consumer.messages.at(-1);
+    const merged = consumer.adapter.acceptSnapshot(snapshotMessage({
+      requestId: pending.requestId,
+      sessionId: 'sess-bad',
+      sessionEpoch: startEnv.sessionEpoch,
+      sequence: 1,
+      facts: {},
+      eventsSince: [Object.freeze({ ...startEnv, pairingHandle: bad })],
+    }));
+    assert.equal(merged.ok, false, `a malformed handle must be rejected: ${JSON.stringify(bad)}`);
+    assert.equal(merged.code, 'EVENTS_SINCE_INVALID');
+    assert.equal(consumer.emitted.flatMap((e) => e.facts).some((f) => f.type === 'runtime/subagent-start'), false);
+  }
+});
+
+// --- P0/B: event identity ---------------------------------------------------
+//
+// Phase B (2026-10-18): every output carries `sessionId`, and the envelope
+// identifies the producing event. The raw child handle is resolved by that
+// identity (`rawChildHandleFor`) instead of by "which raw event is in flight" —
+// so out-of-order, duplicated and buffered delivery all resolve the same child,
+// and a canonical-only replay resolves to null (fail-closed).
+
+test('B: every output carries the session identity, with or without an envelope', () => {
+  const { build } = createHarness();
+  const { adapter, emitted, messages } = build();
+  adapter.ingest(raw(1, 'turn/start', {}));
+  adapter.ingest(raw(3, 'tool/call', { tool: 'a' })); // gap -> resync request
+  adapter.noteCancelAcknowledged(); // envelope-less output
+  for (const output of emitted) {
+    assert.equal(output.sessionId, 'sess-fixture', 'sessionId is always present');
+  }
+  // Envelope-bearing outputs identify the producing event.
+  const withEnvelope = emitted.find((o) => o.envelope);
+  assert.equal(withEnvelope.envelope.sessionId, 'sess-fixture');
+  assert.match(withEnvelope.envelope.eventId, /^sha256:[0-9a-f]{64}$/);
+  assert.equal(typeof withEnvelope.envelope.sequence, 'number');
+  // Envelope-less outputs (ack / snapshot facts) still carry the session but no
+  // fabricated event identity.
+  const withoutEnvelope = emitted.filter((o) => o.envelope === null);
+  assert.ok(withoutEnvelope.length > 0);
+  for (const output of withoutEnvelope) assert.equal(output.sessionId, 'sess-fixture');
+  assert.equal(messages.length, 1);
+});
+
+test('B: the raw child handle is resolved by envelope identity, not by delivery order', () => {
+  const { build } = createHarness();
+  const { adapter, emitted } = build();
+  adapter.ingest(raw(1, 'turn/start', {})); // floor
+  // seq 3 arrives first (forward gap -> buffered), seq 2 fills the gap and drains it.
+  const buffered = adapter.ingest(raw(3, 'subagent/start', { id: 'child-x', runId: 'run-x', mode: 'one-shot' }));
+  assert.equal(buffered.status, 'buffered');
+  assert.equal(adapter.ingest(raw(2, 'tool/call', { tool: 'a' })).status, 'accepted');
+  const startOutput = emitted.find((o) => o.facts.some((f) => f.type === 'runtime/subagent-start'));
+  assert.ok(startOutput, 'the buffered start was drained and emitted');
+  // The producing envelope is the BUFFERED one (sequence 3), and the lookup is
+  // keyed by that envelope's eventId — not by the event that triggered the drain.
+  assert.equal(startOutput.envelope.sequence, 3);
+  assert.equal(adapter.rawChildHandleFor(startOutput.envelope), 'child-x');
+  assert.equal(adapter.rawChildHandleFor(buffered.envelope), 'child-x', 'same identity, same handle');
+  // A duplicate is absorbed before any envelope is built (the existing dedupe
+  // contract): it emits no facts, so it needs no identity — and it must not
+  // disturb the identity ledger.
+  const emittedBefore = emitted.length;
+  const dup = adapter.ingest(raw(3, 'subagent/start', { id: 'child-x', runId: 'run-x', mode: 'one-shot' }));
+  assert.equal(dup.status, 'duplicate');
+  assert.equal(dup.envelope, undefined, 'a duplicate carries no envelope by contract');
+  assert.equal(emitted.length, emittedBefore, 'a duplicate emits nothing');
+  assert.equal(adapter.state().rawHandleSize, 1, 'the ledger is unchanged');
+  assert.equal(adapter.rawChildHandleFor(startOutput.envelope), 'child-x', 'identity still resolves');
+  // An unknown / foreign envelope resolves to null (fail-closed, never a guess).
+  assert.equal(adapter.rawChildHandleFor(null), null);
+  assert.equal(adapter.rawChildHandleFor({}), null);
+  assert.equal(adapter.rawChildHandleFor({ eventId: 'sha256:' + 'a'.repeat(64) }), null);
+  // Non-subagent events never register a raw child handle.
+  const tool = adapter.ingest(raw(5, 'tool/call', { tool: 'a', id: 'not-a-child' }));
+  assert.equal(adapter.rawChildHandleFor(tool.envelope), null);
+  // The ledger is bounded and only its SIZE is observable.
+  assert.equal(typeof adapter.state().rawHandleSize, 'number');
+  assert.equal(adapter.state().rawHandleSize, 1);
+  assert.equal(JSON.stringify(adapter.state()).includes('child-x'), false, 'never observable');
+});
+
+test('B: with two live children, each envelope resolves ITS OWN raw child handle', () => {
+  // This is the discriminating case for identity-keying: a positional
+  // implementation ("the most recent raw child") would resolve the drained
+  // end of child A to child B.
+  const { build } = createHarness();
+  const { adapter, emitted } = build();
+  adapter.ingest(raw(1, 'turn/start', {}));
+  const a = adapter.ingest(raw(2, 'subagent/start', { id: 'sess-child-a', runId: 'run-a', mode: 'one-shot' }));
+  const b = adapter.ingest(raw(3, 'subagent/start', { id: 'sess-child-b', runId: 'run-b', mode: 'one-shot' }));
+  const endA = adapter.ingest(raw(5, 'subagent/end', { id: 'sess-child-a', runId: 'run-a', stopReason: 'completed' }));
+  assert.equal(endA.status, 'buffered');
+  assert.equal(adapter.ingest(raw(4, 'tool/call', { tool: 'x' })).status, 'accepted'); // drains seq 5
+
+  assert.equal(adapter.rawChildHandleFor(a.envelope), 'sess-child-a');
+  assert.equal(adapter.rawChildHandleFor(b.envelope), 'sess-child-b');
+  assert.equal(adapter.rawChildHandleFor(endA.envelope), 'sess-child-a',
+    'the drained end resolves its OWN child, not the most recent one');
+  const endFact = emitted.flatMap((o) => o.facts).find((f) => f.type === 'runtime/subagent-end');
+  assert.equal(endFact.runId, expectedRunProxy('run-a'), 'and pairs with its own start');
+  assert.equal(endFact.terminal, true);
+  // One entry per subagent lifecycle event that carried a raw child id
+  // (A-start, B-start, A-end) — bounded by RAW_HANDLE_CAPACITY.
+  assert.equal(adapter.state().rawHandleSize, 3);
+  assert.equal(JSON.stringify(adapter.state()).includes('sess-child'), false, 'never observable');
+});
+
+test('B: a canonical-only replay resolves no raw child handle (fail-closed, no leak)', () => {
+  const { build } = createHarness();
+  // A REALISTIC child session id shape: the shared redactor redacts it by value
+  // shape (`sess-…`), which is why the payload can carry it at all. (A short
+  // opaque token like `child-y` would survive as a coarse enum token — that is
+  // the same allowance that keeps tool names visible; see contract §12.)
+  const CHILD = 'sess-child-y';
+  const live = build({ sessionId: 'sess-b' });
+  live.adapter.ingest(raw(1, 'turn/start', {}));
+  const startEnv = live.adapter.ingest(raw(2, 'subagent/start', { id: CHILD, runId: 'run-y', mode: 'one-shot' })).envelope;
+  assert.equal(live.adapter.rawChildHandleFor(startEnv), CHILD);
+  assert.equal(startEnv.payload.id, '[REDACTED:session-id]', 'the canonical payload carries the placeholder only');
+
+  // A second adapter only ever sees the canonical envelope: no raw child id is
+  // resolvable, and the raw id from the first adapter never leaks across.
+  const consumer = build({ sessionId: 'sess-b', epoch: startEnv.sessionEpoch });
+  consumer.adapter.ingest(raw(1, 'turn/start', {}));
+  consumer.adapter.ingest(raw(3, 'tool/call', { tool: 'b' })); // gap at 2
+  const pending = consumer.messages.at(-1);
+  const merged = consumer.adapter.acceptSnapshot(snapshotMessage({
+    requestId: pending.requestId,
+    sessionId: 'sess-b',
+    sessionEpoch: startEnv.sessionEpoch,
+    sequence: 1,
+    facts: {},
+    eventsSince: [startEnv],
+  }));
+  assert.equal(merged.ok, true, merged.code || '');
+  assert.equal(consumer.adapter.rawChildHandleFor(startEnv), null, 'identity never seen as raw -> null');
+  const replayed = consumer.emitted.flatMap((o) => o.facts).find((f) => f.type === 'runtime/subagent-start');
+  assert.equal(replayed.runId, expectedRunProxy('run-y'), 'the pairing handle still replays correctly');
+  assert.equal(JSON.stringify(consumer.emitted).includes(CHILD), false, 'no raw child id in any output');
+});
+
+
 test('turn/end maps by reason including attention fallback with coarse reason', () => {
   const { build } = createHarness();
   const { adapter, emitted } = build();
@@ -908,6 +1182,34 @@ test('cancel acknowledgement only produces awaiting evidence, never a release', 
   const factTypes = facts.map((f) => f.type);
   assert.ok(!factTypes.includes('runtime/cancelled'), 'ack is not terminal evidence');
   assert.ok(!factTypes.includes('binding/released'), 'ack never releases a binding');
+});
+
+test('P2: capability reports the injected runtime version and stays null when absent', () => {
+  const { build } = createHarness();
+  const injected = build({ runtimeVersion: '0.1.5-rc.2' });
+  assert.equal(injected.adapter.capability().runtimeVersion, '0.1.5-rc.2');
+  const bare = build();
+  assert.equal(bare.adapter.capability().runtimeVersion, null, 'never guess a version');
+  // A non-string injection degrades to null rather than surfacing junk.
+  assert.equal(build({ runtimeVersion: 42 }).adapter.capability().runtimeVersion, null);
+});
+
+test('P2: runtime/cancelled evidence is source-qualified exactly once (single prefix)', () => {
+  const { build } = createHarness();
+  const { adapter, emitted } = build();
+  let seq = 0;
+  for (const [reason, expected] of [
+    ['aborted', 'turn/end:aborted'],
+    ['interrupted', 'turn/end:interrupted'],
+    ['cancelled', 'turn/end:cancelled'],
+  ]) {
+    seq += 1;
+    emitted.length = 0;
+    adapter.ingest(raw(seq, 'turn/end', { reason }));
+    const fact = emitted.at(-1).facts.find((f) => f.type === 'runtime/cancelled');
+    assert.equal(fact.evidence, expected, `${reason}: one source-qualified prefix`);
+    assert.equal(fact.evidence.includes('turn/end:turn/end'), false);
+  }
 });
 
 test('proven controls dispatch; unproven pause/resume/preempt are hard-rejected', () => {

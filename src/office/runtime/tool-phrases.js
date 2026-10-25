@@ -15,10 +15,19 @@
 //      the office snapshot already carries Chinese presentation strings such
 //      as taskLabel '执行任务中', so the phrase follows that convention).
 //
-// Pure deterministic CommonJS: the only dependency is src/i18n.js (pure, no
-// Electron), and only for the zh phrase text.
-
-const { STRINGS } = require('../../i18n.js');
+// Pure deterministic CommonJS: ZERO dependencies (no Electron, no i18n, no
+// DOM, no IO). The zh phrase text the office snapshot needs lives HERE as a
+// frozen runtime vocabulary table; the matching i18n keys (`TOOL_PHRASE_I18N_KEY`)
+// stay the UI's per-language source of truth, and src/i18n.js keeps its full
+// `office.staff.currentTool.*` family untouched for the panel.
+//
+// Why the zh text is a local table instead of `require('../../i18n.js')`:
+// requiring the shell dictionary made this pure module statically reach
+// Electron (i18n.js lazily requires it), which broke the "no UI shell in the
+// kernel" boundary (contract §17-1). Only the nine runtime phrases are mirrored
+// — never the whole UI dictionary — and
+// test/office-right-panel-p1.test.js pins them equal to the zh dictionary, so
+// the two can never drift.
 
 // Phrase vocabulary. The six §6 categories (typing / search / retrieval /
 // terminal / browse / other) plus the three the office pending summary needs:
@@ -35,6 +44,23 @@ const PHRASE_KEYS = Object.freeze([
 const TOOL_PHRASE_I18N_KEY = Object.freeze(Object.fromEntries(
   PHRASE_KEYS.map((key) => [key, `office.staff.currentTool.${key}`])
 ));
+
+// Phrase key → zh text. This IS the office snapshot's presentation vocabulary
+// (the snapshot already carries zh strings such as taskLabel '执行任务中').
+// Values must stay identical to src/i18n.js `STRINGS.zh[office.staff.currentTool.*]`;
+// the drift pin lives in test/office-right-panel-p1.test.js (which may require
+// the shell dictionary — a pure kernel module may not).
+const PHRASE_ZH = Object.freeze({
+  typing: '打字',
+  search: '查档案',
+  retrieval: '检索',
+  terminal: '终端',
+  command: '执行命令',
+  edit: '编辑文件',
+  browse: '浏览',
+  asking: '等待你回答',
+  other: '其他',
+});
 
 // Tool name → phrase key. Matching is exact and lowercase; anything unknown
 // falls back to 'other' (the table never invents a phrase).
@@ -113,19 +139,17 @@ function toolPhraseI18nKeyOf(toolName) {
 
 /** Tool name → zh phrase string (snapshot-layer summary; see module header). */
 function toolPhraseZhOf(toolName) {
-  const key = TOOL_PHRASE_I18N_KEY[toolPhraseKeyOf(toolName)];
-  const zh = STRINGS.zh[key];
-  return typeof zh === 'string' && zh !== '' ? zh : STRINGS.zh[TOOL_PHRASE_I18N_KEY.other];
+  return PHRASE_ZH[toolPhraseKeyOf(toolName)] || PHRASE_ZH[FALLBACK_PHRASE_KEY];
 }
 
 /** Question pending summary (no runtime text ever reaches the snapshot). */
 function questionSummaryZh() {
-  const key = TOOL_PHRASE_I18N_KEY.asking;
-  return STRINGS.zh[key];
+  return PHRASE_ZH.asking;
 }
 
 module.exports = {
   PHRASE_KEYS,
+  PHRASE_ZH,
   TOOL_PHRASE_I18N_KEY,
   FALLBACK_PHRASE_KEY,
   toolNameOfJournalData,

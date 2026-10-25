@@ -55,6 +55,10 @@ const CLASSIFIED_WORK_SEATS = Object.freeze(['researcher', 'coder', 'reviewer'])
 // stopReason values that count as terminal evidence for subagent/end.
 const TERMINAL_STOP_REASONS = Object.freeze(['completed', 'error', 'failed', 'aborted', 'interrupted', 'cancelled']);
 // Evidence that only acknowledges delivery is never terminal evidence.
+//
+// The execution-port source (`execution/cancel-acknowledged:<reason>`) contains
+// "cancel-ack" too, so this guard already fails it closed — a control receipt
+// from the new execution layer can never release a binding either.
 const NON_TERMINAL_EVIDENCE = Object.freeze(['cancel-ack']);
 const REDACTED_SUMMARY = '[redacted]';
 
@@ -296,6 +300,27 @@ function createEmployeeRegistry({ redactor = null, clock = null, queueController
     return record ? record.parentSessionId : null;
   }
 
+  /** Reverse lookup: the child session registered for a redacted pairing handle
+   *  (`run-sha256:<16 hex>`), or null.
+   *
+   *  Why the module needs this (2026-10-17 P0): the adapter derives the handle
+   *  ONCE from the raw runId and carries it on the canonical envelope, so a fact's
+   *  `runId` is stable across live delivery, buffered drain and canonical replay.
+   *  The RAW child session id, by contrast, only exists on the raw-event paths —
+   *  a drained or replayed `subagent/end` has no raw child id to resolve. The
+   *  handle is the identity that survives, and this map is what turns it back into
+   *  the child session id the binding ledger is keyed by. Unknown handle → null
+   *  (fail-closed: the caller must not guess a child).
+   *
+   *  Linear scan, same access pattern as activeBindingForEmployee(). */
+  function childSessionIdForRunId(runId) {
+    if (typeof runId !== 'string' || runId === '') return null;
+    for (const record of childSessions.values()) {
+      if (record.runId === runId) return record.childSessionId;
+    }
+    return null;
+  }
+
   // Unclassified subagents enter the single collaborator FIFO owned by the
   // queue-controller. They always queue (never direct-dispatch) and the
   // registry keeps no private copy of the queue.
@@ -457,18 +482,26 @@ function createEmployeeRegistry({ redactor = null, clock = null, queueController
     return binding;
   }
 
-  // Maps a free-text evidence marker to a terminal evidence type. Anything
-  // that only acknowledges delivery (cancel-ack) maps to null and can never
-  // release a binding or close a queue item.
-  function evidenceTypeFrom(evidence) {
-    if (typeof evidence !== 'string' || evidence === '') return null;
-    const lowered = evidence.toLowerCase();
-    if (NON_TERMINAL_EVIDENCE.some((token) => lowered.includes(token))) return null;
-    if (lowered.includes('subagent/end')) return 'subagent-end';
-    if (lowered.includes('session/end') || lowered.includes('session-end')) return 'session-end';
-    if (lowered.includes('turn/end') || lowered.includes('turn-end')) return 'turn-end';
-    return null;
-  }
+// Maps a free-text evidence marker to a terminal evidence type. Anything
+// that only acknowledges delivery (cancel-ack) maps to null and can never
+// release a binding or close a queue item.
+//
+// 2026-10-22（Worker Execution Contract v0，加性扩展）：新增 `execution/` 来源。
+// 执行端口（src/team/runtime/execution-schema.js）的终态事实证据形状是
+// `execution/<outcome>:<coarse-reason>`，它是**本仓库自己的**执行层命名空间
+// （不是 Harness 的 `turn/end`：把执行事实写成 `turn/end:*` 会把 dsh 的 provider
+// 词表泄漏进 Team/执行层，正是契约禁止的方向）。因此 office 内核把 `execution/`
+// 登记为第四个受信终态证据来源 —— **只增不改**，既有三个来源语义不变。
+function evidenceTypeFrom(evidence) {
+  if (typeof evidence !== 'string' || evidence === '') return null;
+  const lowered = evidence.toLowerCase();
+  if (NON_TERMINAL_EVIDENCE.some((token) => lowered.includes(token))) return null;
+  if (lowered.includes('subagent/end')) return 'subagent-end';
+  if (lowered.includes('session/end') || lowered.includes('session-end')) return 'session-end';
+  if (lowered.includes('turn/end') || lowered.includes('turn-end')) return 'turn-end';
+  if (lowered.includes('execution/')) return 'execution';
+  return null;
+}
 
   function outcomeFromEvidence(evidence, fallback) {
     if (typeof evidence === 'string') {
@@ -777,6 +810,7 @@ function createEmployeeRegistry({ redactor = null, clock = null, queueController
     registerChildSession: Object.freeze(registerChildSession),
     listChildSessions: Object.freeze(listChildSessions),
     getParentOf: Object.freeze(getParentOf),
+    childSessionIdForRunId: Object.freeze(childSessionIdForRunId),
     registerUnclassifiedSubagent: Object.freeze(registerUnclassifiedSubagent),
     registerClassifiedSubagent: Object.freeze(registerClassifiedSubagent),
     getCollaboratorQueueLength: Object.freeze(getCollaboratorQueueLength),
