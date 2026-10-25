@@ -263,14 +263,20 @@ test('dsh-backend: startRun fails closed when the host has not decided which ses
   }
 });
 
-test('dsh-backend: the fake transport with an empty stream yields no events (no invented completion)', async () => {
+test('dsh-backend: the fake transport with an empty stream yields no invented completion', async () => {
+  // v0.6 语义：空 journal = 流耗尽而无终态 → 恰好一条 crashed(stream-ended)
+  //（丢失执行可见性的诚实信号）。仍然**绝不**发明 completed/failed —— 那才是
+  // "no invented completion" 的本意。
   const backend = createBackend({
     transport: backendModule.createInjectedTransport({ events: [] }),
     sessionFor: () => 'sess-host-provided',
   });
   const handle = await backend.startRun({ jobId: JOB, runId: RUN, role: 'researcher', attempt: 1 });
   assert.ok(handle);
-  assert.equal(await backend.nextEvent(handle), null, 'an empty journal yields NO event (never a guess)');
+  const event = await backend.nextEvent(handle);
+  assert.equal(event.type, 'execution/crashed');
+  assert.equal(event.reason, 'stream-ended');
+  assert.equal(await backend.nextEvent(handle), null, 'the crash is emitted exactly once');
 });
 
 test('dsh-backend: a full journal sequence converts to the exact team effect through the controller', async () => {
@@ -335,12 +341,14 @@ test('dsh-backend: cancel acknowledges delivery without producing a terminal eve
   assert.equal('outcome' in ack, false);
   assert.equal('terminal' in ack, false);
   const events = [];
-  for (let i = 0; i < 4; i += 1) {
+  for (let i = 0; i < 5; i += 1) {
     const event = await backend.nextEvent(handle);
     if (!event) break;
     events.push(event.type);
   }
-  assert.deepEqual(events, ['execution/started', 'execution/cancel-requested', 'execution/cancel-acknowledged']);
+  // 回执照常交付；journal 里没有 turn/end，流耗尽后**诚实地**合成 crashed
+  //（v0.6：取消被 ack 但终态从未出现 → 崩溃可见，仍绝不发明 cancelled）。
+  assert.deepEqual(events, ['execution/started', 'execution/cancel-requested', 'execution/cancel-acknowledged', 'execution/crashed']);
   assert.equal(events.includes('execution/cancelled'), false, 'no cancelled event exists in the journal');
 });
 
@@ -352,9 +360,10 @@ test('dsh-backend: capability() honestly declares what it can and cannot produce
   const capability = backend.capability();
   assert.equal(capability.network, false);
   assert.equal(capability.supportsRecover, false, 'dsh backend declares no recover support');
-  // 能产的与不能产的都是显式清单。
+  // 能产的与不能产的都是显式清单（v0.6 起 crashed 由流耗尽合成 → 可产）。
   assert.equal(capability.unsupportedEventTypes.includes('execution/artifact'), true);
-  assert.equal(capability.unsupportedEventTypes.includes('execution/crashed'), true);
+  assert.equal(capability.producibleEventTypes.includes('execution/crashed'), true,
+    'v0.6: stream-exhaustion crash synthesis makes crashed producible');
   assert.equal(capability.producibleEventTypes.includes('execution/artifact'), false);
   assert.equal(capability.producibleEventTypes.includes('execution/completed'), true);
   // 端口形状：recover 不在，但**显式声明** unsupported（不是静默缺失）。
@@ -659,4 +668,153 @@ test('dsh-backend v1: session-unavailable becomes Team attention (design B §4.9
   assert.equal(types.includes('run/failed'), false);
   assert.equal(types.includes('run/completed'), false);
   assert.equal(types.includes('artifact/available'), false);
+});
+
+// ===========================================================================
+// 6. v0.6 WP1：流耗尽 → crashed、resume 重挂 follow、journal-seq 去重
+// ===========================================================================
+//
+// 真实链路的两个洞（2026-10-25 核实）在这里被钉住：
+//   A. journal 流耗尽而无终态时，run 永远停在 running（后端原显式声明不产 crashed）
+//      → v0.6：流耗尽 = 丢失执行可见性 → 恰好一条合成 crashed(stream-ended)。
+//   B. follow 无 resume cursor（重开即从头重放）→ resume 重挂必须靠 journal-seq
+//      去重吸收重放，只交付**新**事件。
+
+const T6 = 1_700_000_500_000;
+const je6 = (type, data, seq) => ({ type, seq, time: T6 + seq, data });
+
+/** 一次性流：follow 的最小形状（events 数组 → AsyncIterable）。 */
+function streamOf(events) {
+  let i = 0;
+  return Object.freeze({
+    [Symbol.asyncIterator]: () => ({
+      next() {
+        if (i >= events.length) return Promise.resolve({ value: undefined, done: true });
+        const value = events[i];
+        i += 1;
+        return Promise.resolve({ value: { ...value }, done: false });
+      },
+      return() { return Promise.resolve({ value: undefined, done: true }); },
+    }),
+  });
+}
+
+async function drain(backend, handle, max = 8) {
+  const order = [];
+  for (let i = 0; i < max; i += 1) {
+    const event = await backend.nextEvent(handle);
+    if (!event) break;
+    // 只给"需要人处理"语义的事件标注 reason（crashed/attention）；终态默认 reason 不标。
+    const annotate = event.type === 'execution/crashed' || event.type === 'execution/attention';
+    order.push(`${event.type}${annotate && event.reason ? `(${event.reason})` : ''}${event.kind ? `:${event.kind}` : ''}`);
+  }
+  return order;
+}
+
+test('dsh-backend v1: journal stream exhausted without a terminal yields exactly one crashed, then nothing (V0)', async () => {
+  const { transport } = createV1Transport();
+  transport.follow = () => streamOf([je6('turn/start', {}, 1)]);
+  const backend = backendModule.createDshExecutionBackend({ clock: { nowMs: () => T6 }, transport });
+  const handle = await backend.startRun({ jobId: JOB, runId: RUN, role: 'researcher', attempt: 1 });
+  // v0.6：恰好一条合成 crashed（幂等：再多拉取也不重复），其后流确实结束。
+  assert.deepEqual(await drain(backend, handle), ['execution/started', 'execution/crashed(stream-ended)']);
+  assert.equal(backend.state(handle).terminal, false, 'crashed is NOT terminal — resume must stay possible');
+});
+
+test('dsh-backend v1: resume re-follows the SAME session; replayed journal events are skipped by journal seq (V3)', async () => {
+  const { transport, calls } = createV1Transport();
+  const follows = [
+    [je6('turn/start', {}, 1)],                                                    // 第一次：start 后断流
+    [je6('turn/start', {}, 1), je6('turn/end', { reason: { kind: 'completed' } }, 2)], // 重挂：重放 + 新终态
+  ];
+  let n = 0;
+  transport.follow = ({ sessionId }) => {
+    calls.follow.push(sessionId);
+    return streamOf(follows[Math.min(n++, follows.length - 1)]);
+  };
+  const backend = backendModule.createDshExecutionBackend({ clock: { nowMs: () => T6 }, transport });
+  const handle = await backend.startRun({ jobId: JOB, runId: RUN, role: 'researcher', attempt: 1 });
+  assert.deepEqual(await drain(backend, handle), ['execution/started', 'execution/crashed(stream-ended)']);
+  const ack = await backend.resume(handle);
+  assert.equal(ack.ok, true);
+  assert.equal(ack.resumed, true);
+  // 重挂的是**同一个**会话（raw 只在 transport 调用线上）。
+  assert.equal(calls.follow.length, 2);
+  assert.equal(calls.follow[0], calls.follow[1]);
+  // 重放的 started（同 journal seq）被去重跳过；只交付新的 completed。
+  assert.deepEqual(await drain(backend, handle), ['execution/completed']);
+  assert.equal(backend.state(handle).terminal, true);
+});
+
+test('dsh-backend v1: resume finds the session actually completed while unattached — artifact still materializes (V4)', async () => {
+  const { transport, calls } = createV1Transport({ materialize: true });
+  const follows = [
+    [je6('turn/start', {}, 1)],
+    [
+      je6('turn/start', {}, 1),
+      je6('assistant/message', { content: '# Research Notes\n\n结论……' }, 2),
+      je6('turn/end', { reason: { kind: 'completed' } }, 3),
+    ],
+  ];
+  let n = 0;
+  transport.follow = ({ sessionId }) => {
+    calls.follow.push(sessionId);
+    return streamOf(follows[Math.min(n++, follows.length - 1)]);
+  };
+  const backend = backendModule.createDshExecutionBackend({ clock: { nowMs: () => T6 }, transport });
+  const handle = await backend.startRun({
+    jobId: JOB, runId: RUN, role: 'researcher', attempt: 1, produces: ['research-notes'],
+  });
+  assert.deepEqual(await drain(backend, handle), ['execution/started', 'execution/crashed(stream-ended)']);
+  await backend.resume(handle);
+  // 会话其实已跑完：重挂回放映射出终态，artifact 仍在 completed 之前落地（顺序不变式）。
+  assert.deepEqual(await drain(backend, handle), ['execution/artifact:research-notes', 'execution/completed']);
+  assert.deepEqual(calls.artifactFor.map((c) => c.kind), ['research-notes']);
+});
+
+test('dsh-backend v1: resume after a terminal is refused — no second terminal, no new events (V5)', async () => {
+  const { transport } = createV1Transport();
+  const backend = backendModule.createDshExecutionBackend({ clock: { nowMs: () => T6 }, transport });
+  const handle = await backend.startRun({ jobId: JOB, runId: RUN, role: 'researcher', attempt: 1 });
+  assert.deepEqual(await drain(backend, handle), ['execution/started', 'execution/completed']);
+  await assert.rejects(
+    () => backend.resume(handle),
+    (error) => error.code === 'EXEC_HANDLE_TERMINAL',
+  );
+  assert.equal(await backend.nextEvent(handle), null, 'terminal stays final');
+});
+
+test('dsh-backend v1: resume into a still-dead stream honestly crashes again (attention stays observable)', async () => {
+  const { transport, calls } = createV1Transport();
+  // 每次重挂都只有重放（会话没有新事件）——"恢复后发现还是死的"必须可观测。
+  transport.follow = ({ sessionId }) => {
+    calls.follow.push(sessionId);
+    return streamOf([je6('turn/start', {}, 1)]);
+  };
+  const backend = backendModule.createDshExecutionBackend({ clock: { nowMs: () => T6 }, transport });
+  const handle = await backend.startRun({ jobId: JOB, runId: RUN, role: 'researcher', attempt: 1 });
+  assert.deepEqual(await drain(backend, handle), ['execution/started', 'execution/crashed(stream-ended)']);
+  await backend.resume(handle);
+  assert.deepEqual(await drain(backend, handle), ['execution/crashed(stream-ended)']);
+  assert.equal(backend.state(handle).terminal, false);
+});
+
+test('dsh-backend v1: crashed without an explicit reason never passes the schema (V6)', () => {
+  // schema 层：attention / crashed 必须显式给 reason（EXEC_REASON_INVALID）——
+  // 合成路径绕不过（buildEvent 走同一条 validateExecutionEvent）。
+  const verdict = schema.validateExecutionEvent({
+    schemaVersion: 1, type: 'execution/crashed',
+    jobRef: 'exec-job:' + '0'.repeat(16), executionRef: 'exec-run:' + '0'.repeat(16),
+    attempt: 1, seq: 1, atMs: T6, reason: null,
+  });
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.code, 'EXEC_REASON_INVALID');
+});
+
+test('dsh-backend v1: exhaustion crash synthesis stays pull-driven (no timers, no wall clock)', () => {
+  // 结构性：本后端不得引入定时器/墙钟（离线纯度门）——crashed 合成也必须如此。
+  const source = stripComments(fs.readFileSync(path.join(TEAM_RUNTIME_DIR, 'dsh-execution-backend.js'), 'utf8'));
+  for (const pattern of [/\bsetTimeout\s*\(/, /\bsetInterval\s*\(/, /\bDate\.now\s*\(/]) {
+    assert.equal(pattern.test(source), false, `the backend must not use ${pattern}`);
+  }
 });

@@ -454,12 +454,11 @@ function registerShellTeamIpc(ipcMain, log, startDeps = {}) {
     if (checked.action === 'resume') {
       const instance = officeTeamRealInstance;
       if (!instance) return Object.freeze({ ok: false, code: 'TEAM_NOT_ACTIVE' });
-      const state = instance.runtime.state();
-      const role = Object.entries(state.runs).find(([, run]) => run && run.status === 'attention');
-      if (!role) return Object.freeze({ ok: false, code: 'NOT_IN_ATTENTION' });
+      // v0.6（WP1）：恢复 = controller.resume（bind 重试 / follow 重挂）+ 驱动循环重启。
+      // attention 角色查找、TEAM_STOPPED/NOT_IN_ATTENTION 拒绝都在 resumeTeam 里（单一处）。
       try {
-        const verdict = await instance.controller.resume(role[0]);
-        return Object.freeze({ ok: verdict.ok, code: verdict.ok ? null : verdict.code });
+        const verdict = await instance.resumeTeam();
+        return Object.freeze({ ok: verdict.ok, code: verdict.ok ? null : (verdict.code || 'RESUME_FAILED') });
       } catch (error) {
         return Object.freeze({ ok: false, code: 'RESUME_FAILED' });
       }
@@ -568,11 +567,13 @@ function startTeamRealWithTopic({ office, topic, log, deps = {} } = {}) {
     const backend = teamRuntimeModule.dshBackend.createDshExecutionBackend({
       clock: wallClock, transport,
     });
-    // adapter：把后端包成 executor 端口形状（observe/cancel 直通；recover 显式 unsupported）。
+    // adapter：把后端包成 executor 端口形状（observe/cancel/resume 直通；recover 显式 unsupported）。
     const executor = Object.freeze({
       startRun: (args) => backend.startRun(args),
       observe: (handle) => backend.observe(handle),
       cancel: (handle) => backend.cancel(handle),
+      // v0.6（WP1b）：resume 直通后端（重挂同一会话的 follow；重放由 journal-seq 去重吸收）。
+      resume: (handle) => backend.resume(handle),
       unsupported: Object.freeze(['recover']),
     });
     const controller = teamRuntimeModule.createTeamExecutionController({
@@ -601,8 +602,10 @@ function startTeamRealWithTopic({ office, topic, log, deps = {} } = {}) {
           break;
         }
         if (status === 'attention') {
-          // v0.4 真实路径**不**自动 resume（attention 必须显式恢复；恢复 UI 属后续批次）。
-          log('[office] team real paused in attention — explicit resume is not wired in v0.4');
+          // v0.6（WP1）：attention 仍**绝不自动恢复**（显式恢复是铁律）。驱动循环在此
+          // 退场 —— 用户点"继续"走 instance.resumeTeam()：controller.resume（重试绑定 /
+          // 重挂 follow）之后由 startDrive() 重启本循环，续流的事件才有人消费。
+          log('[office] team real paused in attention — waiting for explicit resume (resumeTeam)');
           bridge.pump();
           break;
         }
@@ -614,13 +617,49 @@ function startTeamRealWithTopic({ office, topic, log, deps = {} } = {}) {
         }
       }
     }
+
+    // v0.6（WP1）：驱动循环可**重启**（attention 恢复后续跑）。driveRunning 防重入；
+    // 循环运行中收到重启请求（resume 与循环收尾的窄竞态）→ 排队到 finally 再启。
+    let driveRunning = false;
+    let driveRestartQueued = false;
+    let drivePromise = Promise.resolve();
+    function startDrive() {
+      if (driveRunning) { driveRestartQueued = true; return drivePromise; }
+      driveRunning = true;
+      driveRestartQueued = false;
+      drivePromise = drive()
+        .catch((error) => log(`[office] team real drive failed: ${error && error.message}`))
+        .finally(() => {
+          driveRunning = false;
+          if (driveRestartQueued && !stopped) {
+            driveRestartQueued = false;
+            startDrive();
+          }
+        });
+      return drivePromise;
+    }
+
+    /** 显式恢复（v0.6 WP1）：attention 角色 → controller.resume → 重启驱动循环。
+     *  恢复失败（如 transport 仍未恢复）由 controller 诚实回 attention —— 状态面可观测。 */
+    async function resumeTeam() {
+      if (stopped) return Object.freeze({ ok: false, code: 'TEAM_STOPPED' });
+      const state = runtime.state();
+      const entry = Object.entries(state.runs).find(([, run]) => run && run.status === 'attention');
+      if (!entry) return Object.freeze({ ok: false, code: 'NOT_IN_ATTENTION' });
+      const verdict = await controller.resume(entry[0]);
+      if (verdict.ok) startDrive(); // 幂等：循环仍在跑则记一次重启请求（竞态安全）
+      return Object.freeze({ ok: verdict.ok, code: verdict.ok ? null : (verdict.code || 'RESUME_FAILED') });
+    }
+
     // fire-and-forget：失败只记日志，绝不影响办公室启动。
-    // whenDone 暴露给调用方/测试（**唯一**驱动者是这个循环 —— 不要在外面再并发泵同一个
-    // 迭代器，两个消费者会互相抢事件）。
-    const drivePromise = drive().catch((error) => log(`[office] team real drive failed: ${error && error.message}`));
+    // whenDone = **首发**驱动的 promise（与 v0.4/v0.5 语义一致）；whenSettled = 最近一次
+    // 驱动（resume 重启后测试/调用方等待续跑收尾用）。**唯一**驱动者是 startDrive ——
+    // 不要在外面再并发泵同一个迭代器，两个消费者会互相抢事件。
+    startDrive();
     log(`[office] team real attached: shell-transport -> dsh backend -> controller -> team -> office`);
     const instance = Object.freeze({
       whenDone: drivePromise,
+      whenSettled: () => drivePromise,
       detach() {
         stopped = true;
         if (officeTeamRealInstance === instance) officeTeamRealInstance = null;
@@ -638,6 +677,7 @@ function startTeamRealWithTopic({ office, topic, log, deps = {} } = {}) {
       controller: controller,
       bridge: bridge,
       transport: transport,
+      resumeTeam: resumeTeam,
     });
     officeTeamRealInstance = instance;
     return instance;

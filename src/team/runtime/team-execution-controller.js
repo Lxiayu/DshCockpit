@@ -246,27 +246,12 @@ function createTeamExecutionController(options = {}) {
 
   // ---- 控制方向：Team → Executor ------------------------------------------------
 
-  /** 为一个**就绪**角色建立执行绑定（dispatch → Team startRun 前置 → executor.startRun）。 */
-  async function bindExecution(role) {
-    const existing = sessions.get(role);
-    // 重复 dispatch 绝不启动第二个 Worker。
-    //
-    // **诚实的边界说明（2026-10-23 实测）**：v0 里这条守卫**当前不可达** ——
-    // `readyRoles()` 只回报 `pending` 的 run，而 Team 没有"取消 dispatch"的命令，
-    // 因此一个已绑定的角色永远不会再出现在 readyRoles 里，`bindExecution` 不会被
-    // 第二次进入（有测试钉住这个可达性事实）。
-    // 所以"一 run 一个 Worker"目前**单层**由 executor 的 `EXEC_ALREADY_BOUND` 保证
-    // （`startRun` 里 `runs.has(handleId)` 即抛错）。
-    // 本守卫保留，是为了将来 `attempt > 1` 的重新 dispatch 之类的新路径一旦出现，
-    // 这里仍然是一个正确的拦截点；但它**不是**当前安全性的依赖。
-    if (existing && !existing.terminal) {
-      return Object.freeze({ ok: true, code: null, status: 'already-dispatched', handle: existing.handle });
-    }
-    const dispatched = team.dispatchRun({ role });
-    if (!dispatched.ok || (dispatched.status !== 'applied' && dispatched.status !== 'duplicate')) {
-      noteLedger({ role, event: 'dispatch', result: 'team-rejected', code: dispatched.code });
-      return Object.freeze({ ok: false, code: dispatched.code || 'EXEC_UNSUPPORTED', status: dispatched.status });
-    }
+  /**
+   * bindExecution 的执行器绑定段（dispatch 之后）：startRun → observe → 会话登记。
+   * v0.6（WP1a）起独立成函数：bind 阶段失败进 attention 后，`resume` 要**重试**这一段
+   *（sessions 无条目 —— 洞 A：老实现 resume 第一行就 EXEC_HANDLE_UNKNOWN）。
+   */
+  async function bindExecutorFor(role) {
     const expected = makeExpected(role);
     let handle;
     try {
@@ -327,6 +312,30 @@ function createTeamExecutionController(options = {}) {
     sessions.set(role, session);
     noteLedger({ role, event: 'bound', result: 'applied', seq: null });
     return Object.freeze({ ok: true, code: null, status: 'bound', handle });
+  }
+
+  /** 为一个**就绪**角色建立执行绑定（dispatch → Team startRun 前置 → executor.startRun）。 */
+  async function bindExecution(role) {
+    const existing = sessions.get(role);
+    // 重复 dispatch 绝不启动第二个 Worker。
+    //
+    // **诚实的边界说明（2026-10-23 实测）**：v0 里这条守卫**当前不可达** ——
+    // `readyRoles()` 只回报 `pending` 的 run，而 Team 没有"取消 dispatch"的命令，
+    // 因此一个已绑定的角色永远不会再出现在 readyRoles 里，`bindExecution` 不会被
+    // 第二次进入（有测试钉住这个可达性事实）。
+    // 所以"一 run 一个 Worker"目前**单层**由 executor 的 `EXEC_ALREADY_BOUND` 保证
+    //（`startRun` 里 `runs.has(handleId)` 即抛错）。
+    // 本守卫保留，是为了将来 `attempt > 1` 的重新 dispatch 之类的新路径一旦出现，
+    // 这里仍然是一个正确的拦截点；但它**不是**当前安全性的依赖。
+    if (existing && !existing.terminal) {
+      return Object.freeze({ ok: true, code: null, status: 'already-dispatched', handle: existing.handle });
+    }
+    const dispatched = team.dispatchRun({ role });
+    if (!dispatched.ok || (dispatched.status !== 'applied' && dispatched.status !== 'duplicate')) {
+      noteLedger({ role, event: 'dispatch', result: 'team-rejected', code: dispatched.code });
+      return Object.freeze({ ok: false, code: dispatched.code || 'EXEC_UNSUPPORTED', status: dispatched.status });
+    }
+    return bindExecutorFor(role);
   }
 
   /** 启动：建 job（幂等）→ 把所有 ready 角色绑定执行。 */
@@ -415,10 +424,30 @@ function createTeamExecutionController(options = {}) {
     return Object.freeze({ ok: true, code: null, acknowledged: !!(ack && ack.acknowledged), runStatus: team.state().runs[role]?.status || null });
   }
 
-  /** 显式恢复（attention → running）：Team 必须先 startRun（Team 的权威），再让执行器继续。 */
+  /**
+   * 显式恢复（attention → running）。两条路径（v0.6 WP1 闭环）：
+   *
+   *   1. **无会话**（attention 来自 bind 阶段的 EXEC_TRANSPORT_UNAVAILABLE —— executor
+   *      从未启动，sessions 无条目）：Team 先 startRun（attention→running，Team 权威），
+   *      再重试 `bindExecutorFor`。重试再失败 → 诚实回 attention（不 failed、不停 running）。
+   *   2. **有会话**（attention 来自执行事件，如 crashed/blocked）：Team 先 startRun，
+   *      再 `executor.resume(handle)` 让执行侧续跑。执行器续跑失败 → 诚实回滚 attention。
+   *
+   * 终态会话不可 resume（终态只能由终态执行事件推动，绝不复活）。
+   */
   async function resume(role) {
     const session = sessions.get(role);
-    if (!session) return noteRejection('EXEC_HANDLE_UNKNOWN');
+    if (!session) {
+      const resumed = team.startRun({ role, consumedArtifactIds: consumedArtifactIdsFor(role) });
+      if (!resumed.ok && resumed.status !== 'duplicate') {
+        return Object.freeze({ ok: false, code: resumed.code, status: resumed.status });
+      }
+      pumpProjection();
+      const bound = await bindExecutorFor(role);
+      if (!bound.ok) return bound; // TRANSPORT_UNAVAILABLE 已在内部转回 attention
+      return Object.freeze({ ok: true, code: null, runStatus: team.state().runs[role]?.status || null });
+    }
+    if (session.terminal) return noteRejection('EXEC_HANDLE_TERMINAL');
     const resumed = team.startRun({ role, consumedArtifactIds: consumedArtifactIdsFor(role) });
     if (!resumed.ok && resumed.status !== 'duplicate') {
       return Object.freeze({ ok: false, code: resumed.code, status: resumed.status });
@@ -428,8 +457,17 @@ function createTeamExecutionController(options = {}) {
       try {
         await executor.resume(session.handle);
       } catch (error) {
-        noteLedger({ role, event: 'resume', result: 'executor-error', code: error && error.code });
-        return Object.freeze({ ok: false, code: error && error.code ? error.code : 'EXEC_EXECUTOR_ERROR' });
+        const code = error && error.code ? error.code : 'EXEC_EXECUTOR_ERROR';
+        noteLedger({ role, event: 'resume', result: 'executor-error', code });
+        // Team 已回 running，但执行侧续跑失败 —— 诚实回滚为 attention，
+        // 绝不静默留在 running（那正是 v0.4 真实链路"停在 running"的洞）。
+        const attended = team.noteRunAttention({ role, reason: 'resume-failed' });
+        pumpProjection();
+        return Object.freeze({
+          ok: false, code,
+          status: attended.status === 'applied' ? 'attention' : attended.status,
+          attentionReason: 'resume-failed',
+        });
       }
     }
     return Object.freeze({ ok: true, code: null, runStatus: team.state().runs[role]?.status || null });

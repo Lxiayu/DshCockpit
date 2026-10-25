@@ -115,10 +115,11 @@ const DSH_EXECUTION_MAPPING = Object.freeze([
   }),
   Object.freeze({
     dshFact: 'crash / reconnect',
-    source: '**无 office 事实来源**：main.js:4249-4257、1537-1574 只走 runtime-health 与托盘，'
-      + 'runtime-supervisor.recordCrash 只写崩溃 JSON（main.js:3864）',
+    source: 'v0.6（WP1b，2026-10-25）：journal follow 流耗尽而无终态 → 本后端合成 '
+      + 'crashed(stream-ended)（受信来源 = 流本身的结束；进程级 crash 信号仍只走 '
+      + 'runtime-health，见 gaps 残留项）',
     mapsTo: 'execution/crashed',
-    covered: false,
+    covered: true,
   }),
   Object.freeze({
     dshFact: 'run identity (raw sessionId / raw runId)',
@@ -142,9 +143,11 @@ const DSH_BACKEND_GAPS = Object.freeze([
   Object.freeze({
     code: 'DSH_NO_CRASH_FACT',
     capability: 'execution/crashed',
-    detail: '运行时崩溃/重连是壳级健康信号，main.js 刻意只走 runtime-health（避免把"连接抖动"'
-      + '变成任务终态）。要映射成 Team crash 必须先在壳侧新增一条**受信的**崩溃事实来源。',
-    level: 'P1',
+    detail: 'v0.6 起由"流耗尽而无终态"代理覆盖（合成 crashed(stream-ended) → attention，'
+      + '可显式 resume 重挂 follow 续流）。残留：进程级崩溃/重连信号（main.js:4249-4257、'
+      + '1537-1574）仍只走 runtime-health —— "连接抖动"不会变成任务事实；需要更细的 crash '
+      + '原因时必须先新增受信来源，不从日志文本猜。',
+    level: 'P2',
   }),
   Object.freeze({
     code: 'DSH_SESSION_ROLE_BINDING_UNDECIDED',
@@ -357,6 +360,11 @@ function createDshExecutionBackend(options = {}) {
       // 控制面回执队列（**只有类型**；seq 在交付时分配，见 pullEvents）。
       receipts: [],
       deliveredJournalEvents: 0,
+      // v0.6（WP1）：follow 无 resume cursor（重开即从头重放）——重挂后靠
+      // journal 自身的单调 seq 去重吸收重放，只交付新事件。无数字 seq 的流不去重。
+      lastJournalSeq: null,
+      // v0.6（WP1b）：流耗尽合成 crashed 只发一次（幂等标志）。
+      exhausted: false,
     });
     log(`[dsh-backend] startRun ${role} -> ${handle.handleId} (session bound in-process only)`);
     return handle;
@@ -438,7 +446,7 @@ function createDshExecutionBackend(options = {}) {
   /**
    * 拉取一次：产出一条执行事件，或报告流已耗尽。
    *
-   * 三条顺序规则（都是刻意的）：
+   * 四条顺序规则（都是刻意的）：
    *   0. **有序发射队列最优先**：artifact（及其后续 completed）在物化时按序入队，
    *      必须先于一切新拉取的 journal 事件交付（保证 artifact→completed 的先后）。
    *   1. **控制面回执排在已交付的 journal 事件之后**：`cancel()` 只把回执**入队**，
@@ -447,6 +455,10 @@ function createDshExecutionBackend(options = {}) {
    *   2. **未映射的 journal 事件被跳过但**不**终止流**：tool/call、assistant/message
    *      等只 canonical 化（与 adapter 的默认分支同一立场），流要继续读到真正的
    *      turn/end —— 否则一次工具调用就会让整次执行"看起来结束"。
+   *   3.（v0.6 WP1b）**流耗尽而无终态 → 恰好一条合成 `execution/crashed(stream-ended)`**：
+   *      follow 无 resume cursor，"流结束了却没等到终态" = 丢失执行可见性（dsh 掉线/
+   *      重启的等价物）。crash 默认策略（attention，非终态）由 controller 接手；
+   *      显式 resume 后由 `resume()` 对同一会话重挂 follow 续流。绝不猜 failed。
    */
   async function pullEvents(handle) {
     const state = runs.get(handle.handleId);
@@ -476,8 +488,28 @@ function createDshExecutionBackend(options = {}) {
               events: Object.freeze([buildEvent(state, receipt)]), done: false, skipped,
             });
           }
+          // 规则 3：无终态的耗尽 → 恰好一条合成 crashed（幂等）；再拉即 done。
+          if (!state.exhausted) {
+            state.exhausted = true;
+            return Object.freeze({
+              events: Object.freeze([
+                buildEvent(state, { type: 'execution/crashed', reason: 'stream-ended' }),
+              ]),
+              done: false, skipped,
+            });
+          }
           return Object.freeze({ events: Object.freeze([]), done: true, skipped });
         }
+        // 规则 2b（v0.6）：journal-seq 去重 —— 重挂 follow 后从头重放的旧事件
+        //（seq ≤ 已交付的最大 journal seq）一律跳过。无数字 seq 的流保守放行。
+        const rawSeq = next.value && typeof next.value.seq === 'number' && Number.isFinite(next.value.seq)
+          ? next.value.seq
+          : null;
+        if (rawSeq !== null && state.lastJournalSeq !== null && rawSeq <= state.lastJournalSeq) {
+          skipped += 1;
+          continue;
+        }
+        if (rawSeq !== null) state.lastJournalSeq = rawSeq;
         const mapped = mapDshJournalEvent(next.value);
         if (!mapped.type) { skipped += 1; continue; }
         state.deliveredJournalEvents += 1;
@@ -515,8 +547,13 @@ function createDshExecutionBackend(options = {}) {
    * `observe`：把"journal 流 → 执行事件流"包成 AsyncIterable。
    * 事件按需产出（pull 模型），**无 timers**。
    *
-   * 注意：`next()` **不能**因为一次"跳过"就判 done —— 未映射的 journal 事件不是
-   * 流的结束。因此这里循环拉取直到真正产出一条事件或流确实耗尽。
+   * 注意一：`next()` **不能**因为一次"跳过"就判 done —— 未映射的 journal 事件不是
+   * 流的结束，因此这里循环拉取直到真正产出一条事件或流确实耗尽。
+   *
+   * 注意二（v0.6 WP1b）：自然耗尽**不**闩死迭代器 —— 耗尽后 `pullEvents` 会快速
+   * 幂等地返回 done，而 `resume()` 替换 `state.iterator` 后同一个 observe 迭代器
+   * 必须能继续交付新事件（闭包 `closed` 只用于显式 `return()` 的消费方拆除）。
+   * 闩死 `closed` 的旧实现会让 resume 后的 pumpOne 永远拿不到事件（实测踩过）。
    */
   function observe(handle) {
     const state = runs.get(handle.handleId);
@@ -528,10 +565,7 @@ function createDshExecutionBackend(options = {}) {
         for (;;) {
           const result = await pullEvents(handle);
           if (result.events.length > 0) return { value: result.events[0], done: false };
-          if (result.done) {
-            closed = true;
-            return { value: undefined, done: true };
-          }
+          if (result.done) return { value: undefined, done: true };
         }
       },
       return() { closed = true; return Promise.resolve({ value: undefined, done: true }); },
@@ -582,6 +616,32 @@ function createDshExecutionBackend(options = {}) {
     return normalizeCancelAck({ acknowledged: true, atMs: clock.nowMs(), reason: 'dsh-transport' });
   }
 
+  /**
+   * resume（v0.6 WP1b）：attention 后的执行侧续跑 —— 对**同一会话**重挂 follow。
+   *
+   * - follow 无 resume cursor（重开即从头重放）：重放由 pullEvents 规则 2b 的
+   *   journal-seq 去重吸收，只交付新事件；已入队的 emissionQueue/receipts 不受影响
+   *   （规则 0/1 仍最优先）。
+   * - 会话其实已跑完时，重挂回放会映射出 turn/end → 正常 completed（含 materializer）。
+   * - 重挂后流立刻又结束且无新事件 → 下一次拉取会再合成一条 crashed(stream-ended)
+   *   （"恢复后发现还是死的"保持可观测，绝不假装续跑成功）。
+   * - 仅非终态会话可 resume；transport 未注入即诚实拒绝。
+   */
+  async function resume(handle) {
+    const state = runs.get(handle.handleId);
+    if (!state) throw execError('EXEC_HANDLE_UNKNOWN', 'unknown execution handle');
+    if (state.terminal) throw execError('EXEC_HANDLE_TERMINAL', 'cannot resume a terminal execution');
+    if (!transport) throw execError('EXEC_TRANSPORT_UNAVAILABLE', 'no transport injected');
+    const stream = transport.follow({ sessionId: state.sessionId });
+    if (!stream || typeof stream[Symbol.asyncIterator] !== 'function') {
+      throw execError('EXEC_PORT_SHAPE_INVALID', 'transport.follow must return an AsyncIterable');
+    }
+    state.iterator = stream[Symbol.asyncIterator]();
+    state.exhausted = false; // 新流重新计耗尽（再断流会再合成 crashed —— 诚实可观测）
+    advanceClock(1); // 可注入的确定性推进（默认 no-op）
+    return Object.freeze({ ok: true, resumed: true, atMs: clock.nowMs() });
+  }
+
   function state(handle) {
     const run = runs.get(handle.handleId);
     if (!run) throw execError('EXEC_HANDLE_UNKNOWN', 'unknown execution handle');
@@ -602,8 +662,8 @@ function createDshExecutionBackend(options = {}) {
   /** 能力自述：明确哪些事件类型本后端**能**产出（诚实清单）。 */
   function capability() {
     const hasMaterializer = !!(transport && typeof transport.artifactFor === 'function');
-    const producible = EXECUTION_EVENT_TYPES.filter((type) => type !== 'execution/crashed'
-      && (type !== 'execution/artifact' || hasMaterializer));
+    // v0.6（WP1b）：crashed 由"流耗尽而无终态"合成 → 始终可产。
+    const producible = EXECUTION_EVENT_TYPES.filter((type) => type !== 'execution/artifact' || hasMaterializer);
     return Object.freeze({
       backend: DSH_BACKEND_VERSION,
       transport: transport ? transport.describe() : null,
@@ -612,9 +672,7 @@ function createDshExecutionBackend(options = {}) {
       sessionHook: typeof (transport && transport.resolveSession) === 'function' || sessionFor !== null,
       materializerHook: hasMaterializer,
       producibleEventTypes: Object.freeze(producible),
-      unsupportedEventTypes: Object.freeze(
-        hasMaterializer ? ['execution/crashed'] : ['execution/artifact', 'execution/crashed'],
-      ),
+      unsupportedEventTypes: Object.freeze(hasMaterializer ? [] : ['execution/artifact']),
       supportsRecover: false,
       gaps: DSH_BACKEND_GAPS,
     });
@@ -626,7 +684,8 @@ function createDshExecutionBackend(options = {}) {
     observe,
     nextEvent,
     cancel,
-    unsupported: Object.freeze(['recover', 'execution/artifact', 'execution/crashed']),
+    resume,
+    unsupported: Object.freeze(['recover']),
     // 诊断
     state,
     capability,

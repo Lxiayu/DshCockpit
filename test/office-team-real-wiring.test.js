@@ -386,3 +386,133 @@ test('team-real wiring: openTeamFollowStream extracts journal events from frames
   const fifth = await fourth.then(() => iterator.next());
   assert.equal(fifth.done, true);
 });
+// ===========================================================================
+// 5. v0.6 WP1：真实链路的 resume 闭环（bind 重试 + 流耗尽恢复）
+// ===========================================================================
+
+/** 可脚本化 deps：createSession 前置失败次数 + 每次 openFollow 的 journal 脚本。 */
+function makeScriptedDeps({ createFailures = 0, journals = [] } = {}) {
+  const T0 = 1_700_000_000_000;
+  const je = (type, data, seq) => ({ type, seq, time: T0 + seq, data });
+  void je;
+  const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), 'team-real-resume-'));
+  let nowMs = T0;
+  const clock = { nowMs: () => nowMs };
+  let created = 0;
+  let opened = 0;
+  const rpc = {
+    calls: { create: 0, prompt: [], cancel: [] },
+    async createSession() {
+      rpc.calls.create += 1;
+      if (created < createFailures) {
+        created += 1;
+        throw new Error('runtime down (scripted)');
+      }
+      created += 1;
+      return `sess-rs-${rpc.calls.create}`;
+    },
+    async prompt(sessionId, text, mode) { rpc.calls.prompt.push({ sessionId, text, mode }); return { ok: true }; },
+    async cancel(sessionId) { rpc.calls.cancel.push(sessionId); return { ok: true }; },
+  };
+  const openFollow = () => {
+    const events = journals[Math.min(opened, journals.length - 1)] || [];
+    opened += 1;
+    let i = 0;
+    return Object.freeze({
+      [Symbol.asyncIterator]: () => ({
+        next() {
+          if (i >= events.length) return Promise.resolve({ value: undefined, done: true });
+          const value = events[i]; i += 1;
+          return Promise.resolve({ value, done: false });
+        },
+      }),
+    });
+  };
+  return { rpc, openFollow, artifactDir, clock, jobId: 'job-resume-wiring-1' };
+}
+
+const RS_JE = (type, data, seq) => ({ type, seq, time: 1_700_000_000_000 + seq, data });
+
+test('team-real wiring WP1a: bind 失败→attention→resumeTeam 重试绑定→真实链路完成', async () => {
+  // dsh 起不来（第一次 createSession 失败）→ researcher bind attention →
+  // runtime 恢复后用户点"继续"（resumeTeam）→ 重试绑定 → 驱动重启 → 任务完成。
+  const journals = [
+    [ // researcher（重试成功后的第一次 openFollow）
+      RS_JE('turn/start', {}, 1),
+      RS_JE('assistant/message', { content: [{ type: 'text', text: '# 研究笔记（恢复后产出）' }] }, 2),
+      RS_JE('turn/end', { reason: { kind: 'completed' } }, 3),
+    ],
+    [ // reviewer
+      RS_JE('turn/start', {}, 1),
+      RS_JE('turn/end', { reason: { kind: 'completed' } }, 2),
+    ],
+  ];
+  const deps = makeScriptedDeps({ createFailures: 1, journals });
+  const box = loadMainWiring(ON_ENV);
+  const real = box.attach(makeOffice(), () => {}, deps);
+  assert.ok(real, 'attach must succeed (failure happens at bind, not attach)');
+  await real.whenDone;
+  assert.equal(real.runtime.state().status, 'attention');
+  assert.equal(real.runtime.state().runs.researcher.attention.reason, 'session-unavailable');
+  assert.equal(deps.rpc.calls.create, 1, 'only the failed create happened before attention');
+
+  const verdict = await real.resumeTeam();
+  assert.equal(verdict.ok, true, `resumeTeam must re-bind, got ${JSON.stringify(verdict)}`);
+  await real.whenSettled();
+  const state = real.runtime.state();
+  assert.equal(state.status, 'completed', 'the real chain must finish after resume');
+  assert.equal(state.runs.reviewer.consumedArtifactIds.length, 1, 'handoff survived the retry');
+  assert.equal(deps.rpc.calls.create, 3, 'failed create + researcher retry + reviewer');
+});
+
+test('team-real wiring WP1b: 流耗尽→crashed→attention→resumeTeam 重挂→续流完成', async () => {
+  // researcher 的第一条流只有 turn/start（dsh 中途死掉的离线等价物）→ crashed →
+  // attention；resumeTeam 重挂同一会话 → 重放去重 + 新事件 → 完成 → reviewer 接力。
+  const journals = [
+    [RS_JE('turn/start', {}, 1)],
+    [ // researcher 重挂：重放 seq1 + 新 seq2/3（会话其实在断流期间跑完了）
+      RS_JE('turn/start', {}, 1),
+      RS_JE('assistant/message', { content: [{ type: 'text', text: '# 研究笔记（断流期间产出）' }] }, 2),
+      RS_JE('turn/end', { reason: { kind: 'completed' } }, 3),
+    ],
+    [ // reviewer
+      RS_JE('turn/start', {}, 1),
+      RS_JE('turn/end', { reason: { kind: 'completed' } }, 2),
+    ],
+  ];
+  const deps = makeScriptedDeps({ journals });
+  const box = loadMainWiring(ON_ENV);
+  const real = box.attach(makeOffice(), () => {}, deps);
+  assert.ok(real);
+  await real.whenDone;
+  assert.equal(real.runtime.state().status, 'attention');
+  assert.equal(real.runtime.state().runs.researcher.attention.reason, 'stream-ended',
+    'exhaustion without a terminal must surface as crashed(stream-ended) → attention');
+
+  const verdict = await real.resumeTeam();
+  assert.equal(verdict.ok, true);
+  await real.whenSettled();
+  const state = real.runtime.state();
+  assert.equal(state.status, 'completed', 're-follow must continue the run to a real terminal');
+  assert.equal(state.runs.researcher.terminalEvidence.source, 'execution/completed:ok');
+  assert.equal(state.runs.reviewer.consumedArtifactIds.length, 1, 'artifact materialized after re-follow');
+  // 只建了两个会话（researcher 会话是**重挂**，不是重建 —— raw sessionId 不变）。
+  assert.equal(deps.rpc.calls.create, 2);
+});
+
+test('team-real wiring WP1: resumeTeam 拒绝不在 attention 的实例（无旁路）', async () => {
+  const deps = makeScriptedDeps({
+    journals: [[
+      RS_JE('turn/start', {}, 1),
+      RS_JE('assistant/message', { content: [{ type: 'text', text: '# 笔记' }] }, 2),
+      RS_JE('turn/end', { reason: { kind: 'completed' } }, 3),
+    ]],
+  });
+  const box = loadMainWiring(ON_ENV);
+  const real = box.attach(makeOffice(), () => {}, deps);
+  await real.whenDone;
+  assert.equal(real.runtime.state().status, 'completed');
+  const verdict = await real.resumeTeam();
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.code, 'NOT_IN_ATTENTION');
+});

@@ -338,12 +338,18 @@ test('team-ui: resume routes ONLY when a run is in attention', async () => {
   box.register(ipc, () => {});
   // 无实例。
   assert.equal((await ipc.call('shell:team', { action: 'resume' })).code, 'TEAM_NOT_ACTIVE');
-  // 有实例但不在 attention。
+  // 有实例但不在 attention（v0.6：attention 查找与拒绝都在 instance.resumeTeam 里）。
   const resumed = [];
   box.setInstance({
     detach: () => ({ ok: true }),
     runtime: { state: () => ({ status: 'running', runs: { researcher: { status: 'running' } } }) },
-    controller: { resume: async (role) => { resumed.push(role); return { ok: true }; } },
+    resumeTeam: async () => {
+      const state = { runs: { researcher: { status: 'running' } } };
+      const entry = Object.entries(state.runs).find(([, run]) => run && run.status === 'attention');
+      if (!entry) return { ok: false, code: 'NOT_IN_ATTENTION' };
+      resumed.push(entry[0]);
+      return { ok: true, code: null };
+    },
   });
   assert.equal((await ipc.call('shell:team', { action: 'resume' })).code, 'NOT_IN_ATTENTION');
   assert.deepEqual(resumed, []);
@@ -351,7 +357,10 @@ test('team-ui: resume routes ONLY when a run is in attention', async () => {
   box.setInstance({
     detach: () => ({ ok: true }),
     runtime: { state: () => ({ status: 'attention', runs: { researcher: { status: 'completed' }, reviewer: { status: 'attention' } } }) },
-    controller: { resume: async (role) => { resumed.push(role); return { ok: true }; } },
+    resumeTeam: async () => {
+      resumed.push('reviewer');
+      return { ok: true, code: null };
+    },
   });
   const ok = await ipc.call('shell:team', { action: 'resume' });
   assert.equal(ok.ok, true);
@@ -372,16 +381,21 @@ test('team-ui: blocked reviewer → attention → resume through the full real c
   let status = await ipc.call('shell:team', { action: 'status' });
   assert.equal(status.jobStatus, 'attention');
   assert.equal(status.attentionRole, 'reviewer');
-  // 恢复：controller.resume → Team startRun(attention→running) → executor.resume
-  //（FakeExecutor 语义；真实链路中 resume 的执行侧语义见契约 §7.5）。
-  // 这里 deps 的 reviewer 流已耗尽 —— resume 后 Team 回 running 且无新事件，
-  // 驱动循环停在 running（诚实：等待真实执行侧的后续事件）。
+  // 恢复（v0.6 WP1）：controller.resume → Team startRun(attention→running) →
+  // executor.resume（后端重挂同一会话的 follow；重放由 journal-seq 去重吸收）→
+  // 驱动循环重启。这里 deps 的重挂流只有重放（没有新事件）→ 流耗尽 → 再合成一条
+  // crashed(stream-ended) → **诚实回 attention**（不停 running、不伪造完成）。
   const resumeResult = await ipc.call('shell:team', { action: 'resume' });
-  // resume 的 Team 侧命令必须成功（角色回 running）。
+  // resume 的 Team 侧命令必须成功（恢复本身被接受）。
   assert.equal(resumeResult.ok, true, `resume failed: ${resumeResult.code}`);
+  await instance.whenSettled();
   const state = instance.runtime.state();
-  assert.equal(state.runs.reviewer.status, 'running', 'explicit resume must return the run to running');
+  assert.equal(state.runs.reviewer.status, 'attention',
+    'v0.6: a resume that finds no new events honestly returns to attention (never silent running)');
+  assert.equal(state.runs.reviewer.attention.reason, 'stream-ended');
   assert.equal(state.runs.reviewer.terminalEvidence, null);
+  // 重挂确实发生了（驱动重启消费了重挂后的流）。
+  assert.equal(deps.rpc.calls.create >= 2, true, 'researcher + reviewer sessions were created');
 });
 
 // ===========================================================================
