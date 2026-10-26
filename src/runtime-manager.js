@@ -34,7 +34,7 @@ const STARTUP_FAIL_THRESHOLD = 3;
 // /api/remote.mux 事件面、无 /api/respond）已由兼容层覆盖，因此矩阵放宽到整个 0.1.x。
 // 该常量的语义也随之改变：它是"已测试矩阵"，**不再作为安装挡板**——矩阵外的版本
 // 仍可安装，壳会记录 knownIssue、提示降级并保留一键回滚（容器优先：harness 可以坏，
-// 壳不能坏）。真正的崩溃保护由 watchdog + 回滚 + 降级态承担（见 docs/strategy/
+// 壳不能坏）。真正的崩溃保护由 watchdog + 回滚 + 降级态承担（见 docs/archive/strategy/
 // 2026-09-22-harness-upgrade-compat-plan.md）。
 const SUPPORTED_RUNTIME_RANGE = '<0.2.0-0';
 

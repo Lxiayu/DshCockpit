@@ -2,7 +2,7 @@
 //
 // dsh 0.1.2 replaced the two legacy event WebSockets (/api/events.host and
 // /api/events.mux) plus POST /api/respond with ONE cookie-gated multiplexed
-// stream (docs/strategy/2026-09-22-harness-upgrade-compat-plan.md §1.5):
+// stream (docs/archive/strategy/2026-09-22-harness-upgrade-compat-plan.md §1.5):
 //
 //   WS  ws://127.0.0.1:<port>/api/remote.mux        (Cookie required, else 401)
 //   →   {type:'open',   streamId, endpoint, payload:{args}}

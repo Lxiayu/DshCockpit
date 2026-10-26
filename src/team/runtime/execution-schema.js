@@ -6,7 +6,7 @@
 // fs / 网络 / office 模块 / team-runtime / LLM / 时钟读取 / timers / 随机数。
 // 所有时间由调用方的 clock 提供；所有身份都是确定性派生。
 //
-// 契约：docs/specs/WORKER-EXECUTION-CONTRACT-v0.md
+// 契约：docs/architecture/WORKER-EXECUTION-CONTRACT-v0.md
 //
 // 命名边界：本模块**不占用** Harness 的 `team/*` 与 Team Runtime 的
 // `job/*` / `run/*` / `artifact/*` 命名空间 —— 执行事实使用 `execution/*` 前缀。

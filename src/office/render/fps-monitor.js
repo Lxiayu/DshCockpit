@@ -9,7 +9,7 @@
 // the main process).
 //
 // Degradation contract (SPEC-07; latch fix 2026-09-24; judgement rewrite
-// 2026-09-24 — see docs/strategy/2026-09-24-office-perf-mustfix.md): when the
+// 2026-09-24 — see docs/archive/strategy/2026-09-24-office-perf-mustfix.md): when the
 // observed presentation rate stays below thresholdFps for lowWindowLimit
 // consecutive windows, the monitor latches degraded=true exactly once and
 // reports the stable code LOW_FPS_PERSISTENT — distinct from

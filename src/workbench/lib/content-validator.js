@@ -6,7 +6,7 @@
 // {ok, detail}; a violation never aborts the walk — the report lists ALL of
 // them (the publish contract lists every violation before exiting non-zero).
 //
-// M0 scope (docs/notes/office-workbench-m0.md §2):
+// M0 scope (docs/architecture/office-workbench-m0.md §2):
 // - coarse schema validation for every content JSON
 // - referenced assets exist (character frames via the provenance source
 //   pack; layout assets via the managed production catalog)

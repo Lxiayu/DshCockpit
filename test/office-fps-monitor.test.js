@@ -541,7 +541,7 @@ test('M1 low-cost profile: redraw coalescing and skip-unchanged are MEASURED (re
   // 2026-09-25（**有意更新**，性能专项）：full 档不再"每推必画"——可视签名没变
   // 的那一推画出来是同样的像素（62.5Hz 重复重绘是实测 CPU/GPU 的主要来源之一）。
   // full 与 low-cost 的唯一区别现在只剩"不设频率上限"。见
-  // docs/strategy/2026-09-25-v0.4.0-release-verification.md「性能专项」。
+  // docs/archive/strategy/2026-09-25-v0.4.0-release-verification.md「性能专项」。
   // （boot 的 applySnapshot 已经画过一次。）
   const bootRenders = record.renders;
   assert.equal(bootRenders, 1, 'the initial snapshot painted at boot');

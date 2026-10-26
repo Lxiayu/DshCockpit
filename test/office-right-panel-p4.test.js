@@ -1,7 +1,7 @@
 'use strict';
 
 // test/office-right-panel-p4.test.js — P4 选中员工「今日工作记录」+ 右栏打磨
-// contract tests (docs/strategy/2026-09-23-office-right-panel-spec.md §3 块⑤ /
+// contract tests (docs/architecture/2026-09-23-office-right-panel-spec.md §3 块⑤ /
 // §4 数据契约 / §6 i18n / §7 测试计划 / §8 P4 行), module-layer only (no Electron).
 //
 // Covers:

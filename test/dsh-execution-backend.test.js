@@ -2,7 +2,7 @@
 
 // test/dsh-execution-backend.test.js — 阶段 5：DeepSeek dsh 执行后端适配骨架。
 //
-// 契约：docs/specs/WORKER-EXECUTION-CONTRACT-v0.md §9
+// 契约：docs/architecture/WORKER-EXECUTION-CONTRACT-v0.md §9
 // 盘点：docs/research/DSH-EXECUTION-BACKEND-COMPAT-2026-10.md
 //
 // 本文件**完全离线**：不启动 Harness、不发网络请求、不读文件系统（除读源码做

@@ -1,7 +1,7 @@
 'use strict';
 
 // test/office-right-panel-p3.test.js — P3 待你处理收件箱 contract tests for the
-// office right-panel rework (docs/strategy/2026-09-23-office-right-panel-spec.md
+// office right-panel rework (docs/architecture/2026-09-23-office-right-panel-spec.md
 // §3 块③ / §4 数据契约 detailRef / §5 审批危险分级 / §6 i18n / §7 测试计划 /
 // §8 P3 行), cross-checked against 2026-09-23-approval-ux-cross-tool.md
 // (审批期间阻塞输入框、权限请求不设超时、模态带撤销说明).

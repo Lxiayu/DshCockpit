@@ -1,6 +1,6 @@
 // test/runtime-mux.test.js — the 0.1.5 /api/remote.mux client contract.
 // Fixture: a local http + ws server speaking the real wire shapes from
-// docs/strategy/2026-09-22-harness-upgrade-compat-plan.md §1.5/§9. No real
+// docs/archive/strategy/2026-09-22-harness-upgrade-compat-plan.md §1.5/§9. No real
 // harness is contacted.
 'use strict';
 

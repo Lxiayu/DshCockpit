@@ -5,7 +5,7 @@
 // 纯 CommonJS、**无状态纯函数**：零依赖（只有 team-schema 的纯词表与 sha256），
 // 无 Electron / DOM / Pixi / fs / 网络 / 时钟读取 / office 模块 import。
 //
-// 契约：docs/specs/TEAM-RUNTIME-CONTRACT-v0.md §13
+// 契约：docs/architecture/TEAM-RUNTIME-CONTRACT-v0.md §13
 //
 // 职责边界（Team 契约 §10 / §13.1）：
 //   - Team Runtime 是**唯一事实作者**。本模块只做"Team fact → 白名单 office 事实"的

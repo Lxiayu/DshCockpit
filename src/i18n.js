@@ -172,7 +172,7 @@ const STRINGS = {
     'office.settings.privacyFull': '完整：保留任务文本（密钥仍永不保存）',
     'office.settings.saved': '办公室设置已保存，将在下一个行为决策点生效',
     'office.settings.invalid': '办公室设置无效，请检查取值范围',
-    // 右栏改版（docs/strategy/2026-09-23-office-right-panel-spec.md §6）：
+    // 右栏改版（docs/architecture/2026-09-23-office-right-panel-spec.md §6）：
     // 用量块 / 待你处理 / 员工当前工具短语 / 时间线 / 同步圆点。中英同表。
     'office.usage.today': '今日用量',
     'office.usage.spent': '已花费',
@@ -744,7 +744,7 @@ const STRINGS = {
     'office.settings.privacyFull': 'Full: keeps task text (secrets are still never stored)',
     'office.settings.saved': 'Office settings saved; they take effect at the next behavior decision point',
     'office.settings.invalid': 'Invalid office settings; please check the value ranges',
-    // 右栏改版（docs/strategy/2026-09-23-office-right-panel-spec.md §6）：
+    // 右栏改版（docs/architecture/2026-09-23-office-right-panel-spec.md §6）：
     // 用量块 / 待你处理 / 员工当前工具短语 / 时间线 / 同步圆点。中英同表。
     'office.usage.today': "Today's usage",
     'office.usage.spent': 'Spent',

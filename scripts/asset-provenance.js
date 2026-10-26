@@ -11,7 +11,7 @@
 //   / workbench normalizer）→ 发布（action-publisher + provenance 台账）→
 //   在盘校验（sha256 + validateCharacterPack + 引用完整性）。
 //
-// 复用而非重建（与 docs/strategy/2026-09-22-assets-in-use.md 分工）：
+// 复用而非重建（与 docs/archive/strategy/2026-09-22-assets-in-use.md 分工）：
 //   - 在用判定/权威引用表 = 该文档 + animations.json / anchors.json /
 //     src/office/layout-assets.js —— 本 CLI 不另立清单，只**追加链信息**；
 //   - 发布台账 = content/characters/whale-girl/provenance/*.json（只追加）；
@@ -39,7 +39,7 @@ const PACK_ROOT = path.join(ROOT, 'resources', 'characters', 'deepseek-default')
 const CHARACTERS_ROOT = path.join(ROOT, 'resources', 'characters');
 const CONTENT_ROOT = path.join(ROOT, 'content', 'characters', 'whale-girl');
 const OFFICE_ROOT = path.join(ROOT, 'resources', 'office');
-const INDEX_OUT = path.join(ROOT, 'docs', 'strategy', '2026-09-26-asset-provenance-index.json');
+const INDEX_OUT = path.join(ROOT, 'docs', 'quality', '2026-09-26-asset-provenance-index.json');
 
 // ---------------------------------------------------------------------------
 // 已知"链断点"登记（2026-09-26 盘点；每条都给找回锚点，运行时复核）
@@ -467,7 +467,7 @@ function buildIndex() {
     kind: 'asset-provenance-index',
     generatedAt: new Date().toISOString(),
     repo: 'DshCockpit（主仓）',
-    divisionOfLabor: '在用清单/孤儿判定见 docs/strategy/2026-09-22-assets-in-use.md；本索引只记录来源链与校验方法，不重复在用判定',
+    divisionOfLabor: '在用清单/孤儿判定见 docs/archive/strategy/2026-09-22-assets-in-use.md；本索引只记录来源链与校验方法，不重复在用判定',
     counts: {
       characterActions: entries.filter((e) => e.kind === 'character-action').length,
       officeTexturesActive: entries.filter((e) => e.kind === 'office-texture' && !e.archived).length,

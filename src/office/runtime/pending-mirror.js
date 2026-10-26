@@ -1,7 +1,7 @@
 'use strict';
 
 // src/office/runtime/pending-mirror.js — pre-module pending mirror (P1 data
-// pipeline, docs/strategy/2026-09-23-office-right-panel-spec.md §4).
+// pipeline, docs/architecture/2026-09-23-office-right-panel-spec.md §4).
 //
 // The office module is created lazily (the first time the office view opens),
 // so runtime waterfall requests (approval/request, user-questions/request) can

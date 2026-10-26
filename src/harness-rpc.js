@@ -276,7 +276,7 @@ module.exports = {
 
 
 // ---------------------------------------------------------------------------
-// Wire-level RPC client: dual protocol (plan §4.2, docs/strategy/
+// Wire-level RPC client: dual protocol (plan §4.2, docs/archive/strategy/
 // 2026-09-22-harness-upgrade-compat-plan.md §1.4/§4.2).
 //
 // 0.1.1 (protocol 'legacy', the default): POST /api/<dot method> with a flat

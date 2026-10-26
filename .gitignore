@@ -5,7 +5,6 @@ out/
 .DS_Store
 .trial/
 .superpowers/
-docs/
 vendor/runtime/
 vendor/compat/
 vendor/.archive/
@@ -24,9 +23,10 @@ studio/build/
 studio/content/
 content/incoming/
 .mimosa/
-# 注：docs/ 在本仓库整体忽略（既有约定）；office 测试实际读取的
-# docs/specs|research|superpowers 少数文件用 git add -f 强制纳入，
-# 与 docs/compat/** 的处理方式一致。
+# 文档（2026-10-27 重构）：活跃文档入库，docs/archive/ 保持本地。
+# 旧的"docs/ 整体忽略 + git add -f 少数文件"约定已废弃：没有索引的知识
+# 对人和 agent 都等于不存在。结构由 test/docs-index.test.js 机械校验。
+docs/archive/
 
 # S1 开发目录收编（2026-10-16）：s1 的素材树、证据截图与保险箱目录整体
 # 落到本仓工作树，但一律不入库——本仓是公开仓，且这些内容不进发行包

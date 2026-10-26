@@ -22,7 +22,7 @@
 // vocabulary (userData, window title, stdout tokens, evidence modes) so the
 // studio entry (studio/main.js) can share the exact same surface.
 //
-// Boundaries this launcher enforces (docs/notes/office-workbench-m0.md §3):
+// Boundaries this launcher enforces (docs/architecture/office-workbench-m0.md §3):
 // - ISOLATED userData: .workbench-data/ in the repo — the real user profile
 //   AND .office-editor-data/ are never read or written.
 // - The workbench WRITES only content/build/** (gallery, reports) and

@@ -2,7 +2,7 @@
 
 // test/team-execution-fake.test.js — 阶段 2/3/4：FakeExecutor 纵向切片 + Team 调度接入。
 //
-// 契约：docs/specs/WORKER-EXECUTION-CONTRACT-v0.md §6/§7/§8
+// 契约：docs/architecture/WORKER-EXECUTION-CONTRACT-v0.md §6/§7/§8
 //
 // **本文件完全不需要 Office**（任务书 §6.4 的第一组）：这里只创建
 //   Team Runtime + FakeExecutor + TeamExecutionController

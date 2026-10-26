@@ -3,7 +3,7 @@
 // M4.1h — 巡游 / 休息区 (wander + break area) contracts.
 //
 // The user-facing口径 implemented here (see
-// docs/strategy/2026-09-24-office-wander-and-restarea-assessment.md §已实施):
+// docs/archive/strategy/2026-09-24-office-wander-and-restarea-assessment.md §已实施):
 //  1. while a whale-girl is in the ROAMING state, the share of time she spends
 //     in the left HALF of the scene must land inside 40%..50%
 //  2. the break area is the furniture-band strip of the left wing; resting does

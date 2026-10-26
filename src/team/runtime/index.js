@@ -6,14 +6,14 @@
 // 边界（契约 §10）：Team Runtime 是**无 UI、纯 Node** 的独立层 —— 不 import
 // office-module、不写 office 状态、不使用 Electron/DOM/Pixi/fs/网络/LLM。
 //
-// 契约：docs/specs/TEAM-RUNTIME-CONTRACT-v0.md
+// 契约：docs/architecture/TEAM-RUNTIME-CONTRACT-v0.md
 
 const schema = require('./team-schema.js');
 const runtime = require('./team-runtime.js');
 const officeAdapter = require('./team-office-adapter.js');
 const officeBridge = require('./team-office-bridge.js');
 // v0.6（WP5）：team-office-demo.js / team-executor-demo.js 已归档到
-// archive/team-demos/（真实入口覆盖其用途；见 docs/specs/HARNESS-V0.6-PLAN）。
+// archive/team-demos/（真实入口覆盖其用途；见 docs/plans/completed/HARNESS-V0.6-PLAN-2026-10-25.md）。
 const executionSchema = require('./execution-schema.js');
 const executionPort = require('./execution-port.js');
 const fakeExecutor = require('./fake-executor.js');

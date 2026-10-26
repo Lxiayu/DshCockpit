@@ -1,7 +1,7 @@
 'use strict';
 
 // test/office-right-panel-p2.test.js — P2 structure rework contract tests
-// for the office right-panel rework (docs/strategy/
+// for the office right-panel rework (docs/architecture/
 // 2026-09-23-office-right-panel-spec.md §3 信息架构 / §4 数据契约 / §7 测试
 // 计划 / §8 P2 行).
 //

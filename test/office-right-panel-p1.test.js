@@ -1,7 +1,7 @@
 'use strict';
 
 // test/office-right-panel-p1.test.js — P1 data pipeline contract tests for the
-// office right-panel rework (docs/strategy/2026-09-23-office-right-panel-spec.md
+// office right-panel rework (docs/architecture/2026-09-23-office-right-panel-spec.md
 // §4 数据契约 / §5 审批危险分级 / §7 测试计划 / §8 P1 行).
 //
 // Covers, module-layer only (no Electron):

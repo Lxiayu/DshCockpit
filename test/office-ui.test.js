@@ -1231,7 +1231,7 @@ test('E4 office page consumes the catalog draft widths (no local copy)', () => {
 // Task M0 — the Office Workbench (tool surface): boundary enforcement.
 // The workbench is a DEV TOOL: it may import runtime code, but the PRODUCT
 // entry points (src/main.js, src/office/office.html) must never reference
-// src/workbench/** or content/** (docs/notes/office-workbench-m0.md §2.4).
+// src/workbench/** or content/** (docs/architecture/office-workbench-m0.md §2.4).
 // ---------------------------------------------------------------------------
 
 test('M0 boundary: the product entry dependency graph never references src/workbench/** or content/**', () => {

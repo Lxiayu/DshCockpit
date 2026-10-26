@@ -518,7 +518,7 @@ capability() → { adapterVersion, runtimeVersion, supports:{…}, terminalEvide
 | # | 冲突 | 判定 | 处置 |
 |---|---|---|---|
 | C1 | 任务书要求阅读仓库根 `AGENTS.md`，但**根目录不存在** `AGENTS.md`（也无 `CLAUDE.md`）。仅 `studio/AGENTS.md` 存在，属开发期创作工具、不在产品范围 | 文档缺口 | 记录；本契约以代码为唯一事实来源。建议 v1 补一份根 `AGENTS.md` 或明确"以 SPEC-00..09 + 本契约为准" |
-| C2 | `docs/superpowers/specs/2026-08-30-office-spec-00-boundaries.md:27-37` 冻结的目录布局（`src/office/ui/`、`test/office/`、`scripts/office-assets/`、`scripts/office-probes/`）与现状不符：页面/preload/html/css 直接位于 `src/office/`，office 测试是扁平 `test/office-*.test.js`，脚本目录已内化（见 `test/office-packaging-boundary.test.js` 的 P5 说明） | **superseded**（该布局段） | 标记为历史布局；本契约按**实际**布局冻结。SPEC-00 的状态词汇、来源契约、变更顺序仍然有效 |
+| C2 | `docs/architecture/2026-08-30-office-spec-00-boundaries.md:27-37` 冻结的目录布局（`src/office/ui/`、`test/office/`、`scripts/office-assets/`、`scripts/office-probes/`）与现状不符：页面/preload/html/css 直接位于 `src/office/`，office 测试是扁平 `test/office-*.test.js`，脚本目录已内化（见 `test/office-packaging-boundary.test.js` 的 P5 说明） | **superseded**（该布局段） | 标记为历史布局；本契约按**实际**布局冻结。SPEC-00 的状态词汇、来源契约、变更顺序仍然有效 |
 | C3 | SPEC-05 正文只列 `250/500/1000ms`，实现是 `250/500/1000/2000/4000`（封顶 5000，最多 5 次） | 散文不精确，非契约冲突（SPEC 同时写了"封顶 5s""最多 5 次"） | 本契约以实现的冻结时间线为准 |
 | C4 | 研究文档的 `TurnEndReasonMap` 为 `completed/aborted/blocked/error/max-tokens/interrupted`；实现额外接受 `failed` 与 `cancelled`，且 `max-tokens` → `attention`（不是 failed） | 实现是超集且降级更保守 | 记录为**有意**：未知/未列原因一律降级 `attention`，绝不猜 failed |
 | C5 | 研究文档称 `agent/status` 是原生事件；实现里 0.1.5 journal 已无该事件，`turn/start` 由壳翻译成 `agent/status{running}` | 版本差异，已被壳吸收 | 记录：adapter 词表保留 0.1.x 形状，翻译层在 `main.js` |
@@ -530,7 +530,7 @@ capability() → { adapterVersion, runtimeVersion, supports:{…}, terminalEvide
 | **C11** | `runtime/cancelled` 的 evidence 被拼成 `turn/end:turn/end:<reason>`（adapter 的 fact 已自带前缀，组合根又加一次） | 输出污染（`lastResult.reason` / `binding.lastEvidence`） | ✅ **已修复**（收尾阶段 P2）：模块原样消费 adapter 的来源限定 evidence；所有权规则见 §10.1 |
 | C12 | `office-module.js` 的 `runsByProxy` 只写不读（proxy → childSession 的映射从未被消费，也不随 `destroy()` 清理） | 死状态 + 无界增长 | ✅ **已修复**（2026-10-18 收尾）：静态确认全仓仅"声明 + 1 处写入、0 处读取、不暴露、无测试引用"后**删除**；子会话身份的权威反查只由 `registry.childSessionIdForRunId()` 承担（不再有两个映射表都声称负责身份关联） |
 
-**无冲突的确认项**：`FEATURES.md` 声明的 1514 项测试与实测一致（1514 pass / 0 fail）；`office:*` 通道恰好 8 个；快照 schemaVersion 1；四个常驻 + 单协作者；`eventId`/`sessionEpoch` 从未被任何活跃文档声称为 Harness 原生。
+**无冲突的确认项**（审计当时口径，2026-10-22；测试总数此后增长）：`FEATURES.md` 当时声明的 1514 项测试与实测一致（1514 pass / 0 fail）；`office:*` 通道恰好 8 个；快照 schemaVersion 1；四个常驻 + 单协作者；`eventId`/`sessionEpoch` 从未被任何活跃文档声称为 Harness 原生。
 
 ---
 

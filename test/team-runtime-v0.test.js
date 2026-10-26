@@ -2,7 +2,7 @@
 
 // test/team-runtime-v0.test.js — Team Runtime v0 headless 测试。
 //
-// 契约：docs/specs/TEAM-RUNTIME-CONTRACT-v0.md
+// 契约：docs/architecture/TEAM-RUNTIME-CONTRACT-v0.md
 // 调研依据：docs/research/TEAM-RUNTIME-OSS-RESEARCH-2026-10.md
 //
 // 覆盖（任务书 Phase D 的 13 项）：

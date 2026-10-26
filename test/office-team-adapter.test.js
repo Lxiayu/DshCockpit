@@ -2,7 +2,7 @@
 
 // test/office-team-adapter.test.js — Team → Office 白名单映射器（headless）。
 //
-// 契约：docs/specs/TEAM-RUNTIME-CONTRACT-v0.md §13
+// 契约：docs/architecture/TEAM-RUNTIME-CONTRACT-v0.md §13
 //
 // 本文件只测**纯映射器**（`src/team/runtime/team-office-adapter.js`）：无 office、
 // 无 Electron/DOM/Pixi/fs/网络、无时钟读取。adapter 是无状态纯函数，因此 replay /

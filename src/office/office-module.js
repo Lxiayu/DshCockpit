@@ -14,7 +14,7 @@
 //   Harness and never receive session IDs, prompts, tool arguments or raw
 //   errors. The snapshot is whitelist-built AND passed through the shared
 //   privacy redactor as a safety net.
-// - P1 exception (authorized by docs/strategy/2026-09-23-office-right-panel-
+// - P1 exception (authorized by docs/architecture/2026-09-23-office-right-panel-
 //   spec.md §4): the snapshot carries an AGGREGATE `usage` block (today's
 //   token counts + money estimate, assembled by main.js from the shell's own
 //   caches) and a `pending` list of approval/question requests. Neither
@@ -69,7 +69,7 @@ const { createOfficeLayout } = require('./runtime/office-layout.js');
 const { resolveRuntimeLayout } = require('./runtime/office-layout-compiler.js');
 const { LAYOUT_ASSETS, DRAFT_WIDTHS, CHARACTER_FOOT_RATIO } = require('./layout-assets.js');
 const { SETTINGS_BOUNDS: PERSISTED_SETTINGS_BOUNDS } = require('./runtime/office-persistence.js');
-// P1 data pipeline (docs/strategy/2026-09-23-office-right-panel-spec.md §4/§5):
+// P1 data pipeline (docs/architecture/2026-09-23-office-right-panel-spec.md §4/§5):
 // the approval risk table and the tool phrase vocabulary live beside the other
 // pure office runtime modules so the panel, the pending cards and main.js
 // share one implementation.
@@ -2112,7 +2112,7 @@ function createOfficeModule(options = {}) {
 
   // ---- Team-to-Office 窄入口（第二阶段第 5 项） --------------------------------
   //
-  // 契约：docs/specs/TEAM-RUNTIME-CONTRACT-v0.md §13
+  // 契约：docs/architecture/TEAM-RUNTIME-CONTRACT-v0.md §13
   //
   // 这个入口只接受 **Team-to-Office adapter 已经映射好的白名单事实**。它：
   //   - **不**读 label / prompt / 任务正文（没有任何相关字段）；

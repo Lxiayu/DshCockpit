@@ -3,7 +3,7 @@
 // src/office/layout-schema.js — schema-v1 draft validation (pure module).
 //
 // P5/B-1 (2026-09-23): the production-required slice of the layout EDITOR
-// core moved here (docs/strategy/2026-09-23-p5-deletion-inventory.md §3).
+// core moved here (docs/archive/strategy/2026-09-23-p5-deletion-inventory.md §3).
 // The production boot chain (office.html ->
 // office-boot.resolveProductionLayoutDraft, the saved > bundled layout
 // priority gate) only ever needed this stateless validator — never the

@@ -28,16 +28,16 @@ function activeText(doc) {
   return lines.join('\n');
 }
 
-const discussion = readDoc('docs/specs/OFFICE-DESIGN-DISCUSSION.md');
+const discussion = readDoc('docs/architecture/OFFICE-DESIGN-DISCUSSION.md');
 const research = readDoc('docs/research/HARNESS-RUNTIME-EVIDENCE-2026-08.md');
 const plan = readDoc(
-  'docs/superpowers/plans/2026-08-30-virtual-office-runtime-implementation.md'
+  'docs/plans/completed/2026-08-30-virtual-office-runtime-implementation.md'
 );
 const spec00 = readDoc(
-  'docs/superpowers/specs/2026-08-30-office-spec-00-boundaries.md'
+  'docs/architecture/2026-08-30-office-spec-00-boundaries.md'
 );
 const specIndex = readDoc(
-  'docs/superpowers/specs/2026-08-30-office-development-spec-index.md'
+  'docs/architecture/2026-08-30-office-development-spec-index.md'
 );
 
 const activeDiscussion = activeText(discussion);

@@ -1,5 +1,5 @@
 // test/runtime-auth.test.js — 共享 runtime 鉴权（token URL → Cookie）契约。
-// 依据 docs/strategy/2026-09-22-harness-upgrade-compat-plan.md §1.3 的实测：
+// 依据 docs/archive/strategy/2026-09-22-harness-upgrade-compat-plan.md §1.3 的实测：
 //   GET <authUrl> → 303 + Set-Cookie: dsh-auth-<随机前缀>=<签名>；裸 / 一律 401。
 'use strict';
 

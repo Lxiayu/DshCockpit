@@ -6,7 +6,7 @@
 // filesystem, no network. The schema-v1 validation rules (parseDraft /
 // validateDraftSchema / ASSET_BY_ID) live in layout-schema.js — the single
 // source of truth shared with the production boot chain (P5/B-1 extraction,
-// docs/strategy/2026-09-23-p5-deletion-inventory.md §3); this file only adds
+// docs/archive/strategy/2026-09-23-p5-deletion-inventory.md §3); this file only adds
 // the editing state machine on top of them. Import is atomic: any validation
 // failure leaves the current draft, selection and undo/redo history
 // untouched.

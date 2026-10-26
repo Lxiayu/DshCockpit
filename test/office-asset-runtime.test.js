@@ -572,7 +572,7 @@ const WORKING_FRAME_SOURCES = [
 ];
 
 test('working frame inventory classifies the four tracked sources as present-unconnected', () => {
-  // 依赖 s1 私有树 photo/ / docs/notes/，主仓不迁移：源图缺失时整条跳过（视为通过）。
+  // 依赖 s1 私有树 photo/，主仓不迁移：源图缺失时整条跳过（视为通过）。
   if (!fs.existsSync(path.join(__dirname, '..', 'photo', 'output_nobg'))) return;
   const stdout = execFileSync('python3', [WORKING_FRAME_SCRIPT, '--inventory'], { encoding: 'utf8' });
   const inventory = JSON.parse(stdout);
@@ -610,7 +610,7 @@ test('the committed validation report records geometry-rejected verdicts without
   assert.deepEqual(derived, [], 'rejected frames never produce derived files');
   // provenance: source hashes in the report match the immutable sources
   const { createHash } = require('node:crypto');
-  // 依赖 s1 私有树 photo/ / docs/notes/，主仓不迁移：源图缺失时只跳过哈希比对（报告本体断言保留）。
+  // 依赖 s1 私有树 photo/，主仓不迁移：源图缺失时只跳过哈希比对（报告本体断言保留）。
   if (fs.existsSync(path.join(__dirname, '..', 'photo', 'output_nobg'))) {
     for (const frame of report.frames) {
       const disk = fs.readFileSync(path.join(__dirname, '..', 'photo', 'output_nobg', frame.file));
@@ -778,9 +778,10 @@ test('E2e catalog: every asset PNG decodes with positive width/height and an alp
 });
 
 test('E2e doc contract: the flat-asset 接入规范 stays in sync with the catalog reality', () => {
-  // 依赖 s1 私有树 photo/ / docs/notes/，主仓不迁移：文档缺失时整条跳过（视为通过）。
-  if (!fs.existsSync(path.join(__dirname, '..', 'docs', 'notes', 'office-editor.md'))) return;
-  const doc = fs.readFileSync(path.join(__dirname, '..', 'docs', 'notes', 'office-editor.md'), 'utf8');
+  // 规范文档已入库（docs/architecture/office-asset-naming.md），因此不再跳过：缺失即红。
+  const specPath = path.join(__dirname, '..', 'docs', 'architecture', 'office-asset-naming.md');
+  assert.ok(fs.existsSync(specPath), 'the asset-naming spec must be tracked (a skipped gate is a dead gate)');
+  const doc = fs.readFileSync(specPath, 'utf8');
   // naming + directory rules the doc promises
   assert.match(doc, /prop-<name>\.png/, 'the doc declares the single-image naming rule');
   assert.match(doc, /resources\/office\//, 'the doc points at the managed resource directory');
@@ -835,7 +836,7 @@ test('E3a catalog: the three flat pilot entries are registered with production f
     const diskPath = path.join(__dirname, '..', 'resources', 'office', 'flat', asset.src.slice('./office-assets/flat/'.length));
     assert.equal(existsSync(diskPath), true, `${id} exists on disk: ${diskPath}`);
     // the copy is byte-identical to the photo/ source (no image processing)
-    // 依赖 s1 私有树 photo/ / docs/notes/，主仓不迁移：源图缺失时只跳过逐字节比对（catalog 本体断言保留）。
+    // 依赖 s1 私有树 photo/，主仓不迁移：源图缺失时只跳过逐字节比对（catalog 本体断言保留）。
     const sourcePath = path.join(__dirname, '..', 'photo', asset.src.slice('./office-assets/flat/'.length));
     if (existsSync(sourcePath)) {
       assert.equal(existsSync(sourcePath), true, `photo/ source ${sourcePath} is untouched`);
@@ -876,9 +877,9 @@ test('E3a catalog: the three flat pilot entries are registered with production f
 });
 
 test('E3a doc contract: the flat/ namespace rule in the 接入规范 matches the catalog', () => {
-  // 依赖 s1 私有树 photo/ / docs/notes/，主仓不迁移：文档缺失时整条跳过（视为通过）。
-  if (!fs.existsSync(path.join(__dirname, '..', 'docs', 'notes', 'office-editor.md'))) return;
-  const doc = fs.readFileSync(path.join(__dirname, '..', 'docs', 'notes', 'office-editor.md'), 'utf8');
+  const specPath = path.join(__dirname, '..', 'docs', 'architecture', 'office-asset-naming.md');
+  assert.ok(fs.existsSync(specPath), 'the asset-naming spec must be tracked (a skipped gate is a dead gate)');
+  const doc = fs.readFileSync(specPath, 'utf8');
   assert.match(doc, /resources\/office\/flat\//, 'the doc declares the flat/ namespace directory');
   assert.match(doc, /flat-desk/, 'the doc names the flat pilot ids');
   const { LAYOUT_ASSETS } = require('../src/office/layout-assets.js');

@@ -7,7 +7,7 @@
 // 目的：在不启动 Electron / DOM / Pixi 的前提下，证明现有 office runtime 的
 // 纯模块（adapter / snapshot / reducer / registry / wiring / classifier）**已经**
 // 可以作为一个无 UI、可测试、可复用的 Harness Runtime 内核被驱动，并把它的
-// 契约行为钉死。契约文本见 docs/specs/HARNESS-RUNTIME-CONTRACT-v0.md。
+// 契约行为钉死。契约文本见 docs/architecture/HARNESS-RUNTIME-CONTRACT-v0.md。
 //
 // 边界（本文件刻意不做的事）：
 //   - 不 require electron / pixi / DOM / office.html；不 require office-module.js

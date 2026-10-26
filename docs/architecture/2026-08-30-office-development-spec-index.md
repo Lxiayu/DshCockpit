@@ -2,7 +2,7 @@
 
 > 状态：Draft for implementation review。本文档是开发分册入口，不替代产品总纲或 Character Runtime 设计规格。
 >
-> 唯一依据：`总纲.md`、`docs/specs/OFFICE-DESIGN-DISCUSSION.md`、`docs/research/HARNESS-RUNTIME-EVIDENCE-2026-08.md`、`docs/superpowers/plans/2026-08-30-virtual-office-runtime-implementation.md` 及本目录下已确认的五份 Character Runtime 规格。当前所有 Office 分册均为 `Draft`，用户确认后才可改为 `Approved`。
+> 唯一依据：`docs/architecture/OFFICE-DESIGN-DISCUSSION.md`、`docs/research/HARNESS-RUNTIME-EVIDENCE-2026-08.md`、`docs/plans/completed/2026-08-30-virtual-office-runtime-implementation.md` 及本目录下已确认的五份 Character Runtime 规格。当前所有 Office 分册均为 `Draft`，用户确认后才可改为 `Approved`。
 
 ## 阅读顺序
 
@@ -79,10 +79,10 @@ SPEC-00
 ```bash
 git status --short
 git diff --name-only
-sed -n '1,260p' docs/superpowers/specs/2026-08-30-office-agent-handoff.md
-sed -n '1,260p' docs/superpowers/specs/2026-08-30-office-development-spec-index.md
-sed -n '1,420p' docs/superpowers/plans/2026-08-30-virtual-office-runtime-implementation.md
-sed -n '1,260p' docs/superpowers/specs/<assigned-spec>.md
+sed -n '1,260p' docs/archive/superpowers/specs/2026-08-30-office-agent-handoff.md
+sed -n '1,260p' docs/architecture/2026-08-30-office-development-spec-index.md
+sed -n '1,420p' docs/plans/completed/2026-08-30-virtual-office-runtime-implementation.md
+sed -n '1,260p' docs/archive/superpowers/specs/<assigned-spec>.md
 ```
 
 随后只读取 assigned SPEC 列出的代码入口和测试；不要用全文搜索结果替代前置阅读。开始编码前，在交接消息中回复 `Task / Scope / Out of scope / Gate command` 四项。

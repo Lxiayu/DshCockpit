@@ -3,7 +3,7 @@
 // src/office/runtime/index.js — Harness Runtime Kernel 聚合面（第 0 步工程任务）。
 //
 // 这个文件是 `src/office/runtime/` 的**唯一聚合入口**，也是"纯内核边界"的
-// 机器可读清单：契约文档 docs/specs/HARNESS-RUNTIME-CONTRACT-v0.md §2.3 与本
+// 机器可读清单：契约文档 docs/architecture/HARNESS-RUNTIME-CONTRACT-v0.md §2.3 与本
 // 文件必须一致，test/office-runtime-boundary.test.js 强制二者与实际目录集合
 // 相等——任何新增模块都必须显式登记，不允许"悄悄多一个文件"。
 //

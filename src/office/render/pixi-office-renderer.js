@@ -1270,7 +1270,7 @@ async function createOfficeRenderer(options) {
     // 再 clear，于是恢复出来的场景只剩占位图（家具 32 件全灰块、角色空贴图）。
     // 复现：latch 到 static → retryRendering → officeTextureCount 15→0、
     // texturedFurniture 32→0、placeholderFurniture 0→32（真壳探针，见
-    // docs/strategy/2026-09-25-v0.4.0-release-verification.md）。
+    // docs/archive/strategy/2026-09-25-v0.4.0-release-verification.md）。
     // 真正的释放点是 destroy()（视图销毁）——那里的语义不变。
     if (app) {
       // Pixi's destroy() leaves the canvas in the DOM (removeView defaults to

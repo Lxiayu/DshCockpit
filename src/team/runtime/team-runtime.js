@@ -5,7 +5,7 @@
 // 纯 CommonJS：无 Electron / DOM / Pixi / fs / 网络 / LLM / prompt 模板 / 随机数。
 // 所有时间来自注入的 clock；所有身份都是确定性派生。
 //
-// 契约：docs/specs/TEAM-RUNTIME-CONTRACT-v0.md
+// 契约：docs/architecture/TEAM-RUNTIME-CONTRACT-v0.md
 //
 // 架构立场（来自开源调研，见 docs/research/TEAM-RUNTIME-OSS-RESEARCH-2026-10.md）：
 //   - 状态 = **append-only 事实日志的纯函数折叠**（Temporal Event History /

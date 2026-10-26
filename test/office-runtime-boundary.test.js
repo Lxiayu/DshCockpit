@@ -24,7 +24,7 @@
 //   - main.js 的 0.1.5 journal → adapter 词表翻译层（无 UI 探针复刻了它，
 //     这里做源级漂移检测）。
 //
-// 契约文本：docs/specs/HARNESS-RUNTIME-CONTRACT-v0.md §2 / §17。
+// 契约文本：docs/architecture/HARNESS-RUNTIME-CONTRACT-v0.md §2 / §17。
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -160,7 +160,7 @@ test('boundary: the kernel manifest partitions src/office/runtime exactly (no si
   ].sort();
   assert.deepEqual(declared, actual,
     'src/office/runtime 的每个 .js 必须显式登记为 KERNEL_MODULES / IO_BOUNDARY_MODULES / 聚合面；'
-    + '新增模块时同步更新 src/office/runtime/index.js 与 docs/specs/HARNESS-RUNTIME-CONTRACT-v0.md §2.3');
+    + '新增模块时同步更新 src/office/runtime/index.js 与 docs/architecture/HARNESS-RUNTIME-CONTRACT-v0.md §2.3');
   // 清单自身无重复。
   assert.equal(new Set(declared).size, declared.length, '清单不得有重复条目');
 });

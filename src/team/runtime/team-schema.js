@@ -5,7 +5,7 @@
 // 纯 CommonJS：零依赖（只有纯计算的 node:crypto），无 Electron / DOM / Pixi /
 // fs / 网络 / office 模块 / LLM / 时钟读取。所有时间由调用方注入的 clock 提供。
 //
-// 契约：docs/specs/TEAM-RUNTIME-CONTRACT-v0.md
+// 契约：docs/architecture/TEAM-RUNTIME-CONTRACT-v0.md
 // 调研依据：docs/research/TEAM-RUNTIME-OSS-RESEARCH-2026-10.md
 //
 // 命名边界（契约 §1.1）：本模块**不占用** Harness 的 `team/*` 事件域。Team 事实

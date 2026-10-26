@@ -1,7 +1,7 @@
 'use strict';
 
 // test/office-ux-mustfix.test.js — 2026-09-25 UX 审查「发版前必修」7 条的回归
-// （docs/strategy/2026-09-25-ux-and-flow-review.md §③）。每条断言对应审查项：
+// （docs/archive/strategy/2026-09-25-ux-and-flow-review.md §③）。每条断言对应审查项：
 //   ① B1/G1 安慰剂按钮真接线：cancel/followup 经注入的 controlRequest seam 复用
 //     IM 已验证的 harness RPC（session/cancel、session/prompt steer）；失败与
 //     interrupt 诚实拒绝，绝不产生"取消已请求"式假反馈。

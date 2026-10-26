@@ -7,7 +7,7 @@
 // 真实 I/O 一律经**注入的 transport**；未注入时所有控制调用 fail-closed 返回
 // `EXEC_TRANSPORT_UNAVAILABLE`（诚实失败，而不是假装接通）。
 //
-// 契约：docs/specs/WORKER-EXECUTION-CONTRACT-v0.md §9
+// 契约：docs/architecture/WORKER-EXECUTION-CONTRACT-v0.md §9
 // 盘点依据：docs/research/DSH-EXECUTION-BACKEND-COMPAT-2026-10.md（每个映射项都有
 // 仓库内的源码位置，**没有一项来自推测**）。
 //

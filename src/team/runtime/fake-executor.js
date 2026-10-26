@@ -5,7 +5,7 @@
 // 纯 CommonJS：零依赖（只有 execution-schema / execution-port 两个纯同级模块），
 // 无 Electron / DOM / Pixi / fs / 网络 / LLM / office / **team-runtime**。
 //
-// 契约：docs/specs/WORKER-EXECUTION-CONTRACT-v0.md §6
+// 契约：docs/architecture/WORKER-EXECUTION-CONTRACT-v0.md §6
 //
 // 它是什么：
 //   `startRun` → 一个**确定性脚本**的执行后端；`observe` 产出 ExecutionEvent 流；

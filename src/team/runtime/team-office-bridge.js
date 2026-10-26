@@ -6,7 +6,7 @@
 // 网络 / office 模块 import。office 侧以**注入**方式给出（只有一个窄入口
 // `ingestTeamProjectionFact`），因此本模块既不知道 office 内部结构，也不会反向依赖它。
 //
-// 契约：docs/specs/TEAM-RUNTIME-CONTRACT-v0.md §13
+// 契约：docs/architecture/TEAM-RUNTIME-CONTRACT-v0.md §13
 //
 // 职责：
 //   - `pump()` 把 Team Runtime 日志里**尚未消费**的 fact 逐条经 adapter 映射后交给 office；

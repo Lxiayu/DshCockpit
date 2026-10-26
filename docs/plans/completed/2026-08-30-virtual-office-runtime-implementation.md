@@ -1,5 +1,9 @@
 # Virtual Office Character Runtime Implementation Plan
 
+> 历史记录：本文是 2026-08-30 已完成计划，文中路径与命令反映**当时**的文档结构；
+> 现行结构见 `docs/README.md`（2026-10-27 重构后）。
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 在不侵入 DeepSeek Harness、保持现有 DshCockpit 回归安全的前提下，交付一个可验证的 PixiJS 2D Character Runtime，并逐步接入四名常驻员工和一个协作者的 Virtual Office。

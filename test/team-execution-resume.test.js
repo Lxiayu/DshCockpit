@@ -2,7 +2,7 @@
 
 // test/team-execution-resume.test.js — v0.6 WP1：resume 执行侧闭环（控制器层）。
 //
-// 钉住的两个洞（2026-10-25 核实，计划 docs/specs/HARNESS-V0.6-PLAN-2026-10-25.md §2.1）：
+// 钉住的两个洞（2026-10-25 核实，计划 docs/plans/completed/HARNESS-V0.6-PLAN-2026-10-25.md §2.1）：
 //   洞 A（WP1a）：bind 阶段 attention（session-unavailable）后 sessions 无条目，
 //        controller.resume() 第一行就 EXEC_HANDLE_UNKNOWN —— "继续"是死路。
 //        v0.6：resume 对无会话的 attention = Team 先回 running，再重试执行器绑定。

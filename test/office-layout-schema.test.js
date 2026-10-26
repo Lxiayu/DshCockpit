@@ -13,7 +13,7 @@
 //     stable codes, and still degrades to the bundled draft.
 //
 // P5/B-1 (2026-09-23): the editor core left the product repo with the
-// authoring block (docs/strategy/2026-09-23-p5-deletion-inventory.md); the
+// authoring block (docs/archive/strategy/2026-09-23-p5-deletion-inventory.md); the
 // schema module it used to require is now the sole in-repo implementation,
 // consumed directly by the production boot chain.
 

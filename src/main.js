@@ -71,7 +71,7 @@ const { createQuickAskShortcutManager } = require('./quickask-shortcut');
 const { createMemoryFiles } = require('./memory-files');
 const { createPluginOpGuard, failureCode, shouldCleanupAfterFailure, summarizeOutput, inferStage, parsePnpmBlockedPackage, upsertOnlyBuiltDependencies, pickSubpackage, resolveDepKey, pruneBundles, sanitizeProfile } = require('./plugin-flow');
 const { resolveOfficeCharacterPack } = require('./office/office-pack-resolver.js');
-// P1 data pipeline (docs/strategy/2026-09-23-office-right-panel-spec.md §4):
+// P1 data pipeline (docs/architecture/2026-09-23-office-right-panel-spec.md §4):
 // the office usage block is assembled here from the shell's own caches (the
 // token-stats collect() cache, the cost snapshot and the balance monitor);
 // the office module never collects. toolNameOfJournalData is the shared M5
@@ -754,7 +754,7 @@ let eventsFeedLiveLogged = false;
 let eventsFeedFailStreak = 0;
 // 0.1.5 event surface: the mux client + its protocol tag. 'legacy' keeps the
 // 0.1.1 events.{host,mux} + /api/respond path; 'mux' routes through
-// /api/remote.mux + $events/result (docs/strategy/2026-09-22 plan §4.2).
+// /api/remote.mux + $events/result (docs/archive/strategy/2026-09-22-harness-upgrade-compat-plan.md §4.2).
 let eventsFeedProtocol = 'legacy';
 let runtimeMux = null;
 let eventsFeedSessionErrorCount = 0;
@@ -3602,7 +3602,7 @@ function checkBudget(monthCost) {
 }
 
 // ---------------------------------------------------------------------------
-// P1 office data pipeline (docs/strategy/2026-09-23-office-right-panel-spec.md
+// P1 office data pipeline (docs/architecture/2026-09-23-office-right-panel-spec.md
 // §4): inject the shell-assembled usage block into the office module, mirror
 // runtime waterfall requests into its pending list, and remove them through
 // the shared answer path. No new data collection happens here — every field
@@ -5852,7 +5852,7 @@ if (!gotLock) {
     // suspend / resume）→ window-manager.setOfficePresentationSuspended →
     // 既有 office:visibility 推送载荷的 presenting 字段。presenting=false 期间
     // 办公室渲染判据停表（锁屏节流帧不计入低帧率、恢复预算不消耗），唤醒沿
-    // 自动尝试一次有界恢复——语义见 docs/strategy/2026-09-24-office-render-latch-fix.md
+    // 自动尝试一次有界恢复——语义见 docs/archive/strategy/2026-09-24-office-render-latch-fix.md
     // 的「2026-09-25 增补」。不新增 IPC 通道（office:* 仍恰好 8 个）。
     // 平台边界：只息屏不锁屏在 Electron 公开 API 里没有可靠事件，不覆盖（探针侧
     // 用 ioreg/pmset 自判，scripts/office-soak.js presentedNow）。

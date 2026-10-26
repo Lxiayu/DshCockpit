@@ -2,7 +2,8 @@
 
 > 把 DeepSeek Harness（`dsh`）打包成 Windows / macOS 桌面应用，双击即用，不再依赖终端手动启动。
 >
-> 状态：**阶段 1 原型进行中** · 基于 `@deepseek-ai/dsh` **0.1.0-rc.6** · 2025 年勘察自本机安装产物与官方仓库文档
+> 状态：**v0.4.0 已发布；v0.5 / v0.6（Harness+Team 生产化）已完成（2026-10-26）** · 基于 `@deepseek-ai/dsh` **0.1.0-rc.6** ·
+> 产品方向草案：[`docs/product/WORK-FIRST-V0.7.md`](docs/product/WORK-FIRST-V0.7.md) · 仓库地图与开发铁律：[`AGENTS.md`](AGENTS.md)
 
 ---
 
@@ -343,6 +344,16 @@
 - [x] 性能：静态画面零重绘、诊断环去重、仿真时钟有界补步、Windows 杀软面（子进程/整目录扫描）
 - [x] 运维：崩溃诊断一键导出、素材复现链 CLI（`asset-provenance`）、上游兼容工作流改为邮件汇报
 - [x] 出包：asar 内创作块 0；内置运行时 `0.1.5-rc.2`
+
+### 阶段 8 — Harness / Team 生产化（✅ v0.5 / v0.6，2026-10）
+- [x] Team Runtime 成为 Team 事实的唯一作者（fold 内核 + 显式 Role→Seat 表 + 两层身份校验）
+- [x] 执行端口契约 + controller 唯一转换点；dsh 后端注入 transport / sessionFor，raw 身份不跨界
+- [x] v0.5：执行端口契约、9 类执行事件、artifact 槽位、终态证据由 controller 构造、办公室只做投影
+- [x] v0.6：续跑闭环（resume + 流耗尽合成 crash + journal-seq 去重）、过程可见（`execution/progress`）、
+      首帧与运行时健康解耦、快照版本化推送（静止 ≤1Hz + 1s 心跳）、demo 归档
+- [x] 文档结构重构：`docs/README.md` 唯一索引、`AGENTS.md` 仓库地图、`test/docs-index.test.js` 机械校验
+- [ ] v0.7：Work-first（WorkItem / Artifact / Evidence / Verification Runner）——方向见
+      [`docs/product/WORK-FIRST-V0.7.md`](docs/product/WORK-FIRST-V0.7.md)，待拍板
 
 ---
 

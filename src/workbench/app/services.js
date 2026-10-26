@@ -10,7 +10,7 @@
 // registration, windows, ready tokens) live in ./boot.js; the golden gallery
 // renders through real BrowserWindows and lives in ./gallery.js.
 //
-// Boundaries (docs/notes/office-workbench-m0.md §3, office-workbench-design.md §3):
+// Boundaries (docs/architecture/office-workbench-m0.md §3, office-workbench-design.md §3):
 // - content/** is the authoring tree; the tool writes only content/build/** and
 //   content/characters/** through the publish kernel.
 // - content/scenes/flat/layout.json is read-only for the preview (the

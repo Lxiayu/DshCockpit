@@ -2,7 +2,7 @@
 
 // test/worker-execution-contract.test.js — Worker Execution Contract v0 契约测试（阶段 1）。
 //
-// 契约：docs/specs/WORKER-EXECUTION-CONTRACT-v0.md
+// 契约：docs/architecture/WORKER-EXECUTION-CONTRACT-v0.md
 //
 // 覆盖（任务书 §11.1 Contract tests）：
 //   - interface shape（端口必需方法 / recover 的显式声明）

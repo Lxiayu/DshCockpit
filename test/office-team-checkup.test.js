@@ -2,7 +2,7 @@
 
 // test/office-team-checkup.test.js — Team → Office 最小事实消费闭环（组合根）。
 //
-// 契约：docs/specs/TEAM-RUNTIME-CONTRACT-v0.md §13
+// 契约：docs/architecture/TEAM-RUNTIME-CONTRACT-v0.md §13
 //
 // 目标闭环（任务书 §3）：
 //   researcher started -> working -> artifact available -> completed

@@ -2,7 +2,7 @@
 
 // test/office-team-execution.test.js — 阶段 4 组合组：FakeExecutor → Team → Office projection。
 //
-// 契约：docs/specs/WORKER-EXECUTION-CONTRACT-v0.md §8 / Team 契约 §13
+// 契约：docs/architecture/WORKER-EXECUTION-CONTRACT-v0.md §8 / Team 契约 §13
 //
 // 这一组**是唯一**允许出现 Office 的组合测试（任务书 §6.4/§11.4 要求两组分开）。
 // Team 侧的隔离组在 `test/team-execution-fake.test.js`，它结构上不 import office。

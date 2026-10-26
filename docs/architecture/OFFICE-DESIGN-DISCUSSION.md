@@ -950,7 +950,7 @@ visibleHeight = clamp(64px, sceneHeight * 0.11, 180px)
 5. **移动与资源契约**：移动速度按 `min(sceneWidth, sceneHeight)` 的比例换算，四舍五入不会改变逻辑位置；Waypoint Graph 使用版本化 JSON、显式有向/无向边、容量和带过期时间的 reservation。`manifest.json` 只提供 metadata 入口，anchors/animations 文件分别作为唯一几何和动画数据源；v1 atlas 禁止 trim/rotate。
 6. **可验证性与持久化**：Playground 默认使用 fixture graph，点击吸附到可达 waypoint；帧时长、脚底基线、移动速度、resize 误差和到达误差均有自动阈值，视觉自然度另行人工复核。持久化只保存配置、历史和带 `sessionEpoch` 的可恢复绑定快照，不保存路径、帧、聊天锁或瞬时过渡；旧代际快照不能恢复运行态。
 
-这些修订已同步到 `docs/superpowers/specs/2026-08-30-character-*.md` 与 `animation-playground-plan.md`。若本记录与旧段落冲突，以本节和对应正式规格为准。
+这些修订已同步到 `docs/archive/superpowers/specs/2026-08-30-character-*.md` 与 `animation-playground-plan.md`（历史归档）。若本记录与旧段落冲突，以本节和对应正式规格为准。
 
 ## 设计纪律
 

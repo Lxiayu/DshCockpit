@@ -19,7 +19,7 @@
 // 不证明（诚实的边界）
 //   - 对话由 RPC 发起而不是人手点击 UI；壳侧接线（follow/resync/座位/右栏）是真实路径。
 //   - 只覆盖本机平台 + 一个运行时版本；Windows 真机与高分屏另跑
-//     （docs/strategy/2026-09-24-windows-perf-audit.md 的 V1–V10）。
+//     （docs/archive/strategy/2026-09-24-windows-perf-audit.md 的 V1–V10）。
 //   - 「两类缺陷不再复发」是 N 小时无复发的回归证据，不是形式化证明。
 //
 // 隔离与清理：userData 与 DSH_HOME 都在临时目录，跑完（含失败）删除；

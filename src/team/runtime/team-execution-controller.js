@@ -5,7 +5,7 @@
 // 纯 CommonJS：零依赖（team-runtime / execution-schema / execution-port 三个纯同级模块），
 // 无 Electron / DOM / Pixi / fs / 网络 / LLM / **office**。
 //
-// 契约：docs/specs/WORKER-EXECUTION-CONTRACT-v0.md §7
+// 契约：docs/architecture/WORKER-EXECUTION-CONTRACT-v0.md §7
 //
 // 它做什么（且只做这些）：
 //   1. 从 Team state 找出**可 dispatch 的 run**（读 Team，不猜）；

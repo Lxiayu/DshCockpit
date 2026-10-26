@@ -10,7 +10,7 @@
 
 ## 前置阅读与允许范围
 
-先读 handoff、SPEC 索引、implementation plan、`总纲.md`、`docs/specs/OFFICE-DESIGN-DISCUSSION.md` 和 Harness research。Task 0 仅允许修改上述文档及 `test/office-doc-contract.test.js`；禁止修改 `src/`、`package.json`、角色资源和 Harness 接线。发现旧文档冲突时标记 `superseded` 并报告，不删除历史文件。
+先读 handoff、SPEC 索引、implementation plan、`总纲.md`、`docs/architecture/OFFICE-DESIGN-DISCUSSION.md` 和 Harness research。Task 0 仅允许修改上述文档及 `test/office-doc-contract.test.js`；禁止修改 `src/`、`package.json`、角色资源和 Harness 接线。发现旧文档冲突时标记 `superseded` 并报告，不删除历史文件。
 
 ## 产品范围冻结
 
@@ -68,7 +68,7 @@ queue: empty | queued
 1. 在 `test/office-doc-contract.test.js` 写失败断言，检查状态词汇、四员工/单协作者、2x3 布局、`office-state.v1`、feature flags、Harness unsupported 能力和来源表。
 2. 运行 `node --test test/office-doc-contract.test.js`，预期旧文档/缺契约时失败。
 3. 标记冲突段落并补齐当前词汇，不改实现文件。
-4. 再运行测试和 `git diff --check -- docs/superpowers/specs docs/superpowers/plans docs/specs`。
+4. 再运行测试和 `git diff --check -- docs/architecture docs/archive`。
 
 ## 验收、失败处理与交接报告
 

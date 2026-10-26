@@ -1,7 +1,7 @@
 // src/mcp-manager.js — MCP server panel (T1/R3, v0.3.1).
 //
 // Visual management for MCP servers configured through the DSH-native
-// `@deepseek-ai/dsh-mcp-client` plugin. Spec: docs/specs/MCP-MANAGER-SPEC.md
+// `@deepseek-ai/dsh-mcp-client` plugin. Spec: docs/architecture/MCP-MANAGER-SPEC.md
 // (v2). Pure logic lives in plain functions (patch-file surgery, validation,
 // Windows command wrapping) so tests run under plain node; createMcpManager()
 // wires them into one stateful object for the main process.

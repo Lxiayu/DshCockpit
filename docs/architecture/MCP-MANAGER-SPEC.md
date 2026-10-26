@@ -4,7 +4,7 @@
 >
 > **v2 修订说明**：对标 Claude Desktop / Claude Code / Codex CLI / VS Code 四家成熟实现后全面升级——补齐远程传输、enabled 策略、通用导入器、密钥安全存储、两层健康检查、Windows 兼容、使用量观测等 9 项差距。对标结论见 §2。
 >
-> 关联文档：[ROADMAP.md](file:///Users/xia/program/dsh/DshCockpit/ROADMAP.md) §R3 · [PREDEV-FEATURES-REPORT.md](file:///Users/xia/program/dsh/DshCockpit/docs/specs/PREDEV-FEATURES-REPORT.md) §T1
+> 关联文档：ROADMAP §R3（历史路线图，已随重构归档）· `docs/archive/strategy/PREDEV-FEATURES-REPORT.md` §T1
 
 ---
 

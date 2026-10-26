@@ -4,7 +4,7 @@
 //
 // 纯 CommonJS：零依赖，无 Electron / DOM / Pixi / fs / 网络 / office / team-runtime。
 //
-// 契约：docs/specs/WORKER-EXECUTION-CONTRACT-v0.md §5.1
+// 契约：docs/architecture/WORKER-EXECUTION-CONTRACT-v0.md §5.1
 //
 // 端口（Team Runtime 只认识这个接口，不认识任何具体后端）：
 //

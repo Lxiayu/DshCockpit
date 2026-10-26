@@ -17,7 +17,7 @@
 // read-only / danger-full-access branches remain the contract for a future
 // permission-axis projection (or a frame that carries a real tier verbatim).
 //
-// P1 data pipeline of the office right-panel spec (docs/strategy/
+// P1 data pipeline of the office right-panel spec (docs/architecture/
 // 2026-09-23-office-right-panel-spec.md §5), cross-checked against
 // 2026-09-23-approval-ux-cross-tool.md (Warp denylist / Devin Smart
 // "never auto-approved" list / Anthropic incident log — three independent

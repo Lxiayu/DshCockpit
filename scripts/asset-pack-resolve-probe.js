@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// scripts/asset-pack-resolve-probe.js — 迁移接线验证探针（docs/strategy/
+// scripts/asset-pack-resolve-probe.js — 迁移接线验证探针（docs/archive/strategy/
 // 2026-09-23-migration-wiring-verification.md §1）：生产角色包的 resolve() 覆盖面
 // ——四方向行走（b01..bNN 多帧序列）/ working-back / sleeping / idle / idle-blink /
 // idle-lunch，以及 adapter 词汇表到美术的兜底链。只读 pack 文件：零网络、零

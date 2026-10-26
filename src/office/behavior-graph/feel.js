@@ -4,7 +4,7 @@
 //
 // Parameters are borrowed from the peer project's teardown (dsh-pet, MIT code; its
 // ASSETS and prompts are explicitly off-limits — only the structure and the numbers
-// are reused, with attribution — see docs/strategy/2026-09-27-dsh-pet-teardown.md):
+// are reused, with attribution — see docs/archive/strategy/2026-09-27-dsh-pet-teardown.md):
 //
 //   squash        0.55 amplitude, 220ms, first 45% ease-in then easeOutBack
 //                 (c1 = 1.70158, overshoot capped at 1.12)
