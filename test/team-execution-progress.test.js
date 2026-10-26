@@ -243,3 +243,51 @@ test('progress V10: office ingestion validates the closed set and renders the se
   assert.equal(bad.code, 'TEAM_PHASE_UNKNOWN');
   assert.equal(seat.toolPhraseKey, 'retrieval', 'invalid phase must not clobber the current one');
 });
+
+test('fact log is identical with and without the office attached (office is only a consumer)', async () => {
+  // 移植自 office-team-executor-demo.test.js（demo fixture 归档前）—— 改用真实
+  // 链路（dsh 后端 + scripted transport）证明同一性质：办公室是投影的纯消费者，
+  // 挂不挂 office 不改变 Team 事实日志一个字节。
+  const journals = [
+    [
+      je('turn/start', {}, 1),
+      je('tool/call', { name: 'read' }, 2),
+      je('assistant/message', { content: [{ type: 'text', text: '# 笔记' }] }, 3),
+      je('turn/end', { reason: { kind: 'completed' } }, 4),
+    ],
+    [je('turn/start', {}, 1), je('turn/end', { reason: { kind: 'completed' } }, 2)],
+  ];
+  const runOnce = async (withOffice) => {
+    const transport = { follow: () => streamOf(journals[0]), cancel: async () => ({ ok: true }), describe: () => ({ transport: 'x' }) };
+    // 每次 follow 依次给不同脚本 —— 与其它测试的 scripted 模式一致。
+    let fi = 0;
+    transport.follow = () => streamOf(journals[Math.min(fi++, journals.length - 1)]);
+    const clock = { nowMs: () => T0 };
+    const runtime = team.createTeamRuntime({ clock });
+    const backend = backendModule.createDshExecutionBackend({
+      clock, transport, sessionFor: (r) => `sess-${r.role}`, phaseForTool: toolPhraseKeyOf,
+    });
+    const controller = team.createTeamExecutionController({
+      teamRuntime: runtime,
+      executor: {
+        startRun: (args) => backend.startRun(args),
+        observe: (handle) => backend.observe(handle),
+        cancel: (handle) => backend.cancel(handle),
+        unsupported: Object.freeze(['recover']),
+      },
+      clock, jobId: JOB,
+      onFact: withOffice ? () => { /* 消费者在线（投影订阅）；不产生任何回写 */ } : undefined,
+    });
+    await controller.start();
+    for (let i = 0; i < 16; i += 1) {
+      await controller.dispatchReady();
+      const step = await controller.pumpOne();
+      if (!step) break;
+    }
+    return runtime.facts();
+  };
+  const withoutOffice = await runOnce(false);
+  const withOffice = await runOnce(true);
+  assert.equal(withoutOffice.length > 4, true, 'scenario must produce a real fact log');
+  assert.deepEqual(withOffice, withoutOffice, 'the office subscription must not alter a single fact');
+});

@@ -523,26 +523,23 @@ test('fake: the whole chain completes with no office, no electron, no DOM, no ne
   }
 });
 
-test('fake: the executor and controller never require the office demo (demo is not a production input)', () => {
+test('fake: the executor and controller never require the (archived) office demo fixture', () => {
+  // v0.6（WP5）：demo fixture 已归档到 archive/team-demos/（git 忽略的本地保险箱）。
+  // 生产执行模块不得引用它 —— 这条断言在归档后仍成立（引用一个不存在的模块会让
+  // require 直接抛错，离线套件全红）。
   const strip = (source) => source
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/(^|[^:\\])\/\/[^\n]*/g, '$1 ');
   for (const name of ['fake-executor.js', 'team-execution-controller.js', 'dsh-execution-backend.js']) {
     const code = strip(fs.readFileSync(path.join(TEAM_RUNTIME_DIR, name), 'utf8'));
-    assert.equal(/team-office-demo/.test(code), false, `${name} must not require the dev demo script`);
+    assert.equal(/team-office-demo/.test(code), false, `${name} must not require the archived demo fixture`);
+    assert.equal(/team-executor-demo/.test(code), false, `${name} must not require the archived executor demo`);
   }
-  // demo 与 FakeExecutor 的机制必须不同：demo 直接调 Team 命令（applyDemoOp），
-  // FakeExecutor 只产事件。这里把"demo 有 applyDemoOp、executor 没有"钉住。
-  const demoSource = strip(fs.readFileSync(path.join(TEAM_RUNTIME_DIR, 'team-office-demo.js'), 'utf8'));
-  assert.ok(/function applyDemoOp/.test(demoSource), 'demo keeps its own direct-command fixture');
+  // FakeExecutor 自己的机制不变：只产事件，不直接调 Team 命令（没有 applyDemoOp）。
   const fakeSource = strip(fs.readFileSync(path.join(TEAM_RUNTIME_DIR, 'fake-executor.js'), 'utf8'));
   assert.equal(/applyDemoOp|DEMO_SCRIPT/.test(fakeSource), false,
-    'FakeExecutor must not reuse the demo script/ops');
+    'FakeExecutor must never reuse the archived demo script/ops');
 });
 
-test('fake: the dev demo still works unchanged (regression: this task did not repurpose it)', () => {
-  // demo 的存在与用途不变：仍是固定脚本 fixture，仍直接驱动 Team 命令。
-  assert.equal(typeof team.createTeamOfficeDemo, 'function');
-  assert.equal(Array.isArray(team.DEMO_SCRIPT_HAPPY), true);
-  assert.equal(team.DEMO_SCRIPT_HAPPY.every((op) => typeof op.op === 'string'), true);
-});
+// v0.6（WP5）：'the dev demo still works unchanged' 随 demo fixture 归档删除
+// （createTeamOfficeDemo / DEMO_SCRIPT_* 已从 index.js 表面移除）。

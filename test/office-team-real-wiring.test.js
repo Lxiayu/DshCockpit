@@ -75,13 +75,10 @@ function loadMainWiring(env = {}) {
     'getRuntimeUrl', 'createHarnessRpcWire', 'harnessRpcDeps', 'runtimeMux', 'Date',
     `${extractFunction('officeTeamRealEnabled')}
      ${extractFunction('officeTeamRealTopic')}
-     const OFFICE_TEAM_GATE_CONFLICT = ${JSON.stringify('OFFICE_TEAM_GATE_CONFLICT')};
      ${extractFunction('openTeamFollowStream')}
      ${extractFunction('startTeamRealWithTopic')}
      ${extractFunction('attachOfficeTeamReal')}
      ${extractFunction('detachOfficeTeamReal')}
-     ${extractFunction('officeTeamDemoEnabled')}
-     ${extractFunction('officeTeamExecutorDemoEnabled')}
      let officeTeamRealInstance = null;
      return {
        gate: officeTeamRealEnabled, topic: officeTeamRealTopic,
@@ -89,7 +86,6 @@ function loadMainWiring(env = {}) {
        openFollowStream: openTeamFollowStream,
        setInstance: (v) => { officeTeamRealInstance = v; },
        getInstance: () => officeTeamRealInstance,
-       demoGate: officeTeamDemoEnabled, executorDemoGate: officeTeamExecutorDemoEnabled,
      };`,
   );
   const fakePath = path;
@@ -177,37 +173,38 @@ async function driveToTerminal(real) {
 // 1. 门控（默认关闭 / 三方互斥 / 主题必填）
 // ===========================================================================
 
-test('team-real wiring: the gate is default-off and a separate env var', () => {
+test('team-real wiring: the gate is default-off; demo gates are retired (v0.6 WP5 archival)', () => {
   // 沙箱 env 为空 → 关。
   const box = loadMainWiring();
   assert.equal(box.gate(), false);
-  assert.equal(box.demoGate(), false);
-  assert.equal(box.executorDemoGate(), false);
   // main.js 源级：门名与默认关闭。
   assert.match(SRC, /function officeTeamRealEnabled\(\) \{\s*return process\.env\.DSH_DESKTOP_OFFICE_TEAM_REAL === '1';/);
-  // 三个门是三个不同的环境变量。
-  const vars = ['DSH_DESKTOP_OFFICE_TEAM_DEMO', 'DSH_DESKTOP_OFFICE_TEAM_EXECUTOR_DEMO', 'DSH_DESKTOP_OFFICE_TEAM_REAL'];
-  assert.equal(new Set(vars).size, 3);
-  for (const v of vars) assert.ok(SRC.includes(v));
+  // v0.6（WP5）：两个 demo 门已退役（fixture 归档到 archive/team-demos/，真实
+  // 入口覆盖其用途）。main.js 里不再有 demo 门/挂载函数/冲突常量/文件引用。
+  for (const retired of [
+    'DSH_DESKTOP_OFFICE_TEAM_DEMO', 'DSH_DESKTOP_OFFICE_TEAM_EXECUTOR_DEMO',
+    'function officeTeamDemoEnabled', 'function attachOfficeTeamDemo',
+    'function attachOfficeTeamExecutorDemo', 'OFFICE_TEAM_GATE_CONFLICT',
+    'team-office-demo.js', 'team-executor-demo.js',
+  ]) {
+    assert.equal(SRC.includes(retired), false, `main.js must no longer reference ${retired}`);
+  }
 });
 
-test('team-real wiring: refuses when any other Team gate is on (three-way exclusion)', () => {
-  const src = SRC;
-  const attachBlock = extractFunction('attachOfficeTeamReal');
-  assert.match(attachBlock, /if \(officeTeamDemoEnabled\(\) \|\| officeTeamExecutorDemoEnabled\(\)\) \{[\s\S]{0,220}OFFICE_TEAM_GATE_CONFLICT/);
-  // 互斥检查在委托核心装配之前（require 已搬进 startTeamRealWithTopic）。
-  const conflictAt = attachBlock.indexOf('if (officeTeamDemoEnabled() || officeTeamExecutorDemoEnabled())');
-  const coreAt = attachBlock.indexOf('startTeamRealWithTopic({');
-  assert.ok(conflictAt > -1 && coreAt > -1 && conflictAt < coreAt);
-  // 冲突分支是"return null + 记日志"，不是抛错（普通启动零影响）。
-  const conflictBlock = attachBlock.slice(conflictAt, attachBlock.indexOf('}', attachBlock.indexOf('return null;', conflictAt)));
-  assert.ok(conflictBlock.includes('return null'), 'the conflict branch must return null, not throw');
-  assert.equal(/throw\s/.test(conflictBlock), false, 'a gate conflict must not throw');
-  // executor-demo 侧也对称避让（任意两个门都不同时 attach）。
-  const execBlock = extractFunction('attachOfficeTeamExecutorDemo');
-  assert.match(execBlock, /officeTeamDemoEnabled\(\) \|\| officeTeamRealEnabled\(\)/);
-  void src;
+test('team-real wiring: the demo fixtures are archived and the real gates share one instance guard', () => {
+  // 归档结构断言：src 里不再有 demo 模块（本地 archive/team-demos/ 是 git 忽略的
+  // 保险箱）；fake-executor 保留（离线契约套件的唯一执行器）。
+  const runtimeDir = path.join(ROOT, 'src', 'team', 'runtime');
+  assert.equal(fs.existsSync(path.join(runtimeDir, 'team-office-demo.js')), false);
+  assert.equal(fs.existsSync(path.join(runtimeDir, 'team-executor-demo.js')), false);
+  assert.equal(fs.existsSync(path.join(runtimeDir, 'fake-executor.js')), true);
+  // 同一时刻一个真实 Team：单实例守卫在 startTeamRealWithTopic（env 入口与 UI 入口共享）。
+  const coreBlock = extractFunction('startTeamRealWithTopic');
+  assert.match(coreBlock, /if \(officeTeamRealInstance\) \{[\s\S]{0,160}TEAM_ALREADY_ACTIVE/);
 });
+
+// v0.6（WP5）：三方互斥测试随 demo 门退役删除 —— 上面两条测试已覆盖
+// "demo 门不存在"与"单实例守卫存在"两侧。
 
 test('team-real wiring: refuses without a user topic (U3: text comes from the user)', () => {
   const envNoTopic = Object.freeze({ DSH_DESKTOP_OFFICE_TEAM_REAL: '1' });

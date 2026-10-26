@@ -12,8 +12,8 @@ const schema = require('./team-schema.js');
 const runtime = require('./team-runtime.js');
 const officeAdapter = require('./team-office-adapter.js');
 const officeBridge = require('./team-office-bridge.js');
-const officeDemo = require('./team-office-demo.js');
-const executorDemo = require('./team-executor-demo.js');
+// v0.6（WP5）：team-office-demo.js / team-executor-demo.js 已归档到
+// archive/team-demos/（真实入口覆盖其用途；见 docs/specs/HARNESS-V0.6-PLAN）。
 const executionSchema = require('./execution-schema.js');
 const executionPort = require('./execution-port.js');
 const fakeExecutor = require('./fake-executor.js');
@@ -29,10 +29,8 @@ const TEAM_MODULES = Object.freeze([
   'execution-schema.js',
   'fake-executor.js',
   'team-execution-controller.js',
-  'team-executor-demo.js',
   'team-office-adapter.js',
   'team-office-bridge.js',
-  'team-office-demo.js',
   'team-runtime.js',
   'team-schema.js',
 ]);
@@ -49,7 +47,6 @@ module.exports = {
   runtime,
   officeAdapter,
   officeBridge,
-  officeDemo,
   executionSchema,
   executionPort,
   fakeExecutor,
@@ -61,12 +58,6 @@ module.exports = {
   // 第二阶段第 5 项：Team → Office 白名单映射与驱动桥（纯模块）
   createTeamOfficeAdapter: officeAdapter.createTeamOfficeAdapter,
   createTeamOfficeBridge: officeBridge.createTeamOfficeBridge,
-  // 开发模式体验接通（工作包 A）：固定 Team 脚本 -> bridge -> office 窄入口。
-  // 纯模块、默认由 main.js 的 DSH_DESKTOP_OFFICE_TEAM_DEMO=1 门控。
-  createTeamOfficeDemo: officeDemo.createTeamOfficeDemo,
-  DEMO_SCRIPT_HAPPY: officeDemo.DEMO_SCRIPT_HAPPY,
-  DEMO_SCRIPT_CANCEL: officeDemo.DEMO_SCRIPT_CANCEL,
-  DEMO_SCRIPT_FAILED: officeDemo.DEMO_SCRIPT_FAILED,
   // Worker Execution Contract v0：执行端口 + 确定性 FakeExecutor + 唯一窄转换层。
   EXECUTION_SCHEMA_VERSION: executionSchema.EXECUTION_SCHEMA_VERSION,
   EXECUTION_EVENT_TYPES: executionSchema.EXECUTION_EVENT_TYPES,

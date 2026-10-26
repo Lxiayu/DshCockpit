@@ -83,11 +83,8 @@ function loadWiring(env = {}, office = null) {
     'require', 'process', 'path', 'app', 'officeModuleInstance',
     'getRuntimeUrl', 'createHarnessRpcWire', 'harnessRpcDeps', 'runtimeMux', 'Date',
     `${extractFunction('officeTeamRealEnabled')}
-     ${extractFunction('officeTeamExecutorDemoEnabled')}
-     ${extractFunction('officeTeamDemoEnabled')}
      ${extractFunction('officeTeamRealTopic')}
      ${extractFunction('officeTeamUiEnabled')}
-     const OFFICE_TEAM_GATE_CONFLICT = ${JSON.stringify('OFFICE_TEAM_GATE_CONFLICT')};
      const OFFICE_TEAM_UI_TOPIC_MAX = 2000;
      ${extractFunction('officeTeamRealStatus')}
      ${extractFunction('validateShellTeamPayload')}
@@ -96,7 +93,6 @@ function loadWiring(env = {}, office = null) {
      let officeTeamRealInstance = null;
      return {
        gateReal: officeTeamRealEnabled, gateUi: officeTeamUiEnabled,
-       gateDemo: officeTeamDemoEnabled, gateExec: officeTeamExecutorDemoEnabled,
        envTopic: officeTeamRealTopic,
        status: officeTeamRealStatus, validate: validateShellTeamPayload,
        start: startTeamRealWithTopic, register: registerShellTeamIpc,
@@ -202,11 +198,13 @@ test('team-ui: the UI gate is default-off and independent of the env REAL gate',
   assert.equal(box.gateUi(), false);
   assert.equal(box.gateReal(), false);
   assert.match(SRC, /function officeTeamUiEnabled\(\) \{\s*return process\.env\.DSH_DESKTOP_OFFICE_TEAM_UI === '1';/);
-  // 第四个门是独立 env 变量。
-  const vars = ['DSH_DESKTOP_OFFICE_TEAM_DEMO', 'DSH_DESKTOP_OFFICE_TEAM_EXECUTOR_DEMO',
-    'DSH_DESKTOP_OFFICE_TEAM_REAL', 'DSH_DESKTOP_OFFICE_TEAM_UI'];
-  assert.equal(new Set(vars).size, 4);
+  // v0.6（WP5）：两个 demo 门已退役（fixture 归档），现存两个独立 env 变量。
+  const vars = ['DSH_DESKTOP_OFFICE_TEAM_REAL', 'DSH_DESKTOP_OFFICE_TEAM_UI'];
+  assert.equal(new Set(vars).size, 2);
   for (const v of vars) assert.ok(SRC.includes(v));
+  for (const retired of ['DSH_DESKTOP_OFFICE_TEAM_DEMO', 'DSH_DESKTOP_OFFICE_TEAM_EXECUTOR_DEMO']) {
+    assert.equal(SRC.includes(retired), false, `${retired} must be retired with the archived fixtures`);
+  }
 });
 
 test('team-ui: office-module.js is untouched by this feature (frozen requires + ceiling)', () => {

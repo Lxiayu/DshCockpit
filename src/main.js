@@ -129,13 +129,8 @@ if (process.env.DSH_DESKTOP_USER_DATA) {
 const OFFICE_RUNTIME_ENABLED = true;
 const OFFICE_RUNTIME_SCHEME = 'office-runtime';
 let officeModuleInstance = null;
-// 工作包 A：开发模式 Team 演示实例（仅当 DSH_DESKTOP_OFFICE_TEAM_DEMO=1 时非 null）。
-let officeTeamDemoInstance = null;
-// 工作包 A（Harness v0.3）：开发模式 **FakeExecutor 执行链路** 实例
-// （仅当 DSH_DESKTOP_OFFICE_TEAM_EXECUTOR_DEMO=1 时非 null；与上面的门互斥）。
-let officeTeamExecutorDemoInstance = null;
-// Harness v0.4（阶段1）：**真实 dsh 执行链路** 实例（仅当 DSH_DESKTOP_OFFICE_TEAM_REAL=1
-// 时非 null；与两个开发 fixture 门三方互斥）。
+// Harness v0.4（阶段1）：**真实 dsh 执行链路** 实例（env REAL 与 UI 入口共享；
+// 同一时刻只允许一个真实 Team —— 单实例守卫在 startTeamRealWithTopic）。
 let officeTeamRealInstance = null;
 let officeWindowManager = null; // late-bound: set right after createWindowManager()
 function getWindowManager() { return officeWindowManager; }
@@ -206,135 +201,14 @@ function ensureOfficeStateStore() {
 function officeStateSettingsOrNull() {
   try { return ensureOfficeStateStore().get().settings; } catch { return null; }
 }
-// 工作包 A（2026-10-22）：开发模式 Team→Office 体验接通开关。**默认关闭**：
-// 不设置时 `createTeamOfficeDemo` 根本不会被 require，普通启动路径零影响。
-// 它只驱动一个固定 Team 脚本（不连真实 Harness、不伪造 session、不读用户 prompt、
-// 不调用外部模型、不把 Team 事实写回 Harness）。
-function officeTeamDemoEnabled() {
-  return process.env.DSH_DESKTOP_OFFICE_TEAM_DEMO === '1';
-}
-
-/**
- * 把**开发模式** Team 演示接到办公室组合根上（纯接线，见 team-office-demo.js）。
- *
- * 统一表述（与契约 §13 一致）：team-office-demo 是**开发期固定脚本 fixture**。它用
- * Office logical clock 作为演示时间来源，用一个独立的 unref pump 定时器检查到期脚本
- * 操作。生产 Team **不**依赖 Office 是否打开、是否可见、renderer 是否运行或 Office
- * 是否 tick；真实生产接入必须来自真实 Worker / Harness execution evidence。
- *
- * 它不新增 IPC、不改 office-module 的既有行为，也**不**连真实 Harness、不伪造
- * session、不读用户 prompt、不调用外部模型、不把 Team 事实写回 Harness。
- */
-function attachOfficeTeamDemo(office, log) {
-  if (!officeTeamDemoEnabled()) return null;
-  let demo = null;
-  try {
-    const { createTeamOfficeDemo } = require('./team/runtime/team-office-demo.js');
-    demo = createTeamOfficeDemo({ office, log });
-    const attached = demo.attach();
-    if (!attached || attached.ok !== true) {
-      log(`[office] team demo attach refused: ${attached && attached.code}`);
-      return null;
-    }
-    log('[office] team demo attached (DSH_DESKTOP_OFFICE_TEAM_DEMO=1): fixed Team script -> bridge -> office.ingestTeamProjectionFact');
-  } catch (error) {
-    // 开发开关失败绝不影响办公室启动。
-    log(`[office] team demo attach failed: ${error && error.message}`);
-    return null;
-  }
-  return demo;
-}
-
-/** 反注册开发模式 Team 演示：清掉 pump 定时器（幂等）。Office 目前没有独立的销毁
- *  路径（模块随进程生命周期存活），所以在 will-quit 的统一清理处调用；将来若加入
- *  Office teardown，也应在那里调用同一个函数。 */
-function detachOfficeTeamDemo(log) {
-  if (!officeTeamDemoInstance) return false;
-  let ok = false;
-  try {
-    ok = officeTeamDemoInstance.detach().ok === true;
-  } catch (error) {
-    log(`[office] team demo detach failed: ${error && error.message}`);
-    return false;
-  }
-  officeTeamDemoInstance = null;
-  if (ok) log('[office] team demo detached (pump timer cleared)');
-  return ok;
-}
-
-// 工作包 A（Harness v0.3, 2026-10-23）：开发模式 **FakeExecutor 执行链路** 体验开关。
-// **默认关闭**：不设置时 `createTeamExecutorDemo` 根本不会被 require，普通启动路径零影响。
-//
-// 与上面那个门（DSH_DESKTOP_OFFICE_TEAM_DEMO）的语义区别 —— 两者**不可互换**：
-//   旧门：固定脚本 **直接调用 Team 命令**（事实作者 = fixture 自己）；
-//   新门：FakeExecutor 产出 ExecutionEvent → TeamExecutionController 转换
-//        （事实作者 = Team Runtime，且是执行证据的函数）。
-// 因此两个门**互斥**：同时设置会拒绝启动新入口（见 OFFICE_TEAM_DEMO_CONFLICT），
-// 避免"两套 fixture 同时 attach 到同一办公室"从而难以分辨谁写了事实。
-function officeTeamExecutorDemoEnabled() {
-  return process.env.DSH_DESKTOP_OFFICE_TEAM_EXECUTOR_DEMO === '1';
-}
-
-/** 两个开发门同时打开时的稳定码（测试钉住；不抛错、不改变办公室启动）。 */
-const OFFICE_TEAM_DEMO_CONFLICT = 'OFFICE_TEAM_DEMO_CONFLICT';
-
-/** 开发场景选择（可选；不设置时默认 happy）。 */
-function officeTeamExecutorDemoScenario() {
-  const raw = process.env.DSH_DESKTOP_OFFICE_TEAM_EXECUTOR_SCENARIO;
-  return typeof raw === 'string' && raw !== '' ? raw : 'happy';
-}
-
-/**
- * 把**开发模式 FakeExecutor 执行链路**接到办公室组合根上（纯接线，见
- * team-executor-demo.js）。它**不**连真实 Harness、不伪造 session、不读用户 prompt、
- * 不调用外部模型、不把 Team 事实写回 Harness。
- *
- * 与旧 demo 的三处结构差异（这正是新增它的原因）：
- *   1. **事实来源是执行事件**，不是固定脚本直接调 Team 命令；
- *   2. 唯一转换点是 TeamExecutionController（旧 demo 没有转换层）；
- *   3. producer 与 consumer 通过**同一个** bridge/窄入口相接，因此"Office 只是
- *      projection 消费者"这一性质对新链路同样成立（有 headless 对照测试）。
- *
- * 它不新增 IPC、不改 office-module 的既有行为。
- */
-function attachOfficeTeamExecutorDemo(office, log) {
-  if (!officeTeamExecutorDemoEnabled()) return null;
-  // 互斥：任何其它 Team 门（旧 fixture / 真实链路）同时打开时拒绝本入口
-  //（绝不"两个事实作者同时写同一办公室"）。
-  if (officeTeamDemoEnabled() || officeTeamRealEnabled()) {
-    log(`[office] team executor demo refused: ${OFFICE_TEAM_DEMO_CONFLICT} `
-      + '(TEAM_DEMO / TEAM_EXECUTOR_DEMO / TEAM_REAL are mutually exclusive)');
-    return null;
-  }
-  let demo = null;
-  try {
-    const scenario = officeTeamExecutorDemoScenario();
-    const { createTeamExecutorDemo, DEMO_SCENARIO_NAMES } = require('./team/runtime/team-executor-demo.js');
-    if (!DEMO_SCENARIO_NAMES.includes(scenario)) {
-      log(`[office] team executor demo refused: DEMO_SCENARIO_UNKNOWN (${scenario})`);
-      return null;
-    }
-    demo = createTeamExecutorDemo({ office, scenario, log });
-    const attached = demo.attach();
-    if (!attached || attached.ok !== true) {
-      log(`[office] team executor demo attach refused: ${attached && attached.code}`);
-      return null;
-    }
-    log(`[office] team executor demo attached (DSH_DESKTOP_OFFICE_TEAM_EXECUTOR_DEMO=1, scenario=${scenario}): `
-      + 'FakeExecutor -> TeamExecutionController -> team -> bridge -> office.ingestTeamProjectionFact');
-  } catch (error) {
-    // 开发开关失败绝不影响办公室启动。
-    log(`[office] team executor demo attach failed: ${error && error.message}`);
-    return null;
-  }
-  return demo;
-}
-
+// v0.6（WP5，2026-10-26）：两个开发模式 Team fixture 已归档到 archive/team-demos/
+//（固定脚本版 + FakeExecutor 版，对应环境变量开关随之退役）。真实入口（env REAL /
+// UI）覆盖全部用途；fake-executor.js 保留（离线契约套件的唯一执行器）。
 // ===========================================================================
 // Harness v0.4（阶段1，2026-10-25 用户拍板）：**真实 dsh 会话后端**最小接入。
 //
 // 门：DSH_DESKTOP_OFFICE_TEAM_REAL=1 + DSH_DESKTOP_OFFICE_TEAM_TOPIC="<研究主题>"
-// 与两个开发 fixture 门（TEAM_DEMO / TEAM_EXECUTOR_DEMO）**三方互斥**。
+// 与 UI 入口共享单实例守卫（同一时刻只允许一个真实 Team）。
 //
 // 链路（与离线测试里验证过的同一条代码路径）：
 //   用户主题（U3：唯一用户输入）
@@ -356,9 +230,6 @@ function officeTeamRealTopic() {
   const raw = process.env.DSH_DESKTOP_OFFICE_TEAM_TOPIC;
   return typeof raw === 'string' ? raw.trim() : '';
 }
-
-/** 三个 Team fixture/real 门同时开多个时的稳定码（测试钉住）。 */
-const OFFICE_TEAM_GATE_CONFLICT = 'OFFICE_TEAM_GATE_CONFLICT';
 
 // ===========================================================================
 // Harness v0.5（首次体验最小版）：办公室里的 Team 任务发起入口。
@@ -532,12 +403,6 @@ function openTeamFollowStream(sessionId) {
  */
 function attachOfficeTeamReal(office, log, deps = {}) {
   if (!officeTeamRealEnabled()) return null;
-  // 三方互斥：任何两个 Team 门同时开都拒绝真实入口（分辨不了"谁在写事实"）。
-  if (officeTeamDemoEnabled() || officeTeamExecutorDemoEnabled()) {
-    log(`[office] team real refused: ${OFFICE_TEAM_GATE_CONFLICT} `
-      + '(TEAM_DEMO / TEAM_EXECUTOR_DEMO / TEAM_REAL are mutually exclusive)');
-    return null;
-  }
   const topic = officeTeamRealTopic();
   if (!topic) {
     log('[office] team real refused: TEAM_TOPIC_REQUIRED (set DSH_DESKTOP_OFFICE_TEAM_TOPIC)');
@@ -719,20 +584,6 @@ function detachOfficeTeamReal(log) {
 }
 
 /** 反注册 FakeExecutor 开发入口：清掉 pump 定时器（幂等）。语义与旧 demo 的 detach 相同。 */
-function detachOfficeTeamExecutorDemo(log) {
-  if (!officeTeamExecutorDemoInstance) return false;
-  let ok = false;
-  try {
-    ok = officeTeamExecutorDemoInstance.detach().ok === true;
-  } catch (error) {
-    log(`[office] team executor demo detach failed: ${error && error.message}`);
-    return false;
-  }
-  officeTeamExecutorDemoInstance = null;
-  if (ok) log('[office] team executor demo detached (pump timer cleared)');
-  return ok;
-}
-
 function officeRuntimeEnabled() {
   return (OFFICE_RUNTIME_ENABLED || process.env.DSH_DESKTOP_OFFICE_RUNTIME === '1')
     && process.env.DSH_DESKTOP_OFFICE_RUNTIME !== '0';
@@ -849,12 +700,7 @@ function ensureOfficeModule() {
     officeModuleInstance.subscribe((snapshot) => {
       try { getWindowManager().broadcastToOfficeViews('office:state', snapshot); } catch { /* no views yet */ }
     });
-    // 工作包 A：开发模式 Team→Office 体验接通（默认关闭；见 officeTeamDemoEnabled）。
-    // 必须在 start() 之前 attach，这样第一个 tick 就能推进脚本。
-    officeTeamDemoInstance = attachOfficeTeamDemo(officeModuleInstance, log);
-    // 工作包 A（Harness v0.3）：开发模式 FakeExecutor 执行链路（默认关闭；与新门互斥）。
-    officeTeamExecutorDemoInstance = attachOfficeTeamExecutorDemo(officeModuleInstance, log);
-    // Harness v0.4（阶段1）：真实 dsh 执行链路（默认关闭；三个 Team 门互斥）。
+    // Harness v0.4（阶段1）：真实 dsh 执行链路（默认关闭；env 入口与 UI 入口共享）。
     officeTeamRealInstance = attachOfficeTeamReal(officeModuleInstance, log);
     officeModuleInstance.start();
   }
@@ -6144,10 +5990,6 @@ if (!gotLock) {
   });
 
   app.on('will-quit', () => {
-    // 开发模式 Team 演示的 pump 定时器（默认关闭；无实例时是 no-op）。
-    detachOfficeTeamDemo(log);
-    // 开发模式 FakeExecutor 执行链路的 pump 定时器（默认关闭；无实例时是 no-op）。
-    detachOfficeTeamExecutorDemo(log);
     // 真实 dsh 执行链路的驱动循环（默认关闭；无实例时是 no-op）。
     detachOfficeTeamReal(log);
     if (trayPeakTimer) { clearInterval(trayPeakTimer); trayPeakTimer = null; }
