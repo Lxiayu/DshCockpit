@@ -30,6 +30,8 @@ function freezeItem(item) {
     verifyCommand: item.verifyCommand === undefined ? null : item.verifyCommand,
     verification: item.verification === undefined ? null : item.verification,
     blockedCode: item.blockedCode === undefined ? null : item.blockedCode,
+    attempt: Number.isInteger(item.attempt) ? item.attempt : 1,
+    retryOf: item.retryOf === undefined ? null : item.retryOf,
   });
 }
 
@@ -82,7 +84,7 @@ function createWorkController({ store, workspace, nowMs = () => Date.now(), log 
     return indexItems().find((item) => item.workItemId === currentId) || null;
   }
 
-  function begin({ goal, templateId = 'research-review', verifyCommand = '' } = {}) {
+  function begin({ goal, templateId = 'research-review', verifyCommand = '', attempt = 1, retryOf = null } = {}) {
     const text = typeof goal === 'string' ? goal.trim() : '';
     if (text === '') return Object.freeze({ ok: false, code: 'WORK_GOAL_REQUIRED' });
     const verify = typeof verifyCommand === 'string' ? verifyCommand.trim() : '';
@@ -103,6 +105,8 @@ function createWorkController({ store, workspace, nowMs = () => Date.now(), log 
       phase: null,
       verifyCommand: verify === '' ? null : verify,
       verification: null,
+      attempt: Number.isInteger(attempt) && attempt >= 1 && attempt <= 3 ? attempt : 1,
+      retryOf: typeof retryOf === 'string' && retryOf !== '' ? retryOf : null,
     };
     store.appendItem(workspace, item);
     currentId = item.workItemId;
@@ -186,6 +190,37 @@ function createWorkController({ store, workspace, nowMs = () => Date.now(), log 
     }
     if (terminal) captureDiff();
     return Object.freeze({ ok: true, code: null, changed: true });
+  }
+
+  /**
+   * v0.7 P2 WP4：受控重试（手动、上限 3）。资格：终态失败/未产出，或验证未通过。
+   * 明确不做自动重试 —— 每次重试都是一次完整团队运行（成本可见、用户可控）。
+   */
+  function canRetry() {
+    const item = activeItem();
+    if (!item) return Object.freeze({ ok: false, code: 'WORK_ITEM_NONE' });
+    if (ACTIVE_STATUS.includes(item.status)) return Object.freeze({ ok: false, code: 'WORK_ACTIVE' });
+    const failedVerification = !!(item.verification && item.verification.ok === false);
+    const eligible = ['failed', 'incomplete', 'abandoned'].includes(item.status) || failedVerification;
+    if (!eligible) return Object.freeze({ ok: false, code: 'WORK_RETRY_NOT_ELIGIBLE' });
+    const attempt = Number.isInteger(item.attempt) ? item.attempt : 1;
+    if (attempt >= 3) return Object.freeze({ ok: false, code: 'WORK_RETRY_LIMIT' });
+    return Object.freeze({ ok: true, code: null, nextAttempt: attempt + 1 });
+  }
+
+  function retry() {
+    const verdict = canRetry();
+    if (!verdict.ok) return verdict;
+    const prev = activeItem();
+    const begun = begin({
+      goal: prev.goal,
+      templateId: prev.templateId,
+      verifyCommand: prev.verifyCommand || '',
+      attempt: verdict.nextAttempt,
+      retryOf: prev.workItemId,
+    });
+    if (!begun.ok) return begun;
+    return Object.freeze({ ok: true, code: null, item: begun.item, nextAttempt: verdict.nextAttempt });
   }
 
   /**
@@ -350,6 +385,7 @@ function createWorkController({ store, workspace, nowMs = () => Date.now(), log 
       artifacts: Object.freeze(artifacts),
       current: current,
       active: !!(current && ACTIVE_STATUS.includes(current.status)),
+      canRetry: canRetry(),
     });
   }
 
@@ -361,6 +397,8 @@ function createWorkController({ store, workspace, nowMs = () => Date.now(), log 
     abandon,
     captureDiff,
     runVerification,
+    canRetry,
+    retry,
     finish,
     snapshot,
     currentItemId: () => currentId,

@@ -44,6 +44,7 @@
           <div class="row">
             <button id="startBtn" class="primary" type="submit" data-i18n="work.task.start">开始</button>
             <button id="resumeBtn" type="button" data-i18n="work.resume" hidden>继续</button>
+            <button id="retryBtn" type="button" data-i18n="work.retry" hidden>重试</button>
             <button id="cancelBtn" type="button" data-i18n="work.cancel" hidden>取消任务</button>
           </div>
           <p id="notice" class="notice" role="status"></p>
@@ -59,6 +60,7 @@
           <div id="detailMeta">
             <span id="detailStatus" class="badge"></span>
             <span id="detailPhase"></span>
+            <span id="detailAttempt"></span>
           </div>
           <p id="blockedNote" class="notice bad" role="status" hidden></p>
 

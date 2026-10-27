@@ -105,7 +105,7 @@ test('work-view: the renderer is text-only and talks through one channel', () =>
   assert.match(JS, /compactMode = new URLSearchParams\(location\.search\)\.get\('compact'\) === '1'/);
   assert.doesNotMatch(JS, /require\(|process\.|localStorage/, 'the renderer has no node or storage access');
   const invokes = [...JS.matchAll(/action: '([a-z-]+)'/g)].map((m) => m[1]);
-  assert.deepEqual([...new Set(invokes)].sort(), ['cancel', 'expand', 'open-artifact', 'resume', 'select-workspace', 'start', 'status']);
+  assert.deepEqual([...new Set(invokes)].sort(), ['cancel', 'expand', 'open-artifact', 'resume', 'retry', 'select-workspace', 'start', 'status']);
   assert.match(PRELOAD, /ipcRenderer\.invoke\('shell:work', payload\)/);
   assert.doesNotMatch(PRELOAD, /shell:work:[a-z-]+/, 'one channel + action payload, not a family of channels');
 });

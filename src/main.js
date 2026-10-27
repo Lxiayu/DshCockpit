@@ -469,7 +469,25 @@ async function startWorkRun(goal, verifyCommand = '') {
   // 先落工作项，再启动执行链：产物回调需要在项存在时挂载。
   const begun = controller.begin({ goal, verifyCommand });
   if (!begun.ok) return begun;
-  const workspace = workWorkspace;
+  return launchWorkRun(controller, workWorkspace, office, goal, verifyCommand);
+}
+
+/** v0.7 P2 WP4：手动重试（最多 3 次）。每次都是完整团队运行，成本用户可见。 */
+async function retryWorkRun() {
+  const controller = ensureWorkController();
+  if (!controller) return Object.freeze({ ok: false, code: workWorkspaceError || 'WORKSPACE_REQUIRED' });
+  const office = officeModuleInstance;
+  if (!office || typeof office.ingestTeamProjectionFact !== 'function') {
+    return Object.freeze({ ok: false, code: 'OFFICE_NOT_READY' });
+  }
+  if (officeTeamRealInstance) return Object.freeze({ ok: false, code: 'TEAM_ALREADY_ACTIVE' });
+  const retried = controller.retry();
+  if (!retried.ok) return retried;
+  return launchWorkRun(controller, workWorkspace, office, retried.item.goal, retried.item.verifyCommand || '');
+}
+
+/** 共享的执行链启动（首跑与重试同一路径）。调用方负责先落工作项。 */
+async function launchWorkRun(controller, workspace, office, goal, verifyCommand) {
   // The team executes INSIDE the workspace: dsh roots its workspace at the
   // process cwd, so a dedicated runtime is the only honest way to do this
   // without changing the user's main harness workspace.
@@ -594,6 +612,7 @@ function registerShellWorkIpc(ipcMain) {
     start: (goal, verifyCommand) => startWorkRun(goal, verifyCommand),
     cancel: () => cancelWorkRun(),
     resume: () => resumeWorkRun(),
+    retry: () => retryWorkRun(),
     expand: () => expandWorkView(),
     openArtifact: (args) => openWorkArtifact(args),
   });

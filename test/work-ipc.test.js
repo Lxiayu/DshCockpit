@@ -15,6 +15,7 @@ function makeIpc(overrides = {}) {
     start: async (goal, verifyCommand) => { calls.push(['start', goal, verifyCommand]); return { ok: true }; },
     cancel: async () => { calls.push('cancel'); return { ok: true }; },
     resume: async () => { calls.push('resume'); return { ok: true }; },
+    retry: async () => { calls.push('retry'); return { ok: true }; },
     expand: async () => { calls.push('expand'); return { ok: true }; },
     openArtifact: async (args) => { calls.push(['open', args]); return { ok: true, text: 'x' }; },
   };
@@ -44,6 +45,7 @@ test('work-ipc: delegates with trimmed values (the goal is the only user text)',
   assert.deepEqual(await ipc.handle({ action: 'open-artifact', key: 'job:notes', verb: 'read' }, true), { ok: true, text: 'x' });
   assert.deepEqual(await ipc.handle({ action: 'resume' }, true), { ok: true });
   assert.deepEqual(await ipc.handle({ action: 'expand' }, true), { ok: true });
+  assert.deepEqual(await ipc.handle({ action: 'retry' }, true), { ok: true });
   assert.deepEqual(calls, [
     ['select', { path: '/tmp/ws' }],
     ['select', { create: 'demo' }],
@@ -52,6 +54,7 @@ test('work-ipc: delegates with trimmed values (the goal is the only user text)',
     ['open', { key: 'job:notes', verb: 'read' }],
     'resume',
     'expand',
+    'retry',
   ]);
 });
 

@@ -157,6 +157,9 @@ function renderDetail() {
   $('cancelBtn').hidden = !active;
   // 被 Team 门禁挡住时"继续"没有意义（缺的是上游产物，不是会话）；只留取消/放弃。
   $('resumeBtn').hidden = !(active && item.status === 'attention' && !item.blockedCode);
+  // v0.7 P2：手动重试（终态失败/未产出或验证未通过，上限 3）。
+  $('retryBtn').hidden = !(state.canRetry && state.canRetry.ok);
+  $('detailAttempt').textContent = item.attempt > 1 ? tr('work.attempt', { n: item.attempt }) : '';
   $('blockedNote').hidden = !item.blockedCode;
   $('blockedNote').textContent = item.blockedCode
     ? (tr(`work.blocked.${item.blockedCode}`) || tr('work.blocked.generic'))
@@ -245,6 +248,11 @@ async function resumeTask() {
   if (result) setNotice('');
 }
 
+async function retryTask() {
+  const result = await act({ action: 'retry' });
+  if (result) setNotice(tr('work.retrying'));
+}
+
 async function cancelTask() {
   const result = await act({ action: 'cancel' });
   if (!result) return;
@@ -280,6 +288,7 @@ function bind() {
   $('taskForm').addEventListener('submit', startTask);
   $('cancelBtn').addEventListener('click', cancelTask);
   $('resumeBtn').addEventListener('click', resumeTask);
+  $('retryBtn').addEventListener('click', retryTask);
   $('createWs').addEventListener('click', createWorkspace);
   $('openWs').addEventListener('click', openWorkspace);
   $('changeWs').addEventListener('click', () => { hideViewer(); $('onboarding').hidden = false; $('main').hidden = true; });

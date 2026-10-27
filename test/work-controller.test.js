@@ -250,6 +250,47 @@ test('work-controller: verification is skipped without a command or before a ter
   assert.equal(calls, 0);
 });
 
+test('work-controller: retry is manual, bounded to 3, and preserves the previous evidence', async () => {
+  const ctx = setup({
+    runCommand: async () => ({ ok: false, exitCode: 1, signal: null, timedOut: false, durationMs: 3, output: 'fail', truncated: false }),
+  });
+  ctx.controller.begin({ goal: '改代码', verifyCommand: 'npm test' });
+  assert.equal(ctx.controller.canRetry().code, 'WORK_ACTIVE');
+  ctx.controller.sync({ status: 'completed', runs: {} });
+  await ctx.controller.runVerification();
+  const eligible = ctx.controller.canRetry();
+  assert.equal(eligible.ok, true);
+  assert.equal(eligible.nextAttempt, 2);
+  const first = ctx.controller.snapshot().current.workItemId;
+  const retried = ctx.controller.retry();
+  assert.equal(retried.ok, true);
+  assert.equal(retried.item.attempt, 2);
+  assert.equal(retried.item.retryOf, first);
+  assert.equal(retried.item.verifyCommand, 'npm test');
+  assert.equal(ctx.controller.snapshot().items.length, 2, 'the previous attempt stays in history');
+  // second retry → attempt 3; third → limit
+  ctx.controller.sync({ status: 'completed', runs: {} });
+  await ctx.controller.runVerification();
+  assert.equal(ctx.controller.retry().item.attempt, 3);
+  ctx.controller.sync({ status: 'completed', runs: {} });
+  await ctx.controller.runVerification();
+  assert.equal(ctx.controller.canRetry().code, 'WORK_RETRY_LIMIT');
+  assert.equal(ctx.controller.retry().ok, false);
+});
+
+test('work-controller: a clean run with passing verification is not retryable', () => {
+  const ctx = setup({
+    runCommand: async () => ({ ok: true, exitCode: 0, signal: null, timedOut: false, durationMs: 3, output: 'ok', truncated: false }),
+  });
+  ctx.controller.begin({ goal: '改代码', verifyCommand: 'npm test' });
+  addArtifact(ctx); // a real Team artifact so the gate yields `completed`
+  ctx.controller.sync({ status: 'completed', runs: {} });
+  return ctx.controller.runVerification().then(() => {
+    assert.equal(ctx.controller.snapshot().current.status, 'completed');
+    assert.equal(ctx.controller.canRetry().code, 'WORK_RETRY_NOT_ELIGIBLE');
+  });
+});
+
 test('work-controller: finish(incomplete) goes through the artifact gate', () => {
   const { controller } = setup();
   controller.begin({ goal: '研究' });
