@@ -130,6 +130,17 @@ contextBridge.exposeInMainWorld('officeBridge', {
   // Team 任务"是壳拥有的控制而非办公室投影。载荷：{action:'status'} |
   // {action:'start', topic} | {action:'resume'}。
   team: (payload) => ipcRenderer.invoke('shell:team', payload),
+  // v0.7 P1.5：悬停呈现（壳自有通道；office:* 仍是 8 个）。传 null 恢复。
+  present: (employeeId) => ipcRenderer.invoke('shell:office-present', typeof employeeId === 'string' ? employeeId : null),
+  // v0.7 P1.5：工作坞模式（壳推布局；docked 时自有右栏收成浮动待办卡）。
+  getDockLayout: () => ipcRenderer.invoke('shell:office-layout'),
+  onDockLayout: (listener) => {
+    const dockListener = (_event, value) => {
+      if (typeof listener === 'function') listener(value);
+    };
+    ipcRenderer.on('shell:office-layout', dockListener);
+    return () => ipcRenderer.removeListener('shell:office-layout', dockListener);
+  },
   onVisibilityPush: (listener) => {
     if (typeof listener === 'function') visibilityListeners.add(listener);
     return () => visibilityListeners.delete(listener);

@@ -535,7 +535,7 @@ test('office.html follows the shell theme through the preload bridge (no new bus
   for (const channel of ['office:state', 'office:dispatch', 'office:cancel', 'office:interrupt', 'office:settings', 'office:diagnostics', 'office:visibility', 'office:pending']) {
     assert.ok(preload.includes(`'${channel}'`), `preload references ${channel}`);
   }
-  assert.doesNotMatch(preload, /office:(?!(state|dispatch|cancel|interrupt|settings|diagnostics|visibility|pending))/, 'no other office channels');
+  assert.doesNotMatch(preload, /['"]office:(?!(state|dispatch|cancel|interrupt|settings|diagnostics|visibility|pending))/, 'no other office channels (shell:office-* is the shell namespace)');
   assert.ok(preload.includes('contextBridge'), 'still a contextBridge surface');
 });
 

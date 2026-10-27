@@ -80,10 +80,10 @@ test('window-manager composes the shell: the window loads nothing, views carry t
   assert.match(wm, /scheduleShellSync\(\)/, 'resize/maximize/fullscreen re-flow the shell');
   // switching keeps every page alive but attaches exactly one main view
   // (v0.7 P1: the loop covers harness / office / work without per-pair rules)
-  assert.match(wm, /for \(const view of \[harnessView, officeShellView, workView\]\)/,
+  assert.match(wm, /for \(const view of \[harnessView, officeShellView, workDockView, workView\]\)/,
     'all main-area views are reconciled in one place');
-  assert.match(wm, /if \(view && view !== active && attached\(view\)\) contentView\.removeChildView\(view\)/,
-    'switching detaches exactly the non-active views');
+  assert.match(wm, /if \(view && !visible\.includes\(view\) && attached\(view\)\) contentView\.removeChildView\(view\)/,
+    'switching detaches exactly the non-visible views (office + optional dock)');
   assert.match(wm, /const active = activeMainView === 'office' \? officeShellView/,
     'the active view is chosen from the same state the rail sees');
   assert.match(wm, /did-first-visually-non-empty-paint/, 'the paint-ready timing moved to the harness view');

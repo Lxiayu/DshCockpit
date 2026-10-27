@@ -491,6 +491,13 @@ async function startWorkRun(goal) {
   return workStatusPayload();
 }
 
+/** 坞内「展开」：切到全屏工作台（同一个 shell:work 状态，不另起事实）。 */
+function expandWorkView() {
+  windowManager.showWorkShellView();
+  sendWorkUpdate();
+  return Object.freeze({ ok: true, code: null });
+}
+
 async function resumeWorkRun() {
   const instance = officeTeamRealInstance;
   if (!instance) return Object.freeze({ ok: false, code: 'TEAM_NOT_ACTIVE' });
@@ -556,6 +563,7 @@ function registerShellWorkIpc(ipcMain) {
     start: (goal) => startWorkRun(goal),
     cancel: () => cancelWorkRun(),
     resume: () => resumeWorkRun(),
+    expand: () => expandWorkView(),
     openArtifact: (args) => openWorkArtifact(args),
   });
   work.register(ipcMain);
@@ -2667,6 +2675,28 @@ function registerIpc() {
     }
     windowManager.hideOfficeShellView();
     return { ok: true, active: 'harness' };
+  });
+  // v0.7 P1.5：悬停呈现（壳自有通道；office:* 仍为 8 个）。
+  // 页面启动晚于布局推送时用它拉一次（push + pull 同一通道名）。
+  ipcMain.handle('shell:office-layout', () => Object.freeze({
+    dock: windowManager.isWorkDockVisible(),
+    width: 380,
+  }));
+  ipcMain.handle('shell:office-present', (_e, employeeId) => {
+    const office = officeModuleInstance;
+    if (!office || typeof office.setPresenting !== 'function') {
+      return Object.freeze({ ok: false, code: 'OFFICE_NOT_READY' });
+    }
+    if (employeeId === null || employeeId === undefined) {
+      return office.setPresenting({ presenting: false });
+    }
+    // 座位白名单在模块常量上（实例只暴露方法；office.EMPLOYEE_IDS 是 undefined）。
+    const { EMPLOYEE_IDS } = require('./office/office-module.js');
+    const allowed = Array.isArray(EMPLOYEE_IDS) ? EMPLOYEE_IDS : [];
+    if (typeof employeeId !== 'string' || !allowed.includes(employeeId)) {
+      return Object.freeze({ ok: false, code: 'TEAM_SEAT_UNKNOWN' });
+    }
+    return office.setPresenting({ employeeId, presenting: true });
   });
   ipcMain.handle('office-rail:set-accent', (_e, accent) => {
     const allowed = ['indigo', 'sky', 'teal', 'amber', 'rose', 'slate'];

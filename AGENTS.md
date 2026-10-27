@@ -76,9 +76,9 @@ node --test /abs/path/test/xxx.test.js
 
 ## 7. 当前状态与下一步
 
-- v0.6 已推送（`21f7db3`）；v0.7 P1（工作区/产物落地/工作台）已落地并通过首轮真机验收（全量 1853 绿），
-  本地未推送；计划/偏差/真机脚本见 `docs/plans/active/HARNESS-V0.7-P1-PLAN-2026-10-27.md`
-  与 `docs/research/HARNESS-V0.7-P1-REPORT-2026-10-27.md`。
+- v0.6 已推送（`21f7db3`）；v0.7 P1（工作区/产物/工作台）已真机验收；
+  P1.5（工作坞并入办公室 + 角色悬停卡）已落地（全量 1861 绿），本地未推送。
+  计划：`docs/plans/active/HARNESS-V0.7-P1.5-DOCK-PLAN-2026-10-27.md`。
 - 待办主线：`docs/product/WORK-FIRST-V0.7.md` P1（产物与工作台）。
 - 已知缺口：bind-attention 取消入口、blocked-turn steer 续跑、crash 受信来源、durable store。
 - 办公室视觉重构（绑定式角色）排在 P3，硬门槛是 P1 验收通过。

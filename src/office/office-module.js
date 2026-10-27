@@ -637,6 +637,8 @@ function createOfficeModule(options = {}) {
       // v0.7 P1：座位级产物标记（闭集 kind → 次数）。只有计数，没有 id/路径/内容。
       artifactKinds: Object.create(null),
       artifactCount: 0,
+      // v0.7 P1.5：悬停呈现 —— 暂停移动并转正面（纯呈现，不是事实）。
+      presenting: false,
       animationElapsedMs: 0,
       state: createOfficeState(),
       turnCounter: 0,
@@ -2219,6 +2221,32 @@ function createOfficeModule(options = {}) {
     return validateTeamIdentity(fact);
   }
 
+  /**
+   * v0.7 P1.5：悬停呈现。传 employeeId → 该员工暂停移动并转正面；传 null → 恢复。
+   * 纯呈现状态：不写 Team/Office 事实、不进状态机、不影响任务进度。
+   */
+  function setPresenting({ employeeId = null, presenting = false } = {}) {
+    let next = null;
+    if (presenting) {
+      const rec = typeof employeeId === 'string' ? employees.get(employeeId) : null;
+      if (!rec) return Object.freeze({ ok: false, code: 'TEAM_SEAT_UNKNOWN' });
+      for (const other of employees.values()) {
+        if (other !== rec && other.presenting) other.presenting = false;
+      }
+      rec.presenting = true;
+      rec.facing = 'down'; // 正面（四方向词表里的 front）
+      next = rec.employeeId;
+    } else {
+      let changed = false;
+      for (const rec of employees.values()) {
+        if (rec.presenting) { rec.presenting = false; changed = true; }
+      }
+      if (!changed) return Object.freeze({ ok: true, code: null, presenting: null });
+    }
+    pushSnapshot();
+    return Object.freeze({ ok: true, code: null, presenting: next });
+  }
+
   function ingestTeamProjectionFact(fact) {
     if (!isPlainObject(fact)) return teamRejected('TEAM_FACT_SHAPE_INVALID');
     if (!TEAM_FACT_KINDS.includes(fact.kind)) return teamRejected('TEAM_FACT_UNKNOWN_KIND');
@@ -2511,7 +2539,8 @@ function createOfficeModule(options = {}) {
       if (mine && Array.isArray(mine.route)) planRoute(rec, mine.route, mine.nodeId, logicalMs);
       const partnerRec = employees.get(decision.chat.partnerId);
       const partnerTarget = targets[decision.chat.partnerId];
-      if (partnerRec && partnerTarget && Array.isArray(partnerTarget.route)) {
+      // 悬停呈现中的员工不参与聊天走位/朝向改写（否则会被伙伴的决策转走）。
+      if (partnerRec && partnerTarget && Array.isArray(partnerTarget.route) && !partnerRec.presenting) {
         planRoute(partnerRec, partnerTarget.route, partnerTarget.nodeId, logicalMs);
         partnerRec.facing = (decision.chat.facing || {})[partnerRec.employeeId] || partnerRec.facing;
       }
@@ -2849,6 +2878,7 @@ function createOfficeModule(options = {}) {
 
     // transient route-block retries (task-start move phase, no route yet)
     for (const rec of employees.values()) {
+      if (rec.presenting) continue;
       if (rec.routeRetryAt === null || at < rec.routeRetryAt) continue;
       if (!rec.transition || rec.transition.kind !== 'task-start'
           || rec.transition.phase !== 'move') {
@@ -2906,6 +2936,8 @@ function createOfficeModule(options = {}) {
     for (const rec of employees.values()) {
       if (!rec.segment) continue;
       const segment = rec.segment;
+      // 悬停呈现：指针悬停期间冻结插值（把起点往后推，恢复时不会瞬移）。
+      if (rec.presenting) { segment.startedAtMs += TICK_MS; continue; }
       const elapsed = at - segment.startedAtMs;
       const ratio = segment.durationMs > 0 ? Math.min(1, Math.max(0, elapsed / segment.durationMs)) : 1;
       rec.position = {
@@ -2919,6 +2951,7 @@ function createOfficeModule(options = {}) {
 
     // local behavior decisions (scheduler owns dwell/cooldown/sleep gates)
     for (const rec of freeEmployees()) {
+      if (rec.presenting) continue; // 悬停呈现：不产生新的走位/闲聊决策
       if (settings.reducedMotion && rec.route) continue; // reduced motion resolves below
       // SPEC-04 decision points: the walk that finished last tick is reported
       // so the dwell restarts at the arrived target.
@@ -2945,6 +2978,7 @@ function createOfficeModule(options = {}) {
       if (rec.workstationReservation && movement.isRenewalDue(rec.workstationReservation, at)) {
         rec.workstationReservation = movement.renewReservation({ reservation: rec.workstationReservation, nowMs: at });
       }
+      if (rec.presenting) continue; // 悬停呈现：原地停下（预约续期照常，避免被抢座）
       if (settings.reducedMotion && rec.route) {
         const lastNode = nodesById.get(rec.route[rec.route.length - 1]);
         if (lastNode) arriveAtNode(rec, lastNode.id, at);
@@ -3348,6 +3382,7 @@ function createOfficeModule(options = {}) {
         // require-free).
         // v0.6（WP2）：Team run 的 phase 键优先（闭集，直接命中词表）；
         // legacy harness 路径仍走 toolKind → 词表折算。两者同一呈现词汇。
+        presenting: !!rec.presenting,
         toolPhraseKey: rec.teamPhase || (rec.toolKind ? toolPhraseKeyOf(rec.toolKind) : null),
         toolPhrase: rec.teamPhase ? (PHRASE_ZH[rec.teamPhase] || PHRASE_ZH.other)
           : (rec.toolKind ? toolPhraseZhOf(rec.toolKind) : null),
@@ -4316,6 +4351,7 @@ function createOfficeModule(options = {}) {
     // adapter 已映射的白名单事实（见 TEAM-RUNTIME-CONTRACT-v0 §13）；不新增
     // office:* IPC 通道，不改 reducer 枚举，不进快照字段。
     ingestTeamProjectionFact,
+    setPresenting,
     // P1 运行时体检：单次墙钟 fire 的手动驱动（诊断/单测用——确定性补步断言
     // 不依赖真实 setInterval 节奏）。
     debugClockFire: clockFire,

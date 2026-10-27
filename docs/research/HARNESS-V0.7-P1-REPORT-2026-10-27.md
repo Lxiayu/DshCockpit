@@ -90,6 +90,25 @@
 写了一个 `/Users/xia/research-notes/harness-engineering.md` —— **工作区之外的写入不受壳控制**。
 在给 worker 打开写工具之前，必须把会话 cwd/沙箱钉到工作区（P2 的第一件事）。
 
+## 3.3 P1.5（同日）：工作坞并入办公室 + 角色悬停卡
+
+用户拍板：不再让工作台和办公室争夺整屏。落地：
+
+- **工作坞**：办公室右侧 380px 壳视图（`work.html?compact=1`），任务/产物/证据在办公室视线内；
+  「展开全屏」切到原工作台（同一 `shell:work` 状态）。
+- **右栏收编**：`body.docked` 下办公室自有右栏隐藏，`待你处理` 变成左上浮动卡（仅 pending>0 时出现）；
+  员工列表/详情/用量/时间线让位（后续按需进坞或折叠）。
+- **悬停卡**：复用 `renderer.hitTest` 的 `pointermove` 命中；命中即通过
+  `shell:office-present` 让该员工暂停移动并转正面（模块 `setPresenting`，纯呈现、无事实）；
+  卡片刻度只来自快照（姓名/状态/动作/任务#/产物数/今日完成），点击钉住、Esc 关闭。
+- **边界**：`office:*` 仍 8 个；新增 `shell:office-present` / `shell:office-layout`（壳命名空间）。
+
+CDP 真机验证（Electron 37）：坞出现在右侧；办公室画布重排到 1046px；悬停后 `presenting=true`、
+`facing=down`、位置 2 秒不变；钉住后移开卡片仍在；Esc 后 `presenting=false`；展开全屏/返回办公室均正常。
+
+**真机修掉的三处**：① 隐藏右栏不触发 window resize → canvas 不重排（加 ResizeObserver）；
+② 实例上没有 `EMPLOYEE_IDS` → 白名单恒空（取模块常量）；③ 聊天伙伴的决策会改写呈现中员工的朝向。
+
 ## 4. 真机验收脚本（已按上表执行；保留给后续回归）
 
 ```bash

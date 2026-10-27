@@ -42,6 +42,11 @@ function createWindowManager(deps) {
   // v0.7 P1: the work view is a third main-area view (task board + artifacts).
   // Like the office it stays alive when hidden; only one main view is attached.
   let workView = null;
+  // v0.7 P1.5: the work dock lives at the right edge of the office view.
+  // It is a separate sandboxed view (shell-owned) — the office page stays a
+  // pure projection consumer; work controls never ride office:*.
+  let workDockView = null;
+  const WORK_DOCK_WIDTH = 380;
   let activeMainView = 'harness';
   let shellSyncTimer = null;
   let mainWindowPending = false;
@@ -118,10 +123,16 @@ function createWindowManager(deps) {
       });
       officeShellView.webContents.on('will-navigate', (e) => e.preventDefault());
       officeShellView.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      // The dock may be created before the office page finishes booting; re-send
+      // the layout once it can actually receive pushes.
+      officeShellView.webContents.on('did-finish-load', () => {
+        if (activeMainView === 'office') sendOfficeDockLayout(!!workDockView);
+      });
       officeShellView.webContents.loadURL(url);
       log('[office] shell view created (main-area office)');
     }
     activeMainView = 'office';
+    showWorkDock();
     syncShellViews();
     notifyOfficeShellVisibility();
     notifyOfficeViewsChanged();
@@ -130,6 +141,7 @@ function createWindowManager(deps) {
 
   function hideOfficeShellView() {
     activeMainView = 'harness';
+    sendOfficeDockLayout(false);
     syncShellViews();
     notifyOfficeShellVisibility();
     notifyOfficeViewsChanged();
@@ -168,9 +180,41 @@ function createWindowManager(deps) {
     return !!(workView && activeMainView === 'work');
   }
 
+  /** 工作坞：办公室右侧的壳视图（compact 工作台）。 */
+  function showWorkDock() {
+    if (!mainWindow || mainWindow.isDestroyed()) return null;
+    if (!workDockView) {
+      workDockView = new WebContentsView({
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          backgroundThrottling: false,
+          preload: path.join(__dirname, 'work', 'work-preload.js'),
+        },
+      });
+      workDockView.webContents.on('will-navigate', (e) => e.preventDefault());
+      workDockView.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      workDockView.webContents.loadFile(path.join(__dirname, 'work', 'work.html'), { query: { compact: '1' } });
+      log('[work] dock view created (office right side)');
+    }
+    sendOfficeDockLayout(true);
+    syncShellViews();
+    return workDockView;
+  }
+
+  function sendOfficeDockLayout(dock) {
+    if (!officeShellView) return;
+    try {
+      officeShellView.webContents.send('shell:office-layout', { dock: !!dock, width: WORK_DOCK_WIDTH });
+    } catch { /* closing */ }
+  }
+
   function sendToWorkView(channel, payload) {
-    if (!workView) return;
-    try { workView.webContents.send(channel, payload); } catch { /* closing */ }
+    for (const view of [workView, workDockView]) {
+      if (!view) continue;
+      try { view.webContents.send(channel, payload); } catch { /* closing */ }
+    }
   }
 
   function closeOfficeShellView() {
@@ -233,8 +277,9 @@ function createWindowManager(deps) {
     if (officeShellView) {
       try { officeShellView.webContents.send(channel, payload); } catch { /* closing */ }
     }
-    if (workView) {
-      try { workView.webContents.send(channel, payload); } catch { /* closing */ }
+    for (const view of [workView, workDockView]) {
+      if (!view) continue;
+      try { view.webContents.send(channel, payload); } catch { /* closing */ }
     }
   }
 
@@ -259,8 +304,18 @@ function createWindowManager(deps) {
       width: Math.max(0, content.width - OFFICE_RAIL_WIDTH),
       height: content.height,
     };
+    const dockActive = activeMainView === 'office' && !!workDockView;
+    const officeWidth = dockActive ? Math.max(0, mainArea.width - WORK_DOCK_WIDTH) : mainArea.width;
     if (harnessView) harnessView.setBounds(mainArea);
-    if (officeShellView) officeShellView.setBounds(mainArea);
+    if (officeShellView) officeShellView.setBounds({ ...mainArea, width: officeWidth });
+    if (workDockView) {
+      workDockView.setBounds({
+        x: mainArea.x + officeWidth,
+        y: 0,
+        width: Math.min(WORK_DOCK_WIDTH, mainArea.width),
+        height: mainArea.height,
+      });
+    }
     if (workView) workView.setBounds(mainArea);
     const contentView = mainWindow.contentView;
     const attached = (view) => {
@@ -269,10 +324,13 @@ function createWindowManager(deps) {
     const active = activeMainView === 'office' ? officeShellView
       : activeMainView === 'work' ? workView
         : harnessView;
-    for (const view of [harnessView, officeShellView, workView]) {
-      if (view && view !== active && attached(view)) contentView.removeChildView(view);
+    const visible = [active, dockActive ? workDockView : null].filter(Boolean);
+    for (const view of [harnessView, officeShellView, workDockView, workView]) {
+      if (view && !visible.includes(view) && attached(view)) contentView.removeChildView(view);
     }
-    if (active && !attached(active)) contentView.addChildView(active);
+    for (const view of visible) {
+      if (!attached(view)) contentView.addChildView(view);
+    }
   }
 
   function scheduleShellSync() {
@@ -377,6 +435,7 @@ function createWindowManager(deps) {
       harnessView = null;
       officeShellView = null; // child views die with the window's contents
       workView = null;
+      workDockView = null;
     });
     mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
@@ -711,7 +770,8 @@ function createWindowManager(deps) {
     setCockpitMode, moveCockpitOffset,
     broadcastToOfficeViews, officeViewCount, closeOfficeShellView,
     showOfficeShellView, hideOfficeShellView, isOfficeViewActive,
-    showWorkShellView, isWorkViewActive, sendToWorkView,
+    showWorkShellView, isWorkViewActive, sendToWorkView, showWorkDock,
+    isWorkDockVisible: () => !!(workDockView && activeMainView === 'office'),
     setOfficePresentationSuspended,
     broadcastToOfficeRail, broadcastToShellViews,
     syncShellViews, getActiveMainView: () => activeMainView,

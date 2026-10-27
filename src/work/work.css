@@ -71,3 +71,13 @@ input, textarea { border: 1px solid var(--border-1); border-radius: 8px; backgro
 #viewerPre { margin: 0; padding: 12px; max-height: 48vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
              font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 #viewerNote { padding: 0 10px 8px; }
+
+/* v0.7 P1.5 — dock mode (380px): single column, bounded viewer, history scrolls. */
+body.compact #main { display: block; overflow-y: auto; }
+body.compact #board { border-right: 0; border-bottom: 1px solid var(--border-1); }
+body.compact #items { max-height: 108px; overflow-y: auto; }
+body.compact #detail { padding: 12px; }
+body.compact #detail h1 { font-size: 15px; }
+body.compact #wsPath { display: none; }
+body.compact #viewerPre { max-height: 30vh; }
+body.compact #onboarding .row { width: 100%; }

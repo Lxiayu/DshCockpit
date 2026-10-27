@@ -996,11 +996,16 @@ test('window manager: M4.2 shell — rail + harness views compose, the office sw
     onVisibility: (viewId, visible) => visibility.push([viewId, visible]),
   });
   assert.equal(office.opts.webPreferences.preload, path.join(ROOT, 'src', 'office', 'office-preload.js'));
-  assert.deepEqual(office.bounds, { x: 44, y: 0, width: 1236, height: 800 });
+  // v0.7 P1.5: the office view shrinks by the 380px work dock on its right.
+  assert.deepEqual(office.bounds, { x: 44, y: 0, width: 856, height: 800 });
+  const dock = views.find((v) => v.opts.webPreferences.preload.endsWith('work-preload.js'));
+  assert.ok(dock, 'the work dock view exists');
+  assert.deepEqual(dock.bounds, { x: 900, y: 0, width: 380, height: 800 });
   wm.broadcastToShellViews('shell:theme', 'dark');
-  assert.deepEqual(office.sent.at(-1), ['shell:theme', 'dark'], 'the office view receives the theme push too');
-  assert.ok(win.contentView.children.includes(office) && !win.contentView.children.includes(harness),
-    'the office view replaces the harness view in the main area');
+  assert.deepEqual(office.sent.filter((entry) => entry[0] === 'shell:theme').at(-1), ['shell:theme', 'dark'], 'the office view receives the theme push too');
+  assert.ok(win.contentView.children.includes(office) && win.contentView.children.includes(dock)
+    && !win.contentView.children.includes(harness),
+    'the office view + work dock replace the harness view in the main area');
   assert.equal(wm.isOfficeViewActive(), true);
   assert.deepEqual(visibility, [['office-shell-1', true]], 'the module is told the office became visible');
   // snapshots keep flowing to the office page even while IT is the active view
@@ -1009,8 +1014,10 @@ test('window manager: M4.2 shell — rail + harness views compose, the office sw
 
   // switch back: the office page survives in the background, module told hidden
   wm.hideOfficeShellView();
-  assert.ok(win.contentView.children.includes(harness) && !win.contentView.children.includes(office),
-    'the harness view is back in the main area');
+  assert.ok(win.contentView.children.includes(harness)
+    && !win.contentView.children.includes(office)
+    && !win.contentView.children.includes(dock),
+    'the harness view is back in the main area and the dock is detached');
   assert.equal(wm.isOfficeViewActive(), false);
   // 2026-09-22 语义修正：办公室是"后台活着"的（M4.2）；切回 harness 只让它不再是
   // 当前主视图，**仿真的暂停只看窗口是否可见/最小化**（否则闲聊/走位永远积累不到，
@@ -1029,7 +1036,9 @@ test('window manager: M4.2 shell — rail + harness views compose, the office sw
   wm.syncShellViews();
   assert.deepEqual(rail.bounds, { x: 0, y: 0, width: 44, height: 900 });
   assert.deepEqual(harness.bounds, { x: 44, y: 0, width: 1556, height: 900 });
-  assert.deepEqual(office.bounds, { x: 44, y: 0, width: 1556, height: 900 });
+  wm.showOfficeShellView({ url: 'office-runtime://local/office.html?pack=deepseek-default' });
+  assert.deepEqual(office.bounds, { x: 44, y: 0, width: 1176, height: 900 });
+  assert.deepEqual(dock.bounds, { x: 1220, y: 0, width: 380, height: 900 });
 
   // quit cleanup destroys the office view and returns to the harness
   wm.closeOfficeShellView();
@@ -1110,7 +1119,7 @@ test('office-preload.js exposes only the whitelisted office bridge API', () => {
     assert.ok(source.includes(`'${channel}'`), `preload references ${channel}`);
   }
   assert.doesNotMatch(source, /ipcRenderer\.send\(/, 'invoke only, no raw send channels');
-  assert.doesNotMatch(source, /office:(?!(state|dispatch|cancel|interrupt|settings|diagnostics|visibility|pending))/, 'no other office channels');
+  assert.doesNotMatch(source, /['"]office:(?!(state|dispatch|cancel|interrupt|settings|diagnostics|visibility|pending))/, 'no other office channels (shell:office-* is the shell namespace)');
 });
 
 test('office page resolves the production character pack from a portable descriptor', () => {

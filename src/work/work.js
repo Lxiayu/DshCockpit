@@ -5,6 +5,9 @@
 
 const api = window.workApi;
 const $ = (id) => document.getElementById(id);
+// 坞模式：同一个页面，窄栏布局 + 「展开全屏」。
+const compactMode = new URLSearchParams(location.search).get('compact') === '1';
+if (compactMode) document.body.classList.add('compact');
 
 let lang = 'zh';
 let state = null;
@@ -87,7 +90,8 @@ function render() {
   const hasWorkspace = !!(state && state.workspace);
   $('onboarding').hidden = hasWorkspace;
   $('main').hidden = !hasWorkspace;
-  $('changeWs').hidden = !hasWorkspace;
+  $('changeWs').hidden = !hasWorkspace || compactMode;
+  $('expandWork').hidden = !compactMode;
   renderTeamBadge();
 
   if (!hasWorkspace) {
@@ -277,6 +281,7 @@ function bind() {
   $('createWs').addEventListener('click', createWorkspace);
   $('openWs').addEventListener('click', openWorkspace);
   $('changeWs').addEventListener('click', () => { hideViewer(); $('onboarding').hidden = false; $('main').hidden = true; });
+  $('expandWork').addEventListener('click', () => act({ action: 'expand' }));
   $('openArtifact').addEventListener('click', () => {
     if (selectedKey) act({ action: 'open-artifact', key: selectedKey, verb: 'open' });
   });

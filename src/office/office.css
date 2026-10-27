@@ -131,6 +131,57 @@ html, body {
   line-height: 1.5;
 }
 
+/* v0.7 P1.5: docked mode — the shell work dock owns the right side. The
+   office panel collapses into a floating "need you" card at the top-left and
+   only appears when there is something to answer. */
+body.docked #office-panel {
+  position: fixed;
+  left: 12px;
+  top: 12px;
+  width: 300px;
+  max-height: 72vh;
+  z-index: 30;
+  display: none;
+  border: 1px solid var(--panel-edge);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .18);
+  background: var(--panel-bg);
+  padding: 10px 12px;
+}
+body.docked.has-pending #office-panel { display: flex; }
+body.docked #office-panel > #office-overview,
+body.docked #office-panel > #usage-block,
+body.docked #office-panel > #team-block,
+body.docked #office-panel > #employee-list-block,
+body.docked #office-panel > #activity-block,
+body.docked #office-panel > #details { display: none; }
+body.docked #office-panel > #pending-block { display: block; }
+
+/* Member hover card (pointer-events: none — the scene keeps receiving hover). */
+.member-card {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 40;
+  width: 264px;
+  padding: 10px 12px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 12px;
+  background: var(--panel-bg);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .22);
+  pointer-events: none;
+  font-size: 12px;
+}
+.member-card .mc-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.member-card .mc-head strong { font-size: 14px; }
+.member-card #mc-role { color: var(--text-dim); font-size: 11px; }
+.member-card .mc-line { display: flex; align-items: center; gap: 8px; margin-top: 6px; color: var(--text-dim); }
+.member-card .mc-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin: 8px 0 0; }
+.member-card .mc-facts div { display: flex; justify-content: space-between; gap: 6px; }
+.member-card dt { color: var(--text-dim); }
+.member-card dd { margin: 0; font-variant-numeric: tabular-nums; }
+.member-card .mc-hint { margin: 8px 0 0; color: var(--text-dim); font-size: 11px; }
+
 #office-panel {
   flex: 0 0 320px;
   display: flex;

@@ -47,6 +47,7 @@ function validate(payload) {
   }
   if (action === 'cancel') return { ok: true, action };
   if (action === 'resume') return { ok: true, action };
+  if (action === 'expand') return { ok: true, action };
   if (action === 'open-artifact') {
     const key = typeof payload.key === 'string' ? payload.key.trim() : '';
     if (key === '' || key.length > KEY_MAX_CHARS) return { ok: false, code: 'ARTIFACT_KEY_INVALID' };
@@ -79,8 +80,8 @@ function isTrustedWorkSender(event, expectedFile = 'work.html') {
  * @param {() => Promise<object>} deps.cancel
  * @param {(args: {key: string, verb: string}) => Promise<object>} deps.openArtifact
  */
-function createWorkIpc({ status, selectWorkspace, start, cancel, resume, openArtifact } = {}) {
-  for (const [name, fn] of Object.entries({ status, selectWorkspace, start, cancel, resume, openArtifact })) {
+function createWorkIpc({ status, selectWorkspace, start, cancel, resume, expand, openArtifact } = {}) {
+  for (const [name, fn] of Object.entries({ status, selectWorkspace, start, cancel, resume, expand, openArtifact })) {
     if (typeof fn !== 'function') throw new Error(`createWorkIpc requires ${name}()`);
   }
 
@@ -94,6 +95,7 @@ function createWorkIpc({ status, selectWorkspace, start, cancel, resume, openArt
       case 'start': return start(checked.goal);
       case 'cancel': return cancel();
       case 'resume': return resume();
+      case 'expand': return expand();
       case 'open-artifact': return openArtifact({ key: checked.key, verb: checked.verb });
       default: return refuse('ACTION_UNKNOWN');
     }

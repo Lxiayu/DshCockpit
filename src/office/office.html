@@ -180,6 +180,18 @@
   </aside>
 
   <script src="./node_modules/pixi.js/dist/pixi.min.js"></script>
+  <div id="member-card" class="member-card" hidden aria-live="polite">
+    <div class="mc-head"><strong id="mc-name"></strong><span id="mc-role"></span></div>
+    <div class="mc-line"><span id="mc-status" class="staff-status"></span><span id="mc-action"></span></div>
+    <dl class="mc-facts">
+      <div><dt data-i18n="office.card.task"></dt><dd id="mc-task">—</dd></div>
+      <div><dt data-i18n="office.card.artifacts"></dt><dd id="mc-artifacts">0</dd></div>
+      <div><dt data-i18n="office.card.today"></dt><dd id="mc-today">—</dd></div>
+      <div><dt data-i18n="office.card.queue"></dt><dd id="mc-queue">0</dd></div>
+    </dl>
+    <p class="mc-hint" data-i18n="office.card.hint"></p>
+  </div>
+
   <script>
     // Page bootstrap: mini CommonJS loader over the local app scheme (same
     // pattern as the playground). All URLs are office-runtime://local — no
@@ -1090,6 +1102,8 @@
         if (pendingModalItem && !live.has(pendingModalItem.id)) closePendingModal();
         // P4 打磨①（spec §8 P4 行）：红色只留给 >0。计数为 0 时徽标降为中性
         // （need-zero），不再用警示红点制造「有东西待办」的错觉。
+        // v0.7 P1.5：坞模式下右栏收成浮动卡；只有存在待办时才出现。
+        document.body.classList.toggle('has-pending', summary.count > 0);
         const countEl = document.getElementById('pending-count');
         countEl.textContent = String(summary.count);
         countEl.classList.toggle('need-zero', summary.count === 0);
@@ -1311,6 +1325,76 @@
         return tr(`office.employee.${employeeId}`) || employee.displayName;
       }
 
+      // v0.7 P1.5: member hover card. Hover pauses the employee (shell asks the
+      // simulation), turns them to the front and shows a card built ONLY from
+      // snapshot fields (no prompt/tool args/paths). Click pins; Esc closes.
+      const cardEl = document.getElementById('member-card');
+      let hoverId = null;
+      let hoverPinned = null;
+      let hoverAt = 0;
+      const hoverPoint = (event) => {
+        const sceneCanvas = stage.querySelector('canvas');
+        const rect = (sceneCanvas || stage).getBoundingClientRect();
+        return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      };
+      function moveMemberCard(x, y) {
+        const pad = 12;
+        const w = cardEl.offsetWidth || 260;
+        const h = cardEl.offsetHeight || 170;
+        let nx = x + 16;
+        let ny = y + 16;
+        if (nx + w > window.innerWidth - pad) nx = x - w - 16;
+        if (ny + h > window.innerHeight - pad) ny = Math.max(pad, window.innerHeight - h - pad);
+        cardEl.style.transform = `translate(${Math.max(pad, nx)}px, ${Math.max(pad, ny)}px)`;
+      }
+      function renderMemberCard(employeeId, x, y) {
+        const employee = latestSnapshot && latestSnapshot.employees
+          ? latestSnapshot.employees.find((entry) => entry.employeeId === employeeId)
+          : null;
+        const row = page.staffRows().find((entry) => entry.employeeId === employeeId);
+        if (!employee || !row) { cardEl.hidden = true; return; }
+        const set = (id, value) => { document.getElementById(id).textContent = value === null || value === undefined || value === '' ? '—' : value; };
+        document.getElementById('mc-name').textContent = tr(row.nameKey) || row.displayName;
+        document.getElementById('mc-role').textContent = tr(row.roleKey) || '';
+        const status = document.getElementById('mc-status');
+        status.className = `staff-status status-${row.statusKey}`;
+        status.textContent = row.statusLabel;
+        set('mc-action', row.toolPhrase);
+        set('mc-task', row.taskTitle);
+        set('mc-artifacts', employee.artifacts ? String(employee.artifacts.count) : '0');
+        set('mc-today', employee.record ? `${employee.record.completed}/${employee.record.tasks}` : null);
+        set('mc-queue', String(row.queueCount || 0));
+        cardEl.hidden = false;
+        moveMemberCard(x, y);
+      }
+      function clearMemberCard() {
+        cardEl.hidden = true;
+        // Always release: a pinned card may have outlived hoverId (the pointer
+        // moved away while pinned), and present(null) is idempotent.
+        if (bridge.present) bridge.present(null);
+        hoverId = null;
+      }
+      stage.addEventListener('pointermove', (event) => {
+        if (hoverPinned) return;
+        const now = performance.now();
+        if (now - hoverAt < 80) return; // 节流：命中测试只做 12Hz
+        hoverAt = now;
+        const point = hoverPoint(event);
+        const hit = renderer.hitTest(point.x, point.y);
+        if (hit === hoverId) {
+          if (hit) moveMemberCard(event.clientX, event.clientY);
+          return;
+        }
+        hoverId = hit || null;
+        if (bridge.present) bridge.present(hoverId);
+        if (hoverId) renderMemberCard(hoverId, event.clientX, event.clientY);
+        else cardEl.hidden = true;
+      });
+      stage.addEventListener('pointerleave', () => {
+        if (hoverPinned) return;
+        clearMemberCard();
+      });
+
       // pointer selection on the Pixi canvas — hit-tests run against the
       // LETTERBOXED canvas rect (scene pixels), not the whole stage
       stage.addEventListener('click', (event) => {
@@ -1322,9 +1406,16 @@
           renderer.setSelection(hit);
           syncListSelection();
           renderDetails();
+          // 钉住卡片（移到别的角色/按 Esc 才解除）
+          hoverPinned = hit;
+          hoverId = hit;
+          if (bridge.present) bridge.present(hit);
+          renderMemberCard(hit, event.clientX, event.clientY);
+        } else {
+          hoverPinned = null;
+          clearMemberCard();
         }
       });
-
       // keyboard: list focus + scene selection (shared with the evidence API)
       function handleKeyEvent(key) {
         const result = page.handleKey({ key });
@@ -1353,6 +1444,13 @@
         if (!pendingModalRoot.hidden && event.key === 'Escape') {
           closePendingModal();
           event.preventDefault();
+          return;
+        }
+        // v0.7 P1.5: Esc also releases a pinned member card (the modal above owns
+        // Escape first; a pinned card is passive, so this never blocks approval).
+        if (event.key === 'Escape' && (hoverPinned || !cardEl.hidden)) {
+          hoverPinned = null;
+          clearMemberCard();
           return;
         }
         // 2026-09-25 UX 必修（F1/F2）：只在焦点位于场景/员工列表（非表单元素）
@@ -1636,6 +1734,11 @@
         }
       }
       window.addEventListener('resize', resize);
+      // Any layout change inside the page (panel collapse / dock toggle / debug)
+      // must re-letterbox the canvas; a window resize alone is not enough.
+      if (typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(() => resize()).observe(stage);
+      }
       resize();
 
       const stateResult = await bridge.getState();
@@ -1643,6 +1746,20 @@
       // One main-process clock: subsequent snapshots arrive as office:state
       // pushes (throttled in the module); the page only re-renders the VM.
       bridge.onState((snapshot) => page.applySnapshot(snapshot));
+      function applyDockLayout(payload) {
+        const docked = !!(payload && payload.dock);
+        document.body.classList.toggle('docked', docked);
+        // 隐藏自有右栏会改变 stage 宽度，但不会触发 window resize —— 必须重排画布。
+        requestAnimationFrame(() => resize());
+        if (!docked) {
+          hoverPinned = null;
+          clearMemberCard();
+        }
+      }
+      if (bridge.onDockLayout) bridge.onDockLayout(applyDockLayout);
+      // The dock may exist before this page finished booting: pull once so the
+      // layout never depends on push timing.
+      if (bridge.getDockLayout) bridge.getDockLayout().then(applyDockLayout).catch(() => {});
 
       // Evidence hooks (diagnostics-only, same spirit as the playground)
       window.__office = {
