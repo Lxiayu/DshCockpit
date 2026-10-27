@@ -380,8 +380,8 @@ test('boundary: the renderer and the office page are consumers, never Harness fa
   // 只把已有快照/布局换算成绘制参数；下面的事实来源检查对它们同样生效。
   const renderer = path.join(OFFICE, 'render', 'pixi-office-renderer.js');
   const rendererRequires = requiresOf(read(renderer)).sort();
-  assert.deepEqual(rendererRequires, ['../layout-assets.js', './code-scene.js', './fps-monitor.js', './presentation-clock.js'],
-    '渲染器的 require 集合被冻结：只允许 fps-monitor、layout-assets 与两个纯呈现模块');
+  assert.deepEqual(rendererRequires, ['../layout-assets.js', './code-office.js', './code-scene.js', './fps-monitor.js', './presentation-clock.js'],
+    '渲染器的 require 集合被冻结：只允许 fps-monitor、layout-assets 与三个纯呈现模块');
   for (const spec of rendererRequires) {
     assert.equal(/runtime\/|office-module|harness/i.test(spec), false);
   }

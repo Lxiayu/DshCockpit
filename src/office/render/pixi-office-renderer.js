@@ -70,6 +70,9 @@ const { createPresentationClock } = require('./presentation-clock.js');
 // P3.1: the code-drawn scene description (pure geometry + palette). Off by
 // default — enabling it swaps the flat floor band for a programmatic floor.
 const { describeCodeScene } = require('./code-scene.js');
+// P3.1b: a generated office layout (desks/monitors/chairs/lounge/kitchen) built
+// from the seat anchors — the visual arrangement is no longer the old collage.
+const { describeOffice } = require('./code-office.js');
 
 // Task E4: the shared catalog declares contentBbox (opaque-art bounds) and
 // the draft depth for the flat furniture — the renderer consumes both.
@@ -271,9 +274,14 @@ async function createOfficeRenderer(options) {
     // Approved P3.1 proportion: characters 1.18x the SPEC-02 default. Only the
     // code scene changes it (the shipping look keeps the frozen band).
     characterScale: codeScene && Number.isFinite(codeScene.characterScale) ? codeScene.characterScale : 1,
+    // 2026-10-27 exploration (user: "大胆一些，用代码生成一整套布局"): the
+    // generated layout is a preview, NOT the default — the textured scene is
+    // still the accepted look. `?officeLayout=generated` opts in.
+    generatedFurniture: !!(codeScene && codeScene.generatedFurniture === true),
   };
   let codeSceneStats = null;
   let codeSceneDescription = null;
+  let officeDescription = null;
   // The furniture art is baked for the light room. In the warm dark theme it is
   // multiplied down to a warm mid-tone so it reads as the same furniture under
   // lamp light instead of glowing white cut-outs.
@@ -639,6 +647,25 @@ async function createOfficeRenderer(options) {
       furnitureRecords.set('furniture-edges', {
         item: { id: 'furniture-edges', layer: 'back-furniture' }, node: edges, kind: 'edges',
       });
+      // Generated office: legacy furniture art is hidden and replaced by this
+      // pair (background = desks/monitors/decoration, front = chairs + lips).
+      if (codeSceneOptions.generatedFurniture) {
+      const generatedBack = new PIXI.Graphics();
+      generatedBack.__furnitureId = 'generated-office-back';
+      layers.background.addChild(generatedBack);
+      furnitureRecords.set('generated-office-back', {
+        item: { id: 'generated-office-back', layer: 'background' }, node: generatedBack, kind: 'office-back',
+      });
+      const generatedFront = new PIXI.Graphics();
+      generatedFront.__furnitureId = 'generated-office-front';
+      layers['front-occluders'].addChild(generatedFront);
+      furnitureRecords.set('generated-office-front', {
+        item: { id: 'generated-office-front', layer: 'front-occluders' }, node: generatedFront, kind: 'office-front',
+      });
+      for (const record of furnitureRecords.values()) {
+        if ((record.kind === 'sprite' || record.kind === 'graphics') && record.node) record.node.visible = false;
+      }
+      }
     }
     layoutFurniture();
     // Establish the geometric pass at BUILD time so occlusion never depends on
@@ -740,9 +767,188 @@ async function createOfficeRenderer(options) {
       .fill({ color: 0xffffff, alpha: 0.10 });
   }
 
+  function buildOfficeDescription() {
+    const workstations = typeof layout.workstations === 'function' ? layout.workstations() : null;
+    const instances = workstations && Array.isArray(workstations.instances) ? workstations.instances : [];
+    const seats = instances.map((instance) => {
+      const position = instance && instance.seat && instance.seat.position;
+      if (!position) return null;
+      return { id: instance.deskId || (instance.seat && instance.seat.id) || 'desk', x: position.x, y: position.y };
+    }).filter(Boolean);
+    return describeOffice({
+      scene,
+      seats,
+      reserve: typeof layout.reserveZone === 'function' ? layout.reserveZone() : null,
+    });
+  }
+
+  function sceneColors() {
+    if (codeSceneDescription && codeSceneDescription.colors) return codeSceneDescription.colors;
+    const description = describeCodeScene({
+      scene,
+      layout,
+      theme: codeSceneOptions.theme,
+      accent: codeSceneOptions.accent,
+      tilePx: codeSceneOptions.tilePx,
+      characterScale: codeSceneOptions.characterScale,
+    });
+    codeSceneDescription = description;
+    return description.colors;
+  }
+
+  // P3.1b: the generated office. `pass` splits the drawing by paint role:
+  // 'back' carries everything under the characters, 'front' carries the chair
+  // backs and desk lips that must occlude a seated lower body.
+  function drawGeneratedOffice(node, pass) {
+    const office = officeDescription;
+    if (!office) return;
+    const c = sceneColors();
+    const X = (v) => v * scene.width;
+    const Y = (v) => v * scene.height;
+    const W = (v) => v * scene.width;
+    const H = (v) => v * scene.height;
+    const dark = codeSceneOptions.theme === 'dark';
+
+    if (pass === 'front') {
+      for (const station of office.workstations) {
+        const chair = station.chair;
+        const cx = X(chair.x);
+        const cy = Y(chair.y);
+        const cw = W(chair.w);
+        const ch = H(chair.h);
+        // Chair: backrest, seat, gas lift, five-star base and wheels.
+        node.ellipse(cx + cw * 0.5, cy + ch * 0.94, cw * 0.58, Math.max(2, ch * 0.08))
+          .fill({ color: 0x000000, alpha: dark ? 0.22 : 0.07 });
+        node.roundRect(cx, cy, cw, ch * 0.62, Math.max(3, cw * 0.18)).fill({ color: c.chairBack });
+        node.roundRect(cx + cw * 0.10, cy + ch * 0.08, cw * 0.80, ch * 0.40, Math.max(2, cw * 0.12))
+          .fill({ color: 0xffffff, alpha: dark ? 0.05 : 0.18 });
+        node.roundRect(cx + cw * 0.06, cy + ch * 0.44, cw * 0.88, ch * 0.26, Math.max(2, cw * 0.10))
+          .fill({ color: c.chairSeat });
+        node.rect(cx + cw * 0.46, cy + ch * 0.66, Math.max(1, cw * 0.08), ch * 0.16).fill({ color: c.chairBack });
+        node.rect(cx + cw * 0.18, cy + ch * 0.86, cw * 0.64, 2).fill({ color: c.chairBack, alpha: 0.85 });
+        node.rect(cx + cw * 0.30, cy + ch * 0.90, cw * 0.40, 2).fill({ color: c.chairBack, alpha: 0.55 });
+        node.circle(cx + cw * 0.18, cy + ch * 0.92, 1.6).fill({ color: c.chairBack });
+        node.circle(cx + cw * 0.82, cy + ch * 0.92, 1.6).fill({ color: c.chairBack });
+        // A thin desk lip so the desk still reads as one piece over the body.
+        node.rect(X(station.desk.x), Y(station.desk.y) + H(station.desk.h) - 3, W(station.desk.w), 3)
+          .fill({ color: c.deskEdge, alpha: dark ? 0.9 : 0.75 });
+      }
+      return;
+    }
+
+    // Rug under the lounge.
+    if (office.lounge) {
+      const rug = office.lounge.rug;
+      node.roundRect(X(rug.x), Y(rug.y), W(rug.w), H(rug.h), 10)
+        .fill({ color: c.rug || c.zoneFill, alpha: dark ? 0.75 : 0.9 })
+        .stroke({ width: 1, color: c.zoneStroke, alpha: 0.9 });
+      node.roundRect(X(rug.x) + 6, Y(rug.y) + 6, W(rug.w) - 12, H(rug.h) - 12, 7)
+        .stroke({ width: 1, color: c.zoneStroke, alpha: 0.55 });
+    }
+
+    // Kitchen counter: top face + front edge + sink + coffee machine.
+    if (office.kitchen) {
+      const k = office.kitchen;
+      node.roundRect(X(k.x), Y(k.y), W(k.w), H(k.h), 6).fill({ color: c.counterSide || c.deskSide });
+      node.roundRect(X(k.x), Y(k.y), W(k.w), H(k.h) * 0.55, 6).fill({ color: c.counterTop || c.deskTop });
+      node.rect(X(k.x), Y(k.y) + H(k.h) - 3, W(k.w), 3).fill({ color: c.deskEdge });
+      node.circle(X(k.sink.x), Y(k.sink.y), Math.max(4, H(k.sink.r))).fill({ color: c.monitorEdge, alpha: 0.55 });
+      node.roundRect(X(k.machine.x), Y(k.machine.y), W(k.machine.w), H(k.machine.h), 4)
+        .fill({ color: c.monitorBody });
+      node.rect(X(k.machine.x) + W(k.machine.w) * 0.25, Y(k.machine.y) + H(k.machine.h) * 0.2,
+        W(k.machine.w) * 0.5, Math.max(2, H(k.machine.h) * 0.08)).fill({ color: c.monitorScreen, alpha: 0.7 });
+      // Faucet + two cups beside the sink.
+      node.rect(X(k.sink.x) + H(k.sink.r) * 0.4, Y(k.sink.y) - H(k.sink.r) * 0.9, 2, H(k.sink.r) * 0.9)
+        .fill({ color: c.counterSide || c.deskSide });
+      node.circle(X(k.sink.x) - W(k.w) * 0.12, Y(k.sink.y), Math.max(2, H(k.h) * 0.05)).fill({ color: 0xffffff, alpha: 0.55 });
+      node.circle(X(k.sink.x) - W(k.w) * 0.07, Y(k.sink.y) + H(k.h) * 0.04, Math.max(2, H(k.h) * 0.05)).fill({ color: 0xffffff, alpha: 0.45 });
+    }
+
+    // Lounge furniture.
+    if (office.lounge) {
+      const { sofa, table } = office.lounge;
+      node.roundRect(X(sofa.x), Y(sofa.y), W(sofa.w), H(sofa.h), 8).fill({ color: c.sofa || c.chairBack });
+      node.roundRect(X(sofa.x) + 3, Y(sofa.y) + H(sofa.h) * 0.22, W(sofa.w) - 6, H(sofa.h) * 0.72, 6)
+        .fill({ color: c.sofaSeat || c.chairSeat });
+      // Three seat cushions + two legs.
+      for (let i = 1; i < 3; i += 1) {
+        node.rect(X(sofa.x) + (W(sofa.w) * i) / 3, Y(sofa.y) + H(sofa.h) * 0.24, 1, H(sofa.h) * 0.66)
+          .fill({ color: c.chairBack, alpha: 0.55 });
+      }
+      node.rect(X(sofa.x) + W(sofa.w) * 0.08, Y(sofa.y) + H(sofa.h), 3, 3).fill({ color: c.chairBack, alpha: 0.8 });
+      node.rect(X(sofa.x) + W(sofa.w) * 0.88, Y(sofa.y) + H(sofa.h), 3, 3).fill({ color: c.chairBack, alpha: 0.8 });
+      node.roundRect(X(table.x), Y(table.y), W(table.w), H(table.h), 5).fill({ color: c.deskTop });
+      node.rect(X(table.x) + 2, Y(table.y) + 2, W(table.w) - 4, Math.max(2, H(table.h) * 0.22))
+        .fill({ color: 0xffffff, alpha: dark ? 0.06 : 0.35 });
+    }
+
+    // Workstations: desk, drawer, keyboard, mug, monitor.
+    for (const station of office.workstations) {
+      const desk = station.desk;
+      const dx = X(desk.x);
+      const dy = Y(desk.y);
+      const dw = W(desk.w);
+      const dh = H(desk.h);
+      node.ellipse(dx + dw * 0.5, dy + dh * 0.98, dw * 0.56, Math.max(3, dh * 0.10))
+        .fill({ color: 0x000000, alpha: dark ? 0.24 : 0.08 });
+      // Legs first, then the slab: two slim legs make the top read as a table.
+      const legW = Math.max(2, dw * 0.03);
+      node.rect(dx + dw * 0.10, dy + dh * 0.72, legW, dh * 0.30).fill({ color: c.deskEdge });
+      node.rect(dx + dw * 0.87, dy + dh * 0.72, legW, dh * 0.30).fill({ color: c.deskEdge });
+      node.roundRect(dx, dy, dw, dh, 6).fill({ color: c.deskTop })
+        .stroke({ width: 1, color: c.deskEdge, alpha: dark ? 0.8 : 0.45 });
+      // A darker front face gives the slab thickness.
+      node.rect(dx + 1, dy + dh * 0.88, dw - 2, dh * 0.12).fill({ color: c.deskSide, alpha: 0.95 });
+      node.rect(dx + 2, dy + 2, dw - 4, Math.max(2, dh * 0.16)).fill({ color: 0xffffff, alpha: dark ? 0.05 : 0.30 });
+
+      const drawer = station.drawer;
+      node.roundRect(X(drawer.x), Y(drawer.y), W(drawer.w), H(drawer.h), 3).fill({ color: c.deskSide });
+      node.rect(X(drawer.x) + 2, Y(drawer.y) + H(drawer.h) * 0.22, W(drawer.w) - 4, 1)
+        .fill({ color: c.deskEdge, alpha: 0.9 });
+      node.rect(X(drawer.x) + 2, Y(drawer.y) + H(drawer.h) * 0.58, W(drawer.w) - 4, 1)
+        .fill({ color: c.deskEdge, alpha: 0.9 });
+      node.circle(X(drawer.x) + W(drawer.w) / 2, Y(drawer.y) + H(drawer.h) * 0.40, Math.max(1, W(drawer.w) * 0.06))
+        .fill({ color: c.deskEdge });
+
+      const kb = station.keyboard;
+      node.roundRect(X(kb.x), Y(kb.y), W(kb.w), Math.max(3, H(kb.h)), 2)
+        .fill({ color: c.monitorEdge, alpha: 0.78 });
+      node.circle(X(station.mug.x), Y(station.mug.y), Math.max(2, W(station.mug.r)))
+        .fill({ color: c.accent, alpha: 0.6 });
+
+      // Monitor (bezel + screen + stand) at the far edge of the desk.
+      const mon = station.monitor;
+      const mx = X(mon.x);
+      const my = Y(mon.y);
+      const mw = W(mon.w);
+      const mh = H(mon.h);
+      const bezelH = mh * 0.78;
+      node.rect(mx + mw * 0.42, my + bezelH - 2, mw * 0.16, mh * 0.22).fill({ color: c.monitorBody });
+      node.roundRect(mx, my, mw, bezelH, Math.max(2, mw * 0.04)).fill({ color: c.monitorBody });
+      node.roundRect(mx + mw * 0.07, my + bezelH * 0.07, mw * 0.86, bezelH * 0.86, 2)
+        .fill({ color: c.monitorScreen });
+      node.rect(mx + mw * 0.07, my + bezelH * 0.07, mw * 0.86, Math.max(2, bezelH * 0.16))
+        .fill({ color: 0xffffff, alpha: 0.10 });
+    }
+
+    // Plants.
+    for (const plant of office.plants) {
+      const px = X(plant.x);
+      const py = Y(plant.y);
+      const r = W(plant.r);
+      node.roundRect(px - r * 0.55, py - r * 0.4, r * 1.1, r * 0.9, 2).fill({ color: c.plantPot });
+      node.circle(px, py - r * 0.85, r * 0.75).fill({ color: c.plantLeaf });
+      node.circle(px - r * 0.5, py - r * 0.55, r * 0.5).fill({ color: c.plantLeaf, alpha: 0.85 });
+      node.circle(px + r * 0.5, py - r * 0.65, r * 0.45).fill({ color: c.plantLeaf, alpha: 0.75 });
+    }
+  }
+
   // P3.4: a soft contact shadow under every furniture footprint. It is what
   // makes the art sit ON the floor instead of being a hard-edged cut-out.
   function drawFurnitureGrounding(node) {
+    // The generated office hides the legacy furniture; its shadows must not
+    // survive as ghost blobs (2026-10-27, first generated-scene screenshot).
+    if (officeDescription) return;
     const dark = codeSceneOptions.theme === 'dark';
     for (const record of furnitureRecords.values()) {
       if (record.kind !== 'sprite' && record.kind !== 'graphics') continue;
@@ -766,6 +972,7 @@ async function createOfficeRenderer(options) {
   // desk art a slab thickness, so the rectangle reads as furniture rather than
   // a pasted box. Drawn above the back-furniture sprites, under the characters.
   function drawFurnitureEdges(node) {
+    if (officeDescription) return;
     const dark = codeSceneOptions.theme === 'dark';
     for (const record of furnitureRecords.values()) {
       if (record.kind !== 'sprite' && record.kind !== 'graphics') continue;
@@ -790,6 +997,7 @@ async function createOfficeRenderer(options) {
   // Re-projects every persistent furniture node to the live scene size.
   // Sprites only get transform updates; Graphics redraw their rects in place.
   function layoutFurniture() {
+    if (codeSceneOptions.enabled && codeSceneOptions.generatedFurniture) officeDescription = buildOfficeDescription();
     for (const record of furnitureRecords.values()) {
       if (record.kind === 'floor') {
         record.node.clear();
@@ -802,6 +1010,12 @@ async function createOfficeRenderer(options) {
       } else if (record.kind === 'code') {
         record.node.clear();
         if (codeSceneOptions.enabled) drawCodeMonitor(record.node, record);
+      } else if (record.kind === 'office-back') {
+        record.node.clear();
+        if (codeSceneOptions.enabled) drawGeneratedOffice(record.node, 'back');
+      } else if (record.kind === 'office-front') {
+        record.node.clear();
+        if (codeSceneOptions.enabled) drawGeneratedOffice(record.node, 'front');
       } else if (record.kind === 'shadows') {
         record.node.clear();
         if (codeSceneOptions.enabled) drawFurnitureGrounding(record.node);
@@ -2079,6 +2293,10 @@ async function createOfficeRenderer(options) {
           codeMonitorCount: codeSceneOptions.enabled
             ? [...furnitureRecords.values()].filter((record) => record.kind === 'code').length
             : 0,
+          generatedFurniture: codeSceneOptions.generatedFurniture,
+          generatedDesks: codeSceneOptions.enabled && officeDescription ? officeDescription.stats.desks : 0,
+          generatedLounge: !!(codeSceneOptions.enabled && officeDescription && officeDescription.stats.hasLounge),
+          generatedKitchen: !!(codeSceneOptions.enabled && officeDescription && officeDescription.stats.hasKitchen),
           ...(codeSceneStats || {}),
         },
         fps: monitor && typeof monitor.stats === 'function' ? monitor.stats() : null,

@@ -274,10 +274,15 @@ test('page loader resolves the P3 renderer modules through its require shim', ()
 });
 
 test('code scene renderer: characters use the approved 1.18x, furniture keeps its art', async () => {
-  const view = await createView({ enabled: true, theme: 'dark', accent: 'clay', characterScale: 1.18 }, null, ONE_EMPLOYEE);
+  const view = await createView({
+    enabled: true, theme: 'dark', accent: 'clay', characterScale: 1.18, generatedFurniture: true,
+  }, null, ONE_EMPLOYEE);
   const diagnostics = view.diagnostics();
   assert.equal(diagnostics.codeScene.characterScale, 1.18);
-  assert.equal(diagnostics.codeScene.codeMonitorCount, 6, 'six monitors are drawn in code');
+  assert.equal(diagnostics.codeScene.generatedDesks, 6, 'the generated layout covers all six seats');
+  assert.equal(diagnostics.codeScene.generatedFurniture, true);
+  assert.equal(diagnostics.codeScene.generatedLounge, true);
+  assert.equal(diagnostics.codeScene.generatedKitchen, true);
   const record = view.entities.get('coder');
   const expected = Math.round(840 * 0.11 * 100) / 100 * 1.18;
   assert.ok(Math.abs(record.__layout.visibleHeight - expected) < 0.01,
@@ -285,10 +290,18 @@ test('code scene renderer: characters use the approved 1.18x, furniture keeps it
   view.destroy();
 });
 
+test('code scene renderer: the accepted look keeps the textured furniture (no generated layout)', async () => {
+  const view = await createView({ enabled: true }, null, ONE_EMPLOYEE);
+  const diagnostics = view.diagnostics();
+  assert.equal(diagnostics.codeScene.generatedFurniture, false);
+  assert.equal(diagnostics.codeScene.generatedDesks, 0);
+  view.destroy();
+});
+
 test('code scene renderer: the shipping look keeps the frozen 92.4px character band', async () => {
   const view = await createView(null, null, ONE_EMPLOYEE);
   assert.equal(view.diagnostics().codeScene.characterScale, 1);
-  assert.equal(view.diagnostics().codeScene.codeMonitorCount, 0);
+  assert.equal(view.diagnostics().codeScene.generatedDesks, 0);
   assert.equal(view.entities.get('coder').__layout.visibleHeight, Math.round(840 * 0.11 * 100) / 100);
   view.destroy();
 });

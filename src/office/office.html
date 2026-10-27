@@ -282,10 +282,12 @@
       // before the renderer, which requires it at module load time.
       REGISTRY['presentation-clock'] = await loadModule('./render/presentation-clock.js');
       REGISTRY['code-scene'] = await loadModule('./render/code-scene.js');
+      REGISTRY['code-office'] = await loadModule('./render/code-office.js');
       REGISTRY['pixi-office-renderer'] = await loadModule('./render/pixi-office-renderer.js', (spec) => {
         if (spec === './fps-monitor.js') return REGISTRY['fps-monitor'];
         if (spec === './presentation-clock.js') return REGISTRY['presentation-clock'];
         if (spec === './code-scene.js') return REGISTRY['code-scene'];
+        if (spec === './code-office.js') return REGISTRY['code-office'];
         if (spec === '../layout-assets.js') return REGISTRY['layout-assets'];
         throw new Error('require unsupported: ' + spec);
       });
@@ -440,8 +442,10 @@
         } catch { /* the page stays light if the shell cannot answer */ }
       }
       document.documentElement.dataset.theme = initialTheme;
+      const generatedLayout = officeSearchParams.get('officeLayout') === 'generated';
       const codeSceneOptions = {
         enabled: codeSceneParam !== '0',
+        generatedFurniture: generatedLayout,
         theme: sceneThemeOverride || initialTheme,
         accent: /^[a-z]{3,10}$/.test(sceneAccentParam) ? sceneAccentParam : 'indigo',
         characterScale: Number.isFinite(characterScaleParam) && characterScaleParam > 0 ? characterScaleParam : 1.18,
