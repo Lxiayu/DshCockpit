@@ -460,9 +460,24 @@ async function startWorkRun(goal) {
   const begun = controller.begin({ goal });
   if (!begun.ok) return begun;
   const workspace = workWorkspace;
+  // The team executes INSIDE the workspace: dsh roots its workspace at the
+  // process cwd, so a dedicated runtime is the only honest way to do this
+  // without changing the user's main harness workspace.
+  let teamRuntime;
+  try {
+    teamRuntime = await teamRuntimeHost.ensure(workspace.path);
+  } catch (error) {
+    const code = error && error.code ? error.code : 'TEAM_RUNTIME_UNAVAILABLE';
+    log(`[work] team runtime unavailable: ${code}`);
+    controller.block({ code });
+    sendWorkUpdate();
+    return Object.freeze({ ok: false, code });
+  }
   const instance = startTeamRealWithTopic({
     office, topic: goal, log,
     deps: {
+      rpc: teamRuntime.rpc,
+      openFollow: (sessionId) => openTeamFollowStream(sessionId, teamRuntime.mux),
       artifactDir: path.join(workspace.path, '.dsh', 'artifacts'),
       onArtifact: (record, context) => {
         controller.onArtifact(record, context);
@@ -480,12 +495,14 @@ async function startWorkRun(goal) {
   });
   if (!instance) {
     controller.finish('failed');
+    teamRuntimeHost.scheduleIdleStop();
     sendWorkUpdate();
     return Object.freeze({ ok: false, code: 'TEAM_START_FAILED' });
   }
   // 驱动结束后再同步一次终态（onStatus 覆盖了逐步状态，这里兜底终态与"无产物"门禁）。
   instance.whenSettled().then(() => {
     controller.sync(instance.runtime.state());
+    teamRuntimeHost.scheduleIdleStop();
     sendWorkUpdate();
   }).catch(() => {});
   return workStatusPayload();
@@ -529,6 +546,7 @@ async function cancelWorkRun() {
   // 没有可取消的 run（例如 HANDOFF_INCOMPLETE 把链挡住）：显式放弃 —— 停掉壳的驱动循环、
   // 丢弃这个执行链，工作项标 abandoned；Team 事实保持原样，绝不伪造终态。
   instance.detach();
+  teamRuntimeHost.scheduleIdleStop();
   if (controller && controller.snapshot().active) controller.abandon();
   sendWorkUpdate();
   return Object.freeze({ ok: true, code: null, abandoned: true });
@@ -571,8 +589,7 @@ function registerShellWorkIpc(ipcMain) {
 
 /** 为一个 Team 会话开一条**专用** journal follow 流（与办公室自己的流分命名空间）。
  *  返回 AsyncIterable<journalEvent>：帧到达才推进（真实流语义，无轮询、无定时器）。 */
-function openTeamFollowStream(sessionId) {
-  const mux = runtimeMux;
+function openTeamFollowStream(sessionId, mux = runtimeMux) {
   const streamId = `team-follow-${sessionId}`;
   const queue = [];
   const waiters = [];
@@ -1451,6 +1468,17 @@ const harnessRpcProtocol = () => {
 /** Harness RPC deps shared by the IM bind/stop/steer paths and the compact
  * trigger: protocol + mux (unary transport) + auth (cookie source). */
 const harnessRpcDeps = () => ({ protocol: harnessRpcProtocol(), mux: runtimeMux, auth: runtimeAuth });
+
+// v0.7 P2：工作区专用 Team runtime（cwd = 任务工作区；dsh 没有按会话切 cwd 的接口）。
+// 惰性启动、空闲自动停止；与主 runtime 的 auth/mux/rpc 完全隔离。
+const { createTeamRuntimeHost } = require('./team-runtime-host.js');
+const teamRuntimeHost = createTeamRuntimeHost({
+  dshBin: () => activeDshBin(),
+  nodeBin: () => bestNodeBin(),
+  dshHome: () => dshHomeOf(),
+  log,
+  envExtras: () => (mcpMgr ? mcpMgr.runtimeSecretEnv() : null),
+});
 
 // ---------------------------------------------------------------------------
 // binary resolution
@@ -6269,6 +6297,8 @@ if (!gotLock) {
   app.on('will-quit', () => {
     // 真实 dsh 执行链路的驱动循环（默认关闭；无实例时是 no-op）。
     detachOfficeTeamReal(log);
+    // v0.7 P2：专用 Team runtime 必须随壳退出（否则会留下孤儿 dsh 进程）。
+    try { teamRuntimeHost.stop(); } catch { /* ignore */ }
     if (trayPeakTimer) { clearInterval(trayPeakTimer); trayPeakTimer = null; }
     if (runtimeHealthTimer) { clearInterval(runtimeHealthTimer); runtimeHealthTimer = null; }
     if (balanceTimer) { clearInterval(balanceTimer); balanceTimer = null; }

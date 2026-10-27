@@ -89,6 +89,19 @@ test('hover: the card is built from snapshot fields only and hit-tests the scene
   assert.match(OFFICE_HTML, /event\.key === 'Escape' && \(hoverPinned \|\| !cardEl\.hidden\)/);
 });
 
+test('P2: work runs execute on a dedicated runtime rooted at the workspace', () => {
+  assert.match(MAIN, /const teamRuntimeHost = createTeamRuntimeHost\(\{/);
+  assert.match(MAIN, /dshBin: \(\) => activeDshBin\(\)/);
+  assert.match(MAIN, /teamRuntime = await teamRuntimeHost\.ensure\(workspace\.path\)/);
+  assert.match(MAIN, /rpc: teamRuntime\.rpc,/);
+  assert.match(MAIN, /openFollow: \(sessionId\) => openTeamFollowStream\(sessionId, teamRuntime\.mux\)/);
+  assert.match(MAIN, /teamRuntimeHost\.scheduleIdleStop\(\)/);
+  assert.match(MAIN, /try \{ teamRuntimeHost\.stop\(\); \} catch/);
+  // the follow stream can target a mux other than the main runtime's
+  assert.match(MAIN, /function openTeamFollowStream\(sessionId, mux = runtimeMux\)/);
+  assert.match(MAIN, /controller\.block\(\{ code \}\)/);
+});
+
 test('hover: presenting pauses the simulation without writing facts', () => {
   assert.match(MODULE, /presenting: false,/);
   assert.match(MODULE, /function setPresenting\(\{ employeeId = null, presenting = false \} = \{\}\)/);
