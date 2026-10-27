@@ -64,6 +64,13 @@
 //     retried) — no view switch or manual retry needed.
 
 const { createFpsMonitor } = require('./fps-monitor.js');
+// P3.0: pure present-time interpolation between the two most recent snapshots.
+// It decides WHERE a sprite is drawn, never what the office state is.
+const { createPresentationClock } = require('./presentation-clock.js');
+// P3.1: the code-drawn scene description (pure geometry + palette). Off by
+// default — enabling it swaps the flat floor band for a programmatic floor.
+const { describeCodeScene } = require('./code-scene.js');
+
 // Task E4: the shared catalog declares contentBbox (opaque-art bounds) and
 // the draft depth for the flat furniture — the renderer consumes both.
 const { layoutAssetById } = require('../layout-assets.js');
@@ -139,6 +146,15 @@ async function createOfficeRenderer(options) {
     // footer degrade dot. View-owner plumbing only — never called from the
     // simulation path.
     onStateChange = null,
+    // P3.0 presentation clock. Defaults to the host's requestAnimationFrame and
+    // performance.now; tests inject both. `enabled:false` restores the historical
+    // "paint on snapshot pushes only" behaviour exactly.
+    presentation = null,
+    // P3.1 code-drawn scene. `{ enabled:false, theme:'light', accent:'indigo' }`
+    // by default: the shipping look is unchanged until the visual direction is
+    // approved. Enabled, the floor is drawn from the layout description (tiles,
+    // wall/floor edge, reserve zone) instead of a single translucent band.
+    codeScene = null,
   } = options || {};
 
   if (!layout || typeof layout.waypointGraph !== 'function') {
@@ -219,6 +235,106 @@ async function createOfficeRenderer(options) {
   // Assigned once the `view` object exists (the static fallback element may be
   // built before it, and its retry button must call back into the view).
   let onStaticRetryRequest = null;
+
+  // ---- P3.0 presentation clock (double buffer + frame pump) -----------------
+  // The snapshot push stays the ONLY source of facts. This pump only moves the
+  // already-drawn characters along the segment between the last two pushed
+  // samples, so an irregular push cadence no longer shows up as a stutter.
+  // Disabled automatically when the host has no requestAnimationFrame (Node
+  // tests, static presentations), which keeps the historical paint-per-push
+  // behaviour byte-for-byte.
+  const presentationOptions = presentation || {};
+  const hostScheduleFrame = typeof presentationOptions.scheduleFrame === 'function'
+    ? presentationOptions.scheduleFrame
+    : (typeof requestAnimationFrame === 'function' ? (cb) => requestAnimationFrame(cb) : null);
+  const hostCancelFrame = typeof presentationOptions.cancelFrame === 'function'
+    ? presentationOptions.cancelFrame
+    : (typeof cancelAnimationFrame === 'function' ? (handle) => cancelAnimationFrame(handle) : null);
+  const presentationNow = typeof presentationOptions.now === 'function'
+    ? presentationOptions.now
+    : (typeof performance !== 'undefined' && performance && typeof performance.now === 'function'
+      ? () => performance.now()
+      : () => Date.now());
+  const presentationClock = presentationOptions.enabled !== false && typeof hostScheduleFrame === 'function'
+    ? createPresentationClock({ maxGapMs: presentationOptions.maxGapMs })
+    : null;
+  let presentationFrameHandle = null;
+  let presentationFrames = 0;
+
+  // P3.1 scene switch (see the option block above). Read at draw time, so a
+  // resize reprojects the code scene with the new geometry.
+  const codeSceneOptions = {
+    enabled: !!(codeScene && codeScene.enabled === true),
+    theme: codeScene && typeof codeScene.theme === 'string' ? codeScene.theme : 'light',
+    accent: codeScene && typeof codeScene.accent === 'string' ? codeScene.accent : 'indigo',
+    tilePx: codeScene && Number.isFinite(codeScene.tilePx) ? codeScene.tilePx : null,
+    // Approved P3.1 proportion: characters 1.18x the SPEC-02 default. Only the
+    // code scene changes it (the shipping look keeps the frozen band).
+    characterScale: codeScene && Number.isFinite(codeScene.characterScale) ? codeScene.characterScale : 1,
+  };
+  let codeSceneStats = null;
+  let codeSceneDescription = null;
+  // The furniture art is baked for the light room. In the warm dark theme it is
+  // multiplied down to a warm mid-tone so it reads as the same furniture under
+  // lamp light instead of glowing white cut-outs.
+  let furnitureTint = codeSceneOptions.enabled && codeSceneOptions.theme === 'dark' ? 0x878b8f : null;
+  // Monitors carry a light rectangular bezel; in the dark room that reads as a
+  // bright wireframe, so they get a deeper tint than desks and chairs.
+  function furnitureTintFor(item) {
+    if (furnitureTint === null) return null;
+    const kind = item && item.kind;
+    if (kind === 'monitor') return 0x6f7377;
+    if (kind === 'chair') return 0x7a7e82;
+    return furnitureTint;
+  }
+
+  // ---- P3.3 drag (presentation only) ---------------------------------------
+  // Dragging moves the DRAWN character, never the simulated one: no snapshot is
+  // written and no office:* message is sent. On release the offset eases back
+  // to wherever the simulation already put the character (which may have kept
+  // walking during the drag).
+  const DRAG_RETURN_MS = 260;
+  const dragState = { employeeId: null, baseFoot: null, dx: 0, dy: 0, release: null };
+
+  function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  function clearDrag() {
+    dragState.employeeId = null;
+    dragState.baseFoot = null;
+    dragState.dx = 0;
+    dragState.dy = 0;
+    dragState.release = null;
+  }
+
+  // Where this entity should be DRAWN at `nowMs`: the presentation sample,
+  // overridden by the drag offset (or the return easing).
+  function displayFootOf(record, sample, nowMs) {
+    const targetX = sample.x * scene.width;
+    const targetY = sample.y * scene.height;
+    if (dragState.employeeId !== record.employeeId) return { x: targetX, y: targetY };
+    if (dragState.release) {
+      const elapsed = nowMs - dragState.release.at;
+      const t = elapsed <= 0 ? 0 : (elapsed >= DRAG_RETURN_MS ? 1 : elapsed / DRAG_RETURN_MS);
+      const eased = easeOutCubic(t);
+      const from = dragState.release.from;
+      return {
+        x: from.x + (targetX - from.x) * eased,
+        y: from.y + (targetY - from.y) * eased,
+      };
+    }
+    return { x: dragState.baseFoot.x + dragState.dx, y: dragState.baseFoot.y + dragState.dy };
+  }
+
+  function stopPresentationFrames() {
+    if (presentationFrameHandle !== null && typeof hostCancelFrame === 'function') {
+      try { hostCancelFrame(presentationFrameHandle); } catch { /* already gone */ }
+    }
+    presentationFrameHandle = null;
+  }
+
+  // ---------------------------------------------------------------------------
 
   // ---- init chain: webgl -> canvas -> static -------------------------------
 
@@ -422,17 +538,36 @@ async function createOfficeRenderer(options) {
       if (!layer) continue;
       const partEntries = Object.entries(item.parts || {});
       if (partEntries.length === 0) continue;
+      // P3.4: the flat monitor art reads as a plain light rectangle in the
+      // dark room (its bezel is the bright outline). In the code scene the
+      // monitor alone is redrawn as a bezel + screen + stand, using the same
+      // fixture rect; every other prop keeps its art.
+      if (codeSceneOptions.enabled && item.kind === 'monitor') {
+        const graphics = new PIXI.Graphics();
+        graphics.__furnitureId = item.id;
+        graphics.__furnitureRole = furnitureRole(item);
+        const sortable = item.sortY === true;
+        (sortable ? layers['ground-entities'] : layer).addChild(graphics);
+        furnitureRecords.set(item.id, {
+          item, node: graphics, kind: 'code', rect: partEntries[0][1], mirrorRect: null, sortable,
+        });
+        continue;
+      }
       const wantedAssetId = wantedAssetFor(item);
       const texture = wantedAssetId ? officeTextureMap.get(wantedAssetId) : null;
       if (texture && texture.width > 0 && texture.height > 0) {
         const sprite = new PIXI.Sprite(texture);
         sprite.__furnitureId = item.id;
         sprite.__furnitureRole = furnitureRole(item);
+        const tint = furnitureTintFor(item);
+        if (tint !== null) sprite.tint = tint;
         sprite.anchor.set(0.5, 0.5);
-        if (item.kind === 'monitor' && item.assetId === 'prop-monitor-back-right-top') {
+        if (item.kind === 'monitor' && item.assetId === 'prop-monitor-back-right-top' && furnitureTint === null) {
           // Task 6b: a very light screen outline so the light-gray isometric
           // monitor stays discernible on the light office background (no dark
           // theme). Flat monitor art brings its own contrast — no outline.
+          // The code dark theme hides it too: tinted art plus a light outline
+          // reads as a stray box around every desk.
           const outline = new PIXI.Graphics();
           outline.__role = 'monitor-contrast';
           outline.rect(150, 190, 725, 660).stroke({ width: 8, color: 0x74818c, alpha: 0.45 });
@@ -488,10 +623,168 @@ async function createOfficeRenderer(options) {
         }
       }
     }
+    // P3.4: grounding + material overlays. They live under/over the furniture
+    // sprites but only exist in the code scene, so the shipping look never
+    // gains extra nodes.
+    if (codeSceneOptions.enabled) {
+      const shadows = new PIXI.Graphics();
+      shadows.__furnitureId = 'furniture-shadows';
+      layers.background.addChild(shadows);
+      furnitureRecords.set('furniture-shadows', {
+        item: { id: 'furniture-shadows', layer: 'background' }, node: shadows, kind: 'shadows',
+      });
+      const edges = new PIXI.Graphics();
+      edges.__furnitureId = 'furniture-edges';
+      layers['back-furniture'].addChild(edges);
+      furnitureRecords.set('furniture-edges', {
+        item: { id: 'furniture-edges', layer: 'back-furniture' }, node: edges, kind: 'edges',
+      });
+    }
     layoutFurniture();
     // Establish the geometric pass at BUILD time so occlusion never depends on
     // when the first snapshot push arrives.
     sortGround();
+  }
+
+  // P3.1: environment only. Furniture keeps its existing art path — replacing
+  // the calibrated desk/kitchen sprites with flat code shapes was tried on
+  // 2026-10-27 and read as a regression (giant material blobs), so the
+  // "colour blocks + material detail" language is applied to the room
+  // (floor/wall/window/reception), where the art had no detail to lose.
+  function drawCodeScene(node) {
+    const description = describeCodeScene({
+      scene,
+      layout,
+      theme: codeSceneOptions.theme,
+      accent: codeSceneOptions.accent,
+      tilePx: codeSceneOptions.tilePx,
+      characterScale: codeSceneOptions.characterScale,
+    });
+    codeSceneDescription = description;
+    codeSceneStats = { ...description.stats, theme: description.theme, accent: description.accent, tilePx: description.tilePx };
+    const c = description.colors;
+    // Wall band: three horizontal steps read as wall / mid / floor-edge light.
+    node.rect(0, 0, scene.width, scene.height).fill({ color: c.wall });
+    node.rect(description.floor.x, description.floor.y, description.floor.w, description.floor.h)
+      .fill({ color: c.floorB });
+    for (const tile of description.floor.tiles) {
+      node.rect(tile.x, tile.y, tile.w, tile.h).fill({ color: tile.fill });
+    }
+    // Distance falloff: the floor gets darker away from the window wall.
+    for (const band of description.floor.shadeBands) {
+      node.rect(0, band.y, scene.width, band.h).fill({ color: band.color, alpha: band.alpha });
+    }
+    for (const band of description.walls.bands) {
+      node.rect(0, band.y, description.walls.w, band.h).fill({ color: band.color });
+    }
+    node.rect(description.walls.base.x, description.walls.base.y, description.walls.base.w, description.walls.base.h)
+      .fill({ color: description.walls.base.color });
+
+    // Window: frame, glass, mullions, then a warm pool of light on the floor.
+    const win = description.walls.window;
+    node.rect(win.x - 3, win.y - 3, win.w + 6, win.h + 6).fill({ color: win.frame });
+    node.rect(win.x, win.y, win.w, win.h).fill({ color: win.glass });
+    for (const bar of win.mullions) node.rect(bar.x, bar.y, bar.w, bar.h).fill({ color: win.frame });
+    node.rect(win.glow.x, win.glow.y, win.glow.w, win.glow.h).fill({ color: win.glow.color, alpha: win.glow.alpha });
+    node.rect(win.glow.inner.x, win.glow.inner.y, win.glow.inner.w, win.glow.inner.h)
+      .fill({ color: win.glow.color, alpha: win.glow.inner.alpha });
+
+    // Reception (user decision): a low counter + a faint floor colour split.
+    // The tint stays light so the zone never reads as a blank patch.
+    for (const zone of description.zones) {
+      node.rect(zone.x, zone.y, zone.w, zone.h).fill({ color: zone.fill, alpha: 0.55 });
+      node.rect(zone.x, zone.y, zone.w, 2).fill({ color: zone.accent, alpha: 0.35 });
+    }
+
+    // Reception kept but weakened: one low counter along the reserve zone's
+    // near edge, with a top face and a front edge — no tall wall.
+    const reception = description.reception;
+    if (reception) {
+      node.rect(reception.x, reception.y, reception.w, reception.h).fill({ color: reception.side });
+      node.rect(reception.x, reception.y, reception.w, Math.max(2, Math.round(reception.h * 0.45)))
+        .fill({ color: reception.top });
+      node.rect(reception.x, reception.y + reception.h - 2, reception.w, 2).fill({ color: reception.edge });
+      node.rect(reception.x, reception.y, 3, reception.h).fill({ color: reception.accent, alpha: 0.35 });
+    }
+
+    node.rect(description.edge.x, description.edge.y, description.edge.w, description.edge.h)
+      .fill({ color: description.edge.color });
+  }
+
+  // P3.4: code-drawn monitor (bezel + screen + stand). It replaces only the
+  // monitor art in the code scene; the rect comes from the fixture.
+  function drawCodeMonitor(node, record) {
+    const description = codeSceneDescription;
+    if (!description || !record.rect) return;
+    const c = description.colors;
+    const x = record.rect.x * scene.width;
+    const y = record.rect.y * scene.height;
+    const w = record.rect.width * scene.width;
+    const h = record.rect.height * scene.height;
+    const bezelH = Math.round(h * 0.72);
+    const bezelW = Math.round(w * 0.92);
+    const bx = x + (w - bezelW) / 2;
+    const by = y;
+    const radius = Math.max(2, Math.round(w * 0.05));
+    // Stand first (behind the panel).
+    const standW = Math.max(4, Math.round(w * 0.16));
+    const standH = Math.max(3, Math.round(h * 0.16));
+    node.rect(x + (w - standW) / 2, by + bezelH - 1, standW, standH).fill({ color: c.monitorBody });
+    node.roundRect(x + (w - standW * 1.8) / 2, by + bezelH + standH - 2, standW * 1.8, 2, 1)
+      .fill({ color: c.monitorEdge });
+    // Bezel + screen.
+    node.roundRect(bx, by, bezelW, bezelH, radius).fill({ color: c.monitorBody });
+    node.roundRect(bx + bezelW * 0.07, by + bezelH * 0.07, bezelW * 0.86, bezelH * 0.86, Math.max(1, radius - 1))
+      .fill({ color: c.monitorScreen });
+    node.rect(bx + bezelW * 0.07, by + bezelH * 0.07, bezelW * 0.86, Math.max(1, bezelH * 0.18))
+      .fill({ color: 0xffffff, alpha: 0.10 });
+  }
+
+  // P3.4: a soft contact shadow under every furniture footprint. It is what
+  // makes the art sit ON the floor instead of being a hard-edged cut-out.
+  function drawFurnitureGrounding(node) {
+    const dark = codeSceneOptions.theme === 'dark';
+    for (const record of furnitureRecords.values()) {
+      if (record.kind !== 'sprite' && record.kind !== 'graphics') continue;
+      if (record.item && record.item.kind === 'zone-marker') continue;
+      const rect = record.mirrorRect || record.rect;
+      if (!rect) continue;
+      const x = rect.x * scene.width;
+      const y = rect.y * scene.height;
+      const w = rect.width * scene.width;
+      const h = rect.height * scene.height;
+      const cx = x + w / 2;
+      const cy = y + h * 0.93;
+      node.ellipse(cx, cy, Math.max(6, w * 0.46), Math.max(3, h * 0.14))
+        .fill({ color: 0x000000, alpha: dark ? 0.20 : 0.06 });
+      node.ellipse(cx, cy, Math.max(4, w * 0.30), Math.max(2, h * 0.08))
+        .fill({ color: 0x000000, alpha: dark ? 0.14 : 0.045 });
+    }
+  }
+
+  // P3.4: material edges. A lit top edge + a shaded bottom edge gives the flat
+  // desk art a slab thickness, so the rectangle reads as furniture rather than
+  // a pasted box. Drawn above the back-furniture sprites, under the characters.
+  function drawFurnitureEdges(node) {
+    const dark = codeSceneOptions.theme === 'dark';
+    for (const record of furnitureRecords.values()) {
+      if (record.kind !== 'sprite' && record.kind !== 'graphics') continue;
+      if (record.item && record.item.layer !== 'back-furniture') continue;
+      const rect = record.rect;
+      if (!rect) continue;
+      const x = rect.x * scene.width;
+      const y = rect.y * scene.height;
+      const w = rect.width * scene.width;
+      const h = rect.height * scene.height;
+      const kind = record.item && record.item.kind;
+      if (kind === 'desk-back') {
+        node.rect(x + 1, y, Math.max(0, w - 2), 1).fill({ color: 0xffffff, alpha: dark ? 0.10 : 0.55 });
+        node.rect(x + 1, y + h - 2, Math.max(0, w - 2), 2).fill({ color: 0x000000, alpha: dark ? 0.22 : 0.07 });
+        node.rect(x, y + 1, 1, Math.max(0, h - 2)).fill({ color: 0xffffff, alpha: dark ? 0.05 : 0.22 });
+      } else if (kind === 'monitor') {
+        node.rect(x + w * 0.10, y + 1, w * 0.80, 1).fill({ color: 0xffffff, alpha: dark ? 0.08 : 0.30 });
+      }
+    }
   }
 
   // Re-projects every persistent furniture node to the live scene size.
@@ -499,9 +792,22 @@ async function createOfficeRenderer(options) {
   function layoutFurniture() {
     for (const record of furnitureRecords.values()) {
       if (record.kind === 'floor') {
-        const bandY = scene.height * 0.32;
         record.node.clear();
-        record.node.rect(0, bandY, scene.width, scene.height - bandY).fill({ color: COLORS.floorLine, alpha: 0.35 });
+        if (codeSceneOptions.enabled) {
+          drawCodeScene(record.node);
+        } else {
+          const bandY = scene.height * 0.32;
+          record.node.rect(0, bandY, scene.width, scene.height - bandY).fill({ color: COLORS.floorLine, alpha: 0.35 });
+        }
+      } else if (record.kind === 'code') {
+        record.node.clear();
+        if (codeSceneOptions.enabled) drawCodeMonitor(record.node, record);
+      } else if (record.kind === 'shadows') {
+        record.node.clear();
+        if (codeSceneOptions.enabled) drawFurnitureGrounding(record.node);
+      } else if (record.kind === 'edges') {
+        record.node.clear();
+        if (codeSceneOptions.enabled) drawFurnitureEdges(record.node);
       } else if (record.kind === 'sprite') {
         const rect = record.mirrorRect || record.rect;
         const texture = record.node.texture;
@@ -627,7 +933,85 @@ async function createOfficeRenderer(options) {
     return record;
   }
 
+  // P3.0: every node that updateEntity draws in stage-absolute coordinates is
+  // translated by the interpolation pump INSTEAD of being redrawn. Resetting
+  // the offsets here means a fresh snapshot always redraws from a clean origin.
+  function resetEntityOffsets(record) {
+    const nodes = [record.container, record.__selectionRing, record.__badge,
+      record.__marker, record.__bubbleBg, record.__bubbleText];
+    for (const node of nodes) {
+      if (node && node.position && typeof node.position.set === 'function') node.position.set(0, 0);
+    }
+  }
+
+  // Moves the already-drawn entity to an interpolated foot point. Everything
+  // inside `container` (shadow, placeholder, sprite) shares one translation;
+  // the ring/badge/marker/bubble live on the effects layer and are offset by
+  // the same delta, so the whole label cluster stays attached to the feet.
+  function placeEntity(record, sample, nowMs) {
+    if (!record || !record.container || !record.__placedAt) return false;
+    const foot = displayFootOf(record, sample, nowMs);
+    const footX = foot.x;
+    const footY = foot.y;
+    const dx = footX - record.__placedAt.x;
+    const dy = footY - record.__placedAt.y;
+    const moved = Math.abs(dx) >= 0.01 || Math.abs(dy) >= 0.01;
+    // Always write the offset (including the settle-to-zero frame): the
+    // previous frame's translation must be cleared, never left behind.
+    record.container.position.set(dx, dy);
+    for (const node of [record.__selectionRing, record.__badge, record.__marker,
+      record.__bubbleBg, record.__bubbleText]) {
+      if (node && node.position && typeof node.position.set === 'function') node.position.set(dx, dy);
+    }
+    // hitTest must follow the drawing, not the snapshot.
+    record.__footPx = { x: footX, y: footY };
+    return moved;
+  }
+
+  // Applies the interpolated position of every entity at `nowMs`. Returns true
+  // when at least one entity actually moved (i.e. a repaint is worth doing).
+  function applyPresentationFrame(nowMs) {
+    if (!presentationClock) {
+      // No presentation clock (e.g. a headless harness): only a drag needs
+      // per-frame placement, and it uses the snapshot position as the sample.
+      if (!dragState.employeeId) return false;
+      const dragged = entities.get(dragState.employeeId);
+      if (!dragged || !dragged.__snapshot) return false;
+      return placeEntity(dragged, dragged.__snapshot.position, nowMs);
+    }
+    let moved = false;
+    for (const sample of presentationClock.sample(nowMs)) {
+      const record = entities.get(sample.employeeId);
+      if (record && placeEntity(record, sample, nowMs)) moved = true;
+    }
+    return moved;
+  }
+
+  function schedulePresentationFrame() {
+    if (!presentationClock || presentationFrameHandle !== null) return;
+    if (destroyed || paused || mode === 'static' || !foreground || !presenting) return;
+    try {
+      presentationFrameHandle = hostScheduleFrame(presentationTick);
+    } catch {
+      presentationFrameHandle = null;
+    }
+  }
+
+  function presentationTick() {
+    presentationFrameHandle = null;
+    if (destroyed || !presentationClock || paused || mode === 'static' || !foreground || !presenting) return;
+    presentationFrames += 1;
+    const nowMs = presentationNow();
+    const wasReleasing = dragState.release !== null;
+    if (dragState.release && nowMs - dragState.release.at >= DRAG_RETURN_MS) clearDrag();
+    if (applyPresentationFrame(nowMs) || wasReleasing) renderNow();
+    // Keep the pump alive while something is between samples OR a dragged
+    // character is still returning to its post; an idle office costs nothing.
+    if (dragState.release || presentationClock.interpolating(nowMs)) schedulePresentationFrame();
+  }
+
   function updateEntity(record, employee) {
+    resetEntityOffsets(record);
     record.__snapshot = employee;
     if (mode === 'static') return;
 
@@ -643,7 +1027,11 @@ async function createOfficeRenderer(options) {
     const heightRatio = presentation && Number.isFinite(presentation.heightRatio) && presentation.heightRatio > 0
       ? presentation.heightRatio
       : 1;
-    const visibleHeight = clamp(computeVisibleHeight(scene.height) * heightRatio, 64, 180);
+    const visibleHeight = clamp(
+      computeVisibleHeight(scene.height) * (codeSceneOptions.enabled ? codeSceneOptions.characterScale : 1) * heightRatio,
+      64,
+      180
+    );
     const geometryBounds = pack && pack.geometry ? pack.geometry.visibleBounds.height : 64;
     const scale = visibleHeight / geometryBounds;
     const frame = frameGeometryFor(employee);
@@ -751,6 +1139,9 @@ async function createOfficeRenderer(options) {
       bbText.visible = false;
       bbBg.visible = false;
     }
+    // The interpolation base: this snapshot's foot point, drawn before any
+    // presentation offset is applied.
+    record.__placedAt = { x: footX, y: footY };
   }
 
   // The ACTUAL paint order of the merged ground pass, cached for tests and
@@ -1012,6 +1403,10 @@ async function createOfficeRenderer(options) {
   function applySnapshot(snapshot) {
     if (destroyed || !snapshot || !Array.isArray(snapshot.employees)) return;
     currentSnapshot = snapshot;
+    // Buffer this push as the new interpolation target. `nowMs` is read once so
+    // the capture and the first frame of this push share one timestamp.
+    const nowMs = presentationNow();
+    if (presentationClock) presentationClock.capture(snapshot, nowMs);
     if (snapshot.scene && Number.isFinite(snapshot.scene.referenceWidth)) {
       // logical reference size only; projection keeps using the live scene
     }
@@ -1049,6 +1444,14 @@ async function createOfficeRenderer(options) {
         }
         entities.delete(id);
       }
+    }
+    // P3.0: paint at the interpolated point, then keep the frame pump running
+    // for as long as the samples are still converging. renderScene() below may
+    // skip the repaint (visual signature unchanged), but a moving entity always
+    // changes its quantized foot point, so the first frame of a push paints.
+    if (presentationClock) {
+      applyPresentationFrame(nowMs);
+      if (presentationClock.interpolating(nowMs)) schedulePresentationFrame();
     }
     // M1: the render profile decides whether this push paints (full profile:
     // always, exactly as before).
@@ -1462,6 +1865,79 @@ async function createOfficeRenderer(options) {
       return best;
     },
 
+    // P3.1: the shell theme switch. The page calls this on every theme push;
+    // the scene re-tints furniture and redraws its floor/walls in place.
+    setSceneTheme(theme) {
+      if (destroyed || !codeSceneOptions.enabled) return { ok: false, code: 'CODE_SCENE_DISABLED' };
+      const next = theme === 'dark' ? 'dark' : 'light';
+      if (next === codeSceneOptions.theme) return { ok: true, theme: next };
+      codeSceneOptions.theme = next;
+      furnitureTint = next === 'dark' ? 0x878b8f : null;
+      for (const record of furnitureRecords.values()) {
+        if (record.kind !== 'sprite' || !record.node) continue;
+        const tint = furnitureTintFor(record.item);
+        record.node.tint = tint === null ? 0xffffff : tint;
+      }
+      layoutFurniture();
+      lastRenderSignature = null;
+      renderNow();
+      return { ok: true, theme: next };
+    },
+
+    // ---- P3.3 drag (presentation only) ------------------------------------
+    // The caller (page) converts pointer pixels to scene pixels. Nothing here
+    // touches the simulation: the character is drawn at base + offset and, on
+    // release, eases back to wherever the snapshot already says it is.
+    beginDrag(employeeId) {
+      if (destroyed || mode === 'static') return null;
+      const record = entities.get(employeeId);
+      if (!record || !record.container || !record.__footPx) return null;
+      dragState.employeeId = employeeId;
+      dragState.baseFoot = { x: record.__footPx.x, y: record.__footPx.y };
+      dragState.dx = 0;
+      dragState.dy = 0;
+      dragState.release = null;
+      return { x: dragState.baseFoot.x, y: dragState.baseFoot.y };
+    },
+
+    dragTo(dx, dy) {
+      if (!dragState.employeeId || dragState.release) return false;
+      const nx = Number(dx);
+      const ny = Number(dy);
+      dragState.dx = Number.isFinite(nx) ? nx : 0;
+      dragState.dy = Number.isFinite(ny) ? ny : 0;
+      applyPresentationFrame(presentationNow());
+      renderNow();
+      return true;
+    },
+
+    endDrag() {
+      if (!dragState.employeeId) return null;
+      const record = entities.get(dragState.employeeId);
+      const from = record && record.__footPx ? { x: record.__footPx.x, y: record.__footPx.y } : null;
+      if (!presentationClock || !from) {
+        // No animation pump: snap back to the simulation position immediately.
+        clearDrag();
+        if (record && record.__snapshot) {
+          placeEntity(record, record.__snapshot.position, presentationNow());
+          renderNow();
+        }
+        return from;
+      }
+      dragState.release = { from, at: presentationNow() };
+      dragState.baseFoot = null;
+      dragState.dx = 0;
+      dragState.dy = 0;
+      schedulePresentationFrame();
+      return from;
+    },
+
+    isDragging: () => dragState.employeeId !== null,
+
+    dragOffset: () => (dragState.employeeId
+      ? { dx: dragState.dx, dy: dragState.dy, releasing: dragState.release !== null }
+      : null),
+
     setReducedMotion() {
       // The renderer has no autonomous motion to reduce (single-clock design);
       // reduced motion is enforced by the main-process simulator. Kept as a
@@ -1492,10 +1968,14 @@ async function createOfficeRenderer(options) {
       if (!next) {
         foreground = false;
         stopPump();
+        stopPresentationFrames();
         return Promise.resolve({ mode, diagnosticCode, recovery: 'none' });
       }
       const becameForeground = !foreground;
       foreground = true;
+      // Returning to the foreground resumes the presentation pump too: a push
+      // that arrived while detached left an un-finished interpolation segment.
+      if (presentationClock && presentationClock.interpolating(presentationNow())) schedulePresentationFrame();
       if (!becameForeground) {
         // Already foreground (e.g. a window focus event): never a new attempt.
         return Promise.resolve({ mode, diagnosticCode, recovery: 'none' });
@@ -1534,6 +2014,7 @@ async function createOfficeRenderer(options) {
       presenting = next;
       if (!next) {
         stopPump();
+        stopPresentationFrames();
         return Promise.resolve({ mode, diagnosticCode, recovery: 'none' });
       }
       if (mode === 'static' && diagnosticCode === 'LOW_FPS_PERSISTENT') {
@@ -1541,12 +2022,14 @@ async function createOfficeRenderer(options) {
       }
       resetMonitor();
       schedulePump();
+      if (presentationClock && presentationClock.interpolating(presentationNow())) schedulePresentationFrame();
       return Promise.resolve({ mode, diagnosticCode, recovery: 'none' });
     },
 
     pause() {
       if (destroyed || mode === 'static') return;
       paused = true;
+      stopPresentationFrames();
       if (app && app.ticker) app.ticker.stop();
     },
 
@@ -1554,6 +2037,7 @@ async function createOfficeRenderer(options) {
       if (destroyed || mode === 'static') return;
       paused = false;
       if (app && app.ticker) app.ticker.start();
+      if (presentationClock && presentationClock.interpolating(presentationNow())) schedulePresentationFrame();
     },
 
     isPaused: () => paused,
@@ -1576,6 +2060,27 @@ async function createOfficeRenderer(options) {
         manualRetryAttempts,
         // 2026-09-25 唤醒自愈：呈现门控的当前值（探针/证据用它核对「锁屏期间停表」）。
         presenting,
+        // P3.0 observability: whether the presentation pump exists at all and
+        // how many interpolated frames it has drawn. `enabled:false` (or a host
+        // without rAF) is the historical paint-on-push behaviour.
+        presentation: {
+          enabled: !!presentationClock,
+          frames: presentationFrames,
+          scheduled: presentationFrameHandle !== null,
+          interpolating: presentationClock ? presentationClock.interpolating(presentationNow()) : false,
+          buffers: presentationClock ? presentationClock.stats() : null,
+        },
+        // P3.1: the code-drawn scene switch + the geometry it last produced.
+        codeScene: {
+          enabled: codeSceneOptions.enabled,
+          theme: codeSceneOptions.theme,
+          accent: codeSceneOptions.accent,
+          characterScale: codeSceneOptions.enabled ? codeSceneOptions.characterScale : 1,
+          codeMonitorCount: codeSceneOptions.enabled
+            ? [...furnitureRecords.values()].filter((record) => record.kind === 'code').length
+            : 0,
+          ...(codeSceneStats || {}),
+        },
         fps: monitor && typeof monitor.stats === 'function' ? monitor.stats() : null,
         foreground,
         scene: { ...scene },
@@ -1639,6 +2144,8 @@ async function createOfficeRenderer(options) {
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      stopPresentationFrames();
+      if (presentationClock) presentationClock.reset();
       stopPump();
       for (const record of furnitureRecords.values()) {
         if (record.node) {

@@ -11,6 +11,7 @@ const GOAL_MAX_CHARS = 2000;
 const PATH_MAX_CHARS = 1024;
 const KEY_MAX_CHARS = 200;
 const VERIFY_COMMAND_MAX_CHARS = 500;
+const FOCUS_ID_MAX_CHARS = 64;
 const ARTIFACT_ACTIONS = Object.freeze(['read', 'open', 'reveal']);
 
 function isPlainObject(value) {
@@ -52,6 +53,18 @@ function validate(payload) {
   if (action === 'resume') return { ok: true, action };
   if (action === 'expand') return { ok: true, action };
   if (action === 'retry') return { ok: true, action };
+  // P3.3: 办公室 → 工作坞的成员定位。空/缺省表示"清除定位"；非空必须是
+  // 一个座位 id 形状的短标识符（闭集白名单在 main.js 侧再校验一次）。
+  if (action === 'focus') {
+    const raw = payload.employeeId;
+    if (raw === null || raw === undefined || raw === '') {
+      return { ok: true, action, employeeId: null };
+    }
+    if (typeof raw !== 'string' || raw.length > FOCUS_ID_MAX_CHARS || !/^[a-z0-9][a-z0-9._-]*$/i.test(raw)) {
+      return { ok: false, code: 'FOCUS_ID_INVALID' };
+    }
+    return { ok: true, action, employeeId: raw };
+  }
   if (action === 'open-artifact') {
     const key = typeof payload.key === 'string' ? payload.key.trim() : '';
     if (key === '' || key.length > KEY_MAX_CHARS) return { ok: false, code: 'ARTIFACT_KEY_INVALID' };
@@ -84,8 +97,8 @@ function isTrustedWorkSender(event, expectedFile = 'work.html') {
  * @param {() => Promise<object>} deps.cancel
  * @param {(args: {key: string, verb: string}) => Promise<object>} deps.openArtifact
  */
-function createWorkIpc({ status, selectWorkspace, start, cancel, resume, retry, expand, openArtifact } = {}) {
-  for (const [name, fn] of Object.entries({ status, selectWorkspace, start, cancel, resume, retry, expand, openArtifact })) {
+function createWorkIpc({ status, selectWorkspace, start, cancel, resume, retry, expand, openArtifact, focus } = {}) {
+  for (const [name, fn] of Object.entries({ status, selectWorkspace, start, cancel, resume, retry, expand, openArtifact, focus })) {
     if (typeof fn !== 'function') throw new Error(`createWorkIpc requires ${name}()`);
   }
 
@@ -102,6 +115,7 @@ function createWorkIpc({ status, selectWorkspace, start, cancel, resume, retry, 
       case 'retry': return retry();
       case 'expand': return expand();
       case 'open-artifact': return openArtifact({ key: checked.key, verb: checked.verb });
+      case 'focus': return focus(checked.employeeId);
       default: return refuse('ACTION_UNKNOWN');
     }
   }

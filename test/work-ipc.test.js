@@ -18,6 +18,7 @@ function makeIpc(overrides = {}) {
     retry: async () => { calls.push('retry'); return { ok: true }; },
     expand: async () => { calls.push('expand'); return { ok: true }; },
     openArtifact: async (args) => { calls.push(['open', args]); return { ok: true, text: 'x' }; },
+    focus: async (employeeId) => { calls.push(['focus', employeeId]); return { ok: true }; },
   };
   return { ipc: createWorkIpc({ ...base, ...overrides }), calls };
 }
@@ -34,6 +35,14 @@ test('work-ipc: validates every action and fails closed on unknown/ambiguous pay
   assert.equal(ipc.validate({ action: 'open-artifact', key: '' }).code, 'ARTIFACT_KEY_INVALID');
   assert.equal(ipc.validate({ action: 'open-artifact', key: 'k', verb: 'exec' }).code, 'ARTIFACT_ACTION_INVALID');
   assert.equal(ipc.validate({ action: 'start', goal: 'x', verifyCommand: 'y'.repeat(501) }).code, 'WORK_VERIFY_COMMAND_TOO_LONG');
+  // P3.3: focus carries only a seat id; empty means "clear".
+  assert.deepEqual(ipc.validate({ action: 'focus', employeeId: 'coder' }), { ok: true, action: 'focus', employeeId: 'coder' });
+  assert.deepEqual(ipc.validate({ action: 'focus', employeeId: null }), { ok: true, action: 'focus', employeeId: null });
+  assert.deepEqual(ipc.validate({ action: 'focus' }), { ok: true, action: 'focus', employeeId: null });
+  assert.equal(ipc.validate({ action: 'focus', employeeId: 'bad id!' }).code, 'FOCUS_ID_INVALID');
+  assert.equal(ipc.validate({ action: 'focus', employeeId: 'x'.repeat(65) }).code, 'FOCUS_ID_INVALID');
+  assert.equal(ipc.validate({ action: 'focus', employeeId: '../etc/passwd' }).code, 'FOCUS_ID_INVALID');
+  assert.equal(ipc.validate({ action: 'focus', employeeId: 42 }).code, 'FOCUS_ID_INVALID');
 });
 
 test('work-ipc: delegates with trimmed values (the goal is the only user text)', async () => {
@@ -46,6 +55,8 @@ test('work-ipc: delegates with trimmed values (the goal is the only user text)',
   assert.deepEqual(await ipc.handle({ action: 'resume' }, true), { ok: true });
   assert.deepEqual(await ipc.handle({ action: 'expand' }, true), { ok: true });
   assert.deepEqual(await ipc.handle({ action: 'retry' }, true), { ok: true });
+  assert.deepEqual(await ipc.handle({ action: 'focus', employeeId: 'coder' }, true), { ok: true });
+  assert.deepEqual(await ipc.handle({ action: 'focus', employeeId: null }, true), { ok: true });
   assert.deepEqual(calls, [
     ['select', { path: '/tmp/ws' }],
     ['select', { create: 'demo' }],
@@ -55,6 +66,8 @@ test('work-ipc: delegates with trimmed values (the goal is the only user text)',
     'resume',
     'expand',
     'retry',
+    ['focus', 'coder'],
+    ['focus', null],
   ]);
 });
 

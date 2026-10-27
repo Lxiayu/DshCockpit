@@ -132,6 +132,11 @@ contextBridge.exposeInMainWorld('officeBridge', {
   team: (payload) => ipcRenderer.invoke('shell:team', payload),
   // v0.7 P1.5：悬停呈现（壳自有通道；office:* 仍是 8 个）。传 null 恢复。
   present: (employeeId) => ipcRenderer.invoke('shell:office-present', typeof employeeId === 'string' ? employeeId : null),
+  // v0.7 P3.3：双击成员 → 壳打开工作坞并定位该成员的产物（壳自有通道；
+  // 只传座位 id，不传任务内容/路径，工作坞的事实仍只来自 Team/Work 存储）。
+  focusMember: (employeeId) => ipcRenderer.invoke('shell:office-focus', {
+    employeeId: typeof employeeId === 'string' ? employeeId : null,
+  }),
   // v0.7 P1.5：工作坞模式（壳推布局；docked 时自有右栏收成浮动待办卡）。
   getDockLayout: () => ipcRenderer.invoke('shell:office-layout'),
   onDockLayout: (listener) => {

@@ -525,7 +525,11 @@ test('office.html follows the shell theme through the preload bridge (no new bus
   const html = read('src/office/office.html');
   assert.ok(html.includes('bridge.getTheme'), 'the theme is pulled once on boot');
   assert.ok(html.includes('bridge.onTheme'), 'theme pushes are consumed');
-  assert.ok(html.includes("applyPageTheme('light')"), 'light is the default until the shell answers');
+  // P3.1 acceptance: the resolved theme is applied BEFORE the scene boots (the
+  // scene needs it for its palette); light stays the fallback when the shell
+  // cannot answer, and pushes still re-theme both the page and the scene.
+  assert.ok(html.includes("let initialTheme = 'light'"), 'light is the default until the shell answers');
+  assert.ok(html.includes('document.documentElement.dataset.theme = initialTheme'), 'the resolved theme is applied before boot');
   const preload = read('src/office/office-preload.js');
   assert.ok(preload.includes("getTheme: () => ipcRenderer.invoke('shell:get-theme')"), 'the preload exposes getTheme');
   assert.ok(preload.includes("ipcRenderer.on('shell:theme'"), 'the preload exposes the theme push');

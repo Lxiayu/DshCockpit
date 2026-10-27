@@ -54,6 +54,12 @@
       </aside>
 
       <section id="detail">
+        <!-- v0.7 P3.3：从办公室双击定位到某位成员时显示；只是呈现强调，
+             事实仍来自 Team/Work 存储。即使当前没有工作项也可见。 -->
+        <p id="focusBanner" class="focus-banner" role="status" hidden>
+          <span id="focusText"></span>
+          <button id="clearFocus" type="button" class="link" data-i18n="work.focus.clear">清除定位</button>
+        </p>
         <div id="emptyDetail" class="empty" data-i18n="work.detail.empty">还没有任务。写一句话，交给团队。</div>
         <div id="detailBody" hidden>
           <h1 id="detailGoal"></h1>

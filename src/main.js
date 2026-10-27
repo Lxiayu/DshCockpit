@@ -417,16 +417,46 @@ function ensureWorkController() {
   }
 }
 
+// v0.7 P3.3：办公室双击成员 → 工作坞定位。只存一个座位 id（闭集词表），
+// 不存任务内容/路径；工作坞仍只从 Work 存储与 Team facts 取事实。
+let officeFocusEmployeeId = null;
+
 function workStatusPayload() {
   const controller = ensureWorkController();
   if (!controller) {
     return Object.freeze({
       ok: true, code: workWorkspaceError, workspace: null,
       items: Object.freeze([]), artifacts: Object.freeze([]), current: null, active: false,
+      focusEmployee: officeFocusEmployeeId,
       team: officeTeamRealStatus(),
     });
   }
-  return Object.freeze({ ok: true, code: null, ...controller.snapshot(), team: officeTeamRealStatus() });
+  return Object.freeze({
+    ok: true, code: null, ...controller.snapshot(),
+    focusEmployee: officeFocusEmployeeId,
+    team: officeTeamRealStatus(),
+  });
+}
+
+/** 设置/清除工作坞的成员定位。null 只清除，不打开坞。 */
+function focusWorkMember(employeeId) {
+  if (employeeId === null || employeeId === undefined) {
+    officeFocusEmployeeId = null;
+    sendWorkUpdate();
+    return Object.freeze({ ok: true, employeeId: null });
+  }
+  const { EMPLOYEE_IDS } = require('./office/office-module.js');
+  const allowed = Array.isArray(EMPLOYEE_IDS) ? EMPLOYEE_IDS : [];
+  if (typeof employeeId !== 'string' || !allowed.includes(employeeId)) {
+    return Object.freeze({ ok: false, code: 'TEAM_SEAT_UNKNOWN' });
+  }
+  officeFocusEmployeeId = employeeId;
+  // 打开（或唤起）工作坞：双击的语义是"看这个人的任务与产物"。
+  try {
+    if (windowManager && typeof windowManager.showWorkDock === 'function') windowManager.showWorkDock();
+  } catch { /* shell not ready yet */ }
+  sendWorkUpdate();
+  return Object.freeze({ ok: true, employeeId });
 }
 
 let workUpdateTimer = null;
@@ -615,6 +645,7 @@ function registerShellWorkIpc(ipcMain) {
     retry: () => retryWorkRun(),
     expand: () => expandWorkView(),
     openArtifact: (args) => openWorkArtifact(args),
+    focus: (employeeId) => focusWorkMember(employeeId),
   });
   work.register(ipcMain);
 }
@@ -2757,6 +2788,12 @@ function registerIpc() {
       return Object.freeze({ ok: false, code: 'TEAM_SEAT_UNKNOWN' });
     }
     return office.setPresenting({ employeeId, presenting: true });
+  });
+  // v0.7 P3.3：双击成员 → 工作坞定位（壳自有通道；office:* 仍为 8 个）。
+  // 载荷只有一个座位 id；未知 id 一律拒绝（与 shell:office-present 同一白名单）。
+  ipcMain.handle('shell:office-focus', (_e, payload) => {
+    const employeeId = payload && typeof payload === 'object' ? payload.employeeId : null;
+    return focusWorkMember(typeof employeeId === 'string' ? employeeId : null);
   });
   ipcMain.handle('office-rail:set-accent', (_e, accent) => {
     const allowed = ['indigo', 'sky', 'teal', 'amber', 'rose', 'slate'];

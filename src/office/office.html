@@ -278,8 +278,14 @@
       // fps-monitor must load BEFORE pixi-office-renderer: the renderer
       // requires it at module load time.
       REGISTRY['fps-monitor'] = await loadModule('./render/fps-monitor.js');
+      // P3.0: the pure presentation clock (double-buffer interpolation) loads
+      // before the renderer, which requires it at module load time.
+      REGISTRY['presentation-clock'] = await loadModule('./render/presentation-clock.js');
+      REGISTRY['code-scene'] = await loadModule('./render/code-scene.js');
       REGISTRY['pixi-office-renderer'] = await loadModule('./render/pixi-office-renderer.js', (spec) => {
         if (spec === './fps-monitor.js') return REGISTRY['fps-monitor'];
+        if (spec === './presentation-clock.js') return REGISTRY['presentation-clock'];
+        if (spec === './code-scene.js') return REGISTRY['code-scene'];
         if (spec === '../layout-assets.js') return REGISTRY['layout-assets'];
         throw new Error('require unsupported: ' + spec);
       });
@@ -414,6 +420,37 @@
         image.src = src;
       })));
       const stage = document.getElementById('stage-host');
+      // P3.1 preview lever (2026-10-27, user-approved look): the code-drawn
+      // scene is OFF by default. `?codeScene=1&sceneTheme=dark&accent=clay`
+      // previews it (warm dark theme, material-detail furniture, 1.18x
+      // characters) without changing the shipped appearance.
+      // P3.1（2026-10-27 用户验收）：代码绘制场景默认开启，并跟随壳的主题
+      // （亮色 = 亮房景，暗色 = 灰夜场景）。`?codeScene=0` 是回退/诊断开关；
+      // `?sceneTheme=light|dark` 只用于预览时钉住场景主题。
+      const codeSceneParam = officeSearchParams.get('codeScene');
+      const sceneThemeParam = officeSearchParams.get('sceneTheme');
+      const sceneAccentParam = officeSearchParams.get('accent') || '';
+      const characterScaleParam = Number(officeSearchParams.get('characterScale'));
+      const sceneThemeOverride = sceneThemeParam === 'dark' ? 'dark'
+        : (sceneThemeParam === 'light' ? 'light' : null);
+      let initialTheme = 'light';
+      if (bridge.getTheme) {
+        try {
+          initialTheme = await bridge.getTheme() === 'dark' ? 'dark' : 'light';
+        } catch { /* the page stays light if the shell cannot answer */ }
+      }
+      document.documentElement.dataset.theme = initialTheme;
+      const codeSceneOptions = {
+        enabled: codeSceneParam !== '0',
+        theme: sceneThemeOverride || initialTheme,
+        accent: /^[a-z]{3,10}$/.test(sceneAccentParam) ? sceneAccentParam : 'indigo',
+        characterScale: Number.isFinite(characterScaleParam) && characterScaleParam > 0 ? characterScaleParam : 1.18,
+      };
+      // The canvas is letterboxed inside the stage; the bars must follow the
+      // scene theme or the dark room sits in a bright frame.
+      if (codeSceneOptions.enabled) {
+        stage.style.background = codeSceneOptions.theme === 'dark' ? '#141210' : '#efece5';
+      }
       const renderer = await REGISTRY['pixi-office-renderer'].createOfficeRenderer({
         PIXI: window.PIXI,
         layout,
@@ -421,6 +458,7 @@
         textures,
         officeTextures,
         officeTextureErrors,
+        codeScene: codeSceneOptions,
         // Task 7A: the approved workstation-1 calibration propagated to all
         // six stations; every desk renders from the same managed catalog.
         texturedWorkstations: ['desk-1', 'desk-2', 'desk-3', 'desk-4', 'desk-5', 'desk-6'],
@@ -1374,13 +1412,81 @@
         if (bridge.present) bridge.present(null);
         hoverId = null;
       }
+
+      // P3.3: dsh-pet style dragging. Purely presentational — the renderer
+      // moves the drawn node and eases it back to the snapshot position; no
+      // dispatch/interrupt is ever sent from here.
+      const DRAG_THRESHOLD_PX = 4;
+      const dragGuard = { id: null, startX: 0, startY: 0, active: false, pointerId: null };
+      let suppressClick = false;
+      function endDragGesture(event) {
+        if (!dragGuard.id) return false;
+        const wasActive = dragGuard.active;
+        if (wasActive) {
+          renderer.endDrag();
+          // The click that follows this pointerup must not pin/re-select: the
+          // gesture was a drag, not a click.
+          suppressClick = true;
+          stage.style.cursor = '';
+        }
+        if (event && dragGuard.pointerId !== null && typeof stage.releasePointerCapture === 'function') {
+          try { stage.releasePointerCapture(dragGuard.pointerId); } catch { /* already released */ }
+        }
+        dragGuard.id = null;
+        dragGuard.active = false;
+        dragGuard.pointerId = null;
+        return wasActive;
+      }
+      stage.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return;
+        // A fresh gesture always starts clean: a drag's click suppression must
+        // never outlive the click it was meant for (some platforms skip it).
+        suppressClick = false;
+        const point = hoverPoint(event);
+        const hit = renderer.hitTest(point.x, point.y);
+        if (!hit) return;
+        dragGuard.id = hit;
+        dragGuard.startX = event.clientX;
+        dragGuard.startY = event.clientY;
+        dragGuard.active = false;
+        dragGuard.pointerId = event.pointerId;
+        if (typeof stage.setPointerCapture === 'function') {
+          try { stage.setPointerCapture(event.pointerId); } catch { /* not capturable */ }
+        }
+      });
+      stage.addEventListener('pointerup', (event) => { endDragGesture(event); });
+      stage.addEventListener('pointercancel', (event) => { endDragGesture(event); });
       stage.addEventListener('pointermove', (event) => {
+        // P3.3 drag wins over hover: while the pointer is down on a character
+        // the card is irrelevant, and the guard below would swallow the move.
+        if (dragGuard.id) {
+          const dx = event.clientX - dragGuard.startX;
+          const dy = event.clientY - dragGuard.startY;
+          if (!dragGuard.active && Math.hypot(dx, dy) >= DRAG_THRESHOLD_PX) {
+            // The drag begins only after real movement, so a plain click still
+            // pins the card. beginDrag() returns false when the entity has no
+            // drawable node (static fallback) — then this stays a click.
+            dragGuard.active = !!renderer.beginDrag(dragGuard.id);
+            if (dragGuard.active) {
+              cardEl.hidden = true;
+              hoverPinned = null;
+              if (bridge.present) bridge.present(null);
+              hoverId = null;
+              stage.style.cursor = 'grabbing';
+            }
+          }
+          if (dragGuard.active) {
+            renderer.dragTo(dx, dy);
+            return;
+          }
+        }
         if (hoverPinned) return;
         const now = performance.now();
         if (now - hoverAt < 80) return; // 节流：命中测试只做 12Hz
         hoverAt = now;
         const point = hoverPoint(event);
         const hit = renderer.hitTest(point.x, point.y);
+        stage.style.cursor = hit ? 'grab' : '';
         if (hit === hoverId) {
           if (hit) moveMemberCard(event.clientX, event.clientY);
           return;
@@ -1391,13 +1497,16 @@
         else cardEl.hidden = true;
       });
       stage.addEventListener('pointerleave', () => {
-        if (hoverPinned) return;
+        if (hoverPinned || dragGuard.id) return;
+        stage.style.cursor = '';
         clearMemberCard();
       });
 
       // pointer selection on the Pixi canvas — hit-tests run against the
       // LETTERBOXED canvas rect (scene pixels), not the whole stage
       stage.addEventListener('click', (event) => {
+        // A pointerup that ended a drag is not a click: ignore exactly one.
+        if (suppressClick) { suppressClick = false; return; }
         const sceneCanvas = stage.querySelector('canvas');
         const rect = (sceneCanvas || stage).getBoundingClientRect();
         const hit = renderer.hitTest(event.clientX - rect.left, event.clientY - rect.top);
@@ -1415,6 +1524,16 @@
           hoverPinned = null;
           clearMemberCard();
         }
+      });
+      // P3.3: double-click a member to open the work dock focused on that
+      // member. The shell owns the dock; the page only names a seat id (the
+      // same closed vocabulary as office:present) and sends nothing else.
+      stage.addEventListener('dblclick', (event) => {
+        if (suppressClick) return;
+        const sceneCanvas = stage.querySelector('canvas');
+        const rect = (sceneCanvas || stage).getBoundingClientRect();
+        const hit = renderer.hitTest(event.clientX - rect.left, event.clientY - rect.top);
+        if (hit && bridge.focusMember) bridge.focusMember(hit);
       });
       // keyboard: list focus + scene selection (shared with the evidence API)
       function handleKeyEvent(key) {
@@ -1550,9 +1669,15 @@
       // the office page consumes it exactly like the rail page does
       // (shell:get-theme once + shell:theme pushes). Light until it arrives.
       function applyPageTheme(theme) {
-        document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light';
+        const next = theme === 'dark' ? 'dark' : 'light';
+        document.documentElement.dataset.theme = next;
+        // The scene follows the same switch: re-tint furniture and repaint the
+        // floor/walls in place. A preview-pinned sceneTheme is never overridden.
+        if (codeSceneOptions.enabled && !sceneThemeOverride && typeof renderer.setSceneTheme === 'function') {
+          renderer.setSceneTheme(next);
+          stage.style.background = next === 'dark' ? '#141210' : '#efece5';
+        }
       }
-      applyPageTheme('light');
       if (bridge.getTheme) {
         Promise.resolve(bridge.getTheme()).then(applyPageTheme).catch(() => {});
         if (bridge.onTheme) bridge.onTheme(applyPageTheme);

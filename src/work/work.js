@@ -131,16 +131,38 @@ function renderItems() {
   }
 }
 
-function hideViewer() {
-  $('viewerWrap').hidden = true;
+function hideViewer() {  $('viewerWrap').hidden = true;
   $('viewerPre').textContent = '';
   $('viewerTitle').textContent = '';
   $('viewerMeta').textContent = '';
   $('viewerNote').textContent = '';
 }
 
+function focusEmployeeId() {
+  return state && typeof state.focusEmployee === 'string' && state.focusEmployee !== '' ? state.focusEmployee : null;
+}
+
+// P3.3: the banner is presentation emphasis over existing producers; it never
+// changes the Work facts and clears through the same shell:work channel.
+function renderFocusBanner() {
+  const focus = focusEmployeeId();
+  const banner = $('focusBanner');
+  banner.hidden = !focus;
+  if (!focus) return;
+  const item = selectedItem();
+  const hasMatch = !!(item && Array.isArray(item.artifactRefs)
+    && item.artifactRefs.some((key) => (artifactByKey(key) || {}).producerRole === focus));
+  const who = tr(`office.employee.${focus}`) || focus;
+  $('focusText').textContent = hasMatch
+    ? tr('work.focus.banner', { who })
+    : tr('work.focus.none', { who });
+}
+
 function renderDetail() {
   const item = selectedItem();
+  // P3.3: the member focus banner is independent of which item is selected —
+  // it names a seat and highlights that producer's artifacts below.
+  renderFocusBanner();
   $('emptyDetail').hidden = !!item;
   $('detailBody').hidden = !item;
   if (!item) return;
@@ -170,11 +192,16 @@ function renderDetail() {
   list.textContent = '';
   const refs = Array.isArray(item.artifactRefs) ? item.artifactRefs : [];
   $('artifactEmpty').hidden = refs.length > 0;
+  // P3.3: member focus from the office (double-click). Only emphasis: matching
+  // artifacts get a marker, and the banner names the seat. Nothing is added to
+  // the Work facts.
+  const focus = focusEmployeeId();
   for (const key of refs) {
     const artifact = artifactByKey(key);
     if (!artifact) continue;
     const li = document.createElement('li');
     li.classList.toggle('on', selectedKey === key);
+    li.classList.toggle('focus-match', focus !== null && artifact.producerRole === focus);
     const kind = document.createElement('span');
     kind.className = 'kind';
     kind.textContent = tr(`work.kind.${artifact.kind}`) || artifact.kind;
@@ -293,6 +320,9 @@ function bind() {
   $('openWs').addEventListener('click', openWorkspace);
   $('changeWs').addEventListener('click', () => { hideViewer(); $('onboarding').hidden = false; $('main').hidden = true; });
   $('expandWork').addEventListener('click', () => act({ action: 'expand' }));
+  // P3.3: clearing the office focus is presentation-only; the work facts are
+  // untouched and the status push re-renders the banner away.
+  $('clearFocus').addEventListener('click', () => { act({ action: 'focus', employeeId: null }); });
   $('openArtifact').addEventListener('click', () => {
     if (selectedKey) act({ action: 'open-artifact', key: selectedKey, verb: 'open' });
   });
