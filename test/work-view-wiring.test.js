@@ -79,7 +79,7 @@ test('work-view: the renderer is text-only and talks through one channel', () =>
   assert.match(JS, /textContent = result\.text/);
   assert.doesNotMatch(JS, /require\(|process\.|localStorage/, 'the renderer has no node or storage access');
   const invokes = [...JS.matchAll(/action: '([a-z-]+)'/g)].map((m) => m[1]);
-  assert.deepEqual([...new Set(invokes)].sort(), ['cancel', 'open-artifact', 'select-workspace', 'start', 'status']);
+  assert.deepEqual([...new Set(invokes)].sort(), ['cancel', 'open-artifact', 'resume', 'select-workspace', 'start', 'status']);
   assert.match(PRELOAD, /ipcRenderer\.invoke\('shell:work', payload\)/);
   assert.doesNotMatch(PRELOAD, /shell:work:[a-z-]+/, 'one channel + action payload, not a family of channels');
 });
@@ -88,6 +88,13 @@ test('work-view: the preload exposes no direct fs/ipc passthrough', () => {
   assert.doesNotMatch(PRELOAD, /exposeInMainWorld\('workApi', \{\s*ipcRenderer/);
   assert.doesNotMatch(PRELOAD, /invoke: \(channel, payload\)/, 'the channel is fixed, not caller-chosen');
   assert.match(PRELOAD, /pickFolder: \(\) => ipcRenderer\.invoke\('shell:pick-folder', 'workspace'\)/);
+});
+
+test('work-view: every element id the renderer reaches for exists in the page', () => {
+  const ids = new Set([...HTML.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
+  const used = [...JS.matchAll(/\$\('([^']+)'\)/g)].map((m) => m[1]);
+  assert.ok(used.length >= 15, 'the renderer actually wires the page');
+  for (const id of used) assert.ok(ids.has(id), `work.js reaches for #${id}, which work.html does not define`);
 });
 
 test('work-view: every static i18n key exists in both languages', () => {

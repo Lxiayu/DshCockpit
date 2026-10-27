@@ -149,6 +149,8 @@ function renderDetail() {
   const active = !!(state.active && state.current && state.current.workItemId === item.workItemId);
   $('startBtn').disabled = busy || !!state.active;
   $('cancelBtn').hidden = !active;
+  $('resumeBtn').hidden = !(active && item.status === 'attention');
+  $('changeWs').disabled = !!state.active;
 
   const list = $('artifacts');
   list.textContent = '';
@@ -225,6 +227,11 @@ async function startTask(event) {
   }
 }
 
+async function resumeTask() {
+  const result = await act({ action: 'resume' });
+  if (result) setNotice('');
+}
+
 async function cancelTask() {
   const result = await act({ action: 'cancel' });
   if (result) setNotice(tr('work.cancelRequested'));
@@ -258,6 +265,7 @@ function apply(next) {
 function bind() {
   $('taskForm').addEventListener('submit', startTask);
   $('cancelBtn').addEventListener('click', cancelTask);
+  $('resumeBtn').addEventListener('click', resumeTask);
   $('createWs').addEventListener('click', createWorkspace);
   $('openWs').addEventListener('click', openWorkspace);
   $('changeWs').addEventListener('click', () => { hideViewer(); $('onboarding').hidden = false; $('main').hidden = true; });
@@ -283,6 +291,10 @@ async function boot() {
     if (value === 'zh' || value === 'en') lang = value;
   } catch { /* fallback zh */ }
   applyStaticI18n();
+  // 词典是异步拉取的；到货后重填静态文案与状态标签（否则英文用户会看到 HTML 里的中文回退）。
+  if (api && api.i18n && api.i18n.loaded) {
+    api.i18n.loaded.then(() => { applyStaticI18n(); render(); }).catch(() => {});
+  }
   if (api && api.onLanguage) {
     api.onLanguage((value) => {
       if (value !== 'zh' && value !== 'en') return;

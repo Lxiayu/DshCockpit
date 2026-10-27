@@ -434,6 +434,8 @@ function sendWorkUpdate() {
 }
 
 async function selectWorkWorkspace(target) {
+  // 运行中换工作区会让产物落到旧目录、新视图看不到 —— fail-closed，等任务结束再换。
+  if (officeTeamRealInstance) return Object.freeze({ ok: false, code: 'TEAM_ALREADY_ACTIVE' });
   try {
     const workspace = workStoreInstance().open(target || {});
     attachWorkWorkspace(workspace);
@@ -485,6 +487,16 @@ async function startWorkRun(goal) {
   return workStatusPayload();
 }
 
+async function resumeWorkRun() {
+  const instance = officeTeamRealInstance;
+  if (!instance) return Object.freeze({ ok: false, code: 'TEAM_NOT_ACTIVE' });
+  const verdict = await instance.resumeTeam();
+  sendWorkUpdate();
+  return verdict.ok
+    ? Object.freeze({ ok: true, code: null })
+    : Object.freeze({ ok: false, code: verdict.code || 'RESUME_FAILED' });
+}
+
 async function cancelWorkRun() {
   const instance = officeTeamRealInstance;
   if (!instance) return Object.freeze({ ok: false, code: 'TEAM_NOT_ACTIVE' });
@@ -523,6 +535,7 @@ function registerShellWorkIpc(ipcMain) {
     selectWorkspace: (target) => selectWorkWorkspace(target),
     start: (goal) => startWorkRun(goal),
     cancel: () => cancelWorkRun(),
+    resume: () => resumeWorkRun(),
     openArtifact: (args) => openWorkArtifact(args),
   });
   work.register(ipcMain);

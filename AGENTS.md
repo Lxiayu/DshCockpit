@@ -55,7 +55,7 @@ archive/                      本地保险箱（git 忽略，历史版本在提�
 ## 5. 命令与坑
 
 ```bash
-# 全量测试（当前 1845 项；目标内部循环 < 1 分钟，正在分段优化）
+# 全量测试（当前 1846 项；目标内部循环 < 1 分钟，正在分段优化）
 npm test                                   # = node --test "test/*.test.js"（约 2 分钟）
 # 单套件
 node --test /abs/path/test/xxx.test.js
@@ -76,7 +76,7 @@ node --test /abs/path/test/xxx.test.js
 
 ## 7. 当前状态与下一步
 
-- v0.6 已推送（`21f7db3`）；v0.7 P1（工作区/产物落地/工作台）已落地（全量 1845 绿），
+- v0.6 已推送（`21f7db3`）；v0.7 P1（工作区/产物落地/工作台）已落地（全量 1846 绿），
   本地未推送；计划/偏差/真机脚本见 `docs/plans/active/HARNESS-V0.7-P1-PLAN-2026-10-27.md`
   与 `docs/research/HARNESS-V0.7-P1-REPORT-2026-10-27.md`。
 - 待办主线：`docs/product/WORK-FIRST-V0.7.md` P1（产物与工作台）。

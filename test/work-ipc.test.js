@@ -14,6 +14,7 @@ function makeIpc(overrides = {}) {
     selectWorkspace: async (target) => { calls.push(['select', target]); return { ok: true }; },
     start: async (goal) => { calls.push(['start', goal]); return { ok: true }; },
     cancel: async () => { calls.push('cancel'); return { ok: true }; },
+    resume: async () => { calls.push('resume'); return { ok: true }; },
     openArtifact: async (args) => { calls.push(['open', args]); return { ok: true, text: 'x' }; },
   };
   return { ipc: createWorkIpc({ ...base, ...overrides }), calls };
@@ -38,11 +39,13 @@ test('work-ipc: delegates with trimmed values (the goal is the only user text)',
   assert.deepEqual(await ipc.handle({ action: 'select-workspace', create: 'demo' }, true), { ok: true });
   assert.deepEqual(await ipc.handle({ action: 'start', goal: '  研究主题  ' }, true), { ok: true });
   assert.deepEqual(await ipc.handle({ action: 'open-artifact', key: 'job:notes', verb: 'read' }, true), { ok: true, text: 'x' });
+  assert.deepEqual(await ipc.handle({ action: 'resume' }, true), { ok: true });
   assert.deepEqual(calls, [
     ['select', { path: '/tmp/ws' }],
     ['select', { create: 'demo' }],
     ['start', '研究主题'],
     ['open', { key: 'job:notes', verb: 'read' }],
+    'resume',
   ]);
 });
 
