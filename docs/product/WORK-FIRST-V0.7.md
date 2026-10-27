@@ -147,6 +147,12 @@ plan（模板或 worker 产出，可人工确认）
 - Office 映射最小集（座位 ← 工作图；桌面显示产物缩略）。
 - 验收：首跑 5 分钟内产出真实文件；任务完成时必有可打开产物 + 来源；无产物不得显示"完成"（机械门）。
 
+> **实施口径修正（2026-10-27，见 `docs/plans/active/HARNESS-V0.7-P1-PLAN-2026-10-27.md`）**：
+> ① `report` / `workspace-patch` / `workspace-files` 需要 worker 的工作区写能力与受信 diff（P2），
+> P1 只用现有 `research-notes` / `review-findings`，但**落到真实工作区**并进入索引；
+> ② 任务板 P1 = 单活动任务 + 历史列表（并行/排队 P2）；
+> ③ 办公室 P1 = 座位级产物计数标记（闭集 kind），缩略渲染放 P3。
+
 ### P2（v0.8）：工具循环与验证
 - Worker 工具集（读写/命令/沙箱策略）+ Verification Runner + `execution/verification` / `run/verification` 事实。
 - 受控 retry（attempt ≤ N）+ review 基于 diff/证据。

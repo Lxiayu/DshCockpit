@@ -37,6 +37,7 @@
 | `docs/research/HARNESS-RUNTIME-EVIDENCE-2026-08.md` | 参考 | Harness 原生能力证据（办公室边界事实） |
 | `docs/research/TEAM-RUNTIME-OSS-RESEARCH-2026-10.md` | 参考 | Agent-team OSS 调研（58 仓），支撑 Team Runtime 立场 |
 | `docs/research/DSH-EXECUTION-BACKEND-COMPAT-2026-10.md` | 参考（已按 v0.6 校正） | dsh 执行后端映射盘点；artifact/crash 缺口已由壳侧物化与 WP1 合成覆盖 |
+| `docs/research/HARNESS-V0.7-P1-REPORT-2026-10-27.md` | 进行中（待真机） | v0.7 P1 报告：工作区/产物/工作台、变异矩阵、真机脚本、已知缺口 |
 
 ## 4. 计划与报告
 
@@ -46,7 +47,9 @@
 | `docs/plans/completed/HARNESS-V0.6-REPORT-2026-10-26.md` | 已完成 | v0.6 完成报告：变异矩阵、真机脚本、遗留 |
 | `docs/plans/completed/2026-08-30-virtual-office-runtime-implementation.md` | 已完成 | 办公室运行时 Task 0–9（历史记录；路径按当时结构） |
 
-进行中的计划放 `docs/plans/active/`（当前为空）。
+| `docs/plans/active/HARNESS-V0.7-P1-PLAN-2026-10-27.md` | **进行中** | v0.7 P1 实施：工作区/产物落地/工作台/门禁；含与上位文档的偏差声明 |
+
+进行中的计划放 `docs/plans/active/`；完成的移入 `completed/`。
 
 ## 5. 质量与来源
 
