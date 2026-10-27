@@ -272,6 +272,45 @@ test('shell-transport: materializes to a file with a verifiable sha256 digest', 
   assert.deepEqual(again, materialized);
 });
 
+test('shell-transport: onArtifact fires once with shell-only context (never in the event shape)', async () => {
+  const calls = [];
+  const rpc = fakeRpc();
+  const followHelper = fakeFollowJournals();
+  const artifactDir = tempDir();
+  const transport = createShellTeamTransport({
+    rpc, openFollow: followHelper.open, artifactDir, topic: '回调测试', log: () => {},
+    onArtifact: (record, context) => calls.push({ record, context }),
+  });
+  const sessionId = await transport.resolveSession({ jobId: 'job-cb-1', role: 'researcher', attempt: 0 });
+  followHelper.set(sessionId, [je('assistant/message', { content: '正文' }, 1)]);
+  for await (const _e of transport.follow({ sessionId })) { void _e; }
+  const first = await transport.artifactFor({ sessionId, kind: 'research-notes' });
+  await transport.artifactFor({ sessionId, kind: 'research-notes' }); // idempotent
+  assert.equal(calls.length, 1, 'the callback fires exactly once per materialized artifact');
+  assert.equal(calls[0].context.jobId, 'job-cb-1');
+  assert.equal(calls[0].context.role, 'researcher');
+  assert.equal(calls[0].context.kind, 'research-notes');
+  assert.equal(calls[0].record.digest, first.digest);
+  // the callback receives the shell path, but the event/team-facing shape does not
+  assert.equal(typeof calls[0].record.artifactPath, 'string');
+});
+
+test('shell-transport: an onArtifact failure never breaks materialization (the file is already written)', async () => {
+  const rpc = fakeRpc();
+  const followHelper = fakeFollowJournals();
+  const artifactDir = tempDir();
+  const transport = createShellTeamTransport({
+    rpc, openFollow: followHelper.open, artifactDir, topic: '回调失败', log: () => {},
+    onArtifact: () => { throw new Error('index exploded'); },
+  });
+  const sessionId = await transport.resolveSession({ jobId: 'job-cb-2', role: 'researcher', attempt: 0 });
+  followHelper.set(sessionId, [je('assistant/message', { content: '正文' }, 1)]);
+  for await (const _e of transport.follow({ sessionId })) { void _e; }
+  const materialized = await transport.artifactFor({ sessionId, kind: 'research-notes' });
+  assert.ok(materialized, 'artifactFor still returns the record');
+  assert.ok(fs.existsSync(materialized.artifactPath));
+});
+
 test('shell-transport: refuses to fabricate an artifact without captured output (fail-closed)', async () => {
   const h = createHarness();
   const sessionId = await h.transport.resolveSession({

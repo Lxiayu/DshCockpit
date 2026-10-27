@@ -114,6 +114,9 @@ function createShellTeamTransport(options = {}) {
   }
   const fs = options.fs || require('node:fs');
   const log = typeof options.log === 'function' ? options.log : () => {};
+  // v0.7 P1：物化成功后的壳侧回调（工作区索引登记）。transport 不碰索引/工作区；
+  // 回调失败只记日志 —— 产物文件已经写好，不能因为索引问题伪造或吞掉一次物化。
+  const onArtifact = typeof options.onArtifact === 'function' ? options.onArtifact : null;
   const topic = options.topic.trim();
   const artifactDir = options.artifactDir;
 
@@ -267,6 +270,13 @@ function createShellTeamTransport(options = {}) {
       artifactPath: path, // 只在壳内部（reviewer prompt 与诊断用），绝不进入 ExecutionEvent
       bytes: bytes.length,
     });
+    if (onArtifact) {
+      try {
+        onArtifact(record.materialized, { jobId: record.jobId, role: record.role, kind });
+      } catch (error) {
+        log(`[team-transport] onArtifact failed: ${error && error.message}`);
+      }
+    }
     log(`[team-transport] materialized ${kind} (${bytes.length} bytes) for ${record.role}`);
     return record.materialized;
   }
