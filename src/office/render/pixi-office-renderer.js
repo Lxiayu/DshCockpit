@@ -796,42 +796,94 @@ async function createOfficeRenderer(options) {
     return description.colors;
   }
 
-  // P3.1b: the generated office. `pass` splits the drawing by paint role:
-  // 'back' carries everything under the characters, 'front' carries the chair
-  // backs and desk lips that must occlude a seated lower body.
+  // P3.1b: the generated office, drawn as pseudo-3D boxes (top face + front
+  // face) instead of flat maps. `pass` splits paint roles: 'back' = top faces
+  // and props under the characters, 'front' = front faces + chairs above them.
   function drawGeneratedOffice(node, pass) {
     const office = officeDescription;
     if (!office) return;
     const c = sceneColors();
+    const dark = codeSceneOptions.theme === 'dark';
     const X = (v) => v * scene.width;
     const Y = (v) => v * scene.height;
     const W = (v) => v * scene.width;
     const H = (v) => v * scene.height;
-    const dark = codeSceneOptions.theme === 'dark';
+    const HPX = (v) => Math.max(2, v * scene.height);
+
+    function boxTop(r, top, edge) {
+      const x = X(r.x);
+      const y = Y(r.y);
+      const w = W(r.w);
+      const d = H(r.h);
+      node.roundRect(x, y, w, d, 3).fill({ color: top });
+      node.roundRect(x, y, w, d, 3).stroke({ width: 1, color: edge, alpha: dark ? 0.75 : 0.5 });
+      node.rect(x + 2, y + 2, Math.max(1, w - 4), Math.max(2, d * 0.16))
+        .fill({ color: 0xffffff, alpha: dark ? 0.05 : 0.22 });
+    }
+
+    function boxFront(r, height, front, edge) {
+      const x = X(r.x);
+      const y = Y(r.y) + H(r.h);
+      const w = W(r.w);
+      const h = HPX(height);
+      node.rect(x, y, w, h).fill({ color: front });
+      node.rect(x, y + h - 1, w, 1).fill({ color: edge, alpha: 0.85 });
+      node.rect(x, y, 1, h).fill({ color: edge, alpha: 0.30 });
+      node.rect(x + w - 1, y, 1, h).fill({ color: edge, alpha: 0.45 });
+    }
 
     if (pass === 'front') {
+      const faces = [];
+      for (const station of office.workstations) {
+        faces.push({ key: station.desk.y + station.desk.h, kind: 'desk', station });
+      }
+      if (office.kitchen) faces.push({ key: office.kitchen.y + office.kitchen.h, kind: 'kitchen' });
+      if (office.lounge) {
+        faces.push({ key: office.lounge.sofa.y + office.lounge.sofa.h, kind: 'sofa' });
+        faces.push({ key: office.lounge.table.y + office.lounge.table.h, kind: 'table' });
+      }
+      faces.sort((a, b) => a.key - b.key);
+
+      for (const face of faces) {
+        if (face.kind === 'desk') {
+          const station = face.station;
+          boxFront(station.desk, station.height, c.deskFront || c.deskSide, c.deskEdge);
+        } else if (face.kind === 'kitchen') {
+          boxFront(office.kitchen, office.kitchen.height, c.counterFront || c.counterSide || c.deskSide, c.deskEdge);
+        } else if (face.kind === 'sofa') {
+          boxFront(office.lounge.sofa, 0.030, c.sofaFront || c.chairBack, c.chairBack);
+        } else if (face.kind === 'table') {
+          boxFront(office.lounge.table, office.lounge.table.height, c.deskFront || c.deskSide, c.deskEdge);
+        }
+      }
+
+      // Chairs last: they are nearest to the viewer of anything at a desk.
       for (const station of office.workstations) {
         const chair = station.chair;
         const cx = X(chair.x);
         const cy = Y(chair.y);
         const cw = W(chair.w);
         const ch = H(chair.h);
-        // Chair: backrest, seat, gas lift, five-star base and wheels.
-        node.ellipse(cx + cw * 0.5, cy + ch * 0.94, cw * 0.58, Math.max(2, ch * 0.08))
+        const seatH = HPX(station.chairHeight);
+        // Contact shadow.
+        node.ellipse(cx + cw * 0.5, cy + ch * 0.96, cw * 0.60, Math.max(2, ch * 0.08))
           .fill({ color: 0x000000, alpha: dark ? 0.22 : 0.07 });
-        node.roundRect(cx, cy, cw, ch * 0.62, Math.max(3, cw * 0.18)).fill({ color: c.chairBack });
-        node.roundRect(cx + cw * 0.10, cy + ch * 0.08, cw * 0.80, ch * 0.40, Math.max(2, cw * 0.12))
-          .fill({ color: 0xffffff, alpha: dark ? 0.05 : 0.18 });
-        node.roundRect(cx + cw * 0.06, cy + ch * 0.44, cw * 0.88, ch * 0.26, Math.max(2, cw * 0.10))
-          .fill({ color: c.chairSeat });
-        node.rect(cx + cw * 0.46, cy + ch * 0.66, Math.max(1, cw * 0.08), ch * 0.16).fill({ color: c.chairBack });
-        node.rect(cx + cw * 0.18, cy + ch * 0.86, cw * 0.64, 2).fill({ color: c.chairBack, alpha: 0.85 });
-        node.rect(cx + cw * 0.30, cy + ch * 0.90, cw * 0.40, 2).fill({ color: c.chairBack, alpha: 0.55 });
-        node.circle(cx + cw * 0.18, cy + ch * 0.92, 1.6).fill({ color: c.chairBack });
-        node.circle(cx + cw * 0.82, cy + ch * 0.92, 1.6).fill({ color: c.chairBack });
-        // A thin desk lip so the desk still reads as one piece over the body.
-        node.rect(X(station.desk.x), Y(station.desk.y) + H(station.desk.h) - 3, W(station.desk.w), 3)
-          .fill({ color: c.deskEdge, alpha: dark ? 0.9 : 0.75 });
+        // Backrest box (top + front).
+        const backH = ch * 0.30;
+        node.roundRect(cx + cw * 0.06, cy, cw * 0.88, backH, Math.max(2, cw * 0.12)).fill({ color: c.chairBack });
+        node.rect(cx + cw * 0.06, cy + backH, cw * 0.88, seatH * 0.55).fill({ color: c.chairBack, alpha: 0.85 });
+        // Seat slab.
+        node.roundRect(cx + cw * 0.02, cy + backH, cw * 0.96, ch * 0.30, 3).fill({ color: c.chairSeat });
+        node.rect(cx + cw * 0.02, cy + backH + ch * 0.30, cw * 0.96, seatH)
+          .fill({ color: c.chairBack, alpha: 0.9 });
+        // Gas lift + base.
+        node.rect(cx + cw * 0.46, cy + backH + ch * 0.30 + seatH, Math.max(1, cw * 0.08), ch * 0.16)
+          .fill({ color: c.chairBack });
+        node.ellipse(cx + cw * 0.5, cy + ch * 0.94, cw * 0.40, Math.max(2, ch * 0.05))
+          .fill({ color: c.chairBack, alpha: 0.9 });
+        node.rect(cx + cw * 0.16, cy + ch * 0.92, cw * 0.68, 2).fill({ color: c.chairBack, alpha: 0.8 });
+        node.circle(cx + cw * 0.20, cy + ch * 0.90, 1.5).fill({ color: c.chairEdge || c.chairBack });
+        node.circle(cx + cw * 0.80, cy + ch * 0.90, 1.5).fill({ color: c.chairEdge || c.chairBack });
       }
       return;
     }
@@ -840,106 +892,105 @@ async function createOfficeRenderer(options) {
     if (office.lounge) {
       const rug = office.lounge.rug;
       node.roundRect(X(rug.x), Y(rug.y), W(rug.w), H(rug.h), 10)
-        .fill({ color: c.rug || c.zoneFill, alpha: dark ? 0.75 : 0.9 })
+        .fill({ color: c.rug || c.zoneFill, alpha: dark ? 0.8 : 0.95 })
         .stroke({ width: 1, color: c.zoneStroke, alpha: 0.9 });
       node.roundRect(X(rug.x) + 6, Y(rug.y) + 6, W(rug.w) - 12, H(rug.h) - 12, 7)
-        .stroke({ width: 1, color: c.zoneStroke, alpha: 0.55 });
+        .stroke({ width: 1, color: c.zoneStroke, alpha: 0.5 });
     }
 
-    // Kitchen counter: top face + front edge + sink + coffee machine.
+    // Kitchen counter (top) + coffee machine (top).
     if (office.kitchen) {
       const k = office.kitchen;
-      node.roundRect(X(k.x), Y(k.y), W(k.w), H(k.h), 6).fill({ color: c.counterSide || c.deskSide });
-      node.roundRect(X(k.x), Y(k.y), W(k.w), H(k.h) * 0.55, 6).fill({ color: c.counterTop || c.deskTop });
-      node.rect(X(k.x), Y(k.y) + H(k.h) - 3, W(k.w), 3).fill({ color: c.deskEdge });
-      node.circle(X(k.sink.x), Y(k.sink.y), Math.max(4, H(k.sink.r))).fill({ color: c.monitorEdge, alpha: 0.55 });
-      node.roundRect(X(k.machine.x), Y(k.machine.y), W(k.machine.w), H(k.machine.h), 4)
-        .fill({ color: c.monitorBody });
-      node.rect(X(k.machine.x) + W(k.machine.w) * 0.25, Y(k.machine.y) + H(k.machine.h) * 0.2,
-        W(k.machine.w) * 0.5, Math.max(2, H(k.machine.h) * 0.08)).fill({ color: c.monitorScreen, alpha: 0.7 });
-      // Faucet + two cups beside the sink.
-      node.rect(X(k.sink.x) + H(k.sink.r) * 0.4, Y(k.sink.y) - H(k.sink.r) * 0.9, 2, H(k.sink.r) * 0.9)
-        .fill({ color: c.counterSide || c.deskSide });
-      node.circle(X(k.sink.x) - W(k.w) * 0.12, Y(k.sink.y), Math.max(2, H(k.h) * 0.05)).fill({ color: 0xffffff, alpha: 0.55 });
-      node.circle(X(k.sink.x) - W(k.w) * 0.07, Y(k.sink.y) + H(k.h) * 0.04, Math.max(2, H(k.h) * 0.05)).fill({ color: 0xffffff, alpha: 0.45 });
+      boxTop(k, c.counterTop || c.deskTop, c.deskEdge);
+      node.circle(X(k.sink.x), Y(k.sink.y), Math.max(4, H(k.sink.r)))
+        .fill({ color: c.monitorEdge, alpha: 0.5 });
+      node.circle(X(k.sink.x), Y(k.sink.y), Math.max(2, H(k.sink.r) * 0.55))
+        .fill({ color: c.counterSide || c.deskSide, alpha: 0.9 });
+      node.rect(X(k.sink.x) + H(k.sink.r) * 0.35, Y(k.sink.y) - H(k.sink.r) * 0.9, 2, H(k.sink.r) * 0.9)
+        .fill({ color: c.deskEdge });
+      boxTop(k.machine, c.monitorBody, c.monitorEdge);
+      node.rect(X(k.machine.x) + W(k.machine.w) * 0.2, Y(k.machine.y) + H(k.machine.h) * 0.2,
+        W(k.machine.w) * 0.6, Math.max(2, H(k.machine.h) * 0.10)).fill({ color: c.monitorScreen, alpha: 0.7 });
     }
 
-    // Lounge furniture.
+    // Lounge furniture tops.
     if (office.lounge) {
       const { sofa, table } = office.lounge;
-      node.roundRect(X(sofa.x), Y(sofa.y), W(sofa.w), H(sofa.h), 8).fill({ color: c.sofa || c.chairBack });
-      node.roundRect(X(sofa.x) + 3, Y(sofa.y) + H(sofa.h) * 0.22, W(sofa.w) - 6, H(sofa.h) * 0.72, 6)
+      boxTop(sofa, c.sofa || c.chairBack, c.chairBack);
+      node.roundRect(X(sofa.x) + 3, Y(sofa.y) + H(sofa.h) * 0.30, W(sofa.w) - 6, H(sofa.h) * 0.64, 5)
         .fill({ color: c.sofaSeat || c.chairSeat });
-      // Three seat cushions + two legs.
       for (let i = 1; i < 3; i += 1) {
-        node.rect(X(sofa.x) + (W(sofa.w) * i) / 3, Y(sofa.y) + H(sofa.h) * 0.24, 1, H(sofa.h) * 0.66)
-          .fill({ color: c.chairBack, alpha: 0.55 });
+        node.rect(X(sofa.x) + (W(sofa.w) * i) / 3, Y(sofa.y) + H(sofa.h) * 0.32, 1, H(sofa.h) * 0.60)
+          .fill({ color: c.chairBack, alpha: 0.5 });
       }
-      node.rect(X(sofa.x) + W(sofa.w) * 0.08, Y(sofa.y) + H(sofa.h), 3, 3).fill({ color: c.chairBack, alpha: 0.8 });
-      node.rect(X(sofa.x) + W(sofa.w) * 0.88, Y(sofa.y) + H(sofa.h), 3, 3).fill({ color: c.chairBack, alpha: 0.8 });
-      node.roundRect(X(table.x), Y(table.y), W(table.w), H(table.h), 5).fill({ color: c.deskTop });
-      node.rect(X(table.x) + 2, Y(table.y) + 2, W(table.w) - 4, Math.max(2, H(table.h) * 0.22))
-        .fill({ color: 0xffffff, alpha: dark ? 0.06 : 0.35 });
+      boxTop(table, c.deskTop, c.deskEdge);
+      node.rect(X(table.x) + 3, Y(table.y) + 3, W(table.w) - 6, Math.max(2, H(table.h) * 0.18))
+        .fill({ color: 0xffffff, alpha: dark ? 0.05 : 0.30 });
     }
 
-    // Workstations: desk, drawer, keyboard, mug, monitor.
-    for (const station of office.workstations) {
+    // Desks (tops + props + monitors), farthest first.
+    const stations = [...office.workstations].sort((a, b) => (a.desk.y - b.desk.y));
+    for (const station of stations) {
       const desk = station.desk;
       const dx = X(desk.x);
       const dy = Y(desk.y);
       const dw = W(desk.w);
       const dh = H(desk.h);
-      node.ellipse(dx + dw * 0.5, dy + dh * 0.98, dw * 0.56, Math.max(3, dh * 0.10))
+      const deskH = HPX(station.height);
+      // Contact shadow.
+      node.ellipse(dx + dw * 0.5, dy + dh + deskH * 0.9, dw * 0.55, Math.max(3, dh * 0.09))
         .fill({ color: 0x000000, alpha: dark ? 0.24 : 0.08 });
-      // Legs first, then the slab: two slim legs make the top read as a table.
-      const legW = Math.max(2, dw * 0.03);
-      node.rect(dx + dw * 0.10, dy + dh * 0.72, legW, dh * 0.30).fill({ color: c.deskEdge });
-      node.rect(dx + dw * 0.87, dy + dh * 0.72, legW, dh * 0.30).fill({ color: c.deskEdge });
-      node.roundRect(dx, dy, dw, dh, 6).fill({ color: c.deskTop })
-        .stroke({ width: 1, color: c.deskEdge, alpha: dark ? 0.8 : 0.45 });
-      // A darker front face gives the slab thickness.
-      node.rect(dx + 1, dy + dh * 0.88, dw - 2, dh * 0.12).fill({ color: c.deskSide, alpha: 0.95 });
-      node.rect(dx + 2, dy + 2, dw - 4, Math.max(2, dh * 0.16)).fill({ color: 0xffffff, alpha: dark ? 0.05 : 0.30 });
+      boxTop(desk, c.deskTop, c.deskEdge);
 
+      // Drawer box on the right side.
       const drawer = station.drawer;
-      node.roundRect(X(drawer.x), Y(drawer.y), W(drawer.w), H(drawer.h), 3).fill({ color: c.deskSide });
-      node.rect(X(drawer.x) + 2, Y(drawer.y) + H(drawer.h) * 0.22, W(drawer.w) - 4, 1)
+      boxTop(drawer, c.deskSide, c.deskEdge);
+      node.rect(X(drawer.x) + 2, Y(drawer.y) + H(drawer.h) * 0.30, W(drawer.w) - 4, 1)
         .fill({ color: c.deskEdge, alpha: 0.9 });
-      node.rect(X(drawer.x) + 2, Y(drawer.y) + H(drawer.h) * 0.58, W(drawer.w) - 4, 1)
+      node.rect(X(drawer.x) + 2, Y(drawer.y) + H(drawer.h) * 0.62, W(drawer.w) - 4, 1)
         .fill({ color: c.deskEdge, alpha: 0.9 });
-      node.circle(X(drawer.x) + W(drawer.w) / 2, Y(drawer.y) + H(drawer.h) * 0.40, Math.max(1, W(drawer.w) * 0.06))
+      node.circle(X(drawer.x) + W(drawer.w) / 2, Y(drawer.y) + H(drawer.h) * 0.46, Math.max(1, W(drawer.w) * 0.07))
         .fill({ color: c.deskEdge });
 
+      // Keyboard + mug on the desk top.
       const kb = station.keyboard;
       node.roundRect(X(kb.x), Y(kb.y), W(kb.w), Math.max(3, H(kb.h)), 2)
-        .fill({ color: c.monitorEdge, alpha: 0.78 });
+        .fill({ color: c.monitorEdge, alpha: 0.75 });
       node.circle(X(station.mug.x), Y(station.mug.y), Math.max(2, W(station.mug.r)))
-        .fill({ color: c.accent, alpha: 0.6 });
+        .fill({ color: c.accent, alpha: 0.65 });
 
-      // Monitor (bezel + screen + stand) at the far edge of the desk.
+      // Monitor: a box sitting on the far edge of the desk, screen on the
+      // front face so it reads as standing up.
       const mon = station.monitor;
       const mx = X(mon.x);
       const my = Y(mon.y);
       const mw = W(mon.w);
       const mh = H(mon.h);
-      const bezelH = mh * 0.78;
-      node.rect(mx + mw * 0.42, my + bezelH - 2, mw * 0.16, mh * 0.22).fill({ color: c.monitorBody });
-      node.roundRect(mx, my, mw, bezelH, Math.max(2, mw * 0.04)).fill({ color: c.monitorBody });
-      node.roundRect(mx + mw * 0.07, my + bezelH * 0.07, mw * 0.86, bezelH * 0.86, 2)
+      const monH = HPX(station.monitorHeight);
+      node.roundRect(mx, my, mw, mh, 2).fill({ color: c.monitorBody });
+      node.rect(mx, my + mh, mw, monH).fill({ color: c.monitorEdge });
+      node.roundRect(mx + mw * 0.08, my + mh * 0.10, mw * 0.84, mh * 0.80, 2)
+        .fill({ color: c.monitorBody });
+      node.rect(mx + mw * 0.10, my + mh + 1, mw * 0.80, Math.max(2, monH - 2))
         .fill({ color: c.monitorScreen });
-      node.rect(mx + mw * 0.07, my + bezelH * 0.07, mw * 0.86, Math.max(2, bezelH * 0.16))
+      node.rect(mx + mw * 0.10, my + mh + 1, mw * 0.80, Math.max(1, monH * 0.28))
         .fill({ color: 0xffffff, alpha: 0.10 });
+      // Stand foot.
+      node.rect(mx + mw * 0.40, my + mh + monH, mw * 0.20, Math.max(2, mh * 0.10))
+        .fill({ color: c.monitorBody });
     }
 
-    // Plants.
+    // Plants: pot box + layered leaves.
     for (const plant of office.plants) {
       const px = X(plant.x);
       const py = Y(plant.y);
       const r = W(plant.r);
-      node.roundRect(px - r * 0.55, py - r * 0.4, r * 1.1, r * 0.9, 2).fill({ color: c.plantPot });
-      node.circle(px, py - r * 0.85, r * 0.75).fill({ color: c.plantLeaf });
-      node.circle(px - r * 0.5, py - r * 0.55, r * 0.5).fill({ color: c.plantLeaf, alpha: 0.85 });
-      node.circle(px + r * 0.5, py - r * 0.65, r * 0.45).fill({ color: c.plantLeaf, alpha: 0.75 });
+      const potH = HPX(0.014);
+      node.rect(px - r * 0.55, py, r * 1.1, potH).fill({ color: c.plantPot });
+      node.roundRect(px - r * 0.55, py - r * 0.35, r * 1.1, r * 0.45, 2).fill({ color: c.plantPot });
+      node.circle(px, py - r * 0.95, r * 0.70).fill({ color: c.plantLeaf });
+      node.circle(px - r * 0.5, py - r * 0.65, r * 0.48).fill({ color: c.plantLeaf, alpha: 0.85 });
+      node.circle(px + r * 0.5, py - r * 0.75, r * 0.44).fill({ color: c.plantLeaf, alpha: 0.75 });
     }
   }
 

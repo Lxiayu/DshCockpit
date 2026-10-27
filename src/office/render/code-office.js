@@ -11,9 +11,9 @@
 // 功能上不占用的空白区域，规则显式、可测试。
 
 // 尺寸都是归一化坐标（0..1，y 向下）。
-const DESK = Object.freeze({ w: 0.118, d: 0.118, gapAboveSeat: 0.006 });
-const MONITOR = Object.freeze({ w: 0.076, h: 0.088, lift: 0.004 });
-const CHAIR = Object.freeze({ w: 0.054, h: 0.118, aboveSeat: 0.052 });
+const DESK = Object.freeze({ w: 0.118, d: 0.118, gapAboveSeat: 0.006, height: 0.032 });
+const MONITOR = Object.freeze({ w: 0.076, h: 0.088, lift: 0.004, height: 0.038 });
+const CHAIR = Object.freeze({ w: 0.054, h: 0.118, aboveSeat: 0.052, height: 0.024 });
 const KEYBOARD = Object.freeze({ w: 0.052, h: 0.018 });
 const MUG = Object.freeze({ r: 0.0055 });
 
@@ -86,7 +86,13 @@ function describeOffice(input) {
       chair,
       keyboard,
       mug: { x: desk.x + desk.w * 0.82, y: desk.y + desk.d * 0.52, r: MUG.r },
-      drawer: rect(desk.x + desk.w * 0.78, desk.y + desk.d * 0.18, desk.w * 0.18, desk.d * 0.62),
+      drawer: {
+        ...rect(desk.x + desk.w * 0.78, desk.y + desk.d * 0.18, desk.w * 0.18, desk.d * 0.62),
+        height: 0.016,
+      },
+      height: DESK.height,
+      monitorHeight: MONITOR.height,
+      chairHeight: CHAIR.height,
     };
   });
 
@@ -126,7 +132,9 @@ function describeOffice(input) {
       y: loungeRect.y + loungeRect.h * 0.24,
       w: loungeRect.w * 0.40,
       h: loungeRect.h * 0.26,
+      height: 0.028,
     },
+    sofaHeight: 0.045,
   } : null;
 
   // Kitchen: a counter along the top-left, above the lounge band.
@@ -145,7 +153,9 @@ function describeOffice(input) {
       y: kitchenRect.y + kitchenRect.h * 0.22,
       w: kitchenRect.w * 0.20,
       h: kitchenRect.h * 0.46,
+      height: 0.030,
     },
+    height: 0.045,
   } : null;
 
   // Plants in the corners, only where nothing else needs the space.
