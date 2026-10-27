@@ -766,6 +766,10 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
                 : 'office.staff.currentTool.other', employee.toolPhrase)
             : null,
           queueCount: employee.queueCount || 0,
+          // v0.7 P1：座位产物标记（只计数；kind 词表在快照里，页面只显示数量）。
+          artifacts: employee.artifacts && employee.artifacts.count > 0
+            ? L('office.staff.artifacts', '产出 {n}', { n: employee.artifacts.count })
+            : null,
           needsYou: pending.filter((item) => item.employeeId === employee.employeeId).length,
           selected: employee.employeeId === selectedId,
         };
@@ -838,6 +842,9 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
               : 'office.staff.currentTool.other', employee.toolPhrase)
           : null,
         employee.queueCount > 0 ? L('office.staff.queue', '排队 {n}', { n: employee.queueCount }) : null,
+        employee.artifacts && employee.artifacts.count > 0
+          ? L('office.staff.artifacts', '产出 {n}', { n: employee.artifacts.count })
+          : null,
       ].filter(Boolean);
       return { label: `${parts.join(L('office.panel.listSep', '，'))}` };
     },

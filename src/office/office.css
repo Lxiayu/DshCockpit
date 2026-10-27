@@ -554,6 +554,7 @@ html, body {
 
 #employee-list li.selected .staff-task,
 #employee-list li.selected .staff-tool,
+#employee-list li.selected .staff-artifact,
 #employee-list li.selected .staff-queue,
 #employee-list li.selected .need-badge.need-zero {
   color: var(--selected-dim);
@@ -580,14 +581,19 @@ html, body {
 
 .staff-task,
 .staff-tool,
+.staff-artifact,
 .staff-queue {
   font-size: 11px;
   color: var(--text-dim);
 }
 
-.staff-tool::before {
+.staff-tool::before,
+.staff-artifact::before {
   content: "· ";
 }
+
+/* v0.7 P1: artifact count badge (closed-set kinds only; no content) */
+.staff-artifact { color: var(--ok); }
 
 .need-badge {
   font-size: 11px;

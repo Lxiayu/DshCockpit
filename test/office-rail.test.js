@@ -78,9 +78,14 @@ test('window-manager composes the shell: the window loads nothing, views carry t
   assert.match(wm, /x: OFFICE_RAIL_WIDTH,/, 'the main area starts right of the rail');
   assert.doesNotMatch(wm, /COLLAPSED_WIDTH|setOfficeRailCollapsed/, 'the collapse mechanism is retired');
   assert.match(wm, /scheduleShellSync\(\)/, 'resize/maximize/fullscreen re-flow the shell');
-  // switching keeps the office page alive in the background
-  assert.match(wm, /removeChildView\(harnessView\)/, 'switching to the office detaches the harness view');
-  assert.match(wm, /removeChildView\(officeShellView\)/, 'switching back detaches the office view');
+  // switching keeps every page alive but attaches exactly one main view
+  // (v0.7 P1: the loop covers harness / office / work without per-pair rules)
+  assert.match(wm, /for \(const view of \[harnessView, officeShellView, workView\]\)/,
+    'all main-area views are reconciled in one place');
+  assert.match(wm, /if \(view && view !== active && attached\(view\)\) contentView\.removeChildView\(view\)/,
+    'switching detaches exactly the non-active views');
+  assert.match(wm, /const active = activeMainView === 'office' \? officeShellView/,
+    'the active view is chosen from the same state the rail sees');
   assert.match(wm, /did-first-visually-non-empty-paint/, 'the paint-ready timing moved to the harness view');
   // the M4 floating rail window is retired for good
   assert.doesNotMatch(wm, /officeRailWindow/, 'no floating rail window anymore');
@@ -95,7 +100,7 @@ test('main process registers the switching IPC, the flag default and the rail st
   assert.match(main, /const OFFICE_RUNTIME_ENABLED = true;/, 'M4 default is ON');
   assert.match(main, /DSH_DESKTOP_OFFICE_RUNTIME !== '0'/, 'the env kill-switch exists');
   assert.match(main, /office-rail-state\.json/, 'rail state file (accent)');
-  assert.match(main, /activeView: windowManager\.isOfficeViewActive\(\) \? 'office' : 'harness'/, 'the rail state reports the active view');
+  assert.match(main, /activeView: windowManager\.getActiveMainView\(\)/, 'the rail state reports the active main view');
   assert.match(main, /broadcastToShellViews\('shell:theme', t\)/, 'the theme push reaches the shell VIEWS (never in getAllWindows)');
   assert.match(main, /\['indigo', 'sky', 'teal', 'amber', 'rose', 'slate'\]/, 'the accent is validated in the main process');
   assert.doesNotMatch(main, /office-rail:set-collapsed/, 'the collapse IPC is retired');

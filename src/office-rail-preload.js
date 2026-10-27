@@ -38,7 +38,7 @@ contextBridge.exposeInMainWorld('officeRail', {
   // harness view when the office is already active
   toggleOffice: () => ipcRenderer.invoke('office-rail:toggle-office'),
   // M4.2: switch the main area between the harness view and the office view
-  switchView: (view) => ipcRenderer.invoke('office-rail:switch-view', view === 'office' ? 'office' : 'harness'),
+  switchView: (view) => ipcRenderer.invoke('office-rail:switch-view', view === 'work' ? 'work' : view === 'office' ? 'office' : 'harness'),
   onViewState: (cb) => ipcRenderer.on('office-rail:view-state', (_e, value) => cb(value)),
   // rail accent (persisted by the main process; validated there too)
   setAccent: (accent) => ipcRenderer.invoke('office-rail:set-accent', typeof accent === 'string' ? accent : ''),

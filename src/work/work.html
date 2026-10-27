@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:" />
+<title>DshCockpit Work</title>
+<link rel="stylesheet" href="../theme.css" />
+<link rel="stylesheet" href="work.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <div id="wsBlock">
+        <span id="wsLabel" data-i18n="work.ws.label">工作区</span>
+        <strong id="wsName">—</strong>
+        <span id="wsPath"></span>
+        <button id="changeWs" class="link" data-i18n="work.ws.change" hidden>更换</button>
+      </div>
+      <div id="teamBlock">
+        <span id="teamDot" aria-hidden="true"></span>
+        <span id="teamText"></span>
+      </div>
+    </header>
+
+    <section id="onboarding" hidden>
+      <h1 data-i18n="work.onboarding.title">先选一个工作区</h1>
+      <p data-i18n="work.onboarding.body">团队会把产物写进这个目录的 .dsh/ 下；你也可以打开已有项目。</p>
+      <div class="row">
+        <input id="newWsName" type="text" maxlength="40" data-i18n-placeholder="work.onboarding.name" placeholder="新工作区名称" />
+        <button id="createWs" class="primary" data-i18n="work.onboarding.create">新建</button>
+      </div>
+      <div class="row">
+        <button id="openWs" data-i18n="work.onboarding.open">打开已有目录…</button>
+      </div>
+      <p id="onboardNotice" class="notice" role="status"></p>
+    </section>
+
+    <main id="main" hidden>
+      <aside id="board">
+        <form id="taskForm">
+          <textarea id="goal" rows="3" maxlength="2000" data-i18n-placeholder="work.task.placeholder" placeholder="一句话说明你想完成的工作"></textarea>
+          <div class="row">
+            <button id="startBtn" class="primary" type="submit" data-i18n="work.task.start">开始</button>
+            <button id="cancelBtn" type="button" data-i18n="work.cancel" hidden>取消任务</button>
+          </div>
+          <p id="notice" class="notice" role="status"></p>
+        </form>
+        <h2 data-i18n="work.items.title">任务</h2>
+        <ul id="items"></ul>
+      </aside>
+
+      <section id="detail">
+        <div id="emptyDetail" class="empty" data-i18n="work.detail.empty">还没有任务。写一句话，交给团队。</div>
+        <div id="detailBody" hidden>
+          <h1 id="detailGoal"></h1>
+          <div id="detailMeta">
+            <span id="detailStatus" class="badge"></span>
+            <span id="detailPhase"></span>
+          </div>
+
+          <h2 data-i18n="work.artifacts.title">产物</h2>
+          <p id="artifactEmpty" class="empty" data-i18n="work.artifacts.empty">这个任务还没有产物（未产出不会显示为完成）。</p>
+          <ul id="artifacts"></ul>
+
+          <div id="viewerWrap" hidden>
+            <div class="viewer-head">
+              <strong id="viewerTitle"></strong>
+              <span id="viewerMeta"></span>
+              <span class="spacer"></span>
+              <button id="openArtifact" data-i18n="work.artifact.open">打开</button>
+              <button id="revealArtifact" data-i18n="work.artifact.reveal">在文件夹中显示</button>
+            </div>
+            <pre id="viewerPre"></pre>
+            <p id="viewerNote" class="notice" role="status"></p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="work.js"></script>
+</body>
+</html>

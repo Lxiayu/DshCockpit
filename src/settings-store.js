@@ -28,6 +28,7 @@ const DEFAULTS = {
   registry: 'https://registry.npmjs.org/',
   keepVersions: 2,
   workspace: '',            // '' = os.homedir()
+  workWorkspace: '',        // v0.7：工作台工作区（绝对路径；'' = 未选择）
   dshHome: '',              // '' = ~/.dsh
   port: 0,                  // 0 = OS-assigned
   trayOnClose: true,
@@ -82,7 +83,7 @@ const DEFAULTS = {
 
 const NUMERIC_KEYS = ['keepVersions', 'port', 'contextWindow', 'costInputPerM', 'costOutputPerM', 'costCacheReadPerM', 'costCacheWritePerM', 'costPeakInputPerM', 'costPeakOutputPerM', 'costPeakCacheReadPerM', 'costPeakCacheWritePerM', 'monthlyBudget', 'backupKeep', 'remotePort'];
 const BOOLEAN_KEYS = ['trayOnClose', 'autoStart', 'checkUpdatesOnStartup', 'backupOnQuit', 'cockpitOnboarded', 'shellAutoUpdate', 'costPeakEnabled', 'remoteControl', 'remoteCompat', 'remotePublic', 'bootCheckOnStartup', 'compatStatusEnabled', 'notificationCenterEnabled', 'notifDndEnabled', 'notifFoldEnabled', 'weeklyReportEnabled', 'weeklyReportPushIm'];
-const STRING_KEYS = ['channel', 'pinnedVersion', 'registry', 'workspace', 'dshHome', 'nodeBin', 'dshBin', 'language', 'themeMode', 'quickAskHotkey', 'costPeakWindows', 'remotePublicMode', 'notifDndWindow'];
+const STRING_KEYS = ['channel', 'pinnedVersion', 'registry', 'workspace', 'workWorkspace', 'dshHome', 'nodeBin', 'dshBin', 'language', 'themeMode', 'quickAskHotkey', 'costPeakWindows', 'remotePublicMode', 'notifDndWindow'];
 const ARRAY_KEYS = ['recentWorkspaces', 'installedPlugins', 'scheduledTasks', 'scheduledHistory', 'modelProviders', 'imChannels', 'notifKindsDisabled', 'mcpServers'];
 
 class SettingsStore {

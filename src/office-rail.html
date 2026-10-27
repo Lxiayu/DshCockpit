@@ -44,6 +44,13 @@
         <path d="M8.5 11.5h.01M12.5 11.5h.01M16.5 11.5h.01"/>
       </svg>
     </button>
+    <button id="work" class="tile" data-i18n-title="office.rail.work" data-i18n-aria="office.rail.work">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9 5h9a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3z"/>
+        <path d="M9 4.5h6V7H9z"/>
+        <path d="M8 11h8M8 14.5h8M8 18h5"/>
+      </svg>
+    </button>
     <button id="office" class="tile" data-i18n-title="office.rail.office" data-i18n-aria="office.rail.office">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M3 21h18"/>
@@ -81,6 +88,7 @@
       render(); // the office tile's dynamic tooltip is copy too
     }
     const harnessBtn = document.getElementById('harness');
+    const workBtn = document.getElementById('work');
     const officeBtn = document.getElementById('office');
     const paletteBtn = document.getElementById('palette');
     const swatchBox = document.getElementById('swatches');
@@ -115,6 +123,7 @@
     function render() {
       const officeOpen = activeView === 'office';
       harnessBtn.classList.toggle('on', activeView === 'harness');
+      workBtn.classList.toggle('on', activeView === 'work');
       officeBtn.classList.toggle('on', officeOpen);
       // P1 English pass: the state-dependent tooltip is dictionary copy too.
       officeBtn.title = officeOpen ? tr('office.rail.officeBack') : tr('office.rail.officeEnter');
@@ -136,6 +145,10 @@
 
     harnessBtn.addEventListener('click', async () => {
       const result = await api.switchView('harness').catch(() => null);
+      if (result && typeof result.active === 'string') { activeView = result.active; render(); }
+    });
+    workBtn.addEventListener('click', async () => {
+      const result = await api.switchView('work').catch(() => null);
       if (result && typeof result.active === 'string') { activeView = result.active; render(); }
     });
     officeBtn.addEventListener('click', async () => {
@@ -161,7 +174,7 @@
     if (api.i18n && api.i18n.loaded) api.i18n.loaded.then(() => applyI18n()).catch(() => {});
     api.getState().then((state) => {
       if (!state) return;
-      activeView = state.activeView === 'office' ? 'office' : 'harness';
+      activeView = state.activeView === 'work' ? 'work' : state.activeView === 'office' ? 'office' : 'harness';
       applyAccent(state.accent || 'indigo');
       render();
     }).catch(() => { applyAccent('indigo'); });

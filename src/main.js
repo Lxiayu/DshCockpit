@@ -218,7 +218,8 @@ function officeStateSettingsOrNull() {
 //   → Team Runtime → team-office-bridge → office.ingestTeamProjectionFact → 快照
 //
 // 边界：raw sessionId 只在 transport/rpc 调用线上；prompt 只在壳→dsh 的参数里；
-// artifact 内容只落在 userData/team-artifacts/<jobId>/；三者都不进
+// artifact 内容：env 入口落 userData/team-artifacts/<jobId>/，工作台入口落
+// <workspace>/.dsh/artifacts/<jobId>/（v0.7 P1）；三者都不进
 // ExecutionEvent / Team fact / Office 快照（离线测试逐条断言过）。
 // ===========================================================================
 function officeTeamRealEnabled() {
@@ -350,6 +351,183 @@ function registerShellTeamIpc(ipcMain, log, startDeps = {}) {
   });
 }
 
+// ===========================================================================
+// Harness v0.7 P1（2026-10-27）：工作区 + 工作台。
+//
+// 与 shell:team 的关系：shell:team 是办公室里的快捷发起；本段是工作台的入口，
+// 拥有工作区、产物索引与工作项状态。两者共用 startTeamRealWithTopic 与同一个
+// 单实例守卫（同一时刻只有一个真实 Team）。
+//
+// 边界：产物落 <workspace>/.dsh/artifacts/<jobId>/<kind>.md；索引只存工作区相对路径。
+// 绝对路径只出现在 shell:work 的状态载荷（壳→工作台视图）与 open/reveal 动作里，
+// 绝不进入 ExecutionEvent / Team fact / Office 快照。
+// ===========================================================================
+let workStore = null;
+let workWorkspace = null;
+let workWorkspaceError = null;
+let workController = null;
+
+function workStoreInstance() {
+  if (!workStore) {
+    const { createWorkspaceStore } = require('./work/workspace-store.js');
+    workStore = createWorkspaceStore({
+      homeDir: app.getPath('home'),
+      forbiddenRoots: [app.getPath('userData'), app.getPath('appData'), app.getAppPath()],
+      log,
+    });
+  }
+  return workStore;
+}
+
+function attachWorkWorkspace(workspace) {
+  const { createWorkController } = require('./work/work-controller.js');
+  workWorkspace = workspace;
+  workWorkspaceError = null;
+  workController = createWorkController({ store: workStoreInstance(), workspace, log });
+  try {
+    if (settings.get().workWorkspace !== workspace.path) settings.patch({ workWorkspace: workspace.path });
+  } catch (error) {
+    log(`[work] could not persist the workspace setting: ${error && error.message}`);
+  }
+  return workController;
+}
+
+/** 懒加载：首次 status/start 时才打开配置的工作区（启动早期不碰用户目录）。 */
+function ensureWorkController() {
+  if (workController) return workController;
+  const configured = typeof settings.get().workWorkspace === 'string' ? settings.get().workWorkspace.trim() : '';
+  if (configured === '') return null;
+  try {
+    attachWorkWorkspace(workStoreInstance().open({ path: configured }));
+    return workController;
+  } catch (error) {
+    workWorkspaceError = error && error.code ? error.code : 'WORKSPACE_UNAVAILABLE';
+    log(`[work] configured workspace unavailable: ${workWorkspaceError}`);
+    return null;
+  }
+}
+
+function workStatusPayload() {
+  const controller = ensureWorkController();
+  if (!controller) {
+    return Object.freeze({
+      ok: true, code: workWorkspaceError, workspace: null,
+      items: Object.freeze([]), artifacts: Object.freeze([]), current: null, active: false,
+      team: officeTeamRealStatus(),
+    });
+  }
+  return Object.freeze({ ok: true, code: null, ...controller.snapshot(), team: officeTeamRealStatus() });
+}
+
+let workUpdateTimer = null;
+function sendWorkUpdate() {
+  // 驱动循环里每个事件都会触发一次；合并到 150ms 一次推送（状态是幂等的）。
+  if (workUpdateTimer) return;
+  workUpdateTimer = setTimeout(() => {
+    workUpdateTimer = null;
+    try {
+      if (windowManager && typeof windowManager.sendToWorkView === 'function') {
+        windowManager.sendToWorkView('work:update', workStatusPayload());
+      }
+    } catch { /* the work view may not be up yet */ }
+  }, 150);
+}
+
+async function selectWorkWorkspace(target) {
+  try {
+    const workspace = workStoreInstance().open(target || {});
+    attachWorkWorkspace(workspace);
+    sendWorkUpdate();
+    return workStatusPayload();
+  } catch (error) {
+    const code = error && error.code ? error.code : 'WORKSPACE_UNAVAILABLE';
+    log(`[work] workspace selection refused: ${code}`);
+    return Object.freeze({ ok: false, code });
+  }
+}
+
+async function startWorkRun(goal) {
+  const controller = ensureWorkController();
+  if (!controller) return Object.freeze({ ok: false, code: workWorkspaceError || 'WORKSPACE_REQUIRED' });
+  const office = officeModuleInstance;
+  if (!office || typeof office.ingestTeamProjectionFact !== 'function') {
+    return Object.freeze({ ok: false, code: 'OFFICE_NOT_READY' });
+  }
+  if (officeTeamRealInstance) return Object.freeze({ ok: false, code: 'TEAM_ALREADY_ACTIVE' });
+  // 先落工作项，再启动执行链：产物回调需要在项存在时挂载。
+  const begun = controller.begin({ goal });
+  if (!begun.ok) return begun;
+  const workspace = workWorkspace;
+  const instance = startTeamRealWithTopic({
+    office, topic: goal, log,
+    deps: {
+      artifactDir: path.join(workspace.path, '.dsh', 'artifacts'),
+      onArtifact: (record, context) => {
+        controller.onArtifact(record, context);
+        sendWorkUpdate();
+      },
+      onStatus: (teamState) => {
+        controller.sync(teamState);
+        sendWorkUpdate();
+      },
+    },
+  });
+  if (!instance) {
+    controller.finish('failed');
+    sendWorkUpdate();
+    return Object.freeze({ ok: false, code: 'TEAM_START_FAILED' });
+  }
+  // 驱动结束后再同步一次终态（onStatus 覆盖了逐步状态，这里兜底终态与"无产物"门禁）。
+  instance.whenSettled().then(() => {
+    controller.sync(instance.runtime.state());
+    sendWorkUpdate();
+  }).catch(() => {});
+  return workStatusPayload();
+}
+
+async function cancelWorkRun() {
+  const instance = officeTeamRealInstance;
+  if (!instance) return Object.freeze({ ok: false, code: 'TEAM_NOT_ACTIVE' });
+  const state = instance.runtime.state();
+  const entry = Object.entries(state.runs).find(([, run]) => run && (run.status === 'running' || run.status === 'attention'));
+  if (!entry) return Object.freeze({ ok: false, code: 'NOTHING_TO_CANCEL' });
+  const verdict = await instance.controller.requestCancel(entry[0]);
+  return Object.freeze({ ok: !!(verdict && verdict.ok), code: verdict && verdict.code ? verdict.code : null });
+}
+
+async function openWorkArtifact({ key, verb }) {
+  if (!ensureWorkController()) return Object.freeze({ ok: false, code: 'WORKSPACE_REQUIRED' });
+  try {
+    const store = workStoreInstance();
+    if (verb === 'read') {
+      const artifact = store.findArtifact(workWorkspace, key);
+      if (!artifact) return Object.freeze({ ok: false, code: 'WORK_ARTIFACT_UNKNOWN' });
+      const read = store.readArtifact(workWorkspace, key);
+      return Object.freeze({ ok: true, code: null, ...read, ref: artifact.ref, kind: artifact.kind });
+    }
+    const abs = store.absolutePathOf(workWorkspace, key);
+    if (!fs.existsSync(abs)) return Object.freeze({ ok: false, code: 'WORK_ARTIFACT_MISSING' });
+    if (verb === 'reveal') shell.showItemInFolder(abs);
+    else await shell.openPath(abs);
+    return Object.freeze({ ok: true, code: null, verb });
+  } catch (error) {
+    return Object.freeze({ ok: false, code: error && error.code ? error.code : 'WORK_ARTIFACT_OPEN_FAILED' });
+  }
+}
+
+/** 注册 shell:work（单一通道 + action 载荷，与 shell:team 同一模式；发送方校验在 work-ipc）。 */
+function registerShellWorkIpc(ipcMain) {
+  const { createWorkIpc } = require('./work/work-ipc.js');
+  const work = createWorkIpc({
+    status: () => workStatusPayload(),
+    selectWorkspace: (target) => selectWorkWorkspace(target),
+    start: (goal) => startWorkRun(goal),
+    cancel: () => cancelWorkRun(),
+    openArtifact: (args) => openWorkArtifact(args),
+  });
+  work.register(ipcMain);
+}
+
 /** 为一个 Team 会话开一条**专用** journal follow 流（与办公室自己的流分命名空间）。
  *  返回 AsyncIterable<journalEvent>：帧到达才推进（真实流语义，无轮询、无定时器）。 */
 function openTeamFollowStream(sessionId) {
@@ -435,9 +613,13 @@ function startTeamRealWithTopic({ office, topic, log, deps = {} } = {}) {
     const artifactDir = deps.artifactDir
       || path.join(app.getPath('userData'), 'team-artifacts');
     const wallClock = deps.clock || { nowMs: () => Date.now() };
+    // v0.7 P1：工作台入口通过 deps 注入两个壳侧钩子（transport 不碰工作区/索引；
+    // 驱动循环不引用模块级状态 —— 离线接线测试的沙箱只注入显式依赖）。
+    const onArtifact = typeof deps.onArtifact === 'function' ? deps.onArtifact : null;
+    const onStatus = typeof deps.onStatus === 'function' ? deps.onStatus : null;
     const { createShellTeamTransport } = require('./team-shell-transport.js');
     const transport = createShellTeamTransport({
-      rpc, openFollow, artifactDir, topic, log,
+      rpc, openFollow, artifactDir, topic, log, onArtifact,
     });
     const teamRuntimeModule = require('./team/runtime/index.js');
     const runtime = teamRuntimeModule.createTeamRuntime({ clock: wallClock });
@@ -476,6 +658,9 @@ function startTeamRealWithTopic({ office, topic, log, deps = {} } = {}) {
         await controller.dispatchReady();
         const step = await controller.pumpOne(); // 阻塞等待下一条真实执行事件
         if (step) bridge.pump();
+        if (onStatus) {
+          try { onStatus(runtime.state()); } catch (error) { log(`[office] onStatus hook failed: ${error && error.message}`); }
+        }
         const status = runtime.state().status;
         if (['completed', 'failed', 'cancelled'].includes(status)) {
           log(`[office] team real finished: ${status}`);
@@ -2087,6 +2272,7 @@ function registerIpc() {
   ipcMain.handle('shell:get-i18n', () => ({ zh: STRINGS.zh, en: STRINGS.en }));
   // Harness v0.5：办公室 Team 任务发起入口（shell 自有通道；见 registerShellTeamIpc）。
   registerShellTeamIpc(ipcMain, log);
+  registerShellWorkIpc(ipcMain);
   ipcMain.handle('shell:pick-folder', async (_e, kind) => {
     const res = await dialog.showOpenDialog(pickDialogParent(), {
       properties: ['openDirectory', 'createDirectory'],
@@ -2413,6 +2599,11 @@ function registerIpc() {
     return { ok: !!result.ok, open: !!result.ok, active: result.ok ? 'office' : 'harness', code: result.code || null };
   });
   ipcMain.handle('office-rail:switch-view', (_e, view) => {
+    if (view === 'work') {
+      windowManager.showWorkShellView();
+      sendWorkUpdate();
+      return { ok: true, active: 'work' };
+    }
     if (view === 'office') {
       if (!officeRuntimeEnabled()) return { ok: false, active: 'harness', code: 'OFFICE_RUNTIME_DISABLED' };
       const result = openOfficeView();
@@ -2437,7 +2628,7 @@ function registerIpc() {
     return {
       ok: true,
       officeOpen: windowManager.isOfficeViewActive(),
-      activeView: windowManager.isOfficeViewActive() ? 'office' : 'harness',
+      activeView: windowManager.getActiveMainView(),
       accent,
       officeEnabled: officeRuntimeEnabled(),
     };

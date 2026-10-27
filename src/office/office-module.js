@@ -634,6 +634,9 @@ function createOfficeModule(options = {}) {
       lastResult: null,
       toolKind: null,
       teamPhase: null, // v0.6（WP2）：Team run 的当前 phase 键（呈现优先于 toolKind）
+      // v0.7 P1：座位级产物标记（闭集 kind → 次数）。只有计数，没有 id/路径/内容。
+      artifactKinds: Object.create(null),
+      artifactCount: 0,
       animationElapsedMs: 0,
       state: createOfficeState(),
       turnCounter: 0,
@@ -2360,9 +2363,23 @@ function createOfficeModule(options = {}) {
       }
 
       case 'artifact-available': {
-        // 粗粒度阶段提示：只发一条稳定诊断，不传 id/内容/路径，不进快照字段。
+        // v0.7 P1：座位级产物标记。只接受粗粒度 kind token（adapter 已做闭集校验，
+        // 这里再拦一次类型/形状）；只计数，不存 id、路径或内容。
+        const kind = typeof fact.artifactKind === 'string' && /^[a-z][a-z0-9-]{0,31}$/.test(fact.artifactKind)
+          ? fact.artifactKind
+          : null;
+        if (!kind) return teamRejected('TEAM_ARTIFACT_KIND_UNKNOWN');
+        const bound = registry.getBindingForSession(runHandle);
+        const rec = bound && bound.releasedAt === null ? employees.get(bound.employeeId) : null;
+        if (rec) {
+          rec.artifactKinds[kind] = (rec.artifactKinds[kind] || 0) + 1;
+          rec.artifactCount += 1;
+          noteDiagnostic('TEAM_ARTIFACT_AVAILABLE');
+          pushSnapshot();
+          return Object.freeze({ ok: true, code: null, status: 'artifact', seat: bound.employeeId });
+        }
         noteDiagnostic('TEAM_ARTIFACT_AVAILABLE');
-        return Object.freeze({ ok: true, code: null, status: 'noted' });
+        return Object.freeze({ ok: true, code: null, status: 'unbound' });
       }
 
       case 'job-status': {
@@ -3335,6 +3352,11 @@ function createOfficeModule(options = {}) {
         toolPhrase: rec.teamPhase ? (PHRASE_ZH[rec.teamPhase] || PHRASE_ZH.other)
           : (rec.toolKind ? toolPhraseZhOf(rec.toolKind) : null),
         taskSeq: rec.taskSeq || 0,
+        // v0.7 P1：本座位已登记的产物（只计数 + 闭集 kind；不含 id/路径/内容）。
+        artifacts: Object.freeze({
+          count: rec.artifactCount || 0,
+          kinds: Object.freeze({ ...(rec.artifactKinds || {}) }),
+        }),
         // P4 (spec §3 block 5): the selected employee's 今日工作记录 (null when
         // the record is empty — see safeDayRecord).
         record: safeDayRecord(rec.employeeId),

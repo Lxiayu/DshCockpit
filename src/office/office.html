@@ -636,6 +636,13 @@
           tool.textContent = row.toolPhrase;
           nodes.push(tool);
         }
+        if (row.artifacts) {
+          const artifacts = document.createElement('span');
+          artifacts.className = 'staff-artifact';
+          artifacts.textContent = row.artifacts;
+          artifacts.title = tr('office.staff.artifactsTip');
+          nodes.push(artifacts);
+        }
         if (row.queueCount > 0) {
           const queue = document.createElement('span');
           queue.className = 'staff-queue';

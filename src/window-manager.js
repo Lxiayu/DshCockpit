@@ -35,10 +35,13 @@ function createWindowManager(deps) {
   let settingsWindow = null;
   let cockpitWindow = null;
   // M4.2 shell composition: the main window hosts a left rail view plus one
-  // of two main-area views (harness / office). The window itself loads nothing.
+  // of the main-area views (harness / office / work). The window itself loads nothing.
   let railView = null;
   let harnessView = null;
   let officeShellView = null;
+  // v0.7 P1: the work view is a third main-area view (task board + artifacts).
+  // Like the office it stays alive when hidden; only one main view is attached.
+  let workView = null;
   let activeMainView = 'harness';
   let shellSyncTimer = null;
   let mainWindowPending = false;
@@ -136,6 +139,40 @@ function createWindowManager(deps) {
     return !!(officeShellView && activeMainView === 'office');
   }
 
+  // ------------------------------------------ work shell view (v0.7 P1)
+  function showWorkShellView() {
+    if (!workView) {
+      workView = new WebContentsView({
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          // 产物读取与状态推送是事件驱动的；后台节流会让"切回来"看到旧状态。
+          backgroundThrottling: false,
+          preload: path.join(__dirname, 'work', 'work-preload.js'),
+        },
+      });
+      workView.webContents.on('will-navigate', (e) => e.preventDefault());
+      workView.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      workView.webContents.loadFile(path.join(__dirname, 'work', 'work.html'));
+      log('[work] shell view created (main-area workbench)');
+    }
+    activeMainView = 'work';
+    syncShellViews();
+    notifyOfficeShellVisibility();
+    notifyOfficeViewsChanged();
+    return workView;
+  }
+
+  function isWorkViewActive() {
+    return !!(workView && activeMainView === 'work');
+  }
+
+  function sendToWorkView(channel, payload) {
+    if (!workView) return;
+    try { workView.webContents.send(channel, payload); } catch { /* closing */ }
+  }
+
   function closeOfficeShellView() {
     if (!officeShellView) return;
     try {
@@ -196,6 +233,9 @@ function createWindowManager(deps) {
     if (officeShellView) {
       try { officeShellView.webContents.send(channel, payload); } catch { /* closing */ }
     }
+    if (workView) {
+      try { workView.webContents.send(channel, payload); } catch { /* closing */ }
+    }
   }
 
   function notifyOfficeViewsChanged() {
@@ -221,17 +261,18 @@ function createWindowManager(deps) {
     };
     if (harnessView) harnessView.setBounds(mainArea);
     if (officeShellView) officeShellView.setBounds(mainArea);
+    if (workView) workView.setBounds(mainArea);
     const contentView = mainWindow.contentView;
     const attached = (view) => {
       try { return contentView.children.includes(view); } catch { return false; }
     };
-    if (activeMainView === 'office' && officeShellView) {
-      if (harnessView && attached(harnessView)) contentView.removeChildView(harnessView);
-      if (!attached(officeShellView)) contentView.addChildView(officeShellView);
-    } else {
-      if (officeShellView && attached(officeShellView)) contentView.removeChildView(officeShellView);
-      if (harnessView && !attached(harnessView)) contentView.addChildView(harnessView);
+    const active = activeMainView === 'office' ? officeShellView
+      : activeMainView === 'work' ? workView
+        : harnessView;
+    for (const view of [harnessView, officeShellView, workView]) {
+      if (view && view !== active && attached(view)) contentView.removeChildView(view);
     }
+    if (active && !attached(active)) contentView.addChildView(active);
   }
 
   function scheduleShellSync() {
@@ -335,6 +376,7 @@ function createWindowManager(deps) {
       railView = null;
       harnessView = null;
       officeShellView = null; // child views die with the window's contents
+      workView = null;
     });
     mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
@@ -669,6 +711,7 @@ function createWindowManager(deps) {
     setCockpitMode, moveCockpitOffset,
     broadcastToOfficeViews, officeViewCount, closeOfficeShellView,
     showOfficeShellView, hideOfficeShellView, isOfficeViewActive,
+    showWorkShellView, isWorkViewActive, sendToWorkView,
     setOfficePresentationSuspended,
     broadcastToOfficeRail, broadcastToShellViews,
     syncShellViews, getActiveMainView: () => activeMainView,
