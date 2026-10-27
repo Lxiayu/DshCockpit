@@ -228,10 +228,12 @@ async function startTask(event) {
   busy = true;
   $('startBtn').disabled = true;
   setNotice('');
-  const result = await act({ action: 'start', goal });
+  const verifyCommand = ($('verifyCmd').value || '').trim();
+  const result = await act({ action: 'start', goal, verifyCommand });
   busy = false;
   if (result) {
     $('goal').value = '';
+    $('verifyCmd').value = '';
     apply(result);
   } else {
     renderDetail();

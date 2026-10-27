@@ -12,11 +12,11 @@ const crypto = require('node:crypto');
 const { createWorkspaceStore } = require('../src/work/workspace-store.js');
 const { createWorkController } = require('../src/work/work-controller.js');
 
-function setup({ nowMs = () => 1000 } = {}) {
+function setup({ nowMs = () => 1000, runCommand = null } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-ctl-'));
   const store = createWorkspaceStore({ homeDir: home, nowMs });
   const workspace = store.open({ create: 'ctl' });
-  const controller = createWorkController({ store, workspace, nowMs });
+  const controller = createWorkController({ store, workspace, nowMs, runCommand });
   return { store, workspace, controller };
 }
 
@@ -163,6 +163,91 @@ test('work-controller: abandon closes the shell item without inventing a Team te
   assert.equal(snap.active, false);
   const onDisk = store.readIndex(workspace).items[0];
   assert.equal(onDisk.status, 'abandoned');
+});
+
+test('work-controller: workspace changes are captured as a shell artifact (bounded, relative paths)', () => {
+  const { controller, workspace } = setup();
+  const goalFile = path.join(workspace.path, 'notes.md');
+  fs.writeFileSync(goalFile, 'before\n');
+  controller.begin({ goal: '改代码' });
+  // the "worker" edits/creates/deletes files after the baseline
+  fs.writeFileSync(goalFile, 'after\n');
+  fs.writeFileSync(path.join(workspace.path, 'new-file.txt'), 'hello');
+  fs.mkdirSync(path.join(workspace.path, 'node_modules'), { recursive: true });
+  fs.writeFileSync(path.join(workspace.path, 'node_modules', 'ignore.js'), 'x');
+  controller.sync({ status: 'completed', runs: {} });
+  const snap = controller.snapshot();
+  const patchEntry = snap.artifacts.find((entry) => entry.kind === 'workspace-patch');
+  assert.ok(patchEntry, 'a workspace-patch artifact is registered');
+  assert.ok(snap.current.artifactRefs.includes(patchEntry.key));
+  const written = JSON.parse(fs.readFileSync(path.join(workspace.path, '.dsh', 'artifacts', snap.current.workItemId, 'workspace-patch.json'), 'utf8'));
+  assert.deepEqual(written.modified.map((entry) => entry.path), ['notes.md']);
+  assert.deepEqual(written.added.map((entry) => entry.path), ['new-file.txt']);
+  assert.equal(JSON.stringify(written).includes('node_modules'), false, 'dependency trees are excluded');
+  assert.equal(JSON.stringify(written).includes('.dsh'), false, 'own artifacts are excluded');
+  assert.match(written.modified[0].digest, /^ref-sha256:[0-9a-f]{16}$/);
+  assert.equal(written.truncated, false);
+});
+
+test('work-controller: an unchanged workspace produces no empty patch (no fake evidence)', () => {
+  const { controller } = setup();
+  controller.begin({ goal: '什么都不改' });
+  controller.sync({ status: 'completed', runs: {} });
+  const snap = controller.snapshot();
+  assert.equal(snap.artifacts.some((entry) => entry.kind === 'workspace-patch'), false);
+});
+
+test('work-controller: verification runs in the workspace and records evidence', async () => {
+  const calls = [];
+  const ctx = setup({
+    runCommand: async (args) => { calls.push(args); return { ok: true, code: null, exitCode: 0, signal: null, timedOut: false, durationMs: 42, output: 'all tests passed', truncated: false }; },
+  });
+  ctx.controller.begin({ goal: '改代码', verifyCommand: 'npm test' });
+  ctx.controller.sync({ status: 'completed', runs: {} });
+  const result = await ctx.controller.runVerification();
+  assert.equal(result.skipped, false);
+  assert.equal(result.verification.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, 'npm test');
+  assert.equal(calls[0].cwd, ctx.workspace.path);
+  const snap = ctx.controller.snapshot();
+  const evidence = snap.artifacts.find((entry) => entry.kind === 'verification');
+  assert.ok(evidence, 'verification evidence is registered');
+  assert.equal(snap.current.verification.ok, true);
+  const written = JSON.parse(fs.readFileSync(path.join(ctx.workspace.path, '.dsh', 'artifacts', snap.current.workItemId, 'verification.json'), 'utf8'));
+  assert.equal(written.command, 'npm test');
+  assert.equal(written.exitCode, 0);
+  assert.ok(written.outputTail.includes('all tests passed'));
+  assert.equal(written.logRelPath, `.dsh/artifacts/${snap.current.workItemId}/verify.log`);
+  assert.equal(fs.readFileSync(path.join(ctx.workspace.path, written.logRelPath), 'utf8'), 'all tests passed');
+  // idempotent: a second call does not re-run
+  const again = await ctx.controller.runVerification();
+  assert.equal(again.skipped, true);
+  assert.equal(calls.length, 1);
+});
+
+test('work-controller: a failing verification is recorded as not ok (never dressed up)', async () => {
+  const ctx = setup({
+    runCommand: async () => ({ ok: false, code: null, exitCode: 1, signal: null, timedOut: false, durationMs: 5, output: '1 failing', truncated: false }),
+  });
+  ctx.controller.begin({ goal: '改代码', verifyCommand: 'npm test' });
+  ctx.controller.sync({ status: 'completed', runs: {} });
+  const result = await ctx.controller.runVerification();
+  assert.equal(result.verification.ok, false);
+  assert.equal(result.verification.exitCode, 1);
+  assert.equal(ctx.controller.snapshot().current.verification.ok, false);
+});
+
+test('work-controller: verification is skipped without a command or before a terminal state', async () => {
+  let calls = 0;
+  const ctx = setup({ runCommand: async () => { calls += 1; return { ok: true, exitCode: 0, durationMs: 1, output: '' }; } });
+  ctx.controller.begin({ goal: '研究' });
+  ctx.controller.sync({ status: 'completed', runs: {} });
+  assert.equal((await ctx.controller.runVerification()).skipped, true);
+  ctx.controller.begin({ goal: '改代码', verifyCommand: 'npm test' });
+  ctx.controller.sync({ status: 'attention', runs: {} });
+  assert.equal((await ctx.controller.runVerification()).skipped, true);
+  assert.equal(calls, 0);
 });
 
 test('work-controller: finish(incomplete) goes through the artifact gate', () => {

@@ -379,11 +379,21 @@ function workStoreInstance() {
   return workStore;
 }
 
+// 验证命令的执行器（壳侧、cwd=工作区、有超时/输出上限）。
+const workCommandRunner = require('./work/command-runner.js').createCommandRunner();
+
 function attachWorkWorkspace(workspace) {
   const { createWorkController } = require('./work/work-controller.js');
   workWorkspace = workspace;
   workWorkspaceError = null;
-  workController = createWorkController({ store: workStoreInstance(), workspace, log });
+  workController = createWorkController({
+    store: workStoreInstance(),
+    // Explicit keys: the tdz-guard scans factory blocks for shorthand refs and
+    // these are function parameters, not top-level bindings.
+    workspace: workspace,
+    log: log,
+    runCommand: (args) => workCommandRunner.run(args),
+  });
   try {
     if (settings.get().workWorkspace !== workspace.path) settings.patch({ workWorkspace: workspace.path });
   } catch (error) {
@@ -448,7 +458,7 @@ async function selectWorkWorkspace(target) {
   }
 }
 
-async function startWorkRun(goal) {
+async function startWorkRun(goal, verifyCommand = '') {
   const controller = ensureWorkController();
   if (!controller) return Object.freeze({ ok: false, code: workWorkspaceError || 'WORKSPACE_REQUIRED' });
   const office = officeModuleInstance;
@@ -457,7 +467,7 @@ async function startWorkRun(goal) {
   }
   if (officeTeamRealInstance) return Object.freeze({ ok: false, code: 'TEAM_ALREADY_ACTIVE' });
   // 先落工作项，再启动执行链：产物回调需要在项存在时挂载。
-  const begun = controller.begin({ goal });
+  const begun = controller.begin({ goal, verifyCommand });
   if (!begun.ok) return begun;
   const workspace = workWorkspace;
   // The team executes INSIDE the workspace: dsh roots its workspace at the
@@ -500,8 +510,11 @@ async function startWorkRun(goal) {
     return Object.freeze({ ok: false, code: 'TEAM_START_FAILED' });
   }
   // 驱动结束后再同步一次终态（onStatus 覆盖了逐步状态，这里兜底终态与"无产物"门禁）。
-  instance.whenSettled().then(() => {
+  instance.whenSettled().then(async () => {
     controller.sync(instance.runtime.state());
+    sendWorkUpdate();
+    // v0.7 P2：终态后跑任务声明的验证命令（壳侧证据；失败不改变 Team 事实）。
+    try { await controller.runVerification(); } catch { /* evidence failure is logged in the controller */ }
     teamRuntimeHost.scheduleIdleStop();
     sendWorkUpdate();
   }).catch(() => {});
@@ -578,7 +591,7 @@ function registerShellWorkIpc(ipcMain) {
   const work = createWorkIpc({
     status: () => workStatusPayload(),
     selectWorkspace: (target) => selectWorkWorkspace(target),
-    start: (goal) => startWorkRun(goal),
+    start: (goal, verifyCommand) => startWorkRun(goal, verifyCommand),
     cancel: () => cancelWorkRun(),
     resume: () => resumeWorkRun(),
     expand: () => expandWorkView(),

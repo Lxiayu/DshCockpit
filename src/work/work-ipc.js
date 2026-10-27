@@ -10,6 +10,7 @@
 const GOAL_MAX_CHARS = 2000;
 const PATH_MAX_CHARS = 1024;
 const KEY_MAX_CHARS = 200;
+const VERIFY_COMMAND_MAX_CHARS = 500;
 const ARTIFACT_ACTIONS = Object.freeze(['read', 'open', 'reveal']);
 
 function isPlainObject(value) {
@@ -43,7 +44,9 @@ function validate(payload) {
     const goal = typeof payload.goal === 'string' ? payload.goal.trim() : '';
     if (goal === '') return { ok: false, code: 'WORK_GOAL_REQUIRED' };
     if (goal.length > GOAL_MAX_CHARS) return { ok: false, code: 'WORK_GOAL_TOO_LONG' };
-    return { ok: true, action, goal };
+    const verifyCommand = typeof payload.verifyCommand === 'string' ? payload.verifyCommand.trim() : '';
+    if (verifyCommand.length > VERIFY_COMMAND_MAX_CHARS) return { ok: false, code: 'WORK_VERIFY_COMMAND_TOO_LONG' };
+    return { ok: true, action, goal, verifyCommand };
   }
   if (action === 'cancel') return { ok: true, action };
   if (action === 'resume') return { ok: true, action };
@@ -92,7 +95,7 @@ function createWorkIpc({ status, selectWorkspace, start, cancel, resume, expand,
     switch (checked.action) {
       case 'status': return status();
       case 'select-workspace': return selectWorkspace(checked.target);
-      case 'start': return start(checked.goal);
+      case 'start': return start(checked.goal, checked.verifyCommand);
       case 'cancel': return cancel();
       case 'resume': return resume();
       case 'expand': return expand();

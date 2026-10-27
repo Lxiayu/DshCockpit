@@ -55,7 +55,7 @@ archive/                      本地保险箱（git 忽略，历史版本在提�
 ## 5. 命令与坑
 
 ```bash
-# 全量测试（当前 1853 项；目标内部循环 < 1 分钟，正在分段优化）
+# 全量测试（当前 1878 项；目标内部循环 < 1 分钟，正在分段优化）
 npm test                                   # = node --test "test/*.test.js"（约 2 分钟）
 # 单套件
 node --test /abs/path/test/xxx.test.js

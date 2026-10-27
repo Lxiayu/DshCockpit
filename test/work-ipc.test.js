@@ -12,7 +12,7 @@ function makeIpc(overrides = {}) {
   const base = {
     status: () => ({ ok: true, calls: calls.push('status') }),
     selectWorkspace: async (target) => { calls.push(['select', target]); return { ok: true }; },
-    start: async (goal) => { calls.push(['start', goal]); return { ok: true }; },
+    start: async (goal, verifyCommand) => { calls.push(['start', goal, verifyCommand]); return { ok: true }; },
     cancel: async () => { calls.push('cancel'); return { ok: true }; },
     resume: async () => { calls.push('resume'); return { ok: true }; },
     expand: async () => { calls.push('expand'); return { ok: true }; },
@@ -32,6 +32,7 @@ test('work-ipc: validates every action and fails closed on unknown/ambiguous pay
   assert.equal(ipc.validate({ action: 'start', goal: 'x'.repeat(GOAL_MAX_CHARS + 1) }).code, 'WORK_GOAL_TOO_LONG');
   assert.equal(ipc.validate({ action: 'open-artifact', key: '' }).code, 'ARTIFACT_KEY_INVALID');
   assert.equal(ipc.validate({ action: 'open-artifact', key: 'k', verb: 'exec' }).code, 'ARTIFACT_ACTION_INVALID');
+  assert.equal(ipc.validate({ action: 'start', goal: 'x', verifyCommand: 'y'.repeat(501) }).code, 'WORK_VERIFY_COMMAND_TOO_LONG');
 });
 
 test('work-ipc: delegates with trimmed values (the goal is the only user text)', async () => {
@@ -39,13 +40,15 @@ test('work-ipc: delegates with trimmed values (the goal is the only user text)',
   assert.deepEqual(await ipc.handle({ action: 'select-workspace', path: ' /tmp/ws ' }, true), { ok: true });
   assert.deepEqual(await ipc.handle({ action: 'select-workspace', create: 'demo' }, true), { ok: true });
   assert.deepEqual(await ipc.handle({ action: 'start', goal: '  研究主题  ' }, true), { ok: true });
+  assert.deepEqual(await ipc.handle({ action: 'start', goal: '改代码', verifyCommand: ' npm test ' }, true), { ok: true });
   assert.deepEqual(await ipc.handle({ action: 'open-artifact', key: 'job:notes', verb: 'read' }, true), { ok: true, text: 'x' });
   assert.deepEqual(await ipc.handle({ action: 'resume' }, true), { ok: true });
   assert.deepEqual(await ipc.handle({ action: 'expand' }, true), { ok: true });
   assert.deepEqual(calls, [
     ['select', { path: '/tmp/ws' }],
     ['select', { create: 'demo' }],
-    ['start', '研究主题'],
+    ['start', '研究主题', ''],
+    ['start', '改代码', 'npm test'],
     ['open', { key: 'job:notes', verb: 'read' }],
     'resume',
     'expand',

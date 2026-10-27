@@ -24,6 +24,15 @@ const META_FILE = 'work.json';
 const ARTIFACTS_DIR = 'artifacts';
 const WORKSPACE_NAME_RE = /^[\p{L}\p{N}._-]{1,40}$/u;
 const MAX_ARTIFACT_READ_BYTES = 256 * 1024;
+// Change capture (v0.7 P2 WP2): bounded so a huge project never stalls the UI.
+const MANIFEST_MAX_FILES = 5000;
+const MANIFEST_MAX_HASH_BYTES = 2 * 1024 * 1024;
+const MANIFEST_MAX_HASHED_FILES = 200;
+const MANIFEST_EXCLUDED_DIRS = new Set([
+  '.dsh', '.git', 'node_modules', 'dist', 'out', 'build', '.cache', 'coverage',
+  '.next', 'target', '.venv', 'venv', '.idea', '.vscode',
+]);
+const SHELL_DIGEST_RE = /^ref-sha256:[0-9a-f]{16}$/;
 
 function codeError(code, message) {
   // 稳定码同时进 message，调用方（与测试）可以只看到一种可读的错误形状。
@@ -276,7 +285,7 @@ function createWorkspaceStore({
   } = {}) {
     if (typeof jobId !== 'string' || jobId === '') throw codeError('WORK_ARTIFACT_INVALID', 'jobId required');
     if (typeof kind !== 'string' || kind === '') throw codeError('WORK_ARTIFACT_INVALID', 'kind required');
-    if (typeof digest !== 'string' || !/^exec-sha256:[0-9a-f]{16}$/.test(digest)) {
+    if (typeof digest !== 'string' || !/^(?:exec|ref)-sha256:[0-9a-f]{16}$/.test(digest)) {
       throw codeError('WORK_ARTIFACT_INVALID', 'digest must be an opaque exec-sha256 token');
     }
     const key = `${jobId}:${kind}`;
@@ -344,7 +353,7 @@ function createWorkspaceStore({
     const abs = resolveInside(workspace.path, artifact.relPath);
     if (!fs.existsSync(abs)) throw codeError('WORK_ARTIFACT_MISSING', 'artifact file is gone');
     const bytes = fs.readFileSync(abs);
-    const expected = artifact.digest.replace(/^exec-sha256:/, '');
+    const expected = artifact.digest.replace(/^(?:exec|ref)-sha256:/, '');
     if (sha256Hex(bytes).slice(0, 16) !== expected) {
       throw codeError('WORK_ARTIFACT_DIGEST_MISMATCH', 'artifact bytes do not match the recorded digest');
     }
@@ -353,6 +362,117 @@ function createWorkspaceStore({
       return Object.freeze({ ok: true, key: artifact.key, kind: artifact.kind, text, truncated: true, bytes: bytes.length });
     }
     return Object.freeze({ ok: true, key: artifact.key, kind: artifact.kind, text: bytes.toString('utf8'), truncated: false, bytes: bytes.length });
+  }
+
+  /**
+   * 扫描工作区清单（v0.7 P2）：相对路径 → {size, mtimeMs}。
+   * 排除自产目录与依赖目录；文件数/大小有上限（truncated 如实标注）。
+   */
+  function scanManifest(rootPath) {
+    const files = Object.create(null);
+    let count = 0;
+    let truncated = false;
+    const walk = (dir) => {
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const entry of entries) {
+        if (count >= MANIFEST_MAX_FILES) { truncated = true; return; }
+        if (entry.isSymbolicLink()) continue;
+        const abs = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (MANIFEST_EXCLUDED_DIRS.has(entry.name)) continue;
+          walk(abs);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        const rel = path.relative(rootPath, abs).split(path.sep).join('/');
+        if (rel === '' || rel.startsWith('..')) continue;
+        let stat;
+        try { stat = fs.statSync(abs); } catch { continue; }
+        files[rel] = { size: stat.size, mtimeMs: Math.floor(stat.mtimeMs) };
+        count += 1;
+      }
+    };
+    walk(rootPath);
+    return Object.freeze({ files, truncated });
+  }
+
+  /** 基线 → 现在的差异（added/modified/deleted；digest 只给变化项，且有上限）。 */
+  function diffManifests(before, after, rootPath = null) {
+    const prev = (before && before.files) || {};
+    const next = (after && after.files) || {};
+    const added = [];
+    const modified = [];
+    const deleted = [];
+    for (const [rel, info] of Object.entries(next)) {
+      if (!prev[rel]) added.push({ path: rel, size: info.size, digest: null });
+      else if (prev[rel].size !== info.size || prev[rel].mtimeMs !== info.mtimeMs) {
+        modified.push({ path: rel, size: info.size, digest: null });
+      }
+    }
+    for (const rel of Object.keys(prev)) if (!next[rel]) deleted.push({ path: rel });
+    // digests: bounded (200 files / 2MB each) — evidence, not a backup.
+    let hashed = 0;
+    for (const entry of [...added, ...modified]) {
+      if (!rootPath || hashed >= MANIFEST_MAX_HASHED_FILES || entry.size > MANIFEST_MAX_HASH_BYTES) continue;
+      try {
+        const bytes = fs.readFileSync(path.join(rootPath, entry.path));
+        entry.digest = `ref-sha256:${sha256Hex(bytes).slice(0, 16)}`;
+        hashed += 1;
+      } catch { /* unreadable: digest stays null (honest) */ }
+    }
+    return Object.freeze({
+      added: Object.freeze(added),
+      modified: Object.freeze(modified),
+      deleted: Object.freeze(deleted),
+      counts: Object.freeze({ added: added.length, modified: modified.length, deleted: deleted.length }),
+      truncated: !!(before && before.truncated) || !!(after && after.truncated),
+    });
+  }
+
+  /** 证据原文（验证日志等）落盘到 `.dsh/artifacts/<jobId>/`；返回相对路径。 */
+  function writeEvidenceFile(workspace, { jobId, filename, text = '' } = {}) {
+    if (typeof jobId !== 'string' || jobId === '') throw codeError('WORK_ARTIFACT_INVALID', 'jobId required');
+    if (typeof filename !== 'string' || filename === '' || filename.includes('/') || filename.includes('\\')) {
+      throw codeError('WORK_ARTIFACT_INVALID', 'filename must be a simple name');
+    }
+    const relPath = `${WORK_DIR}/${ARTIFACTS_DIR}/${jobId}/${filename}`;
+    const abs = resolveInside(workspace.path, relPath);
+    const bytes = Buffer.from(String(text), 'utf8');
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, bytes);
+    return Object.freeze({ relPath, bytes: bytes.length, digest: `ref-sha256:${sha256Hex(bytes).slice(0, 16)}` });
+  }
+
+  /** 壳侧产物（workspace-patch / verification）：JSON 落盘 + 索引登记（幂等）。 */
+  function registerShellArtifact(workspace, { jobId, kind, value, atMs = nowMs() } = {}) {
+    if (typeof jobId !== 'string' || jobId === '') throw codeError('WORK_ARTIFACT_INVALID', 'jobId required');
+    if (typeof kind !== 'string' || kind === '') throw codeError('WORK_ARTIFACT_INVALID', 'kind required');
+    const key = `shell:${jobId}:${kind}`;
+    const index = readIndex(workspace.path, workspace.workspaceId);
+    if (index.artifacts.some((entry) => entry.key === key)) {
+      return Object.freeze({ key, existing: true });
+    }
+    const relPath = `${WORK_DIR}/${ARTIFACTS_DIR}/${jobId}/${kind}.json`;
+    const abs = resolveInside(workspace.path, relPath);
+    const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, bytes);
+    const digest = `ref-sha256:${sha256Hex(bytes).slice(0, 16)}`;
+    index.artifacts.push({
+      key,
+      ref: `ref:shell-${kind}`,
+      kind,
+      relPath,
+      digest,
+      producerRole: 'shell',
+      runRef: null,
+      attempt: null,
+      bytes: bytes.length,
+      createdAtMs: atMs,
+    });
+    saveIndex(workspace.path, index);
+    return Object.freeze({ key, existing: false, relPath, digest, bytes: bytes.length });
   }
 
   /** 绝对路径只给壳的"打开/定位"动作；不进入任何快照。 */
@@ -368,6 +488,10 @@ function createWorkspaceStore({
     reload,
     flush,
     readIndex: (workspace) => readIndex(workspace.path, workspace.workspaceId),
+    scanManifest,
+    diffManifests,
+    writeEvidenceFile,
+    registerShellArtifact,
     registerArtifact,
     appendItem,
     updateItem,
@@ -384,6 +508,7 @@ module.exports = {
   createWorkspaceStore,
   WORK_SCHEMA_VERSION,
   MAX_ARTIFACT_READ_BYTES,
+  MANIFEST_MAX_FILES,
   resolveInside,
   isSafeRelPath,
   validateIndex,

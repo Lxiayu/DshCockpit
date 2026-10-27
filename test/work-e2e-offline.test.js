@@ -54,6 +54,9 @@ test('work-e2e: a full offline run lands a real file in the workspace and comple
   const workspace = store.open({ create: 'e2e' });
   const work = createWorkController({ store, workspace, nowMs: () => clockMs });
   assert.equal(work.begin({ goal: TOPIC }).ok, true);
+  // The worker (running with cwd = workspace on the dedicated runtime) changes a file.
+  const workerFile = path.join(workspace.path, 'worker-output.txt');
+  fs.writeFileSync(workerFile, 'team was here\n');
 
   const rpc = fakeRpc();
   const openFollow = () => {
@@ -113,8 +116,10 @@ test('work-e2e: a full offline run lands a real file in the workspace and comple
   // work item + index
   const snap = work.snapshot();
   assert.equal(snap.current.status, 'completed');
-  assert.deepEqual(snap.current.artifactRefs, ['job-work-e2e-1:research-notes']);
-  assert.equal(snap.artifacts.length, 1);
+  assert.deepEqual(snap.current.artifactRefs.slice().sort(), ['job-work-e2e-1:research-notes', `shell:${snap.current.workItemId}:workspace-patch`].sort());
+  assert.equal(snap.artifacts.length, 2);
+  const patchEntry = snap.artifacts.find((entry) => entry.kind === 'workspace-patch');
+  assert.ok(patchEntry, 'workspace changes ride the work item as a shell artifact');
   assert.equal(snap.artifacts[0].relPath, undefined, 'the status payload omits the relative path');
   const onDisk = store.readIndex(workspace);
   assert.equal(onDisk.artifacts[0].relPath, '.dsh/artifacts/job-work-e2e-1/research-notes.md');

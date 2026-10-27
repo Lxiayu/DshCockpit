@@ -81,7 +81,7 @@ dsh 官方语义：**进程启动目录 = workspace 根**（`dsh/README.md:20`�
 ## 5. 进度
 
 - [x] WP1 专用 Team runtime（含真机验证）
-- [ ] WP2 变更捕获
-- [ ] WP3 Verification Runner
+- [x] WP2 变更捕获（scanManifest/diffManifests + workspace-patch 壳侧产物；空变更不写）
+- [x] WP3 Verification Runner（工作区执行、超时/输出上限、verify.log + verification 证据）
 - [ ] WP4 受控 retry
 - [ ] WP5 真机验收与报告

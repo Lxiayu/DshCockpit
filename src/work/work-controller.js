@@ -27,6 +27,8 @@ function freezeItem(item) {
     finishedAtMs: item.finishedAtMs === undefined ? null : item.finishedAtMs,
     artifactRefs: Object.freeze([...(item.artifactRefs || [])]),
     phase: item.phase === undefined ? null : item.phase,
+    verifyCommand: item.verifyCommand === undefined ? null : item.verifyCommand,
+    verification: item.verification === undefined ? null : item.verification,
     blockedCode: item.blockedCode === undefined ? null : item.blockedCode,
   });
 }
@@ -39,7 +41,7 @@ function freezeItem(item) {
  * @param {(message: string) => void} [deps.log]
  * @param {() => string} [deps.idFactory]  workItemId 生成（测试可注入确定性 id）
  */
-function createWorkController({ store, workspace, nowMs = () => Date.now(), log = () => {}, idFactory } = {}) {
+function createWorkController({ store, workspace, nowMs = () => Date.now(), log = () => {}, idFactory, runCommand = null } = {}) {
   if (!store || typeof store.readIndex !== 'function') throw new Error('work controller needs a workspace store');
   if (!workspace || typeof workspace.path !== 'string') throw new Error('work controller needs an open workspace');
 
@@ -49,6 +51,10 @@ function createWorkController({ store, workspace, nowMs = () => Date.now(), log 
     return `wi-${nowMs()}-${seq}`;
   });
   let currentId = null; // 只允许一个活动工作项（P1）
+  // v0.7 P2：工作区基线（内存）。重启后没有基线 —— 如实不产 diff，不伪造。
+  let baseline = null;
+  let baselineItemId = null;
+  let diffCaptured = false;
 
   // 重启恢复：上次进程留下的 running/attention 项没有活着的执行链 —— 如实标为 interrupted。
   (function reconcileStaleItems() {
@@ -76,9 +82,11 @@ function createWorkController({ store, workspace, nowMs = () => Date.now(), log 
     return indexItems().find((item) => item.workItemId === currentId) || null;
   }
 
-  function begin({ goal, templateId = 'research-review' } = {}) {
+  function begin({ goal, templateId = 'research-review', verifyCommand = '' } = {}) {
     const text = typeof goal === 'string' ? goal.trim() : '';
     if (text === '') return Object.freeze({ ok: false, code: 'WORK_GOAL_REQUIRED' });
+    const verify = typeof verifyCommand === 'string' ? verifyCommand.trim() : '';
+    if (verify.length > 500) return Object.freeze({ ok: false, code: 'WORK_VERIFY_COMMAND_TOO_LONG' });
     const active = activeItem();
     if (active && ACTIVE_STATUS.includes(active.status)) {
       return Object.freeze({ ok: false, code: 'WORK_BUSY' });
@@ -93,9 +101,20 @@ function createWorkController({ store, workspace, nowMs = () => Date.now(), log 
       finishedAtMs: null,
       artifactRefs: [],
       phase: null,
+      verifyCommand: verify === '' ? null : verify,
+      verification: null,
     };
     store.appendItem(workspace, item);
     currentId = item.workItemId;
+    diffCaptured = false;
+    try {
+      baseline = store.scanManifest(workspace.path);
+      baselineItemId = item.workItemId;
+    } catch (error) {
+      baseline = null;
+      baselineItemId = null;
+      log(`[work] workspace baseline failed: ${error && error.code ? error.code : error.message}`);
+    }
     log('[work] work item started');
     return Object.freeze({ ok: true, code: null, item: freezeItem(item) });
   }
@@ -156,13 +175,118 @@ function createWorkController({ store, workspace, nowMs = () => Date.now(), log 
     if (next !== 'attention' && item.blockedCode) patch.blockedCode = null;
     const terminal = next === 'completed' || next === 'incomplete' || next === 'failed' || next === 'cancelled';
     if (terminal && item.finishedAtMs === null) patch.finishedAtMs = nowMs();
-    if (Object.keys(patch).length === 0) return Object.freeze({ ok: true, code: null, changed: false });
+    if (Object.keys(patch).length === 0) {
+      if (terminal) captureDiff();
+      return Object.freeze({ ok: true, code: null, changed: false });
+    }
     try {
       store.updateItem(workspace, item.workItemId, patch);
     } catch (error) {
       return Object.freeze({ ok: false, code: error && error.code ? error.code : 'WORK_ITEM_UPDATE_FAILED' });
     }
+    if (terminal) captureDiff();
     return Object.freeze({ ok: true, code: null, changed: true });
+  }
+
+  /**
+   * v0.7 P2：在工作区执行任务声明的验证命令（壳侧受信证据）。
+   * 只有终态（completed/incomplete/failed）才跑；abandoned/cancelled 不跑。
+   */
+  async function runVerification() {
+    const item = activeItem();
+    if (!item) return Object.freeze({ ok: false, code: 'WORK_ITEM_NONE' });
+    if (item.verification) return Object.freeze({ ok: true, skipped: true, code: null });
+    if (!item.verifyCommand) return Object.freeze({ ok: true, skipped: true, code: null });
+    if (!['completed', 'incomplete', 'failed'].includes(item.status)) {
+      return Object.freeze({ ok: true, skipped: true, code: 'WORK_NOT_TERMINAL' });
+    }
+    if (typeof runCommand !== 'function') return Object.freeze({ ok: false, code: 'VERIFY_UNAVAILABLE' });
+    const startedAtMs = nowMs();
+    let result;
+    try {
+      result = await runCommand({ command: item.verifyCommand, cwd: workspace.path });
+    } catch (error) {
+      result = { ok: false, code: 'VERIFY_FAILED', exitCode: null, timedOut: false, durationMs: 0, output: String(error && error.message) };
+    }
+    let logRelPath = null;
+    try {
+      const log = store.writeEvidenceFile(workspace, {
+        jobId: item.workItemId, filename: 'verify.log', text: result.output || '',
+      });
+      logRelPath = log.relPath;
+    } catch (error) {
+      log(`[work] verify log write failed: ${error && error.code ? error.code : error.message}`);
+    }
+    const verification = {
+      ok: !!result.ok,
+      exitCode: typeof result.exitCode === 'number' ? result.exitCode : null,
+      signal: result.signal || null,
+      timedOut: !!result.timedOut,
+      durationMs: typeof result.durationMs === 'number' ? result.durationMs : 0,
+      startedAtMs,
+    };
+    try {
+      const written = store.registerShellArtifact(workspace, {
+        jobId: item.workItemId,
+        kind: 'verification',
+        value: {
+          schemaVersion: 1,
+          command: item.verifyCommand,
+          ...verification,
+          logRelPath,
+          truncated: !!result.truncated,
+          outputTail: String(result.output || '').slice(-8192),
+        },
+      });
+      store.attachArtifactToItem(workspace, item.workItemId, written.key);
+      store.updateItem(workspace, item.workItemId, { verification });
+    } catch (error) {
+      log(`[work] verification evidence failed: ${error && error.code ? error.code : error.message}`);
+      return Object.freeze({ ok: false, code: error && error.code ? error.code : 'VERIFY_EVIDENCE_FAILED' });
+    }
+    log(`[work] verification ${verification.ok ? 'passed' : 'failed'} (exit=${verification.exitCode})`);
+    return Object.freeze({ ok: true, code: null, skipped: false, verification });
+  }
+
+  /**
+   * v0.7 P2：把本轮工作区变更落成 `workspace-patch`（壳侧产物）。
+   * 空变更不写（Q5）；没有基线（重启）不写；写失败只记日志，不影响 Team 事实。
+   */
+  function captureDiff() {
+    const item = activeItem();
+    if (!item || diffCaptured) return null;
+    if (!baseline || baselineItemId !== item.workItemId) {
+      diffCaptured = true;
+      log('[work] no workspace baseline for this item; skipping change capture');
+      return null;
+    }
+    const after = store.scanManifest(workspace.path);
+    const diff = store.diffManifests(baseline, after, workspace.path);
+    baseline = null;
+    diffCaptured = true;
+    if (diff.counts.added + diff.counts.modified + diff.counts.deleted === 0) return null;
+    try {
+      const written = store.registerShellArtifact(workspace, {
+        jobId: item.workItemId,
+        kind: 'workspace-patch',
+        value: {
+          schemaVersion: 1,
+          workspaceId: workspace.workspaceId,
+          capturedAtMs: nowMs(),
+          counts: diff.counts,
+          added: diff.added,
+          modified: diff.modified,
+          deleted: diff.deleted,
+          truncated: diff.truncated,
+        },
+      });
+      store.attachArtifactToItem(workspace, item.workItemId, written.key);
+      log(`[work] workspace patch captured (${diff.counts.added}+${diff.counts.modified}~${diff.counts.deleted}-)`);
+      return written.key;
+    } catch (error) {
+      log(`[work] workspace patch failed: ${error && error.code ? error.code : error.message}`);
+      return null;
+    }
   }
 
   /**
@@ -188,6 +312,7 @@ function createWorkController({ store, workspace, nowMs = () => Date.now(), log 
     store.updateItem(workspace, item.workItemId, {
       status: 'abandoned', finishedAtMs: nowMs(), phase: null, blockedCode: null,
     });
+    captureDiff();
     // currentId 保留：UI 仍然显示"已放弃"这一项；active 由状态推导（不再活跃）。
     log('[work] work item abandoned by the user');
     return Object.freeze({ ok: true, code: null });
@@ -234,6 +359,8 @@ function createWorkController({ store, workspace, nowMs = () => Date.now(), log 
     sync,
     block,
     abandon,
+    captureDiff,
+    runVerification,
     finish,
     snapshot,
     currentItemId: () => currentId,
