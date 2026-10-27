@@ -472,6 +472,10 @@ async function startWorkRun(goal) {
         controller.sync(teamState);
         sendWorkUpdate();
       },
+      onBlocked: (blocked) => {
+        controller.block(blocked);
+        sendWorkUpdate();
+      },
     },
   });
   if (!instance) {
@@ -499,12 +503,28 @@ async function resumeWorkRun() {
 
 async function cancelWorkRun() {
   const instance = officeTeamRealInstance;
-  if (!instance) return Object.freeze({ ok: false, code: 'TEAM_NOT_ACTIVE' });
+  const controller = ensureWorkController();
+  if (!instance) {
+    // 没有活的执行链（例如重启后看到历史项）：只允许放弃当前工作项。
+    if (controller && controller.snapshot().active) {
+      controller.abandon();
+      sendWorkUpdate();
+      return Object.freeze({ ok: true, code: null, abandoned: true });
+    }
+    return Object.freeze({ ok: false, code: 'TEAM_NOT_ACTIVE' });
+  }
   const state = instance.runtime.state();
   const entry = Object.entries(state.runs).find(([, run]) => run && (run.status === 'running' || run.status === 'attention'));
-  if (!entry) return Object.freeze({ ok: false, code: 'NOTHING_TO_CANCEL' });
-  const verdict = await instance.controller.requestCancel(entry[0]);
-  return Object.freeze({ ok: !!(verdict && verdict.ok), code: verdict && verdict.code ? verdict.code : null });
+  if (entry) {
+    const verdict = await instance.controller.requestCancel(entry[0]);
+    if (verdict && verdict.ok) return Object.freeze({ ok: true, code: null });
+  }
+  // 没有可取消的 run（例如 HANDOFF_INCOMPLETE 把链挡住）：显式放弃 —— 停掉壳的驱动循环、
+  // 丢弃这个执行链，工作项标 abandoned；Team 事实保持原样，绝不伪造终态。
+  instance.detach();
+  if (controller && controller.snapshot().active) controller.abandon();
+  sendWorkUpdate();
+  return Object.freeze({ ok: true, code: null, abandoned: true });
 }
 
 async function openWorkArtifact({ key, verb }) {
@@ -630,6 +650,7 @@ function startTeamRealWithTopic({ office, topic, log, deps = {} } = {}) {
     // 驱动循环不引用模块级状态 —— 离线接线测试的沙箱只注入显式依赖）。
     const onArtifact = typeof deps.onArtifact === 'function' ? deps.onArtifact : null;
     const onStatus = typeof deps.onStatus === 'function' ? deps.onStatus : null;
+    const onBlocked = typeof deps.onBlocked === 'function' ? deps.onBlocked : null;
     const { createShellTeamTransport } = require('./team-shell-transport.js');
     const transport = createShellTeamTransport({
       rpc, openFollow, artifactDir, topic, log, onArtifact,
@@ -669,6 +690,28 @@ function startTeamRealWithTopic({ office, topic, log, deps = {} } = {}) {
       for (;;) {
         if (stopped) break;
         await controller.dispatchReady();
+        if (onStatus) {
+          try { onStatus(runtime.state()); } catch (error) { log(`[office] onStatus hook failed: ${error && error.message}`); }
+        }
+        // v0.7 P1（真机验收）：dispatchReady 可能把 Team 推到 attention（例如绑定失败），
+        // 也可能被 Team 门禁挡住（HANDOFF_INCOMPLETE）。两者都必须在阻塞等待事件之前处理，
+        // 否则循环会卡在一个已完成的会话上，工作项永远显示 running。
+        const preStatus = runtime.state().status;
+        if (['completed', 'failed', 'cancelled', 'attention'].includes(preStatus)) {
+          bridge.pump();
+          break;
+        }
+        if (typeof controller.blocked === 'function') {
+          const blocked = controller.blocked();
+          if (blocked) {
+            log(`[office] team blocked: role=${blocked.role} code=${blocked.code}`);
+            if (onBlocked) {
+              try { onBlocked(blocked); } catch (error) { log(`[office] onBlocked hook failed: ${error && error.message}`); }
+            }
+            bridge.pump();
+            break;
+          }
+        }
         const step = await controller.pumpOne(); // 阻塞等待下一条真实执行事件
         if (step) bridge.pump();
         if (onStatus) {

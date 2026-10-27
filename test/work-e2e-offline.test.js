@@ -129,3 +129,82 @@ test('work-e2e: a full offline run lands a real file in the workspace and comple
   assert.equal(serialized.includes(TOPIC), true, 'the goal is user text and is displayed (allowed)');
   assert.equal(snap.workspace.displayPath, workspace.path, 'the workspace path is shell→view only');
 });
+
+test('work-e2e: a missing upstream artifact blocks the next step observably (no silent running)', async () => {
+  // 真机验收 2026-10-27 的场景：researcher 完成但没有正文 → 物化拒绝 → reviewer 被
+  // Team 的 HANDOFF_INCOMPLETE 挡住。v0 没有 job 级 attention 命令，因此壳必须把
+  // controller 的 blocked 呈现为可处理的 attention，而不是永远 running。
+  const team = require('../src/team/runtime/index.js');
+  const backendModule = require('../src/team/runtime/dsh-execution-backend.js');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-e2e-blocked-'));
+  let clockMs = T0;
+  const clock = { nowMs: () => clockMs };
+  const store = createWorkspaceStore({ homeDir: home, nowMs: () => clockMs });
+  const workspace = store.open({ create: 'blocked' });
+  const work = createWorkController({ store, workspace, nowMs: () => clockMs });
+  work.begin({ goal: '没有产出的任务' });
+
+  const rpc = fakeRpc();
+  let followCount = 0;
+  const openFollow = () => {
+    followCount += 1;
+    const events = followCount === 1
+      ? [
+        { type: 'turn/start', seq: 1, time: T0 + 1, data: {} },
+        // 没有 assistant/message → 没有可物化的正文
+        { type: 'turn/end', seq: 2, time: T0 + 2, data: { reason: { kind: 'completed' } } },
+      ]
+      : [];
+    let i = 0;
+    return Object.freeze({
+      [Symbol.asyncIterator]: () => ({
+        next() {
+          if (i >= events.length) return Promise.resolve({ value: undefined, done: true });
+          const value = events[i]; i += 1;
+          return Promise.resolve({ value, done: false });
+        },
+      }),
+    });
+  };
+  const transport = createShellTeamTransport({
+    rpc, openFollow, artifactDir: path.join(workspace.path, '.dsh', 'artifacts'),
+    topic: '没有产出的任务', log: () => {},
+    onArtifact: (record, context) => work.onArtifact(record, context),
+  });
+  const runtime = team.createTeamRuntime({ clock });
+  const backend = backendModule.createDshExecutionBackend({ clock, transport });
+  const executor = Object.freeze({
+    startRun: (args) => backend.startRun(args),
+    observe: (handle) => backend.observe(handle),
+    cancel: (handle) => backend.cancel(handle),
+    unsupported: Object.freeze(['recover']),
+  });
+  const controller = team.createTeamExecutionController({
+    teamRuntime: runtime, executor, clock, jobId: 'job-work-e2e-blocked',
+  });
+  await controller.start();
+  for (let i = 0; i < 16; i += 1) {
+    await controller.dispatchReady();
+    const step = await controller.pumpOne();
+    if (!step) break;
+    clockMs += 10;
+  }
+  assert.equal(runtime.state().runs.researcher.status, 'completed');
+  assert.equal(runtime.state().runs.reviewer.status, 'pending', 'the reviewer never starts without the artifact');
+  const blocked = controller.blocked();
+  assert.ok(blocked, 'the controller must report the blocked dispatch');
+  assert.equal(blocked.role, 'reviewer');
+  assert.equal(blocked.code, 'HANDOFF_INCOMPLETE');
+
+  const surfaced = work.block(blocked);
+  assert.equal(surfaced.ok, true);
+  const snap = work.snapshot();
+  assert.equal(snap.current.status, 'attention');
+  assert.equal(snap.current.blockedCode, 'HANDOFF_INCOMPLETE');
+  assert.equal(snap.artifacts.length, 0);
+  // 用户放弃：壳状态收口，Team 事实保持原样（没有伪造 completed/failed）
+  assert.equal(work.abandon().ok, true);
+  assert.equal(work.snapshot().current.status, 'abandoned');
+  assert.equal(runtime.state().runs.reviewer.status, 'pending');
+  assert.equal(JSON.stringify(runtime.facts()).includes('abandoned'), false);
+});

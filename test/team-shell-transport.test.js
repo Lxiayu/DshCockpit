@@ -311,6 +311,21 @@ test('shell-transport: an onArtifact failure never breaks materialization (the f
   assert.ok(fs.existsSync(materialized.artifactPath));
 });
 
+test('shell-transport: the real dsh v3 journal shape (data.message.content) is captured', async () => {
+  // 真机验收 2026-10-27 发现：真实 journal 是 {message:{content:[...]}}，离线 fixture 是
+  // {content:[...]}；只认后者会静默漏掉所有真实正文 → 无产物 → 下游挂死。
+  const h = createHarness();
+  const sessionId = await h.transport.resolveSession({ jobId: 'job-v3-1', role: 'researcher', attempt: 1 });
+  h.followHelper.set(sessionId, [
+    { type: 'assistant/message', seq: 1, time: T0 + 1, data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '# 真实形状的笔记' }] } } },
+    { type: 'turn/end', seq: 2, time: T0 + 2, data: { turn: 1, reason: { kind: 'completed' } } },
+  ]);
+  for await (const _e of h.transport.follow({ sessionId })) { void _e; }
+  const materialized = await h.transport.artifactFor({ sessionId, kind: 'research-notes' });
+  assert.ok(materialized, 'the v3 message shape must produce an artifact');
+  assert.ok(fs.readFileSync(materialized.artifactPath, 'utf8').includes('真实形状的笔记'));
+});
+
 test('shell-transport: refuses to fabricate an artifact without captured output (fail-closed)', async () => {
   const h = createHarness();
   const sessionId = await h.transport.resolveSession({

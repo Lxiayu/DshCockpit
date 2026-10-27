@@ -136,6 +136,35 @@ test('work-controller: a stale running item from a previous process is marked in
   assert.equal(second.snapshot().active, false);
 });
 
+test('work-controller: a blocked dispatch is surfaced as attention with a reason code (never a silent running)', () => {
+  const { controller } = setup();
+  controller.begin({ goal: '研究' });
+  const verdict = controller.block({ role: 'reviewer', code: 'HANDOFF_INCOMPLETE' });
+  assert.equal(verdict.ok, true);
+  const snap = controller.snapshot();
+  assert.equal(snap.current.status, 'attention');
+  assert.equal(snap.current.blockedCode, 'HANDOFF_INCOMPLETE');
+  assert.equal(snap.active, true);
+  // leaving attention clears the reason (e.g. after a real resume)
+  controller.sync({ status: 'running', runs: {} });
+  assert.equal(controller.snapshot().current.blockedCode, null);
+});
+
+test('work-controller: abandon closes the shell item without inventing a Team terminal', () => {
+  const { controller, workspace, store } = setup();
+  controller.begin({ goal: '研究' });
+  controller.block({ code: 'HANDOFF_INCOMPLETE' });
+  const verdict = controller.abandon();
+  assert.equal(verdict.ok, true);
+  const snap = controller.snapshot();
+  assert.equal(snap.current.status, 'abandoned');
+  assert.equal(snap.current.blockedCode, null);
+  assert.equal(snap.current.finishedAtMs, 1000);
+  assert.equal(snap.active, false);
+  const onDisk = store.readIndex(workspace).items[0];
+  assert.equal(onDisk.status, 'abandoned');
+});
+
 test('work-controller: finish(incomplete) goes through the artifact gate', () => {
   const { controller } = setup();
   controller.begin({ goal: '研究' });

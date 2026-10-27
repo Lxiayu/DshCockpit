@@ -13,7 +13,7 @@
 const TERMINAL_TEAM_STATUS = Object.freeze(['completed', 'failed', 'cancelled']);
 const ACTIVE_STATUS = Object.freeze(['running', 'attention']);
 const STATUSES = Object.freeze([
-  'running', 'attention', 'completed', 'incomplete', 'failed', 'cancelled', 'interrupted',
+  'running', 'attention', 'completed', 'incomplete', 'failed', 'cancelled', 'interrupted', 'abandoned',
 ]);
 
 function freezeItem(item) {
@@ -27,6 +27,7 @@ function freezeItem(item) {
     finishedAtMs: item.finishedAtMs === undefined ? null : item.finishedAtMs,
     artifactRefs: Object.freeze([...(item.artifactRefs || [])]),
     phase: item.phase === undefined ? null : item.phase,
+    blockedCode: item.blockedCode === undefined ? null : item.blockedCode,
   });
 }
 
@@ -152,6 +153,7 @@ function createWorkController({ store, workspace, nowMs = () => Date.now(), log 
     const patch = {};
     if (next !== item.status) patch.status = next;
     if (phase !== item.phase) patch.phase = phase;
+    if (next !== 'attention' && item.blockedCode) patch.blockedCode = null;
     const terminal = next === 'completed' || next === 'incomplete' || next === 'failed' || next === 'cancelled';
     if (terminal && item.finishedAtMs === null) patch.finishedAtMs = nowMs();
     if (Object.keys(patch).length === 0) return Object.freeze({ ok: true, code: null, changed: false });
@@ -161,6 +163,34 @@ function createWorkController({ store, workspace, nowMs = () => Date.now(), log 
       return Object.freeze({ ok: false, code: error && error.code ? error.code : 'WORK_ITEM_UPDATE_FAILED' });
     }
     return Object.freeze({ ok: true, code: null, changed: true });
+  }
+
+  /**
+   * 执行链被 Team 门禁挡住（如 HANDOFF_INCOMPLETE）：Team v0 没有 job 级 attention 命令，
+   * 因此壳把它呈现为"需要你处理 + 原因码"，而不是让它永远显示 running。
+   */
+  function block({ role = null, code = null } = {}) {
+    const item = activeItem();
+    if (!item) return Object.freeze({ ok: false, code: 'WORK_ITEM_NONE' });
+    if (['completed', 'incomplete', 'failed', 'cancelled', 'abandoned'].includes(item.status)) {
+      return Object.freeze({ ok: false, code: 'WORK_ITEM_TERMINAL' });
+    }
+    const safeCode = typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? code : 'DISPATCH_REJECTED';
+    store.updateItem(workspace, item.workItemId, { status: 'attention', blockedCode: safeCode, phase: null });
+    log(`[work] work item blocked: ${safeCode}`);
+    return Object.freeze({ ok: true, code: null, blockedCode: safeCode, role });
+  }
+
+  /** 用户显式放弃（壳层状态；不伪造任何 Team 终态）。 */
+  function abandon() {
+    const item = activeItem();
+    if (!item) return Object.freeze({ ok: false, code: 'WORK_ITEM_NONE' });
+    store.updateItem(workspace, item.workItemId, {
+      status: 'abandoned', finishedAtMs: nowMs(), phase: null, blockedCode: null,
+    });
+    // currentId 保留：UI 仍然显示"已放弃"这一项；active 由状态推导（不再活跃）。
+    log('[work] work item abandoned by the user');
+    return Object.freeze({ ok: true, code: null });
   }
 
   /** 取消/停止后没有 Team 终态时的显式收口（仍走同一门禁）。 */
@@ -202,6 +232,8 @@ function createWorkController({ store, workspace, nowMs = () => Date.now(), log 
     begin,
     onArtifact,
     sync,
+    block,
+    abandon,
     finish,
     snapshot,
     currentItemId: () => currentId,

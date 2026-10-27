@@ -73,6 +73,31 @@ test('work-view: main owns the work IPC, the workspace and the artifact push', (
   assert.match(MAIN, /settings\.patch\(\{ workWorkspace: workspace\.path \}\)/);
 });
 
+test('work-view: the drive loop handles attention/blocked BEFORE blocking on the next event', () => {
+  // 真机验收 2026-10-27：pumpOne 阻塞在已完成会话上 → 工作项永远 running。
+  // 顺序必须: dispatchReady → 同步/检查终态/attention → 检查 blocked → 才 pumpOne。
+  const dispatchAt = MAIN.indexOf('await controller.dispatchReady();');
+  const statusAt = MAIN.indexOf("const preStatus = runtime.state().status;");
+  const blockedAt = MAIN.indexOf('const blocked = controller.blocked();');
+  const pumpAt = MAIN.indexOf('const step = await controller.pumpOne();');
+  assert.ok(dispatchAt > -1 && statusAt > dispatchAt, 'status is checked right after dispatchReady');
+  assert.ok(blockedAt > statusAt && pumpAt > blockedAt, 'blocked is checked before the blocking pump');
+  assert.match(MAIN, /\['completed', 'failed', 'cancelled', 'attention'\]\.includes\(preStatus\)/);
+  assert.match(MAIN, /onBlocked: \(blocked\) => \{\n        controller\.block\(blocked\);/);
+});
+
+test('work-view: cancelling a blocked chain abandons the shell item and detaches the chain', () => {
+  assert.match(MAIN, /instance\.detach\(\);/);
+  assert.match(MAIN, /controller\.snapshot\(\)\.active\) controller\.abandon\(\)/);
+  assert.match(JS, /result\.abandoned \? tr\('work\.abandoned'\)/);
+});
+
+test('work-view: blocked reasons and the abandoned state are localized', () => {
+  for (const key of ['work.status.abandoned', 'work.blocked.HANDOFF_INCOMPLETE', 'work.blocked.DISPATCH_REJECTED', 'work.blocked.generic']) {
+    assert.equal(I18N.split(`'${key}':`).length - 1, 2, `both languages must define ${key}`);
+  }
+});
+
 test('work-view: the renderer is text-only and talks through one channel', () => {
   assert.doesNotMatch(JS, /innerHTML/, 'user text and artifacts are rendered via textContent');
   assert.match(JS, /textContent = item\.goal/);

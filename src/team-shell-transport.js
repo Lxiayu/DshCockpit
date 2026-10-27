@@ -72,10 +72,15 @@ function isPlainObject(value) {
   return proto === Object.prototype || proto === null;
 }
 
-/** 从 assistant/message 的 data 里提取正文文本（只取 text 片段，不解析其它字段）。 */
+/**
+ * 从 assistant/message 的 data 里提取正文文本（只取 text 片段，不解析其它字段）。
+ * 形状兼容：离线 fixture 用 `{content}`；真实 dsh v3 journal 用 `{message:{content}}`
+ * （2026-10-27 真机验收发现：只认前者会静默漏掉所有真实正文 → 无产物 → 下游挂起）。
+ */
 function assistantTextOf(data) {
   if (!isPlainObject(data)) return null;
-  const content = data.content;
+  const message = isPlainObject(data.message) ? data.message : null;
+  const content = data.content !== undefined ? data.content : (message ? message.content : undefined);
   if (typeof content === 'string' && content.trim() !== '') return content;
   if (Array.isArray(content)) {
     const parts = content

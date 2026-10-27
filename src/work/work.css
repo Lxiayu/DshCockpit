@@ -27,7 +27,9 @@ input, textarea { border: 1px solid var(--border-1); border-radius: 8px; backgro
 #onboarding { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 32px; }
 #onboarding h1 { margin: 0; font-size: 20px; font-weight: 600; }
 #onboarding p { margin: 0; color: var(--text-3); max-width: 520px; text-align: center; }
-#onboarding .row { display: flex; gap: 8px; width: 360px; max-width: 90vw; }
+#onboarding .row { display: flex; gap: 8px; width: 380px; max-width: 90vw; }
+#onboarding .row input { width: auto; flex: 1 1 0; min-width: 0; }
+#onboarding .row button, #taskForm .row button { flex: 0 0 auto; white-space: nowrap; }
 
 #main { flex: 1; display: grid; grid-template-columns: minmax(240px, 300px) 1fr; min-height: 0; }
 #board { border-right: 1px solid var(--border-1); padding: 12px; overflow-y: auto; }

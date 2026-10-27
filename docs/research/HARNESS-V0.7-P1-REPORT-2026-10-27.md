@@ -39,10 +39,10 @@
 
 ## 3. 验证
 
-- 全量：**1846 pass / 0 fail**。
-- 新增套件：`work-workspace-store`（10）、`work-controller`（9）、`work-ipc`（5）、
-  `work-view-wiring`（9）、`work-e2e-offline`（1，真实 transport 全链路）、
-  `office-artifact-marker`（3）。
+- 全量：**1853 pass / 0 fail**（含真机验收发现的两处修复）。
+- 新增套件：`work-workspace-store`（10）、`work-controller`（11）、`work-ipc`（5）、
+  `work-view-wiring`（12）、`work-e2e-offline`（2，真实 transport 全链路 + 阻塞场景）、
+  `office-artifact-marker`（3）；transport 17（含真实 v3 journal 形状回归）。
 - 离线端到端（`work-e2e-offline`）：真实 `team-shell-transport` + dsh 后端 + controller + Team，
   产物落盘、digest 可验、索引持久、工作项 completed、快照无正文/绝对路径。
 
@@ -62,7 +62,35 @@
 | M9 | 办公室产物不计数 | DETECTED |
 | M10 | 办公室不校验 kind | DETECTED |
 
-## 4. 真机验收脚本（**未执行**，需有显示环境）
+## 3.2 真机验收结果（2026-10-27，Electron 37.10.3 + 真实 dsh 0.1.5-rc.2）
+
+**第一轮：发现两处真实缺陷（都已修复并有回归测试）**
+
+1. **assistant 正文形状不匹配**：真实 dsh v3 journal 是 `data.message.content`，离线 fixture 是
+   `data.content`。只认后者 → 每条真实正文都被静默丢弃 → materializer 拒绝伪造产物 →
+   `HANDOFF_INCOMPLETE`。修复：`assistantTextOf` 两种形状都接受（`src/team-shell-transport.js`）。
+2. **handoff 阻塞不可观测 + 驱动循环挂死**：缺产物时 reviewer 保持 pending，`readyRoles()` 不再返回它，
+   Team 不产生任何命令；驱动循环却阻塞在已完成会话的 `pumpOne()` 上，工作项永远 `running`。
+   修复：controller 从 Team state 计算 `blocked`（`HANDOFF_INCOMPLETE` + 角色，不伪造 Team 事实）；
+   驱动循环在 `dispatchReady` 之后、阻塞等待之前检查终态/attention/blocked；工作台呈现为
+   「需要你处理 + 原因码」，取消 = 显式放弃（`abandoned`，Team 事实保持原样）。
+
+**第二轮（修复后）通过**
+
+| 验收项 | 结果 |
+|---|---|
+| 新建工作区（UI 引导） | ✅ `~/DshWorkspaces/acceptance-2026-10-27`，只建 `.dsh/` |
+| 真实团队任务完成 | ✅ 状态 completed，产出 **2** 个产物：research-notes 2170 B + review-findings 98 273 B |
+| 产物落盘 + digest | ✅ 文件在 `<ws>/.dsh/artifacts/<jobId>/`，sha256 与索引一致 |
+| 重启恢复 | ✅ 上次未完成项显示「已中断」；工作区与历史仍在 |
+| 首跑时长 | ✅ 约 5 分钟（两轮模型调用） |
+| 无产物门禁 | ✅（离线 E2E 覆盖；真机缺失路径由第一轮复现） |
+
+**附带发现（P2 必须先解决）**：dsh 会话的 cwd 是用户主目录（本轮 `/Users/xia`），模型的工具
+写了一个 `/Users/xia/research-notes/harness-engineering.md` —— **工作区之外的写入不受壳控制**。
+在给 worker 打开写工具之前，必须把会话 cwd/沙箱钉到工作区（P2 的第一件事）。
+
+## 4. 真机验收脚本（已按上表执行；保留给后续回归）
 
 ```bash
 cd <repo> && npm start
@@ -87,7 +115,7 @@ cd <repo> && npm start
 3. **重启不续跑**：遗留 running/attention 项在工作台标为"已中断"；自动恢复属 P5 持久化。
 4. **办公室只有计数标记**：缩略图/桌面摆件属于 P3 视觉重构。
 5. **工作台不是默认视图**：P1 保持 harness 为默认，实测后再决定是否切换默认。
-6. **真机未验收**：上述脚本未执行（无显示环境）；GUI 行为只有源级接线测试覆盖。
+6. 真机验收已执行（2026-10-27，见 §3.2）；仍需在 Windows 上回归一次（路径/字体/焦点）。
 
 ## 6. 下一步
 

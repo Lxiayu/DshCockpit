@@ -72,11 +72,23 @@ function setOnboardNotice(text) {
   $('onboardNotice').textContent = text || '';
 }
 
+function renderTeamBadge() {
+  const team = (state && state.team) || {};
+  const running = !!(team.active && team.jobStatus === 'running');
+  const attention = !!(team.active && team.jobStatus === 'attention');
+  $('teamDot').className = running ? 'live' : attention ? 'busy' : '';
+  $('teamText').textContent = attention
+    ? tr('work.status.attention')
+    : running ? (tr('work.status.running') + (team.progressPhase ? ` · ${tr(`office.staff.currentTool.${team.progressPhase}`)}` : ''))
+      : tr('work.status.idle');
+}
+
 function render() {
   const hasWorkspace = !!(state && state.workspace);
   $('onboarding').hidden = hasWorkspace;
   $('main').hidden = !hasWorkspace;
   $('changeWs').hidden = !hasWorkspace;
+  renderTeamBadge();
 
   if (!hasWorkspace) {
     if (state && state.code) setOnboardNotice(errorText(state.code));
@@ -86,16 +98,6 @@ function render() {
   $('wsName').textContent = state.workspace.displayPath.split(/[\\/]/).filter(Boolean).pop() || state.workspace.id;
   $('wsPath').textContent = state.workspace.displayPath;
   $('wsPath').title = state.workspace.displayPath;
-
-  // team badge
-  const team = state.team || {};
-  const running = !!(team.active && team.jobStatus === 'running');
-  const attention = !!(team.active && team.jobStatus === 'attention');
-  $('teamDot').className = running ? 'live' : attention ? 'busy' : '';
-  $('teamText').textContent = attention
-    ? tr('work.status.attention')
-    : running ? (tr('work.status.running') + (team.progressPhase ? ` · ${tr(`office.staff.currentTool.${team.progressPhase}`)}` : ''))
-      : tr('work.status.idle');
 
   renderItems();
   renderDetail();
@@ -149,7 +151,12 @@ function renderDetail() {
   const active = !!(state.active && state.current && state.current.workItemId === item.workItemId);
   $('startBtn').disabled = busy || !!state.active;
   $('cancelBtn').hidden = !active;
-  $('resumeBtn').hidden = !(active && item.status === 'attention');
+  // 被 Team 门禁挡住时"继续"没有意义（缺的是上游产物，不是会话）；只留取消/放弃。
+  $('resumeBtn').hidden = !(active && item.status === 'attention' && !item.blockedCode);
+  $('blockedNote').hidden = !item.blockedCode;
+  $('blockedNote').textContent = item.blockedCode
+    ? (tr(`work.blocked.${item.blockedCode}`) || tr('work.blocked.generic'))
+    : '';
   $('changeWs').disabled = !!state.active;
 
   const list = $('artifacts');
@@ -234,7 +241,8 @@ async function resumeTask() {
 
 async function cancelTask() {
   const result = await act({ action: 'cancel' });
-  if (result) setNotice(tr('work.cancelRequested'));
+  if (!result) return;
+  setNotice(result.abandoned ? tr('work.abandoned') : tr('work.cancelRequested'));
 }
 
 async function createWorkspace() {

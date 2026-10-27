@@ -89,6 +89,10 @@ function createTeamExecutionController(options = {}) {
   const LEDGER_CAP = 128;
   let factCursor = 0;          // 已交给订阅者的 Team fact 游标
   let steps = 0;
+  // v0.7 P1（真机验收发现）：下游因 HANDOFF_INCOMPLETE 等 Team 门禁无法启动时，
+  // Team v0 没有 job 级 attention 命令（noteRunAttention 拒绝 pending run）。
+  // 这里如实记录"谁被挡、为什么"，由壳把它呈现为可处理的阻塞态；绝不伪造 Team 事实。
+  let blocked = null;
 
   function noteRejection(code) {
     rejections.set(code, (rejections.get(code) || 0) + 1);
@@ -227,10 +231,18 @@ function createTeamExecutionController(options = {}) {
     session.applied += 1;
     const verdict = commandForEvent(role, event);
     if (!verdict || verdict.ok !== true) {
-      noteLedger({ role, event: event.type, seq: event.seq, result: 'team-rejected', code: verdict && verdict.code });
+      const code = verdict && verdict.code ? verdict.code : 'EXEC_EXECUTOR_ERROR';
+      noteLedger({ role, event: event.type, seq: event.seq, result: 'team-rejected', code });
       if (verdict && verdict.code) rejections.set(verdict.code, (rejections.get(verdict.code) || 0) + 1);
-      return Object.freeze({ ok: false, code: verdict && verdict.code ? verdict.code : 'EXEC_EXECUTOR_ERROR', applied: false });
+      // v0.7 P1（真机验收）：HANDOFF_INCOMPLETE 发生在 execution/started → team.startRun，
+      // 此时 Team v0 没有 job 级 attention 命令；把它记成壳可见的 blocked，避免链"看起来在跑"。
+      if (code === 'HANDOFF_INCOMPLETE') {
+        blocked = { role, code, atMs: clock.nowMs() };
+        log(`[team-exec] role ${role} blocked: ${code}`);
+      }
+      return Object.freeze({ ok: false, code, applied: false });
     }
+    if (blocked && blocked.role === role) blocked = null;
     if (isTerminalTeamOutcome(`run/${TERMINAL_OUTCOME_BY_EVENT_TYPE[event.type]}`) || isTerminalEventType(event.type)) {
       session.terminal = true;
       session.terminalOutcome = TERMINAL_OUTCOME_BY_EVENT_TYPE[event.type];
@@ -353,9 +365,53 @@ function createTeamExecutionController(options = {}) {
   async function dispatchReady() {
     const results = [];
     for (const role of readyRoles()) {
-      results.push(Object.freeze({ role, ...(await bindExecution(role)) }));
+      const verdict = Object.freeze({ role, ...(await bindExecution(role)) });
+      results.push(verdict);
+      if (!verdict.ok) {
+        blocked = { role, code: verdict.code || 'DISPATCH_REJECTED', atMs: clock.nowMs() };
+        noteLedger({ role, event: 'dispatch', result: 'blocked', code: blocked.code });
+        log(`[team-exec] role ${role} blocked: ${blocked.code}`);
+      } else if (blocked && blocked.role === role) {
+        blocked = null;
+      }
     }
     return Object.freeze(results);
+  }
+
+  /**
+   * Team 的 handoff 门禁：下游 run 仍 pending、依赖都已终态、但声明的 consumes 有
+   * 没有对应产物 —— 这就是 HANDOFF_INCOMPLETE（真机验收 2026-10-27：这种悬空不会
+   * 触发任何 Team 命令，因此只能在这里如实计算出来）。
+   */
+  function computedHandoffBlock() {
+    const state = team.state();
+    for (const [role, run] of Object.entries(state.runs || {})) {
+      if (!run || run.status !== 'pending') continue;
+      const deps = Array.isArray(run.dependsOn) ? run.dependsOn : [];
+      if (!deps.every((dep) => ['completed', 'failed', 'cancelled'].includes(state.runs[dep]?.status))) continue;
+      const wanted = consumesKindsFor(role);
+      if (wanted.length === 0) continue;
+      const supplied = Object.values(state.artifacts || {})
+        .filter((ref) => deps.includes(ref.producerRole))
+        .map((ref) => ref.kind);
+      if (!wanted.every((kind) => supplied.includes(kind))) {
+        return Object.freeze({ role, code: 'HANDOFF_INCOMPLETE', atMs: clock.nowMs() });
+      }
+    }
+    return null;
+  }
+
+  /** 当前无法继续的阻塞（壳用于把卡住变成可处理的状态）；无阻塞 → null。 */
+  function blockedVerdict() {
+    const handoff = computedHandoffBlock();
+    if (handoff) return handoff;
+    if (blocked) {
+      // 只在"该角色仍然卡着"时保留：pending（门禁拒绝）或 attention（绑定失败）。
+      // resume 之后 run 变成 running —— 旧的阻塞判定必须失效，否则续跑会被自己挡住。
+      const run = team.state().runs[blocked.role];
+      if (!run || !['pending', 'attention'].includes(run.status)) blocked = null;
+    }
+    return blocked ? Object.freeze({ ...blocked }) : null;
   }
 
   /** 从一个会话取下一个事件（不阻塞：没缓冲就返回 null）。 */
@@ -534,6 +590,7 @@ function createTeamExecutionController(options = {}) {
         runStatus: state.runs[session.role] ? state.runs[session.role].status : null,
       }))),
       rejections: Object.freeze(Object.fromEntries([...rejections].sort((a, b) => a[0].localeCompare(b[0])))),
+      blocked: blockedVerdict(),
       ledger: Object.freeze([...ledger]),
     });
   }
@@ -569,6 +626,7 @@ function createTeamExecutionController(options = {}) {
     ingestExecutionEvent,
     // 查询
     summary,
+    blocked: blockedVerdict,
     describe,
     teamRuntime: team,
     executor,
