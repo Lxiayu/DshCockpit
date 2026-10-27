@@ -39,9 +39,9 @@
 
 ## 3. 验证
 
-- 全量：**1845 pass / 0 fail**。
+- 全量：**1846 pass / 0 fail**。
 - 新增套件：`work-workspace-store`（10）、`work-controller`（9）、`work-ipc`（5）、
-  `work-view-wiring`（8）、`work-e2e-offline`（1，真实 transport 全链路）、
+  `work-view-wiring`（9）、`work-e2e-offline`（1，真实 transport 全链路）、
   `office-artifact-marker`（3）。
 - 离线端到端（`work-e2e-offline`）：真实 `team-shell-transport` + dsh 后端 + controller + Team，
   产物落盘、digest 可验、索引持久、工作项 completed、快照无正文/绝对路径。
