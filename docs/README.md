@@ -50,7 +50,8 @@
 | `docs/plans/active/HARNESS-V0.7-P1-PLAN-2026-10-27.md` | **进行中** | v0.7 P1 实施：工作区/产物落地/工作台/门禁；含与上位文档的偏差声明 |
 | `docs/plans/active/HARNESS-V0.7-P1.5-DOCK-PLAN-2026-10-27.md` | **进行中** | P1.5：工作坞并入办公室（右栏收成浮动待办）、角色悬停卡与暂停呈现 |
 | `docs/plans/active/HARNESS-V0.7-P2-PLAN-2026-10-27.md` | **进行中** | P2：专用 Team runtime（cwd=工作区）、变更捕获、Verification Runner、受控 retry |
-| `docs/plans/active/OFFICE-V3-VISUAL-PLAN-2026-10-27.md` | **设计待拍板** | P3 视觉重构：连续时间、场景代码化、角色生命感、dsh-pet 式交互 |
+| `docs/plans/active/OFFICE-V3-VISUAL-PLAN-2026-10-27.md` | **进行中** | P3 视觉重构：呈现时钟、代码环景、伪 3D 生成布局、dsh-pet 式交互（P3.0/P3.1/P3.3/P3.4 已落地） |
+| `docs/plans/active/OFFICE-V3-ISOMETRIC-PLAN-2026-10-27.md` | **I0 完成，待评审 I1** | 等轴测投影：投影数学、画家算法遮挡、命中测试、I0–I4 分阶段与回退 |
 
 进行中的计划放 `docs/plans/active/`；完成的移入 `completed/`。
 
