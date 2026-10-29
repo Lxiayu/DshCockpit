@@ -3362,17 +3362,35 @@ function createOfficeModule(options = {}) {
       // "Seated at the workstation" means physically AT the own desk seat node
       // (that includes the startup pose and resting at the desk) or inside the
       // task's sit/work phases.
-      const seatedAtWorkstation = (!!rec.transition && rec.transition.kind === 'task-start'
-          && (rec.transition.phase === 'sit' || rec.transition.phase === 'work'))
-        || (!!rec.seatNodeId && rec.currentNodeId === rec.seatNodeId);
-      const backEligibleState = backState === 'working'
+      // 2026-10-30（用户报的 bug1）：判断"人是否真的坐在自己工位上"。
+      //
+      // 原来这里把 task-start 的 sit/work 相位**直接**当成"已落座"，于是
+      // 只要任务一开始、角色还走在半路上被同伴挡住（movement 变成
+      // stationary 而不是 moving），animationStateFor 就已经返回 'working'，
+      // 画面立刻切成侧背坐姿 —— 用户看到的"鲸鱼娘坐在空地上"就是这个。
+      // 实测复现：phase=move / movement=stationary / anim=working-back /
+      // 位置 (0.722,0.528)，离她的座位十万八千里。
+      //
+      // 现在要求**物理上确实在自己的座位节点**（或 approach 段已结束且
+      // 位置已锚定到 seat）。这是"事实优先于意图"：任务是意图，位置是事实。
+      // `reachedSeat` 由 completeSegment() 在 approach-to-seat 段**真正插值到
+      // 座位锚点**时置位（见 completeSegment），是"已落座"的权威事实。
+      // 再用 currentNodeId===seatNodeId 兜住"一直坐着没动"的稳态（启动姿势、
+      // 工位休息）——那种情况 segment 早就结束了，reachedSeat 也可能已被
+      // 后续阶段清掉。
+      const physicallyAtOwnSeat = !!rec.seatNodeId
+        && (rec.reachedSeat === true || rec.currentNodeId === rec.seatNodeId);
+      const seatedAtWorkstation = physicallyAtOwnSeat;
+      // 'working' 也必须是"真的坐下了"。否则就退回到行走/idle 的素材。
+      const workingIsReal = backState === 'working' && physicallyAtOwnSeat;
+      const backEligibleState = workingIsReal
         || (backState === 'idle' && seatedAtWorkstation);
       if (
         rec.presentation && rec.presentation.facing === 'back' && composedBackResource
         && animation.resource && !animation.resource.startsWith('walk-')
         && backEligibleState
       ) {
-        if (backState === 'working' && composedWorkingBackResource) {
+        if (workingIsReal && composedWorkingBackResource) {
           const seated = resolveAnimation({
             state: composedWorkingBackResource,
             direction: rec.facing,

@@ -1931,15 +1931,44 @@
       // 不计入低帧率、恢复预算不消耗）；唤醒沿自动自愈。未收到过推送前按 true
       // 处理（与历史行为一致）。
       let officePresenting = true;
+      // 2026-10-30（用户报"鲸鱼娘之间从来没有触发过聊天"的真因）：
+      // 原来 `blur` 事件被当成"窗口不可见"上报，于是**只要焦点离开办公室窗口
+      // （比如用户点浏览器、点终端），主进程就把整间办公室的模拟暂停**
+      // （isPaused() = visibleViews.size === 0 → advanceOneTick 返回 null →
+      // clockStats.ticks 一直是 0）。实测生产日志：
+      //   [office] clock fires=3434 ticks=0
+      // 也就是"办公室完全没在跑"，自然一次聊天都不会发生。
+      //
+      // 正确语义：`blur`（失去焦点）**不等于**看不见。窗口还在屏幕上、内容还在
+      // 被看着，模拟就该继续 —— 否则用户永远观察不到角色行为。
+      // 只有 `document.visibilityState`（最小化 / 切到别的 tab / 系统锁屏）
+      // 才是真正的"看不见"，也只有那一种情况值得暂停。
       const visibility = (payload) => page.handleVisibility(payload);
-      document.addEventListener('visibilitychange', () => visibility({ visible: document.visibilityState === 'visible', active: officeActive, presenting: officePresenting }));
-      window.addEventListener('blur', () => visibility({ visible: false, active: officeActive, presenting: officePresenting }));
-      window.addEventListener('focus', () => visibility({ visible: true, active: officeActive, presenting: officePresenting }));
+      const reportVisibility = () => visibility({
+        visible: document.visibilityState === 'visible',
+        active: officeActive,
+        presenting: officePresenting,
+      });
+      document.addEventListener('visibilitychange', reportVisibility);
+      window.addEventListener('focus', reportVisibility);
+      window.addEventListener('blur', () => {
+        // 失去焦点：画面仍然可见，模拟继续；只把 active 置回，让渲染帧率
+        // 走后台档（省 CPU 但不冻结世界）。
+        visibility({ visible: document.visibilityState === 'visible', active: officeActive, presenting: officePresenting });
+      });
       bridge.onVisibilityPush((payload) => {
         officeActive = !!(payload && payload.active);
         officePresenting = !(payload && payload.presenting === false);
         visibility({ visible: !!(payload && payload.visible), active: officeActive, presenting: officePresenting });
       });
+      // 2026-10-30（同上，"从来不聊天"的最后一环）：**页面加载时主动上报一次**。
+      // 上面的监听器只在"事件发生"时才上报，而 `visibilitychange` / `focus`
+      // 在页面刚好已是可见态、窗口也已有焦点时**不会触发** —— 于是主进程
+      // 永远收不到这个 view 的 visible=true，`visibleViews` 一直是空集，
+      // `isPaused()` 恒为 true，整个办公室模拟永久冻结。
+      // 生产实测：`clock fires=3434 ticks=0`，且 `[vis-diag] paused noted=true
+      // views=0`。这一句就是让世界动起来的开关。
+      reportVisibility();
       // Forwards the view's renderer state to the module (shell log +
       // office:diagnostics) — on every renderer state change (latch, recovery
       // attempts) and on every activation/visibility event, so the change is

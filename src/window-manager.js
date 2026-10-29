@@ -76,6 +76,22 @@ function createWindowManager(deps) {
     return officeShellView ? 'office-shell-1' : null;
   }
 
+  // 2026-10-30（用户报"鲸鱼娘之间从来没有触发过聊天"的最终真因）：
+  // 这个函数有签名去重（signature === officeShellVisibleFlag 直接 return）。
+  // 启动时序里它经常在**主窗口还没 isVisible() 之前**就被调用一次，
+  // 于是唯一一次通知发的是 `visible=false`；等窗口真正显示后，`show` 事件
+  // 若已经错过（或窗口早已可见、事件不再触发），就**永远不会有第二次通知**，
+  // 主进程侧的 visibleViews 一直是空集 → isPaused() 恒 true →
+  // advanceOneTick 恒返回 null → 整间办公室的模拟永久冻结。
+  // 生产实测日志：`[wm-vis] false|true|true` 只打了一行，
+  // `[office] clock fires=3434 ticks=0`，一天下来一次聊天都没有。
+  //
+  // forceNotifyOfficeShellVisibility(): 无视去重，强制重算并重发一次。
+  function forceNotifyOfficeShellVisibility() {
+    officeShellVisibleFlag = null;
+    notifyOfficeShellVisibility();
+  }
+
   function notifyOfficeShellVisibility() {
     // 2026-09-22 修正（用户实测：永远看不到对话气泡）：办公室在 M4.2 就是"后台活着"的
     // 设计——切到 harness 页不该冻结它的仿真，否则闲聊/走位永远积累不到（无头模拟里首聊
@@ -129,6 +145,11 @@ function createWindowManager(deps) {
         if (activeMainView === 'office') sendOfficeDockLayout(!!workDockView);
       });
       officeShellView.webContents.loadURL(url);
+      // 页面加载完成后强制重发一次可见性：这一刻窗口一定已经就绪，
+      // 是"世界该不该跑"最可靠的判定点（见 forceNotifyOfficeShellVisibility）。
+      officeShellView.webContents.on('did-finish-load', () => {
+        setTimeout(forceNotifyOfficeShellVisibility, 120);
+      });
       log('[office] shell view created (main-area office)');
     }
     activeMainView = 'office';
@@ -358,8 +379,8 @@ function createWindowManager(deps) {
       },
     });
 
-    mainWindow.on('show', () => { createCockpitWindow(); syncCockpitBounds(); showCockpitInactive(); syncShellViews(); notifyOfficeShellVisibility(); });
-    mainWindow.on('restore', () => { createCockpitWindow(); syncCockpitBounds(); showCockpitInactive(); syncShellViews(); notifyOfficeShellVisibility(); });
+    mainWindow.on('show', () => { createCockpitWindow(); syncCockpitBounds(); showCockpitInactive(); syncShellViews(); forceNotifyOfficeShellVisibility(); });
+    mainWindow.on('restore', () => { createCockpitWindow(); syncCockpitBounds(); showCockpitInactive(); syncShellViews(); forceNotifyOfficeShellVisibility(); });
     mainWindow.on('hide', () => { hideCockpit(); notifyOfficeShellVisibility(); });
     mainWindow.on('minimize', () => { hideCockpit(); notifyOfficeShellVisibility(); });
     mainWindow.on('maximize', () => { syncCockpitBounds(); scheduleShellSync(); });
