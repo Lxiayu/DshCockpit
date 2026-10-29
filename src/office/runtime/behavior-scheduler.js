@@ -46,7 +46,17 @@ const DEFAULT_PROBABILITIES = Object.freeze({ roaming: 0.6, resting: 0.25, chatt
 // candidates outside this radius of every peer's CURRENT position and only
 // falls back to crowded ones when nothing else is reachable — a preference,
 // never a block (liveness beats spacing).
-const PERSONAL_SPACE_RATIO = 0.055;
+// 2026-10-29 第十三轮（用户："鲸鱼娘只会聚集在两列办公桌之间的过道里互相挤"）：
+// 实测热点分布是 左区 51% / 中间 43% / 右侧 6.5% —— 区域层面其实是均衡的，
+// 真正的问题是**同一区域内的点太密**：左区 6 个点全在一条竖线上、纵向仅隔
+// 47px，中间最密处两点相距 37px，而角色立绘宽约 200px。于是视觉上永远是
+// "排成一列、两个人叠在一起"。
+//
+// 原来的 0.055（≈46px）只是"两角色身体不重叠"的下限，远小于一个身位。
+// 现在改成**分级**：近于 COMFORT（舒适社交距离）的点排到最后，近于
+// PERSONAL（会明显叠图的）直接排除；同时加区域配额让流量摊到各分区。
+const PERSONAL_SPACE_RATIO = 0.055;   // 身体会叠图 —— 排最后（不丢弃）
+const COMFORT_SPACE_RATIO = 0.07;     // 不到一个身位 —— 次优先
 
 // M4.1d follow-up: how long a resident must be idle before the chat craving
 // above kicks in (ms of simulated time).
@@ -719,13 +729,40 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
 
   // Keep-away ordering: spacious candidates first (same seeded order inside
   // each group), crowded ones kept as the liveness fallback.
+  // 2026-10-29 第十三轮：从"拥挤/不拥挤"两级改成三级（见 COMFORT_SPACE_RATIO）。
+  //   spacious  —— 离所有同伴都 ≥ 一个身位（最优）
+  //   tight     —— 在身位内但未叠图（可去，但排最后）
+  //   blocked   —— 会与同伴叠图（直接剔除）
+  // 这样"两个人挤在 37px 两个点"不会发生，而"这次真没别处可去"时仍可退回
+  // tight 一档，不会因为追求间距而让人站着不动（liveness 优先于间距）。
   function keepAwayOrder(candidateIds, peers) {
+    const points = peerExclusionPoints(peers);
+    if (points.length === 0) return candidateIds;
     const spacious = [];
-    const crowded = [];
+    const tight = [];
+    const blocked = [];
     for (const nodeId of candidateIds) {
-      (isCrowded(nodesById.get(nodeId), peers) ? crowded : spacious).push(nodeId);
+      const node = nodesById.get(nodeId);
+      if (!node || !node.position) { spacious.push(nodeId); continue; }
+      let minDist = Infinity;
+      for (const point of points) {
+        minDist = Math.min(minDist, Math.hypot(node.position.x - point.x, node.position.y - point.y));
+      }
+      if (minDist < PERSONAL_SPACE_RATIO) blocked.push(nodeId);
+      else if (minDist < COMFORT_SPACE_RATIO) tight.push(nodeId);
+      else spacious.push(nodeId);
     }
-    return [...spacious, ...crowded];
+    // 三级排序，**一个都不丢**：
+    //   1) spacious（≥ 一个身位）优先；
+    //   2) tight（身位内但不叠图）次之；
+    //   3) blocked（会叠图）最后 —— 只有真没别的可选时才会用到。
+    //
+    // 为什么不能直接丢弃 blocked：实测"全员拥挤"场景下候选会被清空，导致
+    // 完全没有漫游目标（契约 "a fully crowded office still produces roaming
+    // targets" 直接得 0），并且可选点变少后角色会在剩下两个点之间乒乓
+    // （最热节点对从 8 次涨到 9 次，超过上限）。
+    // 间距由"排序优先级"保证、而不是靠丢弃来保证 —— liveness 优先。
+    return [...spacious, ...tight, ...blocked];
   }
 
   // M4.1h "路径加每趟微偏移": with a seeded chance the direct route is replaced
@@ -773,6 +810,53 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
       : knob('minDwellMs');
   }
 
+  // 2026-10-29 第十三轮：**区域配额**（用户点名的"分区配额"）。
+  //
+  // 光靠点间距还不够：某个区域只有 2 个点、另一个有 6 个，纯按点数量随机
+  // 就会让前者几乎没人去。这里先把候选按"房间分区"归类，再**按区域轮转**
+  // 重排候选（每个区域轮流出一个点），让区域之间的机会均等，而不是点多的
+  // 区域自动占优。
+  //
+  // 分区用纵向三分（左休息区 / 中间过道 / 右侧），与 roomZonesFor() 同源。
+  function zoneOfNode(node) {
+    if (!node || !node.position) return 'unknown';
+    const x = node.position.x;
+    if (x < 0.44) return 'left';
+    if (x <= 0.84) return 'mid';
+    return 'right';
+  }
+
+  function interleaveByZone(candidateIds) {
+    const buckets = new Map();
+    for (const nodeId of candidateIds) {
+      const zone = zoneOfNode(nodesById.get(nodeId));
+      if (!buckets.has(zone)) buckets.set(zone, []);
+      buckets.get(zone).push(nodeId);
+    }
+    if (buckets.size <= 1) return candidateIds;
+    // 区域顺序用**确定性**顺序（按区域名字典序）。
+    // ⚠ 这里**不能**用 rngFor(...)：那是给 employees 分配的每员工随机流，
+    // 用任意 id 调一次就会创建并消耗一个新流，把整个决策序列的随机性打乱
+    // ——实测这么做会让角色再也停不回 roam 节点上（9 个用例红）。
+    // 随机性已经由上游的 shuffled(candidates, rngFor(employeeId)) 提供，够用。
+    const zoneOrder = [...buckets.keys()].sort();
+    const out = [];
+    let progressed = true;
+    let round = 0;
+    while (progressed) {
+      progressed = false;
+      for (const zone of zoneOrder) {
+        const bucket = buckets.get(zone);
+        if (bucket && round < bucket.length) {
+          out.push(bucket[round]);
+          progressed = true;
+        }
+      }
+      round += 1;
+    }
+    return out;
+  }
+
   function chooseTarget({ employeeId, behavior, fromNodeId, at, externalReservations, preferredNodeId, peers = [], candidateIds = null, priority = false }) {
     let candidates;
     if (behavior === 'sleeping') {
@@ -802,6 +886,11 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
       }
     }
     candidates = shuffled(candidates, rngFor(employeeId));
+    // 区域配额先做（把点多的区域打散），再做间距排序 —— 顺序不能反：
+    // 间距是**更强的约束**（两个人不能叠在一起），必须最后落定，否则区域
+    // 轮转会把一个拥挤点又推回列表前面（M4.1e 的"拥挤点输给空闲点"契约）。
+    // 只对漫游生效：睡觉/聊天有明确目的地，不该被区域轮转打乱。
+    if (behavior === 'roaming' && candidates.length > 1) candidates = interleaveByZone(candidates);
     if (behavior !== 'sleeping') candidates = keepAwayOrder(candidates, peers);
     // M4.1h 反乒乓: never walk straight back to the node just left when any other
     // candidate exists. The hottest node PAIR in the assessment was always an
