@@ -143,7 +143,31 @@ function corridorBoundaryX(graph) {
     && node.tags.includes('roaming') && !node.id.startsWith('desk-'));
   const source = roaming.length > 0 ? roaming : nodes;
   const xs = source.map((node) => node.position.x).sort((a, b) => a - b);
-  return xs.length % 2 === 1 ? xs[(xs.length - 1) / 2] : (xs[xs.length / 2 - 1] + xs[xs.length / 2]) / 2;
+  if (xs.length === 0) return 1;
+  const median = xs.length % 2 === 1
+    ? xs[(xs.length - 1) / 2]
+    : (xs[xs.length / 2 - 1] + xs[xs.length / 2]) / 2;
+  // 2026-10-30（架构性修正）：原来取中位数，隐含假设"漫游点在走廊两侧大致
+  // 均匀分布"。左半区从 6 个点扩到 8 个点之后这个假设失效了 —— 左区点数
+  // 过半，中位数必然落进左区（实测边界被拉到 0.40，正好压在新加的列上，
+  // 导致新点不被判定为"左侧"）。
+  //
+  // 走廊的真身是**两群点之间那个空档**，所以改成找最大间隙：取相邻两点
+  // 间隔最大的那一对，边界落在那对的中点。这对任何点分布都成立，且当分布
+  // 本来就均衡（没有显著间隙）时退回中位数，行为不变。
+  // 纯几何回退（没有任何 roaming 标签）保持中位数语义 —— 那种场景下这些点
+  // 不是走廊环上的停留点，间隙没有意义。
+  if (roaming.length === 0) return median;
+  let bestGap = -1;
+  let gapBoundary = null;
+  for (let i = 1; i < xs.length; i += 1) {
+    const gap = xs[i] - xs[i - 1];
+    if (gap > bestGap) {
+      bestGap = gap;
+      gapBoundary = (xs[i - 1] + xs[i]) / 2;
+    }
+  }
+  return bestGap > 0.05 ? gapBoundary : median;
 }
 
 // Roaming nodes that belong to the left rest area, sorted by id for stability.

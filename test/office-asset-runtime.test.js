@@ -1035,12 +1035,12 @@ test('E4 compiler: the approved flat draft compiles into a canonical isomorphic 
   // M4.1h (2026-09-24 巡游/休息区): the left wing became the break area — six
   // tagged left-column target nodes plus three transit-only nodes (the wing's
   // two corner/bend nodes and the second gateway's bottom-aisle node).
-  const LEFT_WING_IDS = ['roam-8', 'roam-9', 'roam-10', 'roam-11', 'roam-12', 'roam-13', 'roam-14', 'roam-15', 'roam-16'];
-  const LEFT_WING_TARGET_IDS = ['roam-10', 'roam-11', 'roam-12', 'roam-13', 'roam-15', 'roam-16'];
+  const LEFT_WING_IDS = ['roam-8', 'roam-9', 'roam-10', 'roam-11', 'roam-12', 'roam-13', 'roam-14', 'roam-15', 'roam-16', 'roam-17'];
+  const LEFT_WING_TARGET_IDS = ['roam-10', 'roam-11', 'roam-12', 'roam-13', 'roam-15', 'roam-16', 'roam-17'];
   const LEFT_WING_RESTING_IDS = ['roam-11', 'roam-12', 'roam-13'];
   const LEFT_WING_TRANSIT_IDS = ['roam-8', 'roam-9', 'roam-14'];
   assert.equal(layout.nodes.length, 27 + LEFT_WING_IDS.length, 'isometric nodes + the left-wing extension');
-  assert.equal(layout.edges.length, 40 + 10 - 11, 'isometric + the 10 left-wing edges − the 11 direct seat↔roam edges');
+  assert.equal(layout.edges.length, 40 + 12 - 11, 'isometric + the 12 left-wing edges − the 11 direct seat↔roam edges');
   const isSeatId = (id) => /^desk-[1-6]$/.test(id);
   const isCorridorNodeId = (id) => /^(roam|chat)-/.test(id);
   for (const edge of layout.edges) {
@@ -1096,6 +1096,8 @@ test('E4 compiler: the approved flat draft compiles into a canonical isomorphic 
     'roam-8>roam-9', 'roam-9>roam-6',
     'roam-4>roam-14', 'roam-14>roam-8',
     'roam-8>roam-10', 'roam-10>roam-11', 'roam-11>roam-15', 'roam-15>roam-12', 'roam-12>roam-16', 'roam-16>roam-13',
+    // 2026-10-30：第二条左通道（x=0.40）的 4 条梯形边
+    'roam-17>roam-13', 'roam-17>roam-16',
   ]);
   const isoEdgeKeys = CANONICAL_OFFICE_LAYOUT.edges
     .filter((edge) => !(isSeatId(edge.from) && isCorridorNodeId(edge.to))

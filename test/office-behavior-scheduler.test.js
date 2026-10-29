@@ -1106,7 +1106,7 @@ test('M4.1g: roaming targets can land in the left rest area (x below the corrido
   // the old geometric "wing + corridor-left" guess — the corridor nodes roam-6/
   // roam-7 are no longer part of the pool (they are right of the left half and
   // were never a break area; they only leaked in through the geometric rule).
-  assert.deepEqual([...left].sort(), ['roam-10', 'roam-11', 'roam-12', 'roam-13', 'roam-15', 'roam-16'],
+  assert.deepEqual([...left].sort(), ['roam-10', 'roam-11', 'roam-12', 'roam-13', 'roam-15', 'roam-16', 'roam-17'],
     'the compiled flat layout break area is the six tagged left-column nodes');
   for (const id of left) {
     const node = graph.nodes.find((entry) => entry.id === id);

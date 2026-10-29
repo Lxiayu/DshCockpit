@@ -641,6 +641,23 @@
         "rest-area"
       ],
       "capacity": 2
+    },
+    {
+      "id": "roam-17",
+      "position": {
+        "x": 0.4,
+        "y": 0.46
+      },
+      "footprint": {
+        "width": 0.05,
+        "height": 0.05
+      },
+      "safeRadius": 0.03,
+      "tags": [
+        "roaming",
+        "rest-area"
+      ],
+      "capacity": 2
     }
   ],
   "edges": [
@@ -1097,6 +1114,30 @@
     {
       "from": "roam-16",
       "to": "roam-13",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting",
+        "resting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-17",
+      "to": "roam-13",
+      "behaviors": [
+        "roaming",
+        "task",
+        "sleeping",
+        "chatting",
+        "resting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-17",
+      "to": "roam-16",
       "behaviors": [
         "roaming",
         "task",

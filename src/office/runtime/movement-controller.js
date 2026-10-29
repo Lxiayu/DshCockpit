@@ -262,24 +262,13 @@ function createMovementController({ graph, config, clock } = {}) {
   // step 时的 occupant gate 同一个数），任务路线就不会规划进对向走廊——
   // 规划进去了就是 1D 对向死锁（双方身体互挡、无任何出口，实测冻结 240s+）。
   // 找不到绕路时返回 UNREACHABLE，由调用方的 retry 梯子等走廊腾空。
-  function findRoute({ fromNodeId, toNodeId, behavior, reservations, nowMs, employeeId, occupiedNodeIds = null, priority = false, blockedSegments = null } = {}) {
+  function findRoute({ fromNodeId, toNodeId, behavior, reservations, nowMs, employeeId, occupiedNodeIds = null, priority = false } = {}) {
     const at = nowMs !== undefined ? nowMs : now();
     const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
     const from = nodesById.get(fromNodeId);
     const to = nodesById.get(toNodeId);
     if (!from || !to) return Object.freeze({ code: 'UNREACHABLE' });
     if (fromNodeId === toNodeId) return Object.freeze([fromNodeId]);
-
-    const blocked = Array.isArray(blockedSegments) && blockedSegments.length > 0
-      ? blockedSegments.filter((segment) => segment && isPoint2(segment.from) && isPoint2(segment.to))
-      : null;
-    const edgeBlockedByBody = (nodeA, nodeB) => {
-      if (!blocked) return false;
-      for (const segment of blocked) {
-        if (segmentsConflict(segment.from, segment.to, nodeA.position, nodeB.position, { width: 1, height: 1 }, OCCUPANT_SOCIAL_RADIUS)) return true;
-      }
-      return false;
-    };
 
     const adjacency = new Map();
     for (const edge of graph.edges) {
@@ -318,7 +307,7 @@ function createMovementController({ graph, config, clock } = {}) {
     // 约束），只放开"几何绕开同伴身体"这一条规划期建议。逐腿推进时
     // step() 的 occupant gate 仍然拒绝踩进别人身体，所以放宽只影响"能不能
     // 拿到一条候选路线"，不会让谁真的穿模。有绕路时行为与之前完全一致。
-    const bfs = (relaxedBody) => {
+    const bfs = () => {
       const visited = new Set([fromNodeId]);
       const parent = new Map();
       let queue = [fromNodeId];
@@ -332,10 +321,6 @@ function createMovementController({ graph, config, clock } = {}) {
             const node = nodesById.get(edge.to);
             if (!node) continue;
             if (priority < 1 && occupied.has(edge.to) && edge.to !== fromNodeId) continue;
-            // 工位缺陷修复：这条边的几何线段若与同伴身体/当前腿冲突，规划期
-            // 直接绕开（找不到绕路 ⇒ UNREACHABLE，retry 梯子等走廊腾空）。
-            // relaxedBody 只在这一轮"无路可走"的兜底里为 true。
-            if (!relaxedBody && currentNode && !priority && edgeBlockedByBody(currentNode, node) && edge.to !== toNodeId) continue;
             // Reservation checks apply to EVERY entered node, including the
             // route target: a full-capacity or protected target must force an
             // alternate route or UNREACHABLE, never a planned intrusion.
@@ -360,13 +345,11 @@ function createMovementController({ graph, config, clock } = {}) {
       return null;
     };
 
-    const strict = bfs(false);
-    if (strict) return strict;
-    // 兜底：只有真的（在避开同伴身体的前提下）一条路都没有时，才放开几何绕行。
-    if (blocked) {
-      const relaxed = bfs(true);
-      if (relaxed) return relaxed;
-    }
+    // 2026-10-30（架构性清理）：原来这里是"严格 → 放宽"两段式，为的是在
+    // 严格模式（避开同伴身体）找不到路时，再放开几何绕行兜底一次。
+    // 几何绕行机制整体删除后，两段式没有存在意义 —— 直接跑一遍。
+    const route = bfs();
+    if (route) return route;
     return Object.freeze({ code: 'UNREACHABLE' });
   }
 

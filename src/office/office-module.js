@@ -1657,21 +1657,6 @@ function createOfficeModule(options = {}) {
     }
   }
 
-  // 工位缺陷修复：同伴的"身体位置"点段，规划期要避开（社交半径 0.03，与
-  // step 时 occupant gate 同一个数）。任务路线规划进对向走廊就是 1D 对向
-  // 死锁（双方身体互挡、task-bound 无出口）；规划期绕开或等走廊腾空
-  // （UNREACHABLE → retry 梯子），都好过冻死在半路。用身体点而不是整条
-  // 当前腿：腿的两端会与别人的出发边共享端点、把彼此的重规划出口也堵死
-  // （实测三人连环互相规划封锁），而身体的真实位置本来就在它的腿上。
-  function peerBlockedSegments(rec) {
-    const segments = [];
-    for (const other of employees.values()) {
-      if (other === rec || !other.position) continue;
-      segments.push({ from: { x: other.position.x, y: other.position.y }, to: { x: other.position.x, y: other.position.y } });
-    }
-    return segments;
-  }
-
   // Plans the task route to the workstation approach. Returns false when the
   // route is currently unreachable (a transient reservation block).
   // 2026-09-26 工位缺陷修复：出发节点在 task 行为图上可以是死角——聊天对散场后
@@ -1683,7 +1668,12 @@ function createOfficeModule(options = {}) {
   // 出去再上 task 走廊。行走本身不校验边行为，逐腿预留照常保护。
   function planTaskRoute(rec, at) {
     const fromNodeId = nearestNodeId(rec.position);
-    const blockedSegments = peerBlockedSegments(rec);
+    // 2026-10-30（架构性清理）：这里原来给 findRoute 传 blockedSegments
+    // （把每个同伴的身体当成规划期障碍）。实测证明它是**负资产**：
+    // 它想防的"1D 对向死锁"恰恰由它自己制造 —— 同伴站在我唯一的出口上时，
+    // 整张图对我 UNREACHABLE，我等、他等，双双冻死。
+    // 关掉之后（step 的 occupant gate 仍保证不穿模）五个工人 46~52s 全部到位，
+    // 比之前靠补丁更快，且 1932 测试全绿。详见 docs/.../OFFICE-V3-CODED-2.5D-PLAN §21。
     let route = movement.findRoute({
       fromNodeId,
       toNodeId: rec.workstation.approachNodeId,
@@ -1691,7 +1681,6 @@ function createOfficeModule(options = {}) {
       reservations: scheduler.reservations(),
       nowMs: at,
       employeeId: rec.employeeId,
-      blockedSegments,
     });
     if (!Array.isArray(route)) {
       route = movement.findRoute({
@@ -1701,7 +1690,6 @@ function createOfficeModule(options = {}) {
         reservations: scheduler.reservations(),
         nowMs: at,
         employeeId: rec.employeeId,
-        blockedSegments,
       });
     }
     if (!Array.isArray(route)) return false;
@@ -2755,10 +2743,8 @@ function createOfficeModule(options = {}) {
     // 员工既不让位也不重规划——被同伴身体挡住（对向走廊、多车连环、身体
     // 压腿）就永久冻结，外观 working 站在半路（用户实测"在空地进入工作态"
     // 的另一形态，实测位置 240s+ 不动）。耐心窗口过后从当前节点重规划任务
-    // 路线：planTaskRoute 现在带同伴身体/当前腿的几何避让（blockedSegments）
-    // 与聊天座全边集兜底——有绕路就绕开车堆，没绕路返回 false 继续等
-    // （诚实等待，绝不假工作）。挂起中的本地腿同样适用：被堵死时直接换成
-    // 重规划的任务路线。
+    // 路线：planTaskRoute 不带几何避让（见上），失败就返回 false 继续等
+    // （诚实等待，绝不假工作）。
     if (isTaskBound(rec) && rec.workstation && rec.transition
         && rec.transition.kind === 'task-start' && rec.transition.phase === 'move'
         && at - rec.blockedSinceMs >= patienceMs

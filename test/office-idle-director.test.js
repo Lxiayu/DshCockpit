@@ -168,7 +168,7 @@ test('left rest area resolves from the real layout graphs', () => {
   // geometric guess — the geometric rule survives for layouts that declare
   // nothing (the canonical isometric fixture below). roam-6/roam-7 were only in
   // the old pool through that guess: they sit right of the left half.
-  assert.deepEqual(flat, ['roam-10', 'roam-11', 'roam-12', 'roam-13', 'roam-15', 'roam-16'],
+  assert.deepEqual(flat, ['roam-10', 'roam-11', 'roam-12', 'roam-13', 'roam-15', 'roam-16', 'roam-17'],
     'the compiled flat layout break area is the six tagged left-column nodes');
   for (const id of flat) {
     const node = flatGraph.nodes.find((entry) => entry.id === id);
@@ -225,14 +225,25 @@ test('corridorBoundaryX is the mid x of the roaming ring', () => {
     .filter((node) => node.tags.includes('roaming') && !node.id.startsWith('desk-'))
     .map((node) => node.position.x)
     .sort((a, b) => a - b);
-  const expected = roamXs.length % 2 === 1
-    ? roamXs[(roamXs.length - 1) / 2]
-    : (roamXs[roamXs.length / 2 - 1] + roamXs[roamXs.length / 2]) / 2;
-  assert.equal(flat, expected, 'the boundary is the ring median');
+  // 2026-10-30：边界语义从中位数改为"最大间隙的中点"。左半区从 6 个点扩到
+  // 8 个之后，左区点数过半，中位数必然落进左区（实测被拉到 0.40，正好压在
+  // 新加的通道上）。走廊的真身是两群点之间的空档，所以取最大间隙更稳。
+  let bestGap = -1;
+  let expected = null;
+  for (let i = 1; i < roamXs.length; i += 1) {
+    const gap = roamXs[i] - roamXs[i - 1];
+    if (gap > bestGap) { bestGap = gap; expected = (roamXs[i - 1] + roamXs[i]) / 2; }
+  }
+  if (!(bestGap > 0.05)) {
+    expected = roamXs.length % 2 === 1
+      ? roamXs[(roamXs.length - 1) / 2]
+      : (roamXs[roamXs.length / 2 - 1] + roamXs[roamXs.length / 2]) / 2;
+  }
+  assert.equal(flat, expected, 'the boundary is the midpoint of the widest roam-node gap');
   // desk/workstation nodes (approach/leave are roaming-tagged) and the M4.1h
   // transit-only wing nodes (roam-8/roam-9/roam-14 — they carry no `roaming`
   // tag, so their x never votes on the boundary) are excluded
-  assert.equal(flatGraph.nodes.filter((node) => node.tags.includes('roaming') && !node.id.startsWith('desk-')).length, 13);
+  assert.equal(flatGraph.nodes.filter((node) => node.tags.includes('roaming') && !node.id.startsWith('desk-')).length, 14);
   // no roaming nodes at all: pure geometry fallback (median of node xs)
   const noRoam = { nodes: [{ id: 'a', position: { x: 0.1 }, tags: ['desk'] }, { id: 'b', position: { x: 0.4 }, tags: ['desk'] }, { id: 'c', position: { x: 0.9 }, tags: ['desk'] }], edges: [] };
   assert.equal(director.corridorBoundaryX(noRoam), 0.4);

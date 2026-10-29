@@ -451,6 +451,15 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
     // two more column spots so the six left targets are spread along the aisle
     Object.freeze({ id: 'roam-15', position: null, footprint: LEFT_WING_FOOTPRINT, tags: LEFT_WING_TAGS, capacity: 2, safeRadius: 0.03 }),
     Object.freeze({ id: 'roam-16', position: null, footprint: LEFT_WING_FOOTPRINT, tags: LEFT_WING_TAGS, capacity: 2, safeRadius: 0.03 }),
+    // 2026-10-30（用户："落点确实不需要局限于21个，我们可以往左半区多加一些"）：
+    // 左半区原来只有 x=0.335 一条竖线 6 个点、纵向间隔 47px，而角色立绘宽约
+    // 200px —— 所以视觉上永远"排成一列、两人叠在一起"。
+    // 实测 x=0.40 这一整列 y 90..620 完全无家具，与第一列的点间距 83~85px
+    // （超过舒适距离 57px）。加第二列 2 个点与第一列**交错**，把"一条线"
+    // 变成"两条交错的线"。
+    // 只加 2 个（而非 4 个）是实测的收敛值：左翼出口只有 2 个且都在底部横道，
+    // 加 4 个会让人流翻倍而路没变宽，实测对向僵持 28s（契约上限 20s）。
+    Object.freeze({ id: 'roam-17', position: null, footprint: LEFT_WING_FOOTPRINT, tags: LEFT_WING_TAGS, capacity: 2, safeRadius: 0.03 }),
   ]);
   const LEFT_WING_EDGES = Object.freeze([
     Object.freeze({ from: 'roam-8', to: 'roam-9', behaviors: Object.freeze(['roaming']), bidirectional: true }),
@@ -471,6 +480,10 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
     Object.freeze({ from: 'roam-15', to: 'roam-12', behaviors: Object.freeze(['roaming']), bidirectional: true }),
     Object.freeze({ from: 'roam-12', to: 'roam-16', behaviors: Object.freeze(['roaming']), bidirectional: true }),
     Object.freeze({ from: 'roam-16', to: 'roam-13', behaviors: Object.freeze(['roaming']), bidirectional: true }),
+    // 第二条左通道（x=0.40）的连线：与第一列就近相连形成"梯子"，
+    // 不做成互不相通的平行线（否则第二列是孤岛，一有人就进不去）。
+    Object.freeze({ from: 'roam-17', to: 'roam-13', behaviors: Object.freeze(['roaming']), bidirectional: true }),
+    Object.freeze({ from: 'roam-17', to: 'roam-16', behaviors: Object.freeze(['roaming']), bidirectional: true }),
   ]);
 
   const topoNodes = [...topology.nodes, ...LEFT_WING_NODES];
@@ -787,6 +800,11 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
   // 右侧走廊的让路顺序。让它留在原地，斜线段 roam-14→roam-8 走的是
   // x 336..451 的开阔地面（地毯右缘 307，绿植右缘 79），并不穿家具。
   corridorIdeals['roam-14'] = { x: centerX(0.47), y: centerY(bottomGateY) };
+  // 第二条左通道 x=0.40，y 与第一列交错（两两之间），
+  // 相邻停留点间距从 47px 提到 83~85px。
+  const LEFT_WING_SECOND_X = 0.40;
+  const leftWingSecondYs = [0.46];
+  corridorIdeals['roam-17'] = { x: centerX(LEFT_WING_SECOND_X), y: centerY(leftWingSecondYs[0]) };
 
   // M4.1f: approach/leave 的理想点从“座位正下方固定偏移”改为“中央走廊内、
   // 贴近本工位背板一侧”。座位正下方落在自家椅矩形里，placeNode 对全家具
