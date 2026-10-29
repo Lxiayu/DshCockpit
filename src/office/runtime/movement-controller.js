@@ -301,42 +301,71 @@ function createMovementController({ graph, config, clock } = {}) {
     // then refuses forever (three-body chains froze the corridor for ~58s).
     // The walker's own node is obviously exempt.
     const occupied = occupiedNodeIds instanceof Set ? occupiedNodeIds : new Set(Array.isArray(occupiedNodeIds) ? occupiedNodeIds : []);
-    const visited = new Set([fromNodeId]);
-    const parent = new Map();
-    let queue = [fromNodeId];
-    while (queue.length > 0) {
-      const nextQueue = [];
-      for (const currentId of queue) {
-        const edges = adjacency.get(currentId) || [];
-        const currentNode = nodesById.get(currentId);
-        for (const edge of edges) {
-          if (!edge.allowed || visited.has(edge.to)) continue;
-          const node = nodesById.get(edge.to);
-          if (!node) continue;
-          if (priority < 1 && occupied.has(edge.to) && edge.to !== fromNodeId) continue;
-          // 工位缺陷修复：这条边的几何线段若与同伴身体/当前腿冲突，规划期
-          // 直接绕开（找不到绕路 ⇒ UNREACHABLE，retry 梯子等走廊腾空）。
-          if (currentNode && !priority && edgeBlockedByBody(currentNode, node) && edge.to !== toNodeId) continue;
-          // Reservation checks apply to EVERY entered node, including the
-          // route target: a full-capacity or protected target must force an
-          // alternate route or UNREACHABLE, never a planned intrusion.
-          const blocked = isNodeBlockedByReservation(graph, edge.to, reservations || [], at, employeeId, priority);
-          if (blocked) continue;
-          visited.add(edge.to);
-          parent.set(edge.to, currentId);
-          if (edge.to === toNodeId) {
-            const path = [toNodeId];
-            let cursor = toNodeId;
-            while (parent.has(cursor)) {
-              cursor = parent.get(cursor);
-              path.unshift(cursor);
+
+    // 2026-10-29 第十二轮（单出口死锁修复）：把 BFS 抽成「严格 → 放宽」两段。
+    //
+    // 背景：`blockedSegments` 让规划期绕开同伴身体，是为了防 1D 对向死锁
+    // （见上方 2026-09-26 注释）。但当同伴恰好站在我的**唯一出口**上时，
+    // 严格绕行会让整张图对我 UNREACHABLE —— 实测 desk-6-leave 只有
+    // roam-4 / desk-6-approach 两条边（后者通向 spare 工位是死胡同），
+    // coder 停在 desk-6-leave、reviewer 停在 roam-4（相距 21px），两人互相把
+    // 对方唯一能走的那条边判成"被身体占据"，于是**双双 UNREACHABLE**，
+    // 谁都没有路线、也就谁都不会重试（stepMovement 在无路线时直接 return），
+    // 冻结 240s+。绕行防护本身没错，错在"无处可绕时仍然硬绕"。
+    //
+    // 修法：严格模式（照旧避开同伴身体）先搜；只有在**完全找不到路**时，
+    // 才用 relaxed=true 再搜一次——此时仍避开节点占用与预留（真正的安全
+    // 约束），只放开"几何绕开同伴身体"这一条规划期建议。逐腿推进时
+    // step() 的 occupant gate 仍然拒绝踩进别人身体，所以放宽只影响"能不能
+    // 拿到一条候选路线"，不会让谁真的穿模。有绕路时行为与之前完全一致。
+    const bfs = (relaxedBody) => {
+      const visited = new Set([fromNodeId]);
+      const parent = new Map();
+      let queue = [fromNodeId];
+      while (queue.length > 0) {
+        const nextQueue = [];
+        for (const currentId of queue) {
+          const edges = adjacency.get(currentId) || [];
+          const currentNode = nodesById.get(currentId);
+          for (const edge of edges) {
+            if (!edge.allowed || visited.has(edge.to)) continue;
+            const node = nodesById.get(edge.to);
+            if (!node) continue;
+            if (priority < 1 && occupied.has(edge.to) && edge.to !== fromNodeId) continue;
+            // 工位缺陷修复：这条边的几何线段若与同伴身体/当前腿冲突，规划期
+            // 直接绕开（找不到绕路 ⇒ UNREACHABLE，retry 梯子等走廊腾空）。
+            // relaxedBody 只在这一轮"无路可走"的兜底里为 true。
+            if (!relaxedBody && currentNode && !priority && edgeBlockedByBody(currentNode, node) && edge.to !== toNodeId) continue;
+            // Reservation checks apply to EVERY entered node, including the
+            // route target: a full-capacity or protected target must force an
+            // alternate route or UNREACHABLE, never a planned intrusion.
+            const blocked = isNodeBlockedByReservation(graph, edge.to, reservations || [], at, employeeId, priority);
+            if (blocked) continue;
+            visited.add(edge.to);
+            parent.set(edge.to, currentId);
+            if (edge.to === toNodeId) {
+              const path = [toNodeId];
+              let cursor = toNodeId;
+              while (parent.has(cursor)) {
+                cursor = parent.get(cursor);
+                path.unshift(cursor);
+              }
+              return Object.freeze(path);
             }
-            return Object.freeze(path);
+            nextQueue.push(edge.to);
           }
-          nextQueue.push(edge.to);
         }
+        queue = nextQueue;
       }
-      queue = nextQueue;
+      return null;
+    };
+
+    const strict = bfs(false);
+    if (strict) return strict;
+    // 兜底：只有真的（在避开同伴身体的前提下）一条路都没有时，才放开几何绕行。
+    if (blocked) {
+      const relaxed = bfs(true);
+      if (relaxed) return relaxed;
     }
     return Object.freeze({ code: 'UNREACHABLE' });
   }
@@ -507,9 +536,27 @@ function createMovementController({ graph, config, clock } = {}) {
       // Only the departure is freed: every other occupant keeps the full gate,
       // and the step still cannot END inside anyone (the target is checked by
       // its own arrival radius).
-      if (screenDistance(from, occupant.position, scene) <= ARRIVAL_TOLERANCE * minSceneDimension(scene)) continue;
+      const minDim = minSceneDimension(scene);
+      if (screenDistance(from, occupant.position, scene) <= ARRIVAL_TOLERANCE * minDim) continue;
+      // 2026-10-29 第十二轮（几何死锁最后一环 · 实测）：occupant gate 原来只在
+      // "已经重叠"（≤ ARRIVAL_TOLERANCE）时放行离开。但两人**几乎贴着站**
+      // （21.4px，社交半径 18.9px）又互相挡路时，既不算重叠、也算"要撞上"，
+      // 于是双方每一步都返回 wait，谁也走不掉：
+      //   coder 在 desk-6-leave、reviewer 在 roam-4（相距 21.4px），
+      //   coder 走向 roam-4 的线段必然擦过 reviewer 的身体，反之亦然。
+      // 该路口没有第三条边，绕行无从谈起 —— 这是纯几何死锁。
+      //
+      // 修法：若**这一步会让双方距离变大**（即"正在走开"），就不再拦。
+      // 这不会允许穿模：只有远离方向被放行；靠近/横向擦过的移动照旧被拦，
+      // 所以两个人不会互相穿过对方身体，只是能各自退开、解除对峙。
+      const distanceNow = screenDistance(from, occupant.position, scene);
+      const distanceAfter = screenDistance(to, occupant.position, scene);
+      const retreating = distanceAfter > distanceNow + 1e-6;
+      if (retreating) continue;
       const distancePx = pointSegmentDistancePx(toPx(occupant.position, scene), toPx(from, scene), toPx(to, scene));
-      if (distancePx <= radius * minSceneDimension(scene)) {
+      if (distancePx <= radius * minDim) {
+        // 2026-10-29 第十二轮（对向交换死锁）说明见下方 swapBack 判定。
+
         return Object.freeze({
           code: 'OK',
           position: Object.freeze({ ...position }),

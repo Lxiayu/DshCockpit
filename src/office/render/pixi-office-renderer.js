@@ -69,10 +69,14 @@ const { createFpsMonitor } = require('./fps-monitor.js');
 const { createPresentationClock } = require('./presentation-clock.js');
 // P3.1: the code-drawn scene description (pure geometry + palette). Off by
 // default — enabling it swaps the flat floor band for a programmatic floor.
-const { describeCodeScene } = require('./code-scene.js');
+const { describeCodeScene, ACCENTS } = require('./code-scene.js');
 // P3.1b: a generated office layout (desks/monitors/chairs/lounge/kitchen) built
 // from the seat anchors — the visual arrangement is no longer the old collage.
 const { describeOffice } = require('./code-office.js');
+// P3-I1: isometric projection kernel (pure). `projection:'iso'` is a preview.
+const { fitCamera, project, unproject } = require('./iso-projection.js');
+// P3-I2: isometric furniture in world coordinates (pure geometry).
+const { describeIsoOffice } = require('./iso-office.js');
 
 // Task E4: the shared catalog declares contentBbox (opaque-art bounds) and
 // the draft depth for the flat furniture — the renderer consumes both.
@@ -158,6 +162,8 @@ async function createOfficeRenderer(options) {
     // approved. Enabled, the floor is drawn from the layout description (tiles,
     // wall/floor edge, reserve zone) instead of a single translucent band.
     codeScene = null,
+    // P3-I1 preview: 'flat' (default, shipping) or 'iso' (isometric room shell).
+    projection = null,
   } = options || {};
 
   if (!layout || typeof layout.waypointGraph !== 'function') {
@@ -282,6 +288,13 @@ async function createOfficeRenderer(options) {
   let codeSceneStats = null;
   let codeSceneDescription = null;
   let officeDescription = null;
+  const projectionMode = projection === 'iso' ? 'iso' : 'flat';
+  let isoCamera = null;
+  // P3-I2: persistent iso furniture nodes, one Graphics per box so the ground
+  // pass can interleave them with the characters by (x + y).
+  const isoFurniture = new Map();
+  let isoDescription = null;
+  let isoShadowNode = null;
   // The furniture art is baked for the light room. In the warm dark theme it is
   // multiplied down to a warm mid-tone so it reads as the same furniture under
   // lamp light instead of glowing white cut-outs.
@@ -319,8 +332,9 @@ async function createOfficeRenderer(options) {
   // Where this entity should be DRAWN at `nowMs`: the presentation sample,
   // overridden by the drag offset (or the return easing).
   function displayFootOf(record, sample, nowMs) {
-    const targetX = sample.x * scene.width;
-    const targetY = sample.y * scene.height;
+    const target = footScreenOf(sample);
+    const targetX = target.x;
+    const targetY = target.y;
     if (dragState.employeeId !== record.employeeId) return { x: targetX, y: targetY };
     if (dragState.release) {
       const elapsed = nowMs - dragState.release.at;
@@ -647,24 +661,23 @@ async function createOfficeRenderer(options) {
       furnitureRecords.set('furniture-edges', {
         item: { id: 'furniture-edges', layer: 'back-furniture' }, node: edges, kind: 'edges',
       });
-      // Generated office: legacy furniture art is hidden and replaced by this
-      // pair (background = desks/monitors/decoration, front = chairs + lips).
+      // 2.5D coded office: the legacy furniture art is hidden; every desk,
+      // chair, prop and decoration is drawn from code in one painter pass.
+      // `kind: 'code'` records must be hidden too: they are the legacy fixture
+      // monitors redrawn as bezel+screen+stand, and leaving them visible put a
+      // second, offset monitor behind the generated one (the stray dark hook
+      // left of the screen, 2026-10-28).
       if (codeSceneOptions.generatedFurniture) {
-      const generatedBack = new PIXI.Graphics();
-      generatedBack.__furnitureId = 'generated-office-back';
-      layers.background.addChild(generatedBack);
-      furnitureRecords.set('generated-office-back', {
-        item: { id: 'generated-office-back', layer: 'background' }, node: generatedBack, kind: 'office-back',
-      });
-      const generatedFront = new PIXI.Graphics();
-      generatedFront.__furnitureId = 'generated-office-front';
-      layers['front-occluders'].addChild(generatedFront);
-      furnitureRecords.set('generated-office-front', {
-        item: { id: 'generated-office-front', layer: 'front-occluders' }, node: generatedFront, kind: 'office-front',
-      });
-      for (const record of furnitureRecords.values()) {
-        if ((record.kind === 'sprite' || record.kind === 'graphics') && record.node) record.node.visible = false;
+        for (const record of furnitureRecords.values()) {
+          if ((record.kind === 'sprite' || record.kind === 'graphics' || record.kind === 'code') && record.node) {
+            record.node.visible = false;
+          }
+        }
       }
+      if (projectionMode === 'iso') {
+        for (const record of furnitureRecords.values()) {
+          if (record.kind !== 'floor' && record.node) record.node.visible = false;
+        }
       }
     }
     layoutFurniture();
@@ -679,12 +692,28 @@ async function createOfficeRenderer(options) {
   // "colour blocks + material detail" language is applied to the room
   // (floor/wall/window/reception), where the art had no detail to lose.
   function drawCodeScene(node) {
+    const generated = codeSceneOptions.generatedFurniture;
+    const dark = codeSceneOptions.theme === 'dark';
     const description = describeCodeScene({
       scene,
       layout,
       theme: codeSceneOptions.theme,
       accent: codeSceneOptions.accent,
-      tilePx: codeSceneOptions.tilePx,
+      // The coded office wants a calmer floor: larger, lower-contrast tiles so
+      // the furniture (not the grid) is the subject. P3 pushed the checker all
+      // the way down to 0.10 — grout lines now carry the tile module, so the
+      // alternation only has to break up the flat fill.
+      tilePx: codeSceneOptions.tilePx || (generated ? Math.round(scene.height * 0.115) : null),
+      checkerContrast: generated ? 0.10 : 1,
+      // Generated mode moves the window into the wall gap between the kitchen
+      // and the left desk column: tall props no longer climb in front of the
+      // glass, and the light pool lands on open floor.
+      //
+      // 2026-10-28 第三轮：窗宽 0.20 → 0.13 并右移至 0.305，把墙面让给茶水间
+      // （用户拍板"减小窗户大小来增大茶水间"）。窗右缘 0.435 < 桌子左缘 0.451，
+      // 仍然不会和显示器打架。
+      windowX: generated ? 0.305 : undefined,
+      windowW: generated ? 0.13 : undefined,
       characterScale: codeSceneOptions.characterScale,
     });
     codeSceneDescription = description;
@@ -694,8 +723,19 @@ async function createOfficeRenderer(options) {
     node.rect(0, 0, scene.width, scene.height).fill({ color: c.wall });
     node.rect(description.floor.x, description.floor.y, description.floor.w, description.floor.h)
       .fill({ color: c.floorB });
+    // P3: floor as LARGE TILES with 1px grout, not a checkerboard. The old
+    // checker (tilePx≈0.09H, contrast 0.35) painted 136 alternating squares
+    // across the whole room; at that size the alternation reads as blotches,
+    // especially in the dark theme where it looked like stains. Grout lines do
+    // the describing instead: they state the tile module without adding
+    // contrast, and the checker is now barely-there (0.10).
     for (const tile of description.floor.tiles) {
       node.rect(tile.x, tile.y, tile.w, tile.h).fill({ color: tile.fill });
+    }
+    const grout = dark ? 0x1f2124 : description.colors.grout;
+    for (const tile of description.floor.tiles) {
+      node.rect(tile.x, tile.y, tile.w, 1).fill({ color: grout, alpha: dark ? 0.55 : 0.75 });
+      node.rect(tile.x, tile.y, 1, tile.h).fill({ color: grout, alpha: dark ? 0.45 : 0.65 });
     }
     // Distance falloff: the floor gets darker away from the window wall.
     for (const band of description.floor.shadeBands) {
@@ -704,17 +744,129 @@ async function createOfficeRenderer(options) {
     for (const band of description.walls.bands) {
       node.rect(0, band.y, description.walls.w, band.h).fill({ color: band.color });
     }
-    node.rect(description.walls.base.x, description.walls.base.y, description.walls.base.w, description.walls.base.h)
-      .fill({ color: description.walls.base.color });
-
+    // P3: skirting board where the wall meets the floor — 4–6px dark band with
+    // a 1px lit top edge. Without it the wall and floor meet in a colour seam
+    // and the room loses its base.
+    const base = description.walls.base;
+    node.rect(base.x, base.y, base.w, base.h).fill({ color: base.color });
+    const skirtH = Math.max(3, Math.round(scene.height * 0.010));
+    node.rect(0, description.floor.y - skirtH, scene.width, skirtH)
+      .fill({ color: mixHex(base.color, 0x000000, 0.18) });
+    node.rect(0, description.floor.y - skirtH, scene.width, 1)
+      .fill({ color: 0xffffff, alpha: dark ? 0.05 : 0.22 });
     // Window: frame, glass, mullions, then a warm pool of light on the floor.
     const win = description.walls.window;
+    // P3 (2026-10-28): the wall needs architecture, not three colour bands.
+    // Order: frame shadow → sill → glass → reflection → frame → mullions.
+    // Sill first (it sits against the wall, behind the glass plane).
+    const sillH = Math.max(3, Math.round(win.h * 0.055));
+    node.rect(win.x - 8, win.y + win.h + 2, win.w + 16, sillH)
+      .fill({ color: mixHex(win.frame, 0xffffff, dark ? 0.06 : 0.16) });
+    node.rect(win.x - 8, win.y + win.h + 2, win.w + 16, 1)
+      .fill({ color: 0xffffff, alpha: dark ? 0.08 : 0.40 });
+    node.rect(win.x - 8, win.y + win.h + 2 + sillH, win.w + 16, 2)
+      .fill({ color: 0x000000, alpha: dark ? 0.34 : 0.14 });
+    // Reveal shadow around the opening: the wall is thicker than the glass.
     node.rect(win.x - 3, win.y - 3, win.w + 6, win.h + 6).fill({ color: win.frame });
+    node.rect(win.x - 3, win.y - 3, win.w + 6, 2).fill({ color: 0x000000, alpha: dark ? 0.30 : 0.12 });
+    node.rect(win.x - 3, win.y - 3, 2, win.h + 6).fill({ color: 0x000000, alpha: dark ? 0.26 : 0.10 });
     node.rect(win.x, win.y, win.w, win.h).fill({ color: win.glass });
+    // Glass reflection: two diagonal bands (low alpha; a single hard band read
+    // as a sticker). Drawn on the glass so the window looks like a surface.
+    for (let i = 0; i < 2; i += 1) {
+      const bandW = win.w * (i === 0 ? 0.20 : 0.11);
+      const startX = win.x + win.w * (i === 0 ? 0.12 : 0.52);
+      node.moveTo(startX, win.y + win.h)
+        .lineTo(startX + bandW, win.y + win.h)
+        .lineTo(startX + bandW + win.w * 0.24, win.y)
+        .lineTo(startX + win.w * 0.24, win.y)
+        .closePath()
+        .fill({ color: 0xffffff, alpha: dark ? 0.035 : (i === 0 ? 0.16 : 0.10) });
+    }
+    // Outdoor hint: a soft lighter band at the top = sky, so the glass is not a
+    // flat fill. Two nested bands give falloff without a gradient.
+    node.rect(win.x, win.y, win.w, Math.round(win.h * 0.42))
+      .fill({ color: 0xffffff, alpha: dark ? 0.03 : 0.16 });
+    node.rect(win.x, win.y, win.w, Math.round(win.h * 0.20))
+      .fill({ color: 0xffffff, alpha: dark ? 0.04 : 0.14 });
     for (const bar of win.mullions) node.rect(bar.x, bar.y, bar.w, bar.h).fill({ color: win.frame });
-    node.rect(win.glow.x, win.glow.y, win.glow.w, win.glow.h).fill({ color: win.glow.color, alpha: win.glow.alpha });
-    node.rect(win.glow.inner.x, win.glow.inner.y, win.glow.inner.w, win.glow.inner.h)
-      .fill({ color: win.glow.color, alpha: win.glow.inner.alpha });
+    // Mullion shading: a 1px dark line to the right of each bar.
+    for (const bar of win.mullions) {
+      node.rect(bar.x + bar.w, bar.y, 1, bar.h).fill({ color: 0x000000, alpha: dark ? 0.22 : 0.08 });
+    }
+    // Transom rail near the top: a third horizontal division.
+    const transomY = win.y + Math.round(win.h * 0.18);
+    node.rect(win.x, transomY, win.w, 2).fill({ color: win.frame });
+    node.rect(win.x, transomY + 2, win.w, 1).fill({ color: 0x000000, alpha: dark ? 0.20 : 0.08 });
+    // Ellipses, not rectangles: three overlapping soft pools read as light
+    // spill; a rectangular band reads as a yellow placemat.
+    for (const band of win.glow.bands) {
+      node.ellipse(band.x + band.w / 2, band.y + band.h / 2, band.w / 2, band.h / 2)
+        .fill({ color: win.glow.color, alpha: band.alpha });
+    }
+    // P3: wall decoration — a clock and a whiteboard on OPEN wall.
+    //
+    // 用户（2026-10-28 第二轮）："钟表的位置，把它放到两列办公桌的中上位置的墙上，
+    // 现在这个位置和办公桌挤到一起了。"
+    //
+    // The clock now lives in the CORRIDOR BETWEEN the two desk columns and high
+    // on the wall. Derived from the real layout rather than hard-coded: the left
+    // column ends at world x ≈0.637 and the right column starts at ≈0.711, so the
+    // gap centre is ≈0.674 (the clock is the only thing there, nothing overlaps).
+    // `clockX` may be overridden by the page for other layouts.
+    const clockR = Math.max(7, Math.round(scene.height * 0.020));
+    const clockX = Math.round(scene.width * 0.674);
+    // "中上位置" = upper part of the wall band, not floating at the ceiling.
+    const clockY = Math.round(description.walls.h * 0.38);
+    node.circle(clockX, clockY, clockR + 2).fill({ color: 0x000000, alpha: dark ? 0.35 : 0.10 });
+    node.circle(clockX, clockY, clockR + 1).fill({ color: mixHex(win.frame, 0x000000, 0.22) });
+    node.circle(clockX, clockY, clockR).fill({ color: dark ? 0xd7dade : 0xfbfaf7 });
+    node.circle(clockX, clockY, clockR).stroke({ width: 1, color: 0x000000, alpha: 0.22 });
+    // 12 tick marks; 4 are longer (the quarters).
+    for (let i = 0; i < 12; i += 1) {
+      const a = (Math.PI * 2 * i) / 12 - Math.PI / 2;
+      const inner = clockR * (i % 3 === 0 ? 0.62 : 0.78);
+      node.moveTo(clockX + Math.cos(a) * inner, clockY + Math.sin(a) * inner)
+        .lineTo(clockX + Math.cos(a) * clockR * 0.90, clockY + Math.sin(a) * clockR * 0.90)
+        .stroke({ width: 1, color: 0x2b3038, alpha: dark ? 0.55 : 0.62 });
+    }
+    // Hands at a fixed 10:10 — deterministic, and the classic clock pose.
+    const hourA = -Math.PI / 2 + (10 + 10 / 60) * (Math.PI * 2) / 12;
+    const minA = -Math.PI / 2 + 10 * (Math.PI * 2) / 60;
+    node.moveTo(clockX, clockY)
+      .lineTo(clockX + Math.cos(hourA) * clockR * 0.52, clockY + Math.sin(hourA) * clockR * 0.52)
+      .stroke({ width: 2, color: 0x23272e, alpha: 0.85 });
+    node.moveTo(clockX, clockY)
+      .lineTo(clockX + Math.cos(minA) * clockR * 0.78, clockY + Math.sin(minA) * clockR * 0.78)
+      .stroke({ width: 1, color: 0x23272e, alpha: 0.85 });
+    node.circle(clockX, clockY, Math.max(1.2, clockR * 0.08)).fill({ color: 0x23272e });
+    // Whiteboard: light panel, frame, two marker strokes, a tray and a marker.
+    // Sits on the wall right of the last desk column (x > 0.81), where nothing
+    // is drawn in front of it.
+    const wbW = Math.round(scene.width * 0.145);
+    const wbH = Math.round(description.walls.h * 0.30);
+    const wbX = Math.round(scene.width * 0.835);
+    const wbY = Math.round(description.walls.h * 0.24);
+    node.rect(wbX - 2, wbY - 2, wbW + 4, wbH + 4).fill({ color: mixHex(win.frame, 0x000000, 0.10) });
+    node.rect(wbX, wbY, wbW, wbH).fill({ color: dark ? 0x8d949a : 0xfcfdfd });
+    node.rect(wbX, wbY, wbW, 1).fill({ color: 0xffffff, alpha: dark ? 0.06 : 0.5 });
+    node.rect(wbX, wbY + wbH - 1, wbW, 1).fill({ color: 0x000000, alpha: 0.16 });
+    // Two deterministic marker strokes (the accent colour, low alpha).
+    const stroke = mixHex(c.accent, dark ? 0x000000 : 0xffffff, dark ? 0.35 : 0.25);
+    node.moveTo(wbX + wbW * 0.10, wbY + wbH * 0.30)
+      .lineTo(wbX + wbW * 0.44, wbY + wbH * 0.30)
+      .lineTo(wbX + wbW * 0.58, wbY + wbH * 0.52)
+      .stroke({ width: 2, color: stroke, alpha: dark ? 0.55 : 0.42 });
+    node.moveTo(wbX + wbW * 0.10, wbY + wbH * 0.68)
+      .lineTo(wbX + wbW * 0.34, wbY + wbH * 0.68)
+      .stroke({ width: 2, color: stroke, alpha: dark ? 0.40 : 0.30 });
+    // Marker tray + a marker lying on it.
+    node.rect(wbX, wbY + wbH, wbW, Math.max(2, Math.round(wbH * 0.10)))
+      .fill({ color: mixHex(win.frame, 0x000000, 0.16) });
+    node.rect(wbX + wbW * 0.30, wbY + wbH + 1, Math.max(4, wbW * 0.16), 2)
+      .fill({ color: stroke, alpha: 0.75 });
+    node.rect(wbX, wbY + wbH, wbW, 1).fill({ color: 0xffffff, alpha: dark ? 0.05 : 0.28 });
+
 
     // Reception (user decision): a low counter + a faint floor colour split.
     // The tint stays light so the zone never reads as a blank patch.
@@ -796,224 +948,2240 @@ async function createOfficeRenderer(options) {
     return description.colors;
   }
 
-  // P3.1b: the generated office, drawn as pseudo-3D boxes (top face + front
-  // face) instead of flat maps. `pass` splits paint roles: 'back' = top faces
-  // and props under the characters, 'front' = front faces + chairs above them.
-  function drawGeneratedOffice(node, pass) {
-    const office = officeDescription;
-    if (!office) return;
+  // ---- P3-I1: isometric preview ------------------------------------------
+  function rebuildIsoCamera() {
+    isoCamera = fitCamera({
+      width: scene.width,
+      height: scene.height,
+      worldWidth: 1,
+      worldDepth: 1,
+      maxHeight: 0.34,
+      margin: 20,
+    });
+    return isoCamera;
+  }
+
+  // Screen position of a world point (normalized office coordinates).
+  function footScreenOf(position) {
+    if (!position) return { x: 0, y: 0 };
+    if (projectionMode !== 'iso') {
+      return { x: position.x * scene.width, y: position.y * scene.height };
+    }
+    if (!isoCamera) rebuildIsoCamera();
+    return project(isoCamera, { x: position.x, y: position.y, z: 0 });
+  }
+
+  function isoPoint(x, y, z) {
+    return project(isoCamera || rebuildIsoCamera(), { x, y, z });
+  }
+
+  function fillIsoPolygon(node, points, fill, stroke, width, alpha, strokeAlpha) {
+    const projected = points.map((point) => isoPoint(point.x, point.y, point.z || 0));
+    if (projected.length < 3) return;
+    node.moveTo(projected[0].x, projected[0].y);
+    for (let i = 1; i < projected.length; i += 1) node.lineTo(projected[i].x, projected[i].y);
+    node.lineTo(projected[0].x, projected[0].y);
+    if (fill !== undefined && fill !== null) node.fill({ color: fill, alpha: alpha === undefined ? 1 : alpha });
+    if (stroke !== undefined && stroke !== null) {
+      node.stroke({ width: width || 1, color: stroke, alpha: strokeAlpha === undefined ? 1 : strokeAlpha });
+    }
+  }
+
+  // The I1 room shell: diamond floor, two walls, window, baseboard, light pool.
+  function drawIsoRoom(node) {
     const c = sceneColors();
+    if (!isoCamera) rebuildIsoCamera();
+    const H = 0.34;
+    // Floor diamond.
+    fillIsoPolygon(node, [
+      { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 },
+    ], c.floorB);
+    // Tile grid (two families of lines).
+    const step = 0.1;
+    for (let i = 1; i < 10; i += 1) {
+      const t = i * step;
+      fillIsoPolygon(node, [{ x: t, y: 0 }, { x: t, y: 1 }], null, c.grout, 1);
+      fillIsoPolygon(node, [{ x: 0, y: t }, { x: 1, y: t }], null, c.grout, 1);
+    }
+    // Back wall (y = 0) and left wall (x = 0).
+    fillIsoPolygon(node, [
+      { x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 },
+      { x: 1, y: 0, z: H }, { x: 0, y: 0, z: H },
+    ], c.wallTop, c.edge, 1);
+    fillIsoPolygon(node, [
+      { x: 0, y: 0, z: 0 }, { x: 0, y: 1, z: 0 },
+      { x: 0, y: 1, z: H }, { x: 0, y: 0, z: H },
+    ], c.wall, c.edge, 1);
+    // Baseboards.
+    fillIsoPolygon(node, [
+      { x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 },
+      { x: 1, y: 0, z: 0.02 }, { x: 0, y: 0, z: 0.02 },
+    ], c.base);
+    fillIsoPolygon(node, [
+      { x: 0, y: 0, z: 0 }, { x: 0, y: 1, z: 0 },
+      { x: 0, y: 1, z: 0.02 }, { x: 0, y: 0, z: 0.02 },
+    ], c.base);
+
+    // Window on the back wall (x 0.34..0.72, z 0.12..0.28).
+    const wx0 = 0.34;
+    const wx1 = 0.72;
+    const wz0 = 0.12;
+    const wz1 = 0.28;
+    fillIsoPolygon(node, [
+      { x: wx0, y: 0, z: wz0 }, { x: wx1, y: 0, z: wz0 },
+      { x: wx1, y: 0, z: wz1 }, { x: wx0, y: 0, z: wz1 },
+    ], c.windowGlass, c.windowFrame, 1);
+    const wm = (wx0 + wx1) / 2;
+    fillIsoPolygon(node, [{ x: wm, y: 0, z: wz0 }, { x: wm, y: 0, z: wz1 }], null, c.windowFrame, 1);
+    // Light pool spilling from the window onto the floor. Flat fills cannot
+    // gradient, so the pool is a few nested bands fading with distance — the
+    // cheap stand-in for a soft falloff that still reads as window light.
+    const bands = 5;
+    const reach = 0.30;
     const dark = codeSceneOptions.theme === 'dark';
-    const X = (v) => v * scene.width;
-    const Y = (v) => v * scene.height;
-    const W = (v) => v * scene.width;
-    const H = (v) => v * scene.height;
-    const HPX = (v) => Math.max(2, v * scene.height);
-
-    function boxTop(r, top, edge) {
-      const x = X(r.x);
-      const y = Y(r.y);
-      const w = W(r.w);
-      const d = H(r.h);
-      node.roundRect(x, y, w, d, 3).fill({ color: top });
-      node.roundRect(x, y, w, d, 3).stroke({ width: 1, color: edge, alpha: dark ? 0.75 : 0.5 });
-      node.rect(x + 2, y + 2, Math.max(1, w - 4), Math.max(2, d * 0.16))
-        .fill({ color: 0xffffff, alpha: dark ? 0.05 : 0.22 });
+    for (let i = bands; i >= 1; i -= 1) {
+      const t = i / bands;
+      const depth = reach * t;
+      const inset = 0.02 * t;
+      fillIsoPolygon(node, [
+        { x: wx0 + inset, y: 0, z: 0 }, { x: wx1 - inset, y: 0, z: 0 },
+        { x: wx1 - inset - 0.03 * t, y: depth, z: 0 }, { x: wx0 + inset + 0.03 * t, y: depth, z: 0 },
+      ], c.windowGlow, null, 1, (dark ? 0.055 : 0.075) * (1 - t * 0.6));
     }
+  }
 
-    function boxFront(r, height, front, edge) {
-      const x = X(r.x);
-      const y = Y(r.y) + H(r.h);
-      const w = W(r.w);
-      const h = HPX(height);
-      node.rect(x, y, w, h).fill({ color: front });
-      node.rect(x, y + h - 1, w, 1).fill({ color: edge, alpha: 0.85 });
-      node.rect(x, y, 1, h).fill({ color: edge, alpha: 0.30 });
-      node.rect(x + w - 1, y, 1, h).fill({ color: edge, alpha: 0.45 });
+  // ---- P3-I2: isometric furniture -----------------------------------------
+  // Face palette per material: top / front (y = y1) / side (x = x1). The
+  // camera looks from +x +y, so those are the two visible box faces.
+  function isoPalette() {
+    const c = sceneColors();
+    const accent = ACCENTS[codeSceneOptions.accent] || ACCENTS.indigo;
+    return {
+      accent,
+      tones: {
+        desk: { top: c.deskTop, front: c.deskFront, side: c.deskSide, edge: c.deskEdge },
+        deskSide: { top: c.deskSide, front: c.deskSide, side: c.deskEdge, edge: c.deskEdge },
+        monitor: { top: c.monitorBody, front: c.monitorScreen, side: c.monitorEdge, edge: c.monitorEdge },
+        monitorEdge: { top: c.monitorEdge, front: c.monitorEdge, side: c.monitorEdge, edge: c.monitorEdge },
+        chairSeat: { top: c.chairSeat, front: c.chairBack, side: c.chairBack, edge: c.deskEdge },
+        chairBack: { top: c.chairBack, front: c.chairBack, side: c.chairSeat, edge: c.deskEdge },
+        accent: { top: accent, front: accent, side: accent, edge: accent },
+        rug: { top: c.rug, front: c.rug, side: c.rug, edge: c.edge },
+        sofaFront: { top: c.sofa, front: c.sofaFront, side: c.sofa, edge: c.edge },
+        sofaSeat: { top: c.sofaSeat, front: c.sofaSeat, side: c.sofaFront, edge: c.edge },
+        sofa: { top: c.sofa, front: c.sofaFront, side: c.sofaFront, edge: c.edge },
+        counter: { top: c.counterTop, front: c.counterFront, side: c.counterSide, edge: c.edge },
+        counterSide: { top: c.counterSide, front: c.counterSide, side: c.counterSide, edge: c.edge },
+        plantPot: { top: c.plantPot, front: c.plantPot, side: c.plantPot, edge: c.edge },
+        plantLeaf: { top: c.plantLeaf, front: c.plantLeaf, side: c.plantLeaf, edge: c.edge },
+      },
+    };
+  }
+
+  function isoQuad(node, points, fill, alpha) {
+    fillIsoPolygon(node, points, fill, null, 1, alpha);
+  }
+
+  // One box: the two camera-facing walls plus the top, in painter order.
+  function drawIsoBox(node, part) {
+    if (!part) return;
+    const palette = isoPalette();
+    const tone = palette.tones[part.tone] || palette.tones.desk;
+    const { x0, y0, x1, y1, z0, z1 } = part;
+    // x = x1 (front-right) and y = y1 (front-left) are the visible walls.
+    isoQuad(node, [
+      { x: x1, y: y1, z: z0 }, { x: x1, y: y0, z: z0 },
+      { x: x1, y: y0, z: z1 }, { x: x1, y: y1, z: z1 },
+    ], tone.side);
+    isoQuad(node, [
+      { x: x0, y: y1, z: z0 }, { x: x1, y: y1, z: z0 },
+      { x: x1, y: y1, z: z1 }, { x: x0, y: y1, z: z1 },
+    ], tone.front);
+    isoQuad(node, [
+      { x: x0, y: y0, z: z1 }, { x: x1, y: y0, z: z1 },
+      { x: x1, y: y1, z: z1 }, { x: x0, y: y1, z: z1 },
+    ], tone.top);
+    // A hairline seam on the top face: without it low-contrast materials
+    // (desk on floor, sofa on rug) merge into one silhouette.
+    fillIsoPolygon(node, [
+      { x: x0, y: y0, z: z1 }, { x: x1, y: y0, z: z1 },
+      { x: x1, y: y1, z: z1 }, { x: x0, y: y1, z: z1 },
+    ], null, tone.edge, 1, 1, codeSceneOptions.theme === 'dark' ? 0.28 : 0.4);
+    drawIsoDetail(node, part, tone, palette);
+  }
+
+  // Surface details are drawn AFTER the box faces inside the same Graphics,
+  // offset a hair along the normal so they cannot z-fight with the face.
+  function drawIsoDetail(node, part, tone, palette) {
+    const { x0, y0, x1, y1, z0, z1 } = part;
+    const edge = tone.edge;
+    const lift = 0.0006;
+    if (part.detail === 'screen') {
+      const ix = (x1 - x0) * 0.08;
+      const iz = (z1 - z0) * 0.12;
+      isoQuad(node, [
+        { x: x0 + ix, y: y1 + lift, z: z0 + iz }, { x: x1 - ix, y: y1 + lift, z: z0 + iz },
+        { x: x1 - ix, y: y1 + lift, z: z1 - iz }, { x: x0 + ix, y: y1 + lift, z: z1 - iz },
+      ], palette.tones.monitor.front);
+      isoQuad(node, [
+        { x: x0 + ix, y: y1 + lift * 2, z: z0 + iz }, { x: x1 - ix, y: y1 + lift * 2, z: z0 + iz },
+        { x: x1 - ix, y: y1 + lift * 2, z: z1 - iz }, { x: x0 + ix, y: y1 + lift * 2, z: z1 - iz },
+      ], edge, 0.18);
+    } else if (part.detail === 'keys') {
+      for (let i = 1; i <= 3; i += 1) {
+        const t = y0 + ((y1 - y0) * i) / 4;
+        isoQuad(node, [
+          { x: x0 + 0.004, y: t, z: z1 + lift }, { x: x1 - 0.004, y: t, z: z1 + lift },
+          { x: x1 - 0.004, y: t + 0.0015, z: z1 + lift }, { x: x0 + 0.004, y: t + 0.0015, z: z1 + lift },
+        ], edge, 0.35);
+      }
+    } else if (part.detail === 'drawer') {
+      for (const t of [0.35, 0.68]) {
+        const z = z0 + (z1 - z0) * t;
+        isoQuad(node, [
+          { x: x0 + 0.004, y: y1 + lift, z }, { x: x1 - 0.004, y: y1 + lift, z },
+          { x: x1 - 0.004, y: y1 + lift, z: z + 0.0012 }, { x: x0 + 0.004, y: y1 + lift, z: z + 0.0012 },
+        ], edge, 0.5);
+      }
+    } else if (part.detail === 'sink') {
+      isoQuad(node, [
+        { x: x0 + 0.006, y: y0 + (y1 - y0) * 0.18, z: z1 + lift },
+        { x: x1 - 0.006, y: y0 + (y1 - y0) * 0.18, z: z1 + lift },
+        { x: x1 - 0.006, y: y0 + (y1 - y0) * 0.52, z: z1 + lift },
+        { x: x0 + 0.006, y: y0 + (y1 - y0) * 0.52, z: z1 + lift },
+      ], palette.tones.counterSide.top);
+    } else if (part.detail === 'machine') {
+      isoQuad(node, [
+        { x: x0 + 0.006, y: y1 + lift, z: z0 + 0.008 },
+        { x: x1 - 0.006, y: y1 + lift, z: z0 + 0.008 },
+        { x: x1 - 0.006, y: y1 + lift, z: z0 + 0.030 },
+        { x: x0 + 0.006, y: y1 + lift, z: z0 + 0.030 },
+      ], edge, 0.55);
+    } else if (part.detail === 'counter' || part.detail === 'table') {
+      isoQuad(node, [
+        { x: x0, y: y1 + lift, z: z1 - 0.001 }, { x: x1, y: y1 + lift, z: z1 - 0.001 },
+        { x: x1, y: y1 + lift, z: z1 }, { x: x0, y: y1 + lift, z: z1 },
+      ], edge, 0.45);
+    } else if (part.detail === 'mug') {
+      const inset = 0.002;
+      isoQuad(node, [
+        { x: x0 + inset, y: y0 + inset, z: z1 + lift }, { x: x1 - inset, y: y0 + inset, z: z1 + lift },
+        { x: x1 - inset, y: y1 - inset, z: z1 + lift }, { x: x0 + inset, y: y1 - inset, z: z1 + lift },
+      ], palette.accent);
+    } else if (part.detail === 'panel') {
+      isoQuad(node, [
+        { x: x0 + 0.004, y: y1 + lift, z: z0 + 0.004 }, { x: x1 - 0.004, y: y1 + lift, z: z0 + 0.004 },
+        { x: x1 - 0.004, y: y1 + lift, z: z0 + 0.006 }, { x: x0 + 0.004, y: y1 + lift, z: z0 + 0.006 },
+      ], edge, 0.5);
+    } else if (part.detail === 'sofa-base') {
+      const mid = (x0 + x1) / 2;
+      isoQuad(node, [
+        { x: mid, y: y0 + 0.006, z: z1 + lift }, { x: mid + 0.0015, y: y0 + 0.006, z: z1 + lift },
+        { x: mid + 0.0015, y: y1 - 0.006, z: z1 + lift }, { x: mid, y: y1 - 0.006, z: z1 + lift },
+      ], edge, 0.35);
     }
+  }
 
-    if (pass === 'front') {
-      const faces = [];
-      for (const station of office.workstations) {
-        faces.push({ key: station.desk.y + station.desk.h, kind: 'desk', station });
-      }
-      if (office.kitchen) faces.push({ key: office.kitchen.y + office.kitchen.h, kind: 'kitchen' });
-      if (office.lounge) {
-        faces.push({ key: office.lounge.sofa.y + office.lounge.sofa.h, kind: 'sofa' });
-        faces.push({ key: office.lounge.table.y + office.lounge.table.h, kind: 'table' });
-      }
-      faces.sort((a, b) => a.key - b.key);
+  // Contact shadows for the iso furniture: one Graphics on the background
+  // layer, under every box. Only footprint-defining parts cast one — legs,
+  // panels, drawers and props sit inside their parent's footprint and would
+  // double-darken the same patch. The offset is toward +y (the window is on
+  // the back wall), so shadows read as cast away from the light.
+  const ISO_SHADOW_CAST = 0.012;
+  function drawIsoShadows(description) {
+    if (!isoShadowNode) {
+      isoShadowNode = new PIXI.Graphics();
+      isoShadowNode.__isoShadow = true;
+      layers.background.addChild(isoShadowNode);
+    }
+    isoShadowNode.clear();
+    const dark = codeSceneOptions.theme === 'dark';
+    const alpha = dark ? 0.34 : 0.13;
+    for (const part of description.parts) {
+      const casts = part.kind === 'desk'
+        || part.kind === 'table'
+        || part.kind === 'counter'
+        || part.kind === 'machine'
+        || part.kind === 'plant'
+        || (part.kind === 'chair' && part.id.endsWith('-chair-seat'));
+      if (!casts) continue;
+      const x0 = part.x0 + 0.006;
+      const x1 = part.x1 - 0.006;
+      const y0 = part.y0 + 0.006;
+      const y1 = part.y1 - 0.006;
+      if (x1 <= x0 || y1 <= y0) continue;
+      fillIsoPolygon(isoShadowNode, [
+        { x: x0, y: y0 + ISO_SHADOW_CAST, z: 0 },
+        { x: x1, y: y0 + ISO_SHADOW_CAST, z: 0 },
+        { x: x1, y: y1 + ISO_SHADOW_CAST, z: 0 },
+        { x: x0, y: y1 + ISO_SHADOW_CAST, z: 0 },
+      ], 0x000000, null, 1, alpha);
+    }
+  }
 
-      for (const face of faces) {
-        if (face.kind === 'desk') {
-          const station = face.station;
-          boxFront(station.desk, station.height, c.deskFront || c.deskSide, c.deskEdge);
-        } else if (face.kind === 'kitchen') {
-          boxFront(office.kitchen, office.kitchen.height, c.counterFront || c.counterSide || c.deskSide, c.deskEdge);
-        } else if (face.kind === 'sofa') {
-          boxFront(office.lounge.sofa, 0.030, c.sofaFront || c.chairBack, c.chairBack);
-        } else if (face.kind === 'table') {
-          boxFront(office.lounge.table, office.lounge.table.height, c.deskFront || c.deskSide, c.deskEdge);
+  function buildIsoDescription() {
+    const workstations = typeof layout.workstations === 'function' ? layout.workstations() : null;
+    const instances = workstations && Array.isArray(workstations.instances) ? workstations.instances : [];
+    const seats = instances.map((instance) => {
+      const position = instance && instance.seat && instance.seat.position;
+      if (!position) return null;
+      return { id: instance.deskId || (instance.seat && instance.seat.id) || 'desk', x: position.x, y: position.y };
+    }).filter(Boolean);
+    return describeIsoOffice({ seats });
+  }
+
+  // Creates/redraws one Graphics per box and re-sorts the ground pass so the
+  // boxes interleave with the characters by (x + y).
+  function layoutIsoFurniture() {
+    if (projectionMode !== 'iso' || !codeSceneOptions.enabled) return;
+    if (!isoCamera) rebuildIsoCamera();
+    const description = buildIsoDescription();
+    isoDescription = description;
+    const layer = layers['ground-entities'];
+    const seen = new Set();
+    for (const part of description.parts) {
+      seen.add(part.id);
+      let record = isoFurniture.get(part.id);
+      if (!record) {
+        const node = new PIXI.Graphics();
+        node.__isoPartId = part.id;
+        layer.addChild(node);
+        record = { node, part };
+        isoFurniture.set(part.id, record);
+      }
+      record.part = part;
+      record.node.clear();
+      drawIsoBox(record.node, part);
+    }
+    for (const [id, record] of [...isoFurniture]) {
+      if (seen.has(id)) continue;
+      record.node.destroy();
+      isoFurniture.delete(id);
+    }
+    drawIsoShadows(description);
+    sortIsoGround();
+  }
+
+  function sortIsoGround() {
+    const layer = layers['ground-entities'];
+    const entries = [];
+    const bands = isoDescription && Array.isArray(isoDescription.stations) ? isoDescription.stations : [];
+    for (const record of entities.values()) {
+      if (!record.container) continue;
+      const point = record.__snapshot ? record.__snapshot.position : null;
+      let key = point ? (point.x + point.y) : 0;
+      // Seated bodies draw just before their desk, so the desk slab and its
+      // modesty panel cover the legs — the same "seated bodies sit behind"
+      // reading the flat renderer gets from its station re-keying.
+      if (point) {
+        for (const band of bands) {
+          if (point.x < band.x0 || point.x > band.x1) continue;
+          if (point.y < band.y0 || point.y > band.y1) continue;
+          key = band.key;
+          break;
         }
       }
+      entries.push({ key, node: record.container, id: record.employeeId, kind: 'character' });
+    }
+    for (const record of isoFurniture.values()) {
+      const part = record.part;
+      entries.push({
+        key: part.sortKey === undefined ? part.depth : part.sortKey,
+        node: record.node,
+        id: part.id,
+        kind: 'furniture',
+      });
+    }
+    entries.sort((a, b) => (a.key - b.key) || String(a.id).localeCompare(String(b.id)));
+    applyGroundOrder(layer, entries);
+    return entries.map((entry) => entry.id);
+  }
 
-      // Chairs last: they are nearest to the viewer of anything at a desk.
-      for (const station of office.workstations) {
-        const chair = station.chair;
-        const cx = X(chair.x);
-        const cy = Y(chair.y);
-        const cw = W(chair.w);
-        const ch = H(chair.h);
-        const seatH = HPX(station.chairHeight);
-        // Contact shadow.
-        node.ellipse(cx + cw * 0.5, cy + ch * 0.96, cw * 0.60, Math.max(2, ch * 0.08))
-          .fill({ color: 0x000000, alpha: dark ? 0.22 : 0.07 });
-        // Backrest box (top + front).
-        const backH = ch * 0.30;
-        node.roundRect(cx + cw * 0.06, cy, cw * 0.88, backH, Math.max(2, cw * 0.12)).fill({ color: c.chairBack });
-        node.rect(cx + cw * 0.06, cy + backH, cw * 0.88, seatH * 0.55).fill({ color: c.chairBack, alpha: 0.85 });
-        // Seat slab.
-        node.roundRect(cx + cw * 0.02, cy + backH, cw * 0.96, ch * 0.30, 3).fill({ color: c.chairSeat });
-        node.rect(cx + cw * 0.02, cy + backH + ch * 0.30, cw * 0.96, seatH)
-          .fill({ color: c.chairBack, alpha: 0.9 });
-        // Armrests.
-        node.rect(cx + cw * 0.05, cy + backH + ch * 0.06, Math.max(1, cw * 0.10), Math.max(2, ch * 0.16))
-          .fill({ color: c.chairBack, alpha: 0.9 });
-        node.rect(cx + cw * 0.85, cy + backH + ch * 0.06, Math.max(1, cw * 0.10), Math.max(2, ch * 0.16))
-          .fill({ color: c.chairBack, alpha: 0.9 });
-        // Gas lift + base.
-        node.rect(cx + cw * 0.46, cy + backH + ch * 0.30 + seatH, Math.max(1, cw * 0.08), ch * 0.16)
-          .fill({ color: c.chairBack });
-        node.ellipse(cx + cw * 0.5, cy + ch * 0.94, cw * 0.40, Math.max(2, ch * 0.05))
-          .fill({ color: c.chairBack, alpha: 0.9 });
-        node.rect(cx + cw * 0.16, cy + ch * 0.92, cw * 0.68, 2).fill({ color: c.chairBack, alpha: 0.8 });
-        node.circle(cx + cw * 0.20, cy + ch * 0.90, 1.5).fill({ color: c.chairEdge || c.chairBack });
-        node.circle(cx + cw * 0.80, cy + ch * 0.90, 1.5).fill({ color: c.chairEdge || c.chairBack });
+  // ---- 2.5D coded furniture (2026-10-27) ---------------------------------
+  // The user's call: furniture and props are generated in code instead of
+  // being collaged from image assets. Every part is an axis-aligned box drawn
+  // as a top face + a front face; the flat projection keeps the camera where
+  // it is (no skewed view) and reads height by lifting the footprint upward.
+  // One Graphics per group, sorted with the characters by the group's
+  // front-bottom edge, so occlusion is a property of geometry, not layers.
+  const officeGroups = new Map();
+  let officeShadowNode = null;
+
+  function mixHex(a, b, t) {
+    const k = Math.min(1, Math.max(0, t));
+    const ar = (a >> 16) & 0xff; const ag = (a >> 8) & 0xff; const ab = a & 0xff;
+    const br = (b >> 16) & 0xff; const bg = (b >> 8) & 0xff; const bb = b & 0xff;
+    return (Math.round(ar + (br - ar) * k) << 16)
+      | (Math.round(ag + (bg - ag) * k) << 8)
+      | Math.round(ab + (bb - ab) * k);
+  }
+
+  function officeTone(tone) {
+    const c = sceneColors();
+    const dark = codeSceneOptions.theme === 'dark';
+    const accent = ACCENTS[codeSceneOptions.accent] || ACCENTS.indigo;
+    const paper = dark ? 0x4b4e52 : 0xffffff;
+    // Metal, keycaps, mesh and glass are *material* families shared by every
+    // object in the kit (2026-10-28 refinement). Deriving them from the theme
+    // instead of hard-coding 0xRRGGBB keeps one light direction and one
+    // saturation budget: nothing may out-shine the wood it stands on.
+    const metalTop = dark ? 0x4e5359 : 0xccd1d6;
+    const metalFront = dark ? 0x3b4045 : 0xa8afb6;
+    const steelTop = dark ? 0x3a3e43 : 0xb4bac0;
+    const steelFront = dark ? 0x2c3034 : 0x8f979e;
+    const keycapTop = dark ? 0x585c61 : 0xeceef0;
+    const keycapFront = dark ? 0x44484d : 0xd2d7db;
+    const meshTop = dark ? 0x3a3d40 : 0x6b7784;
+    const meshFront = dark ? 0x2c2f32 : 0x525e6a;
+    const tones = {
+      desk: { top: c.deskTop, front: c.deskFront },
+      deskSide: { top: c.deskSide, front: c.deskSide },
+      deskFront: { top: c.deskFront, front: c.deskSide },
+      monitor: { top: c.monitorBody, front: c.monitorEdge },
+      monitorEdge: { top: c.monitorEdge, front: c.monitorEdge },
+      // Brushed metal: one step brighter than the monitor shell so handles,
+      // legs and the monitor neck separate from the body they sit on.
+      metal: { top: metalTop, front: metalFront },
+      steel: { top: steelTop, front: steelFront },
+      keycap: { top: keycapTop, front: keycapFront },
+      mesh: { top: meshTop, front: meshFront },
+      chairSeat: { top: c.chairSeat, front: c.chairBack },
+      chairBack: { top: c.chairBack, front: c.chairBack },
+      sofa: { top: c.sofa, front: c.sofaFront },
+      sofaBack: { top: c.sofa, front: c.sofa },
+      sofaSeat: { top: c.sofaSeat, front: c.sofaFront },
+      counterFront: { top: c.counterFront, front: c.counterFront },
+      counterTop: { top: c.counterTop, front: c.counterTop },
+      counterSide: { top: c.counterSide, front: c.counterSide },
+      plantPot: { top: c.plantPot, front: c.plantPot },
+      // 第二种盆色：4 个物种如果都用同一个米色盆，一眼就是复用（2026-10-28）。
+      plantPotAlt: {
+        top: mixHex(c.plantPot, dark ? 0x9aa0a6 : 0xe8e4dc, dark ? 0.26 : 0.62),
+        front: mixHex(c.plantPot, dark ? 0x9aa0a6 : 0xe8e4dc, dark ? 0.26 : 0.62),
+      },
+      plantLeaf: { top: c.plantLeaf, front: c.plantLeaf },
+      plantLeafAlt: {
+        top: mixHex(c.plantLeaf, dark ? 0x000000 : 0x2f4a36, dark ? 0.30 : 0.22),
+        front: mixHex(c.plantLeaf, dark ? 0x000000 : 0x2f4a36, dark ? 0.30 : 0.22),
+      },
+      rug: { top: c.rug, front: c.rug },
+      paper: { top: paper, front: paper },
+      accent: { top: accent, front: accent },
+      // Softer accent for pillows/lamp shades: never a saturated UI chip.
+      accentSoft: { top: mixHex(accent, dark ? 0x000000 : 0xffffff, 0.55), front: mixHex(accent, dark ? 0x000000 : 0xffffff, 0.65) },
+      // Sticky notes: the accent desaturated most of the way to paper, so a
+      // note reads as coloured stationery, not as a UI swatch.
+      sticky: {
+        top: mixHex(accent, paper, dark ? 0.62 : 0.74),
+        front: mixHex(accent, paper, dark ? 0.54 : 0.66),
+      },
+      // Ceramic (mugs, crockery): even further toward paper. The reviewer
+      // measured the old raw-accent mug at saturation 0.68 while every other
+      // object sits at 0.16–0.18 — that gap is exactly what made it read as a
+      // UI chip. 0.80/0.84 lands at sat ≈0.13–0.16, in family with the rest.
+      ceramic: {
+        top: mixHex(accent, paper, dark ? 0.74 : 0.84),
+        front: mixHex(accent, paper, dark ? 0.68 : 0.80),
+      },
+      // A lamp shade is warm material even in a neutral room; reusing the
+      // accent made it read as a lavender UI chip.
+      lampShade: {
+        top: dark ? 0x6b604e : 0xf4e7c8,
+        front: dark ? 0x584f40 : 0xe8d5ab,
+      },
+    };
+    const base = tones[tone] || tones.desk;
+    // Four shades per material: lit top, plain front, shade edge, plus the
+    // top lip highlight. Every object in the kit uses the same four steps, so
+    // the scene reads as one material system instead of N pasted rectangles.
+    return {
+      top: base.top,
+      front: base.front,
+      edge: mixHex(base.front, 0x000000, dark ? 0.28 : 0.18),
+      lip: mixHex(base.top, 0xffffff, dark ? 0.06 : 0.30),
+      glow: mixHex(base.top, 0xffffff, dark ? 0.03 : 0.14),
+    };
+  }
+
+  // Deterministic texture seed. The renderer is a pure projection of the
+  // snapshot: the same part must paint the same grain every frame, so every
+  // pseudo-random offset is hashed out of the part id instead of Math.random().
+  function hash01(seed) {
+    let h = 2166136261 >>> 0;
+    const text = String(seed);
+    for (let i = 0; i < text.length; i += 1) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    h ^= h >>> 13;
+    h = Math.imul(h, 2246822507) >>> 0;
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  }
+
+  // ---------------------------------------------------------------------
+  // Material textures (2026-10-28 refinement).
+  //
+  // The user's verdict on the first prototype was "几个色块简单拼接". A flat
+  // rectangle is the problem; a rectangle plus a *material* is the fix. These
+  // four helpers are the whole vocabulary — wood, stone, fabric and paper —
+  // each one only ever draws low-alpha lines or dots so the silhouette stays
+  // the subject and the texture never becomes a pattern.
+  // ---------------------------------------------------------------------
+
+  // Wood grain: 4–6 straight-ish lines running along the slab's long axis,
+  // plus one faint knot. Lines are 1px and ≤0.16 alpha: visible at 1:1, gone
+  // at a glance — which is exactly what "material" means at this size.
+  function woodGrain(node, part, tone, dark) {
+    const W = scene.width;
+    const H = scene.height;
+    const x = part.x0 * W;
+    const w = Math.max(2, (part.x1 - part.x0) * W);
+    const y = part.y0 * H - part.z1 * H;
+    const d = Math.max(2, (part.y1 - part.y0) * H);
+    if (w < 24 || d < 5) return;
+    const lines = 5;
+    const alpha = dark ? 0.13 : 0.10;
+    for (let i = 0; i < lines; i += 1) {
+      const seed = hash01(`${part.id}:grain:${i}`);
+      const gy = y + 2 + (d - 4) * ((i + 0.35 + seed * 0.3) / lines);
+      const startX = x + 2 + w * 0.03 * seed;
+      const len = w * (0.42 + seed * 0.42);
+      // A 1px-high run with a 1px step in the middle reads as grain rather
+      // than as a ruled line.
+      const midX = startX + len * 0.55;
+      node.rect(startX, gy, Math.max(2, midX - startX), 1)
+        .fill({ color: tone.edge, alpha });
+      node.rect(midX, gy + (seed > 0.5 ? 0 : 1), Math.max(2, startX + len - midX), 1)
+        .fill({ color: tone.edge, alpha: alpha * 0.8 });
+    }
+    // One faint knot on the right third: the single asymmetry that stops the
+    // grain from looking machine-printed.
+    const knot = hash01(`${part.id}:knot`);
+    node.ellipse(x + w * (0.62 + knot * 0.18), y + d * (0.34 + knot * 0.30),
+      Math.max(1, w * 0.016), Math.max(0.8, d * 0.07))
+      .fill({ color: tone.edge, alpha: dark ? 0.16 : 0.11 });
+  }
+
+  // Brushed metal: the review's sharpest material finding (2026-10-28) was that
+  // a fridge is 64% one flat colour with a single 1px highlight — "it differs
+  // from stone only in lightness". Metal needs three things that stone does not
+  // have: a directional sheen band, a bright edge reflection, and a dark seam.
+  // All are low-alpha so the object still reads as one colour.
+  function drawMetalSurface(node, part, tone, dark, x, y, w, h) {
+    if (w < 6 || h < 6) return;
+    // Sheen: a broad vertical band offset from centre (the window side).
+    const bandX = x + w * 0.22;
+    const bandW = Math.max(2, w * 0.16);
+    node.rect(bandX, y + 1, bandW, Math.max(2, h - 2))
+      .fill({ color: tone.lip, alpha: dark ? 0.10 : 0.34 });
+    // A second, narrower band: brushed metal has two highlights, not one.
+    node.rect(x + w * 0.60, y + 1, Math.max(1, w * 0.07), Math.max(2, h - 2))
+      .fill({ color: tone.lip, alpha: dark ? 0.07 : 0.22 });
+    // Edge reflections: a bright line on the lit side, dark on the other.
+    node.rect(x, y + 1, 1, Math.max(2, h - 2)).fill({ color: tone.lip, alpha: dark ? 0.18 : 0.55 });
+    node.rect(x + w - 1, y + 1, 1, Math.max(2, h - 2)).fill({ color: 0x000000, alpha: dark ? 0.30 : 0.16 });
+    // Horizontal brush strokes: 2–3 faint lines make it "drawn", not "flat".
+    for (let i = 1; i <= 2; i += 1) {
+      const gy = y + (h * i) / 3;
+      node.rect(x + 2, gy, Math.max(1, w - 4), 1).fill({ color: tone.edge, alpha: dark ? 0.12 : 0.08 });
+    }
+  }
+
+  // Stone: specks + a migration vein. The review found the counter top to be
+  // 78% one colour, and stone that is uniform reads as plastic (2026-10-28).
+  // Three features separate stone from flat grey: larger mineral flecks at two
+  // sizes, one long low-alpha vein across the slab, and a per-tile tonal shift.
+  function stoneSpecks(node, part, tone, dark) {
+    const W = scene.width;
+    const H = scene.height;
+    const x = part.x0 * W;
+    const w = Math.max(2, (part.x1 - part.x0) * W);
+    const y = part.y0 * H - part.z1 * H;
+    const d = Math.max(2, (part.y1 - part.y0) * H);
+    if (w < 20 || d < 5) return;
+    // Mineral flecks: 14, at two sizes and both directions (dark and light).
+    for (let i = 0; i < 14; i += 1) {
+      const a = hash01(`${part.id}:stone:${i}`);
+      const b = hash01(`${part.id}:stone2:${i}`);
+      const big = i % 4 === 0;
+      const sw = big ? 1.6 + b * 1.4 : 0.8 + b * 0.8;
+      const sh = big ? 1.2 + a : 0.7 + a * 0.7;
+      node.rect(x + 2 + a * (w - 5), y + 2 + b * (d - 5), sw, sh)
+        .fill({ color: i % 3 === 0 ? tone.edge : tone.lip, alpha: dark ? 0.26 : 0.34 });
+    }
+    // One migration vein: a shallow diagonal, brighter than the flecks.
+    node.moveTo(x + w * 0.08, y + d * 0.72)
+      .lineTo(x + w * 0.34, y + d * 0.52)
+      .lineTo(x + w * 0.52, y + d * 0.58)
+      .lineTo(x + w * 0.78, y + d * 0.30)
+      .stroke({ width: 1, color: tone.lip, alpha: dark ? 0.16 : 0.30 });
+    // Panel-to-panel tonal shift: stone slabs are never one batch.
+    const shift = hash01(`${part.id}:slab`);
+    node.rect(x, y, w, d).fill({ color: shift > 0.5 ? 0xffffff : 0x000000, alpha: 0.022 });
+  }
+
+  // Fabric: 3–4 seams plus a soft inner shading band. Used by cushions, sofa
+  // seats and the mesh back, where "same flat colour" was reading as plastic.
+  function fabricSeams(node, part, tone, dark, count) {
+    const W = scene.width;
+    const H = scene.height;
+    const x = part.x0 * W;
+    const w = Math.max(2, (part.x1 - part.x0) * W);
+    const y = part.y0 * H - part.z1 * H;
+    const d = Math.max(2, (part.y1 - part.y0) * H);
+    if (w < 16 || d < 4) return;
+    const seams = count || 3;
+    for (let i = 1; i <= seams; i += 1) {
+      const sy = y + (d * i) / (seams + 1);
+      node.rect(x + 2, sy, Math.max(2, w - 4), 1)
+        .fill({ color: tone.edge, alpha: dark ? 0.26 : 0.18 });
+    }
+    // Cushion softness: a lit band along the back and a shadowed band along
+    // the front edge, so the pad has a dome instead of a flat top.
+    node.rect(x + 1, y + 1, Math.max(1, w - 2), 1).fill({ color: tone.lip, alpha: dark ? 0.12 : 0.34 });
+    node.rect(x + 1, y + d - 2, Math.max(1, w - 2), 1).fill({ color: tone.edge, alpha: dark ? 0.30 : 0.20 });
+  }
+
+  // Paper: stacked sheets, one folded corner, a few text lines. Drawn on the
+  // top face of the papers box so the stack keeps one silhouette.
+  function paperStack(node, part, tone, dark) {
+    const W = scene.width;
+    const H = scene.height;
+    const x = part.x0 * W;
+    const w = Math.max(2, (part.x1 - part.x0) * W);
+    const y = part.y0 * H - part.z1 * H;
+    const d = Math.max(2, (part.y1 - part.y0) * H);
+    if (w < 14 || d < 8) return;
+    // Two lower sheets peeking out at a deterministic offset.
+    const ox = Math.max(1, Math.round(w * 0.035));
+    const oy = Math.max(1, Math.round(d * 0.06));
+    node.rect(x + ox, y + oy, w - ox, d - oy)
+      .fill({ color: mixHex(tone.front, 0x000000, dark ? 0.12 : 0.06) });
+    node.rect(x + ox * 2, y + oy * 2, w - ox * 2, d - oy * 2)
+      .fill({ color: tone.front });
+    // Folded top-right corner: a small triangle of the sheet underneath.
+    const fold = Math.max(3, Math.min(w, d) * 0.16);
+    node.moveTo(x + w - fold, y)
+      .lineTo(x + w, y)
+      .lineTo(x + w, y + fold)
+      .closePath()
+      .fill({ color: mixHex(tone.front, 0x000000, dark ? 0.22 : 0.12) });
+    // Text lines: 3, indented, unequal — paragraphs, not a rule set.
+    const lineColor = dark ? 0x000000 : 0x5b6470;
+    node.rect(x + ox * 2 + 2, y + oy * 2 + Math.max(3, d * 0.16), w * 0.62, 1)
+      .fill({ color: lineColor, alpha: dark ? 0.30 : 0.16 });
+    node.rect(x + ox * 2 + 2, y + oy * 2 + Math.max(5, d * 0.34), w * 0.78, 1)
+      .fill({ color: lineColor, alpha: dark ? 0.26 : 0.13 });
+    node.rect(x + ox * 2 + 2, y + oy * 2 + Math.max(7, d * 0.52), w * 0.44, 1)
+      .fill({ color: lineColor, alpha: dark ? 0.22 : 0.11 });
+  }
+
+  // A soft contact shadow on the floor: two nested ellipses, never one hard
+  // one. One ellipse reads as a stain; two read as falloff.
+  function floorContact(node, cx, cy, rx, ry, strength) {
+    const dark = codeSceneOptions.theme === 'dark';
+    const a = (dark ? 0.20 : 0.055) * (strength === undefined ? 1 : strength);
+    node.ellipse(cx, cy, rx, ry).fill({ color: 0x000000, alpha: a });
+    node.ellipse(cx, cy, rx * 0.62, ry * 0.62).fill({ color: 0x000000, alpha: a * 0.85 });
+  }
+
+  // A throw pillow is one rounded square standing on the seat, leaning back.
+  // It is drawn as a single face (no box top) because a cushion has no
+  // readable top plane at this size — the box path made it look like a cube
+  // with a lid (2026-10-28).
+  function drawPillow(node, part, tone) {
+    const dark = codeSceneOptions.theme === 'dark';
+    const W = scene.width;
+    const H = scene.height;
+    const x = part.x0 * W;
+    const w = Math.max(3, (part.x1 - part.x0) * W);
+    // Use the full box height on screen (the pillow leans on the back cushion).
+    const baseY = part.y1 * H - part.z0 * H;
+    const topY = part.y1 * H - part.z1 * H;
+    const h = Math.max(4, baseY - topY);
+    const r = Math.max(3, Math.min(w, h) * 0.38);
+    // Contact shadow on the seat.
+    node.ellipse(x + w / 2, baseY - 1, w * 0.55, Math.max(1.5, h * 0.16))
+      .fill({ color: 0x000000, alpha: dark ? 0.26 : 0.10 });
+    // Body.
+    node.roundRect(x, topY, w, h, r).fill({ color: tone.front });
+    // Domed face: an inset rounded rect, lighter, offset toward the light.
+    node.roundRect(x + w * 0.10, topY + h * 0.12, w * 0.80, h * 0.76, r * 0.72)
+      .fill({ color: tone.top, alpha: dark ? 0.34 : 0.62 });
+    // Lit top edge and shaded bottom edge (one light source, same as everything
+    // else in the kit).
+    node.roundRect(x + 1, topY + 1, Math.max(1, w - 2), Math.max(1, h * 0.20), r * 0.8)
+      .fill({ color: tone.lip, alpha: dark ? 0.14 : 0.44 });
+    node.roundRect(x + 1, topY + h - Math.max(2, h * 0.18), Math.max(1, w - 2), Math.max(2, h * 0.18), r * 0.6)
+      .fill({ color: 0x000000, alpha: dark ? 0.26 : 0.12 });
+    // Centre crease with a soft button in the middle.
+    node.rect(x + w * 0.5, topY + h * 0.22, 1, Math.max(1, h * 0.50))
+      .fill({ color: tone.edge, alpha: dark ? 0.34 : 0.20 });
+    node.circle(x + w * 0.5, topY + h * 0.50, Math.max(1, Math.min(w, h) * 0.055))
+      .fill({ color: tone.edge, alpha: dark ? 0.30 : 0.18 });
+    // Silhouette.
+    node.roundRect(x, topY, w, h, r).stroke({ width: 1, color: 0x000000, alpha: dark ? 0.30 : 0.16 });
+  }
+
+  // A leaf is drawn from SIMPLE primitives only: a rotated ellipse for the
+  // blade plus a triangle for the point, both filled in the same colour.
+  //
+  // Why not a sampled contour: two attempts at a 20-point custom outline
+  // (moveTo/lineTo/closePath, then poly()) both rendered with pale slivers
+  // punched through the blade — the floor and its grout showed through. The
+  // polygon was verified non-self-intersecting offline, so the breakage comes
+  // from reusing one Graphics path across the fill/stroke sequence in Pixi v8.
+  // Simple primitives are one shape per call and cannot hit that state at all.
+  // 4 种叶形，由 geometry 的 `part.family` 选择（2026-10-28 第二轮）。
+  // 上一版所有物种共用"椭圆 + 尖三角"，所以 4 盆绿植看起来是同一张贴纸。
+  // 全部只用简单图元（ellipse / poly / 直线），避开自建路径在 Pixi v8 上
+  // 复用路径状态打洞的坑（见 §9.3 第 5 条）。
+  function drawLeaf(node, part, tone) {
+    const dark = codeSceneOptions.theme === 'dark';
+    const W = scene.width;
+    const H = scene.height;
+    const cx = (part.x0 + part.x1) / 2 * W;
+    const rx = Math.max(2, (part.x1 - part.x0) / 2 * W);
+    const cy = (part.y0 + part.y1) / 2 * H - part.z1 * H;
+    const ry = Math.max(2, (part.y1 - part.y0) / 2 * H);
+    const tilt = typeof part.tilt === 'number' ? part.tilt : 0;
+    const family = part.family || 'broad';
+    const edgeA = dark ? 0.40 : 0.26;
+    // 叶下投影：所有叶形共用。
+    node.ellipse(cx, cy + ry * 0.52, rx * 0.70, ry * 0.32)
+      .fill({ color: 0x000000, alpha: dark ? 0.20 : 0.07 });
+
+    if (family === 'sword') {
+      // 虎皮兰：细长直立剑形叶。细高椭圆 + 更长的尖端，几乎不横向展开。
+      const tipX = cx + tilt * rx * 0.55;
+      const tipY = cy - ry * 1.05;
+      node.ellipse(cx, cy, rx, ry).fill({ color: tone.front });
+      node.poly([
+        cx - rx * 0.80, cy - ry * 0.50,
+        tipX, tipY,
+        cx + rx * 0.80, cy - ry * 0.50,
+      ]).fill({ color: tone.front });
+      // 剑叶的特征：两侧各一条纵向浅色边（虎皮兰的镶边）。
+      node.moveTo(cx - rx * 0.72, cy + ry * 0.72)
+        .lineTo(tipX - rx * 0.10, tipY + ry * 0.10)
+        .stroke({ width: 1, color: tone.lip, alpha: dark ? 0.14 : 0.34 });
+      node.moveTo(cx + rx * 0.72, cy + ry * 0.72)
+        .lineTo(tipX + rx * 0.06, tipY + ry * 0.10)
+        .stroke({ width: 1, color: tone.lip, alpha: dark ? 0.10 : 0.24 });
+      // 中央叶脉。
+      node.moveTo(cx, cy + ry * 0.85).lineTo(tipX, tipY + ry * 0.10)
+        .stroke({ width: 1, color: tone.edge, alpha: edgeA });
+      node.ellipse(cx, cy, rx, ry).stroke({ width: 1, color: tone.edge, alpha: edgeA });
+    } else if (family === 'rosette') {
+      // 多肉：贴地莲座。每片是短胖的椭圆，尖端朝外上方，层叠出花心。
+      const tipX = cx + tilt * rx * 0.9;
+      const tipY = cy - ry * 0.30;
+      node.ellipse(cx, cy, rx, ry).fill({ color: tone.front });
+      node.poly([
+        cx - rx * 0.85, cy - ry * 0.30,
+        tipX, tipY,
+        cx + rx * 0.85, cy - ry * 0.30,
+      ]).fill({ color: tone.front });
+      // 莲座的厚叶感：一条亮脊 + 一条暗底。
+      node.ellipse(cx - rx * 0.16, cy - ry * 0.16, rx * 0.40, ry * 0.36)
+        .fill({ color: tone.lip, alpha: dark ? 0.12 : 0.26 });
+      node.ellipse(cx, cy + ry * 0.34, rx * 0.72, ry * 0.26)
+        .fill({ color: 0x000000, alpha: dark ? 0.22 : 0.10 });
+      node.ellipse(cx, cy, rx, ry).stroke({ width: 1, color: tone.edge, alpha: edgeA });
+    } else if (family === 'round') {
+      // 榕树：小圆叶，几乎没有尖，叶柄短。
+      const tipX = cx + tilt * rx * 0.30;
+      node.ellipse(cx, cy, rx, ry).fill({ color: tone.front });
+      node.ellipse(cx + tilt * rx * 0.24, cy - ry * 0.16, rx * 0.72, ry * 0.78)
+        .fill({ color: tone.front });
+      node.ellipse(cx - rx * 0.18, cy - ry * 0.22, rx * 0.44, ry * 0.40)
+        .fill({ color: tone.lip, alpha: dark ? 0.12 : 0.26 });
+      node.moveTo(cx, cy + ry * 0.30).lineTo(tipX, cy - ry * 0.30)
+        .stroke({ width: 1, color: tone.edge, alpha: dark ? 0.34 : 0.22 });
+      node.ellipse(cx, cy, rx, ry).stroke({ width: 1, color: tone.edge, alpha: edgeA });
+    } else {
+      // 龟背竹 / 阔叶：宽椭圆 + 尖头 + 叶脉，叶缘要有几个裂口暗示。
+      const tipX = cx + tilt * rx * 0.70;
+      const tipY = cy - ry * 1.10;
+      node.ellipse(cx, cy, rx, ry).fill({ color: tone.front });
+      node.poly([
+        cx - rx * 0.78, cy - ry * 0.52,
+        tipX, tipY,
+        cx + rx * 0.78, cy - ry * 0.52,
+      ]).fill({ color: tone.front });
+      // 龟背竹的裂口：沿叶缘两侧各两个深色缺口（不是真的挖洞，靠低 alpha
+      // 的短线暗示，避免再次触发路径打洞）。
+      const notch = Math.max(1, rx * 0.10);
+      for (const side of [-1, 1]) {
+        for (let i = 0; i < 2; i += 1) {
+          const ny = cy - ry * (0.10 + i * 0.42);
+          node.moveTo(cx + side * rx * 0.92, ny)
+            .lineTo(cx + side * (rx * 0.92 - notch), ny + ry * 0.16)
+            .stroke({ width: Math.max(1, rx * 0.10), color: tone.edge, alpha: dark ? 0.30 : 0.20 });
+        }
       }
+      // 亮脊 + 中脉 + 两条侧脉。
+      node.ellipse(cx - rx * 0.24, cy - ry * 0.30, rx * 0.44, ry * 0.38)
+        .fill({ color: tone.lip, alpha: dark ? 0.12 : 0.24 });
+      node.moveTo(cx - rx * 0.10, cy + ry * 0.60).lineTo(tipX, tipY + ry * 0.14)
+        .stroke({ width: 1, color: tone.edge, alpha: dark ? 0.42 : 0.30 });
+      for (let i = 1; i <= 2; i += 1) {
+        const t = i / 3;
+        const vx = cx - rx * 0.08 + (tipX - (cx - rx * 0.08)) * t;
+        const vy = cy + ry * 0.48 + (tipY - (cy + ry * 0.48)) * t;
+        node.moveTo(vx, vy).lineTo(vx - rx * 0.40, vy + ry * 0.28)
+          .stroke({ width: 1, color: tone.edge, alpha: dark ? 0.24 : 0.17 });
+        node.moveTo(vx, vy).lineTo(vx + rx * 0.36, vy + ry * 0.24)
+          .stroke({ width: 1, color: tone.edge, alpha: dark ? 0.22 : 0.15 });
+      }
+      node.ellipse(cx, cy, rx, ry).stroke({ width: 1, color: tone.edge, alpha: edgeA });
+    }
+  }
+
+  // Tapered pot: wider at the rim than the base, with a rim band, a soil
+  // ellipse, a rim highlight and a shadow under the pot. The old version was a
+  // trapezoid with one ellipse; it read as a bucket of brown paint.
+  function drawPot(node, part, tone) {
+    const dark = codeSceneOptions.theme === 'dark';
+    const W = scene.width;
+    const H = scene.height;
+    const x = part.x0 * W;
+    const w = Math.max(2, (part.x1 - part.x0) * W);
+    const d = Math.max(2, (part.y1 - part.y0) * H);
+    const h = Math.max(2, (part.z1 - part.z0) * H);
+    const frontY = part.y1 * H - part.z1 * H;
+    const topY = part.y0 * H - part.z1 * H;
+    const rimH = Math.max(2, Math.round(h * 0.16));
+    const flare = w * 0.10;
+    // Floor shadow first.
+    node.ellipse(x + w / 2, frontY + h, w * 0.62, Math.max(1.5, d * 0.30))
+      .fill({ color: 0x000000, alpha: dark ? 0.26 : 0.09 });
+    // Body: rim wider than base (a tapered pot).
+    node.moveTo(x + flare, frontY)
+      .lineTo(x + w - flare, frontY)
+      .lineTo(x + w - flare * 2.2, frontY + h)
+      .lineTo(x + flare * 2.2, frontY + h)
+      .closePath()
+      .fill({ color: tone.front });
+    // Vertical form shading: lit left third, shaded right third.
+    node.moveTo(x + flare, frontY)
+      .lineTo(x + flare + w * 0.16, frontY)
+      .lineTo(x + flare * 2.2 + w * 0.14, frontY + h)
+      .lineTo(x + flare * 2.2, frontY + h)
+      .closePath()
+      .fill({ color: tone.lip, alpha: dark ? 0.12 : 0.28 });
+    node.moveTo(x + w - flare - w * 0.14, frontY)
+      .lineTo(x + w - flare, frontY)
+      .lineTo(x + w - flare * 2.2, frontY + h)
+      .lineTo(x + w - flare * 2.2 - w * 0.10, frontY + h)
+      .closePath()
+      .fill({ color: 0x000000, alpha: dark ? 0.26 : 0.12 });
+    // Rim band: a slightly lighter collar around the mouth.
+    node.rect(x + flare * 0.6, frontY, w - flare * 1.2, rimH)
+      .fill({ color: mixHex(tone.front, 0xffffff, dark ? 0.08 : 0.18) });
+    node.rect(x + flare * 0.6, frontY + rimH, w - flare * 1.2, 1)
+      .fill({ color: 0x000000, alpha: dark ? 0.30 : 0.14 });
+    // Pot mouth: rim ellipse then the soil inside it. The soil must be clearly
+    // SMALLER than the rim, or the mouth reads as a hole punched through the
+    // pot (found at 1:1, 2026-10-28).
+    const mouthY = topY + Math.max(1, d * 0.42);
+    node.ellipse(x + w / 2, mouthY, w / 2 - flare * 0.4, Math.max(1, d * 0.34))
+      .fill({ color: mixHex(tone.front, 0xffffff, dark ? 0.10 : 0.22) });
+    node.ellipse(x + w / 2, mouthY + Math.max(0.5, d * 0.04), w * 0.34, Math.max(1, d * 0.20))
+      .fill({ color: mixHex(tone.front, 0x000000, dark ? 0.55 : 0.42) });
+    // Soil texture: 3 deterministic flecks.
+    for (let i = 0; i < 3; i += 1) {
+      const a = hash01(`${part.id}:soil:${i}`);
+      node.rect(x + w * (0.40 + a * 0.20), mouthY - d * 0.02 + a * d * 0.06, 1, 1)
+        .fill({ color: tone.lip, alpha: dark ? 0.14 : 0.22 });
+    }
+    node.ellipse(x + w / 2, mouthY, w / 2 - flare * 0.4, Math.max(1, d * 0.34))
+      .stroke({ width: 1, color: tone.lip, alpha: dark ? 0.22 : 0.55 });
+  }
+
+  // Square tapered pot (succulent). A straight-sided square planter has a very
+  // different silhouette from the round tapered pot, which is what breaks the
+  // "all four plants are the same sticker" impression (2026-10-28).
+  function drawPotSquare(node, part, tone) {
+    const dark = codeSceneOptions.theme === 'dark';
+    const W = scene.width;
+    const H = scene.height;
+    const x = part.x0 * W;
+    const w = Math.max(2, (part.x1 - part.x0) * W);
+    const d = Math.max(2, (part.y1 - part.y0) * H);
+    const h = Math.max(2, (part.z1 - part.z0) * H);
+    const frontY = part.y1 * H - part.z1 * H;
+    const topY = part.y0 * H - part.z1 * H;
+    const rimH = Math.max(2, Math.round(h * 0.14));
+    const taper = w * 0.06;
+    // Floor shadow.
+    node.rect(x + taper, frontY + h, w - taper * 2, 1).fill({ color: 0x000000, alpha: dark ? 0.24 : 0.08 });
+    // A SHALLOW square planter (h≈19px, d≈14px) has almost no readable top
+    // face — drawing a full top-face rect just produced a dark "window" punched
+    // through the planter at 1:1 (2026-10-28). So: front face + a thin rim
+    // strip at the top, and the soil is implied by the rim's dark inner line.
+    // This is the same trick the round pot uses, minus the ellipse.
+    // Body: straight walls, slight taper (a square planter, not a bucket).
+    node.moveTo(x, frontY)
+      .lineTo(x + w, frontY)
+      .lineTo(x + w - taper, frontY + h)
+      .lineTo(x + taper, frontY + h)
+      .closePath()
+      .fill({ color: tone.front });
+    // Left-lit / right-shaded walls.
+    node.moveTo(x, frontY).lineTo(x + w * 0.26, frontY)
+      .lineTo(x + w * 0.26 - taper + 1, frontY + h).lineTo(x + taper, frontY + h)
+      .closePath().fill({ color: tone.lip, alpha: dark ? 0.10 : 0.30 });
+    node.moveTo(x + w * 0.74, frontY).lineTo(x + w, frontY)
+      .lineTo(x + w - taper, frontY + h).lineTo(x + w * 0.74 - taper + 1, frontY + h)
+      .closePath().fill({ color: 0x000000, alpha: dark ? 0.26 : 0.12 });
+    // Rim strip: a lit band at the top edge, then a dark soil line just under
+    // it. The pair reads as "the planter is open and full of soil" without
+    // needing a top face at all.
+    node.rect(x, frontY, w, rimH).fill({ color: mixHex(tone.front, 0xffffff, dark ? 0.10 : 0.24) });
+    node.rect(x, frontY, w, 1).fill({ color: tone.lip, alpha: dark ? 0.16 : 0.46 });
+    node.rect(x + w * 0.10, frontY + rimH * 0.55, w - w * 0.20, Math.max(1, Math.round(rimH * 0.45)))
+      .fill({ color: mixHex(tone.front, 0x000000, dark ? 0.52 : 0.38) });
+    node.rect(x, frontY + rimH, w, 1).fill({ color: 0x000000, alpha: dark ? 0.30 : 0.14 });
+  }
+
+  // Five-star office-chair base seen from above: a hub disc, five tapered
+  // spokes and five casters. The old version (one ellipse + five even lines)
+  // read as a dark asterisk; taper + caster highlight is what makes it a
+  // mechanism.
+  function drawChairStar(node, part, tone) {
+    const dark = codeSceneOptions.theme === 'dark';
+    const W = scene.width;
+    const H = scene.height;
+    const cx = (part.x0 + part.x1) / 2 * W;
+    const cy = (part.y0 + part.y1) / 2 * H;
+    const rx = Math.max(4, (part.x1 - part.x0) / 2 * W);
+    const ry = Math.max(2.5, (part.y1 - part.y0) / 2 * H * 0.62);
+    // Ground occlusion under the whole star.
+    node.ellipse(cx, cy + ry * 0.30, rx * 1.06, ry * 0.78)
+      .fill({ color: 0x000000, alpha: dark ? 0.26 : 0.075 });
+    // Spokes first (under the hub), drawn as tapered quads.
+    for (let i = 0; i < 5; i += 1) {
+      const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
+      const ex = cx + Math.cos(angle) * rx * 0.94;
+      const ey = cy + Math.sin(angle) * ry * 0.94;
+      const halfBase = Math.max(1.2, rx * 0.15);
+      const halfTip = Math.max(0.8, rx * 0.08);
+      const nx = Math.cos(angle + Math.PI / 2);
+      const ny = Math.sin(angle + Math.PI / 2);
+      node.moveTo(cx + nx * halfBase, cy + ny * halfBase * 0.62)
+        .lineTo(ex + nx * halfTip, ey + ny * halfTip * 0.62)
+        .lineTo(ex - nx * halfTip, ey - ny * halfTip * 0.62)
+        .lineTo(cx - nx * halfBase, cy - ny * halfBase * 0.62)
+        .closePath()
+        .fill({ color: tone.front });
+      // Lit top edge of each spoke: one consistent light direction.
+      node.moveTo(cx + nx * halfBase, cy + ny * halfBase * 0.62)
+        .lineTo(ex + nx * halfTip, ey + ny * halfTip * 0.62)
+        .stroke({ width: 1, color: tone.lip, alpha: dark ? 0.16 : 0.45 });
+    }
+    // Central hub: disc + collar.
+    node.ellipse(cx, cy, rx * 0.26, ry * 0.26).fill({ color: tone.top });
+    node.ellipse(cx, cy, rx * 0.26, ry * 0.26).stroke({ width: 1, color: tone.edge, alpha: 0.6 });
+    node.ellipse(cx - rx * 0.06, cy - ry * 0.07, rx * 0.12, ry * 0.12)
+      .fill({ color: tone.lip, alpha: dark ? 0.20 : 0.55 });
+    // Casters: dark wheel + 1px highlight + its own tiny contact shadow.
+    for (let i = 0; i < 5; i += 1) {
+      const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
+      const wx = cx + Math.cos(angle) * rx * 0.94;
+      const wy = cy + Math.sin(angle) * ry * 0.94;
+      const wr = Math.max(1.4, rx * 0.11);
+      node.ellipse(wx, wy + wr * 0.34, wr * 1.05, wr * 0.52)
+        .fill({ color: 0x000000, alpha: dark ? 0.34 : 0.14 });
+      node.circle(wx, wy, wr).fill({ color: dark ? 0x15171a : 0x23262a, alpha: 0.92 });
+      node.circle(wx - wr * 0.24, wy - wr * 0.28, Math.max(0.6, wr * 0.32))
+        .fill({ color: 0xffffff, alpha: dark ? 0.20 : 0.30 });
+    }
+  }
+
+  // One box: front face, top face, seam, then surface details.
+  function drawOfficePart(node, part) {
+    const c = sceneColors();
+    const dark = codeSceneOptions.theme === 'dark';
+    const W = scene.width;
+    const H = scene.height;
+    const x = part.x0 * W;
+    const w = Math.max(1, (part.x1 - part.x0) * W);
+    const d = Math.max(1, (part.y1 - part.y0) * H);
+    const h = Math.max(1, (part.z1 - part.z0) * H);
+    const topY = part.y0 * H - part.z1 * H;
+    const frontY = part.y1 * H - part.z1 * H;
+    const tone = officeTone(part.tone);
+    const radius = (part.kind === 'chair-seat' || part.kind === 'chair-back'
+      || part.kind === 'rug' || part.kind === 'plant-leaf') ? Math.min(w, h) * 0.22 : 0;
+
+    // Plants are the one soft silhouette in the kit: leaves and pots must not
+    // show box faces or they read as stacked green cubes.
+    if (part.kind === 'plant-leaf') {
+      drawLeaf(node, part, tone);
+      return;
+    }
+    if (part.kind === 'plant-pot' && part.detail === 'pot-square') {
+      drawPotSquare(node, part, tone);
+      return;
+    }
+    if (part.kind === 'plant-pot') {
+      drawPot(node, part, tone);
+      return;
+    }
+    if (part.kind === 'plant-tray') {
+      // Tray disc under the pot.
+      node.ellipse(x + w / 2, topY + d * 0.5, w * 0.5, d * 0.5)
+        .fill({ color: mixHex(tone.front, 0x000000, 0.18) });
+      node.ellipse(x + w / 2, topY + d * 0.5 - 1, w * 0.34, d * 0.30)
+        .fill({ color: tone.lip, alpha: 0.18 });
+      return;
+    }
+    if (part.kind === 'pillow') {
+      // Pillows are a SOFT object like leaves: they must not show box faces.
+      // Drawing them through the generic box path produced a cube with a lid
+      // (the top face and the front face at different heights). A pillow is one
+      // rounded square leaning against the back cushion, lit from the top-left.
+      drawPillow(node, part, tone);
+      return;
+    }
+    if (part.kind === 'plant-stem') {
+      // Stem: a 2px tapered stroke from the pot mouth into the leaf cluster.
+      const sx = (part.x0 + part.x1) / 2 * W;
+      const sBase = part.y1 * H - part.z0 * H;
+      const sTop = part.y1 * H - part.z1 * H;
+      node.moveTo(sx, sBase)
+        .lineTo(sx + (part.tilt || 0) * 3, sTop)
+        .stroke({ width: 2, color: tone.front });
+      node.moveTo(sx, sBase)
+        .lineTo(sx + (part.tilt || 0) * 3, sTop)
+        .stroke({ width: 1, color: tone.lip, alpha: dark ? 0.16 : 0.34 });
+      return;
+    }
+    if (part.kind === 'chair-star' || part.detail === 'chair-star') {
+      drawChairStar(node, part, tone);
       return;
     }
 
-    // Rug under the lounge.
-    if (office.lounge) {
-      const rug = office.lounge.rug;
-      node.roundRect(X(rug.x), Y(rug.y), W(rug.w), H(rug.h), 10)
-        .fill({ color: c.rug || c.zoneFill, alpha: dark ? 0.8 : 0.95 })
-        .stroke({ width: 1, color: c.zoneStroke, alpha: 0.9 });
-      node.roundRect(X(rug.x) + 6, Y(rug.y) + 6, W(rug.w) - 12, H(rug.h) - 12, 7)
-        .stroke({ width: 1, color: c.zoneStroke, alpha: 0.5 });
+    // Front face.
+    if (h > 0.5) {
+      if (radius > 0) node.roundRect(x, frontY, w, h + radius, radius).fill({ color: tone.front });
+      else node.rect(x, frontY, w, h).fill({ color: tone.front });
+      // A darker plinth line grounds the object on the floor.
+      node.rect(x, frontY + h - 1, w, 1).fill({ color: 0x000000, alpha: dark ? 0.35 : 0.16 });
     }
+    // Top face.
+    if (radius > 0) node.roundRect(x, topY, w, d, radius).fill({ color: tone.top });
+    else node.rect(x, topY, w, d).fill({ color: tone.top });
+    // Lit lip along the back of the top face + the seam between faces: the
+    // pair is what gives the slab a thickness instead of a pasted rectangle.
+    if (d > 2) node.rect(x + 1, topY, Math.max(0, w - 2), 1).fill({ color: tone.lip, alpha: dark ? 0.22 : 0.55 });
+    node.rect(x, topY + d - 1, w, 1).fill({ color: tone.edge, alpha: dark ? 0.55 : 0.7 });
 
-    // Kitchen counter (top) + coffee machine (top).
-    if (office.kitchen) {
-      const k = office.kitchen;
-      boxTop(k, c.counterTop || c.deskTop, c.deskEdge);
-      node.circle(X(k.sink.x), Y(k.sink.y), Math.max(4, H(k.sink.r)))
-        .fill({ color: c.monitorEdge, alpha: 0.5 });
-      node.circle(X(k.sink.x), Y(k.sink.y), Math.max(2, H(k.sink.r) * 0.55))
-        .fill({ color: c.counterSide || c.deskSide, alpha: 0.9 });
-      node.rect(X(k.sink.x) + H(k.sink.r) * 0.35, Y(k.sink.y) - H(k.sink.r) * 0.9, 2, H(k.sink.r) * 0.9)
-        .fill({ color: c.deskEdge });
-      boxTop(k.machine, c.monitorBody, c.monitorEdge);
-      node.rect(X(k.machine.x) + W(k.machine.w) * 0.2, Y(k.machine.y) + H(k.machine.h) * 0.2,
-        W(k.machine.w) * 0.6, Math.max(2, H(k.machine.h) * 0.10)).fill({ color: c.monitorScreen, alpha: 0.7 });
-    }
-
-    // Lounge furniture tops.
-    if (office.lounge) {
-      const { sofa, table } = office.lounge;
-      boxTop(sofa, c.sofa || c.chairBack, c.chairBack);
-      node.roundRect(X(sofa.x) + 3, Y(sofa.y) + H(sofa.h) * 0.30, W(sofa.w) - 6, H(sofa.h) * 0.64, 5)
-        .fill({ color: c.sofaSeat || c.chairSeat });
-      for (let i = 1; i < 3; i += 1) {
-        node.rect(X(sofa.x) + (W(sofa.w) * i) / 3, Y(sofa.y) + H(sofa.h) * 0.32, 1, H(sofa.h) * 0.60)
-          .fill({ color: c.chairBack, alpha: 0.5 });
+    const detail = part.detail;
+    if (!detail) {
+      // Metal parts without their own detail branch (lamp pole, gas lift, hand
+      // rails) still get the brushed-metal treatment; without it they read as
+      // flat grey sticks, which the review flagged.
+      if (part.tone === 'metal' || part.tone === 'steel') {
+        drawMetalSurface(node, part, tone, dark, x, frontY, w, h);
       }
-      // Two throw pillows at the ends.
-      node.roundRect(X(sofa.x) + 5, Y(sofa.y) + H(sofa.h) * 0.34, W(sofa.w) * 0.14, H(sofa.h) * 0.30, 3)
-        .fill({ color: c.accent, alpha: 0.35 });
-      node.roundRect(X(sofa.x) + W(sofa.w) - 5 - W(sofa.w) * 0.14, Y(sofa.y) + H(sofa.h) * 0.34,
-        W(sofa.w) * 0.14, H(sofa.h) * 0.30, 3).fill({ color: c.accent, alpha: 0.30 });
-      boxTop(table, c.deskTop, c.deskEdge);
-      node.rect(X(table.x) + 3, Y(table.y) + 3, W(table.w) - 6, Math.max(2, H(table.h) * 0.18))
-        .fill({ color: 0xffffff, alpha: dark ? 0.05 : 0.30 });
+      return;
     }
-
-    // Desks (tops + props + monitors), farthest first.
-    const stations = [...office.workstations].sort((a, b) => (a.desk.y - b.desk.y));
-    for (const station of stations) {
-      const desk = station.desk;
-      const dx = X(desk.x);
-      const dy = Y(desk.y);
-      const dw = W(desk.w);
-      const dh = H(desk.h);
-      const deskH = HPX(station.height);
-      // Contact shadow.
-      node.ellipse(dx + dw * 0.5, dy + dh + deskH * 0.9, dw * 0.55, Math.max(3, dh * 0.09))
-        .fill({ color: 0x000000, alpha: dark ? 0.24 : 0.08 });
-      boxTop(desk, c.deskTop, c.deskEdge);
-
-      // Drawer box on the right side.
-      const drawer = station.drawer;
-      boxTop(drawer, c.deskSide, c.deskEdge);
-      node.rect(X(drawer.x) + 2, Y(drawer.y) + H(drawer.h) * 0.30, W(drawer.w) - 4, 1)
-        .fill({ color: c.deskEdge, alpha: 0.9 });
-      node.rect(X(drawer.x) + 2, Y(drawer.y) + H(drawer.h) * 0.62, W(drawer.w) - 4, 1)
-        .fill({ color: c.deskEdge, alpha: 0.9 });
-      node.circle(X(drawer.x) + W(drawer.w) / 2, Y(drawer.y) + H(drawer.h) * 0.46, Math.max(1, W(drawer.w) * 0.07))
-        .fill({ color: c.deskEdge });
-
-      // Desk-top details: wood grain, keyboard, papers, pen cup, mug.
-      for (let i = 1; i <= 2; i += 1) {
-        node.rect(dx + dw * 0.08, dy + dh * (0.30 + i * 0.20), dw * 0.30, 1)
-          .fill({ color: c.deskEdge, alpha: dark ? 0.18 : 0.22 });
+    const inset = Math.max(1, Math.min(w, d) * 0.08);
+    if (detail === 'desk-top') {
+      // P0-A (2026-10-28): the slab is the single biggest surface in frame, so
+      // it carries the wood. Order is deliberate — grain first, then the lit
+      // lip and the front edge last, so the texture never pokes past the
+      // silhouette.
+      node.rect(x + 1, topY + 1, w - 2, 1).fill({ color: tone.lip, alpha: dark ? 0.10 : 0.40 });
+      woodGrain(node, part, tone, dark);
+      // Bevel: 1px lit lip on the back and both ends, 1px shaded lip on the
+      // front. Four hairlines are what give a slab a chamfered edge instead of
+      // a cut-out rectangle.
+      node.rect(x, topY, 1, d).fill({ color: tone.lip, alpha: dark ? 0.08 : 0.30 });
+      node.rect(x + w - 1, topY, 1, d).fill({ color: tone.lip, alpha: dark ? 0.06 : 0.22 });
+      // Front edge: 2px dark band + 1px lit line above it (the chamfer catch).
+      const edgeH = Math.max(2, Math.round(h * 0.30));
+      node.rect(x, frontY + h - edgeH, w, edgeH)
+        .fill({ color: tone.edge, alpha: dark ? 0.36 : 0.24 });
+      node.rect(x, frontY + h - edgeH - 1, w, 1)
+        .fill({ color: tone.lip, alpha: dark ? 0.14 : 0.42 });
+      // Under-slab occlusion: the deepest part of the shadow is against the
+      // back edge (the wall side), fading toward the front.
+      const aoH = Math.max(3, Math.round(h * 0.55));
+      for (let i = 0; i < 3; i += 1) {
+        node.rect(x, frontY + h + i * Math.max(2, aoH / 3), w - i * 2, Math.max(2, aoH / 3))
+          .fill({ color: 0x000000, alpha: (dark ? 0.16 : 0.055) * (1 - i * 0.32) });
       }
-      const kb = station.keyboard;
-      node.roundRect(X(kb.x), Y(kb.y), W(kb.w), Math.max(3, H(kb.h)), 2)
-        .fill({ color: c.monitorEdge, alpha: 0.75 });
-      // A sheet of paper and a pen cup on the left half of the desk.
-      node.rect(dx + dw * 0.12, dy + dh * 0.30, dw * 0.20, dh * 0.24)
-        .fill({ color: 0xffffff, alpha: dark ? 0.55 : 0.85 });
-      node.rect(dx + dw * 0.12, dy + dh * 0.36, dw * 0.20, 1).fill({ color: c.deskEdge, alpha: 0.35 });
-      node.rect(dx + dw * 0.12, dy + dh * 0.42, dw * 0.14, 1).fill({ color: c.deskEdge, alpha: 0.35 });
-      node.circle(dx + dw * 0.24, dy + dh * 0.62, Math.max(2, dw * 0.028)).fill({ color: c.monitorBody, alpha: 0.85 });
-      node.rect(dx + dw * 0.225, dy + dh * 0.56, 1, Math.max(2, dh * 0.07)).fill({ color: c.monitorScreen, alpha: 0.8 });
-      node.rect(dx + dw * 0.245, dy + dh * 0.55, 1, Math.max(2, dh * 0.09)).fill({ color: c.accent, alpha: 0.9 });
-      node.circle(X(station.mug.x), Y(station.mug.y), Math.max(2, W(station.mug.r)))
-        .fill({ color: c.accent, alpha: 0.65 });
-
-      // Monitor: a box sitting on the far edge of the desk, screen on the
-      // front face so it reads as standing up.
-      const mon = station.monitor;
-      const mx = X(mon.x);
-      const my = Y(mon.y);
-      const mw = W(mon.w);
-      const mh = H(mon.h);
-      const monH = HPX(station.monitorHeight);
-      node.roundRect(mx, my, mw, mh, 2).fill({ color: c.monitorBody });
-      node.rect(mx, my + mh, mw, monH).fill({ color: c.monitorEdge });
-      node.roundRect(mx + mw * 0.08, my + mh * 0.10, mw * 0.84, mh * 0.80, 2)
-        .fill({ color: c.monitorBody });
-      node.rect(mx + mw * 0.10, my + mh + 1, mw * 0.80, Math.max(2, monH - 2))
-        .fill({ color: c.monitorScreen });
-      node.rect(mx + mw * 0.10, my + mh + 1, mw * 0.80, Math.max(1, monH * 0.28))
-        .fill({ color: 0xffffff, alpha: 0.10 });
-      // Stand foot.
-      node.rect(mx + mw * 0.40, my + mh + monH, mw * 0.20, Math.max(2, mh * 0.10))
-        .fill({ color: c.monitorBody });
+    } else if (detail === 'desk-leg') {
+      // Side boards: a 1px lit edge on the outside, a 1px shadow on the inside,
+      // and a dark foot pad where the board meets the floor. Without the foot
+      // pad the board looks pasted onto the carpet.
+      node.rect(x, frontY + 1, 1, h - 2).fill({ color: tone.lip, alpha: dark ? 0.10 : 0.22 });
+      node.rect(x + w - 1, frontY + 1, 1, h - 2).fill({ color: 0x000000, alpha: dark ? 0.20 : 0.07 });
+      node.rect(x, frontY + h - 2, w, 2).fill({ color: 0x000000, alpha: dark ? 0.34 : 0.14 });
+    } else if (detail === 'panel') {
+      // Modesty panel: hangs from the slab, never reaches the floor, and has a
+      // vertical seam. A panel that touched the floor turned the desk into a
+      // cabinet (2026-10-27 defect #1) — keep the gap.
+      node.rect(x + 1, frontY + 1, 1, h - 2).fill({ color: 0x000000, alpha: dark ? 0.2 : 0.06 });
+      node.rect(x + w * 0.5, frontY + 2, 1, Math.max(1, h - 4)).fill({ color: tone.edge, alpha: dark ? 0.30 : 0.20 });
+      node.rect(x, frontY + h - 2, w, 2).fill({ color: 0x000000, alpha: dark ? 0.30 : 0.12 });
+    } else if (detail === 'drawer') {
+      // Three drawers. Each is inset on three sides (a 1px dark line top/left/
+      // right), carries a brushed bar pull with a lit line under it, and the
+      // bottom drawer sits on a recessed plinth. This is the "it has a reason
+      // to look like this" detail the flat version was missing.
+      const rows = 3;
+      const plinth = Math.max(2, Math.round(h * 0.07));
+      const bodyH = h - plinth;
+      for (let i = 0; i < rows; i += 1) {
+        const ry = frontY + (bodyH * i) / rows;
+        const rh = bodyH / rows;
+        // Inset shadow: top edge darkest, then the two sides.
+        node.rect(x + 1, ry, w - 2, 1).fill({ color: 0x000000, alpha: dark ? 0.34 : 0.16 });
+        node.rect(x + 1, ry + 1, 1, rh - 2).fill({ color: 0x000000, alpha: dark ? 0.22 : 0.09 });
+        node.rect(x + w - 2, ry + 1, 1, rh - 2).fill({ color: 0x000000, alpha: dark ? 0.22 : 0.09 });
+        // Bar pull: 2px metal bar with a 1px bright top and a dark drop below.
+        const pullW = Math.max(6, Math.round(w * 0.42));
+        const pullX = x + (w - pullW) / 2;
+        const pullY = ry + rh * 0.46;
+        node.rect(pullX, pullY, pullW, 2).fill({ color: officeTone('metal').front });
+        node.rect(pullX, pullY, pullW, 1).fill({ color: officeTone('metal').lip, alpha: dark ? 0.28 : 0.72 });
+        node.rect(pullX, pullY + 2, pullW, 1).fill({ color: 0x000000, alpha: dark ? 0.30 : 0.14 });
+      }
+      // Recessed plinth.
+      node.rect(x + 2, frontY + bodyH, w - 4, plinth).fill({ color: 0x000000, alpha: dark ? 0.34 : 0.16 });
+    } else if (detail === 'screen') {
+      // P0-B: a monitor is a *bezel*, a *glass*, and a *lit panel*, in that
+      // order. The old version was a dark rectangle with a pale rectangle on
+      // it — a sticker. Now: 3px bezel, 1px inner chamfer, inset glass, a
+      // window bar, code-line hints, a dock, a diagonal reflection, and a
+      // power LED.
+      const bezel = Math.max(2, Math.round(Math.min(w, h) * 0.055));
+      const gx = x + bezel;
+      const gy = frontY + bezel;
+      const gw = Math.max(2, w - bezel * 2);
+      const gh = Math.max(2, h - bezel * 2.2);
+      // Inner chamfer: a lit 1px line just inside the bezel catches the window
+      // light, which is what separates "plastic frame" from "black rectangle".
+      node.rect(x + 1, frontY + 1, w - 2, 1).fill({ color: tone.lip, alpha: dark ? 0.16 : 0.34 });
+      node.rect(x + 1, frontY + 1, 1, h - 2).fill({ color: tone.lip, alpha: dark ? 0.12 : 0.26 });
+      node.rect(x, frontY + h - 1, w, 1).fill({ color: 0x000000, alpha: dark ? 0.4 : 0.2 });
+      // Glass.
+      node.rect(gx, gy, gw, gh).fill({ color: c.monitorScreen, alpha: dark ? 0.88 : 1 });
+      // Screen content hints — deliberately low contrast. Specific glyphs would
+      // turn into unreadable noise at this size; a window bar, three unequal
+      // code lines and a dock are enough for the eye to read "a working
+      // screen".
+      const ink = dark ? 0x1b2a33 : 0x4a6673;
+      node.rect(gx, gy, gw, Math.max(1, Math.round(gh * 0.13))).fill({ color: ink, alpha: dark ? 0.30 : 0.16 });
+      const lineH = Math.max(1, Math.round(gh * 0.045));
+      const lineAlpha = dark ? 0.22 : 0.12;
+      node.rect(gx + gw * 0.06, gy + gh * 0.26, gw * 0.46, lineH).fill({ color: ink, alpha: lineAlpha });
+      node.rect(gx + gw * 0.06, gy + gh * 0.38, gw * 0.62, lineH).fill({ color: ink, alpha: lineAlpha * 0.9 });
+      node.rect(gx + gw * 0.12, gy + gh * 0.50, gw * 0.40, lineH).fill({ color: ink, alpha: lineAlpha * 0.8 });
+      node.rect(gx + gw * 0.06, gy + gh * 0.62, gw * 0.54, lineH).fill({ color: ink, alpha: lineAlpha * 0.7 });
+      node.rect(gx + gw * 0.06, gy + gh * 0.80, gw * 0.30, Math.max(1, Math.round(gh * 0.06)))
+        .fill({ color: ink, alpha: (dark ? 0.24 : 0.13) });
+      // Glass reflection: one diagonal band, two steps, very low alpha. Drawn
+      // after the content so the screen looks like it is *behind* glass.
+      const bandW = Math.max(3, Math.round(gw * 0.16));
+      node.moveTo(gx + gw * 0.10, gy + gh)
+        .lineTo(gx + gw * 0.10 + bandW, gy + gh)
+        .lineTo(gx + gw * 0.44 + bandW, gy)
+        .lineTo(gx + gw * 0.44, gy)
+        .closePath()
+        .fill({ color: 0xffffff, alpha: dark ? 0.055 : 0.075 });
+      node.moveTo(gx + gw * 0.52, gy + gh)
+        .lineTo(gx + gw * 0.52 + Math.max(2, bandW * 0.5), gy + gh)
+        .lineTo(gx + gw * 0.76 + Math.max(2, bandW * 0.5), gy)
+        .lineTo(gx + gw * 0.76, gy)
+        .closePath()
+        .fill({ color: 0xffffff, alpha: dark ? 0.035 : 0.05 });
+      // Power LED, bottom-right of the bezel. Brighter in the dark room.
+      node.rect(x + w - bezel - 1, frontY + h - Math.max(2, bezel * 0.7), 2, 1)
+        .fill({ color: dark ? 0x9fe8b4 : 0x5fae74, alpha: dark ? 0.95 : 0.75 });
+      // Screen drop shadow on the bezel's lower inner edge.
+      node.rect(gx, gy + gh, gw, Math.max(1, Math.round(bezel * 0.6))).fill({ color: 0x000000, alpha: 0.28 });
+    } else if (detail === 'monitor-foot') {
+      // Elliptical foot plate: lit top, shadow underneath.
+      node.ellipse(x + w / 2, topY + d * 0.5, w * 0.52, d * 0.5).fill({ color: tone.top });
+      node.ellipse(x + w / 2, topY + d * 0.5, w * 0.52, d * 0.5)
+        .stroke({ width: 1, color: tone.edge, alpha: dark ? 0.5 : 0.4 });
+      node.ellipse(x + w / 2, topY + d * 0.5 - 1, w * 0.30, d * 0.22)
+        .fill({ color: tone.lip, alpha: dark ? 0.16 : 0.42 });
+    } else if (detail === 'monitor-neck') {
+      // Two metal steps: a lit left edge and a shaded right edge make the neck
+      // read as a cylinder rather than a bar.
+      node.rect(x, frontY, Math.max(1, w * 0.34), h).fill({ color: tone.lip, alpha: dark ? 0.16 : 0.5 });
+      node.rect(x + w - Math.max(1, w * 0.30), frontY, Math.max(1, w * 0.30), h)
+        .fill({ color: 0x000000, alpha: dark ? 0.30 : 0.14 });
+    } else if (detail === 'cable') {
+      // Desk cable: two segments approximating a slack drop from the monitor
+      // foot to the back of the slab.
+      const cw = Math.max(1, Math.round(w));
+      node.rect(x, frontY, cw, Math.max(1, Math.round(h * 0.5))).fill({ color: tone.edge, alpha: dark ? 0.7 : 0.5 });
+      node.rect(x + Math.max(1, cw * 0.3), frontY + Math.round(h * 0.4), Math.max(1, Math.round(cw * 0.6)), Math.max(1, Math.round(h * 0.6)))
+        .fill({ color: tone.edge, alpha: dark ? 0.6 : 0.42 });
+    } else if (detail === 'keys') {
+      // P0-C keyboard: a case lip, a recessed key well, then a real key grid
+      // (10 × 3 caps with a 1px gap) plus a space bar. Three ruled lines read
+      // as a barcode; a grid reads as a keyboard.
+      const lip = Math.max(1, Math.round(Math.min(w, d) * 0.10));
+      node.rect(x + 1, topY + 1, w - 2, d - 2).fill({ color: tone.edge, alpha: dark ? 0.30 : 0.14 });
+      const cols = 11;
+      const rows = 3;
+      const wellX = x + lip;
+      const wellY = topY + lip;
+      const wellW = Math.max(4, w - lip * 2);
+      const wellD = Math.max(3, d - lip * 2 - Math.max(2, d * 0.22));
+      const capW = wellW / cols;
+      const capH = wellD / rows;
+      for (let r = 0; r < rows; r += 1) {
+        for (let cidx = 0; cidx < cols; cidx += 1) {
+          const cx = wellX + cidx * capW;
+          const cy = wellY + r * capH;
+          node.rect(cx + 0.4, cy + 0.4, Math.max(1, capW - 1), Math.max(1, capH - 1))
+            .fill({ color: tone.top, alpha: dark ? 0.55 : 0.85 });
+        }
+      }
+      // Space bar: one wide cap on the bottom row.
+      node.rect(wellX + capW * 3, wellY + capH * 2.2, capW * 5, Math.max(1, capH * 0.72))
+        .fill({ color: tone.top, alpha: dark ? 0.60 : 0.9 });
+      node.rect(x, frontY + h - 1, w, 1).fill({ color: 0x000000, alpha: dark ? 0.34 : 0.16 });
+    } else if (detail === 'mouse') {
+      node.ellipse(x + w / 2, topY + d * 0.5, w * 0.5, d * 0.5).fill({ color: tone.top });
+      node.ellipse(x + w / 2, topY + d * 0.5, w * 0.5, d * 0.5)
+        .stroke({ width: 1, color: tone.edge, alpha: dark ? 0.45 : 0.32 });
+      node.rect(x + w / 2 - 0.5, topY + d * 0.18, 1, Math.max(1, d * 0.34)).fill({ color: tone.edge, alpha: 0.6 });
+      node.circle(x + w / 2, topY + d * 0.40, Math.max(1, w * 0.10)).fill({ color: c.monitorEdge, alpha: 0.75 });
+    } else if (detail === 'papers') {
+      paperStack(node, part, tone, dark);
+    } else if (detail === 'sticky') {
+      // Two overlapping notes with a curled corner and a 1px shadow.
+      node.rect(x + 2, topY + 2, w - 2, d - 2).fill({ color: officeTone('sticky').front, alpha: 0.95 });
+      node.rect(x + 1, topY + 1, w - 4, d - 4).fill({ color: officeTone('sticky').top, alpha: 0.98 });
+      node.moveTo(x + w - 4, topY + 1)
+        .lineTo(x + w - 1, topY + 4)
+        .lineTo(x + w - 1, topY + 1)
+        .closePath()
+        .fill({ color: 0x000000, alpha: dark ? 0.30 : 0.10 });
+      node.rect(x + 3, topY + d * 0.36, Math.max(2, w * 0.5), 1).fill({ color: 0x000000, alpha: 0.16 });
+      node.rect(x + 3, topY + d * 0.62, Math.max(2, w * 0.34), 1).fill({ color: 0x000000, alpha: 0.13 });
+    } else if (detail === 'pen') {
+      // Pen cup: tapered body, dark mouth (top ellipse), three pens of unequal
+      // height with 1px caps. A flat circle was reading as a dot.
+      node.moveTo(x + 1, frontY)
+        .lineTo(x + w - 1, frontY)
+        .lineTo(x + w, frontY + h)
+        .lineTo(x, frontY + h)
+        .closePath()
+        .fill({ color: tone.front });
+      node.rect(x + 1, frontY, Math.max(1, w - 2), Math.max(1, Math.round(h * 0.14)))
+        .fill({ color: tone.lip, alpha: dark ? 0.12 : 0.30 });
+      const mouthY = topY + Math.max(1, Math.round(h * 0.10));
+      node.ellipse(x + w / 2, mouthY, w * 0.42, Math.max(1, Math.round(h * 0.12)))
+        .fill({ color: mixHex(tone.front, 0x000000, dark ? 0.5 : 0.35) });
+      // Pens inside: three stems, two caps, deterministic tilt.
+      const stems = [
+        { dx: -0.22, top: 0.74, color: c.accent || 0x4f46e5 },
+        { dx: 0.04, top: 0.88, color: 0xb45309 },
+        { dx: 0.24, top: 0.62, color: 0x0f766e },
+      ];
+      stems.forEach((stem, i) => {
+        const sx = x + w / 2 + stem.dx * w;
+        const sy = frontY - Math.round(h * 0.30);
+        node.rect(sx, sy, Math.max(1, Math.round(w * 0.10)), Math.max(2, Math.round(h * 0.42)))
+          .fill({ color: stem.color, alpha: dark ? 0.72 : 0.85 });
+        node.rect(sx, sy, Math.max(1, Math.round(w * 0.10)), 1)
+          .fill({ color: 0xffffff, alpha: dark ? 0.20 : 0.45 });
+        if (i === 1) {
+          node.rect(sx - 1, sy - 1, Math.max(2, Math.round(w * 0.16)), 1)
+            .fill({ color: 0x000000, alpha: 0.25 });
+        }
+      });
+    } else if (detail === 'mug') {
+      // P0-C mug: body, lit rim, dark interior ellipse, a handle in two
+      // segments on the right, and a shadow on the desk under it.
+      node.ellipse(x + w * 0.5, topY + d * 0.55, w * 0.62, d * 0.30)
+        .fill({ color: 0x000000, alpha: dark ? 0.30 : 0.12 });
+      node.rect(x, frontY, w, h).fill({ color: tone.front });
+      // Vertical glaze highlight: a mug is round, so it needs a cylinder read.
+      node.rect(x + Math.max(1, w * 0.12), frontY + 1, Math.max(1, w * 0.14), h - 2)
+        .fill({ color: tone.lip, alpha: dark ? 0.14 : 0.38 });
+      node.rect(x + w - Math.max(1, w * 0.18), frontY + 1, Math.max(1, w * 0.12), h - 2)
+        .fill({ color: 0x000000, alpha: dark ? 0.24 : 0.10 });
+      // Rim + coffee surface.
+      const rimY = topY + Math.max(1, Math.round(d * 0.18));
+      node.ellipse(x + w / 2, rimY, w * 0.52, Math.max(1, Math.round(d * 0.34)))
+        .fill({ color: tone.front });
+      node.ellipse(x + w / 2, rimY, w * 0.40, Math.max(1, Math.round(d * 0.26)))
+        .fill({ color: mixHex(tone.front, 0x000000, dark ? 0.42 : 0.30) });
+      node.ellipse(x + w / 2, rimY, w * 0.52, Math.max(1, Math.round(d * 0.34)))
+        .stroke({ width: 1, color: tone.lip, alpha: dark ? 0.30 : 0.65 });
+      // Handle: two segments on the right side.
+      const hx = x + w;
+      node.moveTo(hx - 1, frontY + h * 0.28).lineTo(hx + Math.max(1, w * 0.22), frontY + h * 0.34)
+        .stroke({ width: Math.max(1, Math.round(w * 0.10)), color: tone.front });
+      node.moveTo(hx + Math.max(1, w * 0.22), frontY + h * 0.34).lineTo(hx - 1, frontY + h * 0.66)
+        .stroke({ width: Math.max(1, Math.round(w * 0.10)), color: tone.front });
+      node.rect(x, frontY + h - 1, w, 1).fill({ color: 0x000000, alpha: dark ? 0.30 : 0.14 });
+    } else if (detail === 'lamp-base') {
+      node.ellipse(x + w / 2, topY + d * 0.5, w * 0.52, d * 0.5).fill({ color: tone.top });
+      node.ellipse(x + w / 2, topY + d * 0.5, w * 0.52, d * 0.5)
+        .stroke({ width: 1, color: tone.edge, alpha: 0.5 });
+      node.ellipse(x + w / 2, topY + d * 0.5 - 1, w * 0.26, d * 0.2)
+        .fill({ color: tone.lip, alpha: dark ? 0.18 : 0.5 });
+    } else if (detail === 'lamp-pole') {
+      node.rect(x, frontY, Math.max(1, w * 0.4), h).fill({ color: tone.lip, alpha: dark ? 0.2 : 0.55 });
+      node.rect(x + w - Math.max(1, w * 0.3), frontY, Math.max(1, w * 0.3), h)
+        .fill({ color: 0x000000, alpha: dark ? 0.30 : 0.14 });
+    } else if (detail === 'lamp-shade') {
+      // 圆台形灯罩（2026-10-28 第二轮）。上一版是"梯形 + 一条亮带"，放大后
+      // 看起来像一块米色方块。真实布艺灯罩的关键：上口比下口窄（正梯形）、
+      // 底部开口是**椭圆**（能看到罩内的暖光）、罩体有竖向褶皱、下沿一圈亮边。
+      const topW = w * 0.62;
+      const topInset = (w - topW) / 2;
+      const shadeTop = frontY;
+      const shadeBot = frontY + h;
+      // 灯罩投在墙/地上的暖光晕（罩体之外）。
+      node.ellipse(x + w / 2, shadeBot - h * 0.1, w * 0.95, h * 0.75)
+        .fill({ color: tone.top, alpha: dark ? 0.08 : 0.12 });
+      // 罩体：正梯形（上窄下宽）。
+      node.moveTo(x + topInset, shadeTop)
+        .lineTo(x + w - topInset, shadeTop)
+        .lineTo(x + w, shadeBot)
+        .lineTo(x, shadeBot)
+        .closePath()
+        .fill({ color: tone.front, alpha: 0.98 });
+      // 上口：一条窄的受光边（罩顶收口）。
+      node.rect(x + topInset, shadeTop, topW, Math.max(1, Math.round(h * 0.10)))
+        .fill({ color: tone.top, alpha: dark ? 0.45 : 0.95 });
+      // 底部开口：**不画**开孔椭圆（2026-10-28 第二轮第二次修正）。
+      // 这个灯罩只有约 52×19px；任何"开口椭圆"在这里都退化成一只扁平的
+      // 亮色圆盘（一次像飞碟、一次像盘子），因为垂直半径只有 ~5px。
+      // 真实小灯罩从正面偏上看，看到的是：罩底一圈更暗的布沿 + 内部一点暖光。
+      // 所以只用一条暗色布沿 + 一条窄暖光带，不画椭圆。
+      const hemH = Math.max(2, Math.round(h * 0.14));
+      node.rect(x + Math.round(w * 0.03), shadeBot - hemH, w - Math.round(w * 0.06), hemH)
+        .fill({ color: mixHex(tone.front, 0x000000, dark ? 0.30 : 0.16) });
+      // 内部暖光：紧贴布沿上方的一条窄亮带（比罩体亮，比顶部受光带暗）。
+      node.rect(x + Math.round(w * 0.08), shadeBot - hemH - 2, w - Math.round(w * 0.16), 2)
+        .fill({ color: mixHex(tone.top, 0xffffff, dark ? 0.10 : 0.30), alpha: dark ? 0.55 : 0.80 });
+      node.rect(x + Math.round(w * 0.03), shadeBot - 1, w - Math.round(w * 0.06), 1)
+        .fill({ color: 0x000000, alpha: dark ? 0.24 : 0.10 });
+      // 竖向褶皱：3 条很淡的竖线（布艺的垂坠感），不能画成扇骨。
+      for (let i = 1; i <= 3; i += 1) {
+        const t = i / 4;
+        const tx = x + topInset + topW * t;
+        const bx = x + w * t;
+        node.moveTo(tx, shadeTop + Math.round(h * 0.16))
+          .lineTo(bx, shadeBot - hemH)
+          .stroke({ width: 1, color: tone.edge, alpha: dark ? 0.10 : 0.07 });
+      }
+      // 下沿高光 + 底部投影，让罩体有厚度。
+      node.rect(x, shadeBot - 2, w, 1).fill({ color: 0xffffff, alpha: dark ? 0.10 : 0.26 });
+      node.ellipse(x + w / 2, shadeBot + 1, w * 0.50, Math.max(1, d * 0.16))
+        .fill({ color: 0x000000, alpha: dark ? 0.26 : 0.08 });
+    } else if (detail === 'chair-back') {
+      // 2026-10-28 第二轮：按旧贴图素材 prop-chair-back.png 的**背面视角**重建。
+      //
+      // 参考素材的读法（1024² 白底图）：一块上宽下窄的梯形背框（顶角圆角
+      // 明显、底部收进坐垫）、框内一整片微凹的布面、两侧各一根竖直扶手柱
+      // 顶着圆角扶手垫、背框下沿一道横向收边、中间气压杆、五星脚 + 5 个滚轮。
+      //
+      // 上一版画的是"深色网面 + 交叉斜纹 + 头枕横杆"，在多色家具里像第二个
+      // 显示器；而且靠背只有 40px 宽，被 168px 宽的角色完全挡住。现在靠背
+      // 94px 宽、且比角色两侧各露出约 27px，才读得出"她坐在一把椅子上"。
+      const pad = Math.max(2, Math.round(w * 0.045));
+      const rTop = Math.max(4, w * 0.10);
+      // 外框：上宽下窄的梯形（背面视角最关键的一条轮廓）。
+      const insetBottom = w * 0.055;
+      const bodyPath = () => node.moveTo(x + rTop, frontY)
+        .lineTo(x + w - rTop, frontY)
+        .lineTo(x + w, frontY + rTop)
+        .lineTo(x + w - insetBottom, frontY + h)
+        .lineTo(x + insetBottom, frontY + h)
+        .lineTo(x, frontY + rTop)
+        .closePath();
+      bodyPath().fill({ color: tone.front });
+      // 框内布面：四周内缩、略暗，带一条横向中缝。
+      const innerX = x + pad + 1;
+      const innerW = Math.max(3, w - (pad + 1) * 2);
+      const innerY = frontY + pad + 1;
+      const innerH = Math.max(3, h - (pad + 1) * 2.2);
+      node.roundRect(innerX, innerY, innerW, innerH, Math.max(2, rTop * 0.7))
+        .fill({ color: mixHex(tone.front, 0x000000, dark ? 0.30 : 0.20) });
+      // 布面穹顶：中线左右各一条更亮的竖带，做出绷紧的布。
+      node.roundRect(innerX + 1, innerY + 1, Math.max(2, innerW * 0.42), Math.max(2, innerH - 2), 2)
+        .fill({ color: mixHex(tone.front, 0xffffff, dark ? 0.10 : 0.16), alpha: dark ? 0.30 : 0.55 });
+      node.roundRect(innerX + innerW * 0.54, innerY + 1, Math.max(2, innerW * 0.42), Math.max(2, innerH - 2), 2)
+        .fill({ color: mixHex(tone.front, 0xffffff, dark ? 0.06 : 0.10), alpha: dark ? 0.22 : 0.38 });
+      // 中缝：比布料暗一档的 1px 竖线，从框顶到底。
+      node.rect(x + w / 2 - 0.5, innerY + 1, 1, Math.max(1, innerH - 2))
+        .fill({ color: tone.edge, alpha: dark ? 0.40 : 0.26 });
+      // 外框倒角：顶边受光最亮，左右两侧亮/暗对立（光来自窗侧 = 左上）。
+      node.moveTo(x + rTop, frontY + 1)
+        .lineTo(x + w - rTop, frontY + 1)
+        .stroke({ width: Math.max(1, pad * 0.7), color: tone.lip, alpha: dark ? 0.20 : 0.62 });
+      node.rect(x + 1, frontY + rTop, Math.max(1, pad * 0.5), Math.max(2, h - rTop * 2))
+        .fill({ color: tone.lip, alpha: dark ? 0.14 : 0.42 });
+      node.rect(x + w - Math.max(1, pad * 0.5), frontY + rTop, Math.max(1, pad * 0.5), Math.max(2, h - rTop * 2))
+        .fill({ color: 0x000000, alpha: dark ? 0.30 : 0.16 });
+      // 背框下沿收边：一道阴影 + 一道亮线，把"靠背"和下面的坐垫分开。
+      const hemH = Math.max(2, Math.round(h * 0.07));
+      node.rect(x + insetBottom, frontY + h - hemH, w - insetBottom * 2, hemH)
+        .fill({ color: mixHex(tone.front, 0x000000, dark ? 0.34 : 0.22) });
+      node.rect(x + insetBottom, frontY + h - hemH, w - insetBottom * 2, 1)
+        .fill({ color: tone.lip, alpha: dark ? 0.14 : 0.34 });
+      // 整体轮廓线，让它在浅色背景上有边界。
+      bodyPath().stroke({ width: 1, color: tone.edge, alpha: dark ? 0.45 : 0.28 });
+    } else if (detail === 'chair-arm') {
+      // 扶手：一根竖柱 + 一块圆角扶手垫（参考素材里最显眼的侧面特征）。
+      // 画在角色之后，所以只会从角色两侧露出来。
+      const postW = Math.max(2, Math.round(w * 0.40));
+      const postX = x + (w - postW) / 2;
+      const padH = Math.max(2, Math.round(h * 0.16));
+      // 柱
+      node.rect(postX, frontY + padH, postW, Math.max(2, h - padH)).fill({ color: tone.front });
+      node.rect(postX, frontY + padH, Math.max(1, postW * 0.35), Math.max(2, h - padH))
+        .fill({ color: tone.lip, alpha: dark ? 0.12 : 0.36 });
+      node.rect(postX + postW - Math.max(1, postW * 0.3), frontY + padH, Math.max(1, postW * 0.3), Math.max(2, h - padH))
+        .fill({ color: 0x000000, alpha: dark ? 0.28 : 0.14 });
+      // 扶手垫：圆角、顶部受光、底部出阴影
+      node.roundRect(x, frontY, w, padH + 2, Math.max(2, padH * 0.55)).fill({ color: tone.top });
+      node.roundRect(x + 1, frontY + 1, Math.max(1, w - 2), Math.max(1, Math.round(padH * 0.5)), 2)
+        .fill({ color: tone.lip, alpha: dark ? 0.14 : 0.42 });
+      node.rect(x + 1, frontY + padH + 1, Math.max(1, w - 2), 1)
+        .fill({ color: 0x000000, alpha: dark ? 0.30 : 0.15 });
+    } else if (detail === 'cushion') {
+      // P0-D seat pan. Three separate defects were fixed here (2026-10-28):
+      //
+      //  1. TONE TRAP: for `chairBack` the lit top and the front shade are the
+      //     SAME colour, so a "dome" built from tone.top adds nothing.
+      //  2. A big rounded rect with a dark rim reads as a *box lid*.
+      //  3. A LIGHT pad under a DARK mesh back reads as two unrelated objects.
+      //
+      // The fix is a trapezoid (a real seat pan narrows toward the back), in
+      // the same dark family as the backrest, with a sheen only on the crown
+      // and a curved waterfall over the front lip.
+      const narrow = Math.max(2, w * 0.13);       // taper at the rear edge
+      const r = Math.max(2.5, Math.min(w, d) * 0.30);
+      const shell = mixHex(tone.front, 0x000000, dark ? 0.34 : 0.22);
+      const crown = mixHex(tone.front, 0xffffff, dark ? 0.12 : 0.20);
+      const crownLit = mixHex(tone.front, 0xffffff, dark ? 0.18 : 0.30);
+      // Path helper: rear edge inset by `taper`, front edge full width.
+      // Returns `node` so the caller can chain .fill()/.stroke().
+      const panPath = (x0, y0, ww, dd, taper) => node.moveTo(x0 + taper, y0)
+        .lineTo(x0 + ww - taper, y0)
+        .lineTo(x0 + ww - taper * 0.25, y0 + dd * 0.55)
+        .lineTo(x0 + ww, y0 + dd - r * 0.4)
+        .lineTo(x0 + ww - r, y0 + dd)
+        .lineTo(x0 + r, y0 + dd)
+        .lineTo(x0, y0 + dd - r * 0.4)
+        .lineTo(x0 + taper * 0.25, y0 + dd * 0.55)
+        .closePath();
+      // Seat shell (dark, same family as the mesh back).
+      panPath(x, topY, w, d, narrow).fill({ color: shell });
+      // Upholstered crown: concentric insets stepping toward the sheen.
+      for (let i = 1; i <= 3; i += 1) {
+        const inset = i * 2.1;
+        if (w - inset * 2 < 4 || d - inset * 2 < 3) break;
+        panPath(x + inset, topY + inset * 0.7, w - inset * 2, d - inset * 1.4, narrow * 0.82)
+          .fill({ color: i === 3 ? crownLit : crown, alpha: dark ? 0.55 : 0.85 });
+      }
+      // Backrest occlusion: the rear third sits in the back's shadow.
+      node.moveTo(x + narrow, topY)
+        .lineTo(x + w - narrow, topY)
+        .lineTo(x + w - narrow * 0.86, topY + d * 0.26)
+        .lineTo(x + narrow * 1.14, topY + d * 0.26)
+        .closePath()
+        .fill({ color: 0x000000, alpha: dark ? 0.30 : 0.15 });
+      // Waterfall front: the pad curls over the shell, brightest where it
+      // catches the window light.
+      node.roundRect(x + 1, frontY, Math.max(1, w - 2), Math.max(2, h), Math.max(1, r * 0.5))
+        .fill({ color: mixHex(tone.front, 0x000000, dark ? 0.10 : 0.05) });
+      node.roundRect(x + 3, frontY, Math.max(1, w - 6), 1, 1)
+        .fill({ color: crownLit, alpha: dark ? 0.45 : 0.80 });
+      // Silhouette rim: keeps the pad off the floor behind it.
+      panPath(x, topY, w, d, narrow).stroke({ width: 1, color: 0x000000, alpha: dark ? 0.36 : 0.22 });
+      node.rect(x + 2, frontY + h - 1, Math.max(1, w - 4), 1).fill({ color: 0x000000, alpha: dark ? 0.32 : 0.16 });
+    } else if (detail === 'gas-lift') {
+      // Gas cylinder: two diameter steps, a dust cover at the top, a lit side
+      // and a shaded side. A single grey stick is what the eye rejects.
+      node.rect(x, frontY, w, h).fill({ color: tone.front });
+      const lit = Math.max(1, Math.round(w * 0.34));
+      node.rect(x, frontY, lit, h).fill({ color: tone.lip, alpha: dark ? 0.20 : 0.55 });
+      node.rect(x + w - lit, frontY, lit, h).fill({ color: 0x000000, alpha: dark ? 0.30 : 0.14 });
+      // Dust cover / upper sleeve.
+      const sleeveH = Math.max(2, Math.round(h * 0.16));
+      node.rect(x - 1, frontY, w + 2, sleeveH).fill({ color: tone.top });
+      node.rect(x - 1, frontY + sleeveH, w + 2, 1).fill({ color: 0x000000, alpha: dark ? 0.35 : 0.18 });
+    } else if (detail === 'counter-doors') {
+      // P1: four doors with real separations, recessed panel edges, bar pulls,
+      // and a 4px recessed plinth. Three doors with two hairlines was the
+      // "grey wardrobe" look.
+      const cols = 4;
+      const plinth = Math.max(2, Math.round(h * 0.06));
+      const bodyH = Math.max(2, h - plinth);
+      for (let i = 0; i < cols; i += 1) {
+        const dx = x + (w * i) / cols;
+        const dw = w / cols;
+        // Door gap: 2px dark + 1px lit lip below it (the carcass edge).
+        if (i > 0) {
+          node.rect(dx - 1, frontY + 2, 2, bodyH - 4).fill({ color: 0x000000, alpha: dark ? 0.42 : 0.22 });
+          node.rect(dx + 1, frontY + 2, 1, bodyH - 4).fill({ color: tone.lip, alpha: dark ? 0.10 : 0.30 });
+        }
+        // Recessed panel: a 1px darker inset on all four sides of the door.
+        node.rect(dx + 2, frontY + 3, Math.max(1, dw - 4), 1).fill({ color: 0x000000, alpha: dark ? 0.26 : 0.11 });
+        node.rect(dx + 2, frontY + bodyH - 4, Math.max(1, dw - 4), 1).fill({ color: tone.lip, alpha: dark ? 0.10 : 0.22 });
+        // Bar pull: horizontal, with a lit top edge and a dark drop shadow.
+        const pullW = Math.max(5, Math.round(dw * 0.42));
+        const pullX = dx + (dw - pullW) / 2;
+        const pullY = frontY + bodyH * 0.22;
+        node.rect(pullX, pullY, pullW, 2).fill({ color: officeTone('metal').front });
+        node.rect(pullX, pullY, pullW, 1).fill({ color: officeTone('metal').lip, alpha: dark ? 0.30 : 0.80 });
+        node.rect(pullX, pullY + 2, pullW, 1).fill({ color: 0x000000, alpha: dark ? 0.32 : 0.15 });
+      }
+      // Recessed toe kick.
+      node.rect(x, frontY + bodyH, w, plinth).fill({ color: 0x000000, alpha: dark ? 0.36 : 0.18 });
+      node.rect(x, frontY + bodyH, w, 1).fill({ color: 0x000000, alpha: dark ? 0.45 : 0.24 });
+    } else if (detail === 'counter-top') {
+      // Stone slab: specks, a 1px chamfer on the front, a lit back edge and a
+      // shaded front thickness. Stone reads through *speckle*, not colour.
+      node.rect(x + 1, topY + 1, Math.max(1, w - 2), 1).fill({ color: tone.lip, alpha: dark ? 0.10 : 0.55 });
+      stoneSpecks(node, part, tone, dark);
+      const frontThick = Math.max(2, Math.round(h * 0.55));
+      node.rect(x, frontY + h - frontThick, w, frontThick).fill({ color: tone.edge, alpha: dark ? 0.42 : 0.30 });
+      node.rect(x, frontY + h - frontThick, w, 1).fill({ color: tone.lip, alpha: dark ? 0.12 : 0.40 });
+      // Chamfer highlight along the two front corners.
+      node.rect(x, frontY + h - frontThick, 1, frontThick).fill({ color: 0x000000, alpha: dark ? 0.30 : 0.14 });
+      node.rect(x + w - 1, frontY + h - frontThick, 1, frontThick).fill({ color: 0x000000, alpha: dark ? 0.24 : 0.10 });
+    } else if (detail === 'upstand') {
+      // Tiled upstand against the wall: one lit top line, one shadow at the
+      // bottom where it meets the slab.
+      node.rect(x, frontY, w, h).fill({ color: tone.front });
+      node.rect(x + 1, topY, Math.max(1, w - 2), 1).fill({ color: tone.lip, alpha: dark ? 0.14 : 0.50 });
+      node.rect(x, frontY + h - 1, w, 1).fill({ color: 0x000000, alpha: dark ? 0.34 : 0.16 });
+    } else if (detail === 'faucet-base') {
+      node.ellipse(x + w / 2, topY + d * 0.5, w * 0.62, Math.max(1, d * 0.5))
+        .fill({ color: tone.front });
+      node.ellipse(x + w / 2, topY + d * 0.5 - 0.5, w * 0.36, Math.max(1, d * 0.26))
+        .fill({ color: tone.lip, alpha: dark ? 0.20 : 0.60 });
+    } else if (detail === 'faucet-riser') {
+      // Vertical pipe: lit left third, shaded right third.
+      node.rect(x, frontY, w, h).fill({ color: tone.front });
+      node.rect(x, frontY, Math.max(1, w * 0.36), h).fill({ color: tone.lip, alpha: dark ? 0.24 : 0.70 });
+      node.rect(x + w - Math.max(1, w * 0.30), frontY, Math.max(1, w * 0.30), h)
+        .fill({ color: 0x000000, alpha: dark ? 0.34 : 0.16 });
+      // Collar at the base.
+      node.rect(x - 1, frontY + h - 2, w + 2, 2).fill({ color: tone.top });
+    } else if (detail === 'faucet-spout') {
+      // Horizontal spout with a downturn nozzle: the L-bend is what makes a
+      // faucet a faucet (a straight bar reads as a handle).
+      const armH = Math.max(2, Math.round(h * 0.55));
+      node.rect(x, frontY, w, armH).fill({ color: tone.front });
+      node.rect(x, frontY, w, 1).fill({ color: tone.lip, alpha: dark ? 0.24 : 0.70 });
+      // Nozzle: short vertical drop at the far end.
+      const nW = Math.max(2, Math.round(w * 0.30));
+      node.rect(x + w - nW, frontY + armH, nW, Math.max(2, Math.round(h * 0.75)))
+        .fill({ color: tone.front });
+      node.rect(x + w - nW, frontY + armH, 1, Math.max(2, Math.round(h * 0.75)))
+        .fill({ color: tone.lip, alpha: dark ? 0.18 : 0.50 });
+      // Dark opening at the nozzle tip.
+      node.rect(x + w - nW, frontY + armH + Math.max(1, Math.round(h * 0.7)), nW, 1)
+        .fill({ color: 0x000000, alpha: dark ? 0.5 : 0.28 });
+      node.rect(x, frontY + armH - 1, w, 1).fill({ color: 0x000000, alpha: dark ? 0.30 : 0.14 });
+    } else if (detail === 'sink') {
+      // Recessed basin: a dark well, an inner wall that is lighter at the top
+      // (the basin walls catch light), a drain with a cross, and a lit rim.
+      const ix = x + inset;
+      const iy = topY + inset * 0.9;
+      const iw = Math.max(2, w - inset * 2);
+      const id = Math.max(2, d - inset * 1.8);
+      node.roundRect(ix, iy, iw, id, 3).fill({ color: mixHex(tone.front, 0x000000, dark ? 0.55 : 0.38) });
+      // Inner wall: lighter band on the back edge = the basin has depth.
+      node.roundRect(ix + 1, iy + 1, iw - 2, Math.max(1, id * 0.22), 2)
+        .fill({ color: tone.front, alpha: dark ? 0.30 : 0.45 });
+      // Side walls.
+      node.rect(ix + 1, iy + 1, 1, id - 2).fill({ color: tone.front, alpha: dark ? 0.22 : 0.35 });
+      node.rect(ix + iw - 2, iy + 1, 1, id - 2).fill({ color: 0x000000, alpha: dark ? 0.30 : 0.16 });
+      // Drain: circle + cross.
+      const dx2 = ix + iw / 2;
+      const dy2 = iy + id * 0.62;
+      const dr = Math.max(1.5, Math.min(iw, id) * 0.09);
+      node.circle(dx2, dy2, dr).fill({ color: mixHex(tone.front, 0x000000, 0.45) });
+      node.rect(dx2 - dr, dy2, dr * 2, 1).fill({ color: tone.lip, alpha: 0.5 });
+      node.rect(dx2, dy2 - dr, 1, dr * 2).fill({ color: tone.lip, alpha: 0.5 });
+      // Lit rim: 1px highlight all round, brighter on the window side.
+      node.roundRect(ix, iy, iw, id, 3).stroke({ width: 1, color: tone.lip, alpha: dark ? 0.20 : 0.55 });
+    } else if (detail === 'machine') {
+      // Espresso machine: body, a lit front panel, group head, two buttons, a
+      // drip tray with grate lines, and a milk-frother wand on the side.
+      node.rect(x, frontY, w, h).fill({ color: tone.front });
+      // Lit top / control panel.
+      node.rect(x + 1, topY + 1, Math.max(1, w - 2), Math.max(2, Math.round(h * 0.20)))
+        .fill({ color: tone.top, alpha: dark ? 0.55 : 0.95 });
+      // Buttons: two small dots on the panel.
+      for (let i = 0; i < 2; i += 1) {
+        node.circle(x + w * (0.30 + i * 0.40), topY + Math.max(2, h * 0.11), Math.max(1, Math.min(w, h) * 0.045))
+          .fill({ color: i === 0 ? 0x9fe8b4 : 0xd98a8a, alpha: dark ? 0.9 : 0.8 });
+      }
+      // Group head: the portafilter boss, protruding from the front.
+      const ghW = Math.max(3, Math.round(w * 0.34));
+      const ghH = Math.max(3, Math.round(h * 0.16));
+      node.rect(x + (w - ghW) / 2, frontY + h * 0.40, ghW, ghH).fill({ color: tone.edge });
+      node.rect(x + (w - ghW) / 2, frontY + h * 0.40, ghW, 1).fill({ color: tone.lip, alpha: dark ? 0.16 : 0.45 });
+      node.rect(x + (w - ghW) / 2 - 2, frontY + h * 0.40 + ghH - 1, ghW + 4, 2)
+        .fill({ color: 0x000000, alpha: dark ? 0.35 : 0.18 });
+      // Drip tray: recessed bar with grate lines.
+      const trayY = frontY + h - Math.max(4, Math.round(h * 0.14));
+      node.rect(x + 2, trayY, Math.max(1, w - 4), Math.max(2, h - (trayY - frontY)))
+        .fill({ color: tone.edge, alpha: 0.85 });
+      for (let i = 0; i < 4; i += 1) {
+        node.rect(x + 4 + i * ((w - 8) / 4), trayY + 1, 1, Math.max(1, (h - (trayY - frontY)) - 2))
+          .fill({ color: 0x000000, alpha: dark ? 0.30 : 0.14 });
+      }
+      // Milk-frother wand on the right edge.
+      node.rect(x + w - 2, frontY + h * 0.46, 2, Math.max(3, h * 0.30)).fill({ color: officeTone('metal').front });
+      node.rect(x + w - 2, frontY + h * 0.46, 1, Math.max(3, h * 0.30)).fill({ color: officeTone('metal').lip, alpha: 0.6 });
+    } else if (detail === 'espresso-cup') {
+      // A cup on the drip tray: body, dark rim, a handle.
+      node.rect(x + 1, topY + 1, Math.max(1, w - 2), Math.max(1, h - 1)).fill({ color: tone.front });
+      node.ellipse(x + w / 2, topY + Math.max(1, d * 0.22), w * 0.34, Math.max(1, d * 0.20))
+        .fill({ color: mixHex(tone.front, 0x000000, dark ? 0.45 : 0.32) });
+      node.rect(x + w, topY + h * 0.32, Math.max(1, w * 0.14), Math.max(1, h * 0.34))
+        .fill({ color: tone.front });
+    } else if (detail === 'cutting-board') {
+      // 砧板：一块薄木条 + 圆孔 + 木纹。
+      node.roundRect(x, topY, w, Math.max(2, d), Math.max(1, d * 0.4)).fill({ color: tone.top });
+      woodGrain(node, part, tone, dark);
+      // 挂孔
+      node.circle(x + w * 0.86, topY + d * 0.5, Math.max(1, d * 0.20))
+        .fill({ color: mixHex(tone.front, 0x000000, 0.45) });
+      // 前沿厚度
+      node.rect(x, topY + d - 1, w, 1).fill({ color: tone.edge, alpha: dark ? 0.4 : 0.3 });
+      node.rect(x, topY, w, 1).fill({ color: tone.lip, alpha: dark ? 0.12 : 0.45 });
+    } else if (detail === 'jar') {
+      // 调料罐：罐身 + 盖子 + 标签 + 高光。矮而窄，只占十几像素。
+      node.rect(x + 1, frontY, Math.max(1, w - 2), h).fill({ color: tone.front });
+      // 受光面
+      node.rect(x + 1, frontY, Math.max(1, Math.round(w * 0.30)), h)
+        .fill({ color: tone.lip, alpha: dark ? 0.14 : 0.42 });
+      // 盖
+      const lidH = Math.max(1, Math.round(h * 0.22));
+      node.rect(x, frontY, w, lidH).fill({ color: officeTone('metal').front });
+      node.rect(x, frontY, w, 1).fill({ color: officeTone('metal').lip, alpha: dark ? 0.2 : 0.7 });
+      // 标签
+      node.rect(x + 2, frontY + lidH + Math.max(1, h * 0.22), Math.max(1, w - 4), Math.max(1, h * 0.26))
+        .fill({ color: 0xffffff, alpha: dark ? 0.10 : 0.34 });
+      node.rect(x, frontY + h - 1, w, 1).fill({ color: 0x000000, alpha: dark ? 0.3 : 0.14 });
+    } else if (detail === 'upper-cabinet') {
+      // 吊柜（2026-10-28 第四轮）：两块门 + 门缝 + 拉手 + 底部收边 + 顶面。
+      // 顶面必须画（z 抬升后从上往下看得到），但只画一条窄带就够了。
+      node.rect(x, frontY, w, h).fill({ color: tone.front });
+      // 顶面：一条受光窄带
+      node.rect(x, topY, w, Math.max(2, Math.round(d * 0.55)))
+        .fill({ color: mixHex(tone.front, 0xffffff, dark ? 0.10 : 0.26) });
+      node.rect(x, topY + Math.max(2, Math.round(d * 0.55)), w, 1)
+        .fill({ color: tone.edge, alpha: dark ? 0.4 : 0.28 });
+      // 两扇门：中间一道门缝（2px 暗 + 1px 亮）
+      const mid = x + w / 2;
+      node.rect(mid - 1, frontY + 1, 2, Math.max(1, h - 2)).fill({ color: 0x000000, alpha: dark ? 0.42 : 0.22 });
+      node.rect(mid + 1, frontY + 1, 1, Math.max(1, h - 2)).fill({ color: tone.lip, alpha: dark ? 0.10 : 0.30 });
+      // 每扇门的内凹面板 + 竖向拉手
+      for (const [dx, dw] of [[x + 2, w / 2 - 4], [mid + 2, w / 2 - 4]]) {
+        if (dw > 4) {
+          node.rect(dx, frontY + 2, dw, 1).fill({ color: 0x000000, alpha: dark ? 0.26 : 0.11 });
+          node.rect(dx, frontY + h - 3, dw, 1).fill({ color: tone.lip, alpha: dark ? 0.10 : 0.22 });
+        }
+      }
+      // 拉手：两扇门靠中缝一侧各一根竖条
+      for (const hx of [mid - 6, mid + 3]) {
+        node.rect(hx, frontY + h * 0.42, 3, Math.max(4, h * 0.30))
+          .fill({ color: officeTone('metal').front });
+        node.rect(hx, frontY + h * 0.42, 1, Math.max(4, h * 0.30))
+          .fill({ color: officeTone('metal').lip, alpha: dark ? 0.28 : 0.80 });
+      }
+      // 底部收边 + 顶底阴影
+      node.rect(x, frontY + h - 1, w, 1).fill({ color: 0x000000, alpha: dark ? 0.40 : 0.20 });
+      node.rect(x, frontY, w, 1).fill({ color: tone.lip, alpha: dark ? 0.12 : 0.40 });
+    } else if (detail === 'dish-rack') {
+      // 沥水架：一个托盘 + 3 条竖栅 + 两片立着的碟子。
+      node.rect(x, frontY, w, Math.max(2, Math.round(h * 0.30))).fill({ color: tone.front });
+      node.rect(x, frontY, w, 1).fill({ color: tone.lip, alpha: dark ? 0.16 : 0.55 });
+      for (let i = 1; i <= 3; i += 1) {
+        node.rect(x + (w * i) / 4, frontY + Math.round(h * 0.30), 1, Math.max(1, Math.round(h * 0.55)))
+          .fill({ color: tone.edge, alpha: dark ? 0.35 : 0.24 });
+      }
+      // 两片碟子：竖椭圆
+      for (let i = 0; i < 2; i += 1) {
+        node.ellipse(x + w * (0.34 + i * 0.32), topY + d * 0.55,
+          Math.max(1.5, w * 0.16), Math.max(2, d * 0.42))
+          .fill({ color: mixHex(tone.front, 0xffffff, dark ? 0.10 : 0.35) });
+      }
+    } else if (detail === 'kettle') {
+      // 电热水壶：壶身（梯形）+ 壶盖 + 把手 + 底座。
+      const flare = Math.max(1, w * 0.08);
+      node.moveTo(x + flare, frontY)
+        .lineTo(x + w - flare, frontY)
+        .lineTo(x + w, frontY + h)
+        .lineTo(x, frontY + h)
+        .closePath()
+        .fill({ color: tone.front });
+      // 受光面
+      node.moveTo(x + flare, frontY).lineTo(x + flare + w * 0.30, frontY)
+        .lineTo(x + w * 0.30, frontY + h).lineTo(x, frontY + h)
+        .closePath().fill({ color: tone.lip, alpha: dark ? 0.14 : 0.40 });
+      // 壶盖
+      node.ellipse(x + w / 2, topY + Math.max(1, d * 0.30), w * 0.44, Math.max(1, d * 0.26))
+        .fill({ color: tone.top });
+      // 把手：右侧两段
+      node.moveTo(x + w - 1, frontY + h * 0.22).lineTo(x + w + Math.max(2, w * 0.20), frontY + h * 0.34)
+        .stroke({ width: Math.max(1, w * 0.10), color: tone.edge });
+      node.moveTo(x + w + Math.max(2, w * 0.20), frontY + h * 0.34).lineTo(x + w - 1, frontY + h * 0.62)
+        .stroke({ width: Math.max(1, w * 0.10), color: tone.edge });
+      // 底座
+      node.rect(x - 1, frontY + h - 2, w + 2, 2).fill({ color: tone.edge, alpha: dark ? 0.6 : 0.45 });
+    } else if (detail === 'fridge') {
+      // Appliance read: two door split with a real gap (shadow + lit lip),
+      // two vertical bar handles with highlights, a brand plate, a plinth and
+      // a top edge that catches the light.
+      //
+      // The review measured this face as 64% one flat colour — "a blank
+      // vertical rectangle" in the silhouette test. Brushed-metal sheen first,
+      // then the door geometry on top of it.
+      drawMetalSurface(node, part, tone, dark, x, frontY, w, h);
+      // Top edge.
+      node.rect(x + 1, topY + 1, Math.max(1, w - 2), 1).fill({ color: tone.lip, alpha: dark ? 0.12 : 0.45 });
+      // Door split: freezer above, fridge below.
+      const split = frontY + h * 0.42;
+      node.rect(x + 1, split, w - 2, 2).fill({ color: 0x000000, alpha: dark ? 0.48 : 0.26 });
+      node.rect(x + 1, split + 2, w - 2, 1).fill({ color: tone.lip, alpha: dark ? 0.10 : 0.34 });
+      // Vertical bar handles, one per door, on the same side.
+      const hW = Math.max(2, Math.round(w * 0.055));
+      const hX = x + w * 0.14;
+      const handles = [
+        { y0: frontY + h * 0.10, len: h * 0.16 },
+        { y0: split + h * 0.06, len: h * 0.20 },
+      ];
+      handles.forEach((spec) => {
+        node.rect(hX, spec.y0, hW, spec.len).fill({ color: officeTone('metal').front });
+        node.rect(hX, spec.y0, Math.max(1, hW * 0.4), spec.len)
+          .fill({ color: officeTone('metal').lip, alpha: dark ? 0.28 : 0.85 });
+        node.rect(hX + hW, spec.y0, 1, spec.len).fill({ color: 0x000000, alpha: dark ? 0.32 : 0.16 });
+      });
+      // Brand plate: a small low-contrast rectangle, upper area.
+      node.rect(x + w * 0.52, frontY + h * 0.14, Math.max(3, w * 0.16), Math.max(2, h * 0.020))
+        .fill({ color: tone.lip, alpha: dark ? 0.14 : 0.40 });
+      // Recessed plinth.
+      node.rect(x + 1, frontY + h - Math.max(3, h * 0.03), w - 2, Math.max(2, h * 0.03))
+        .fill({ color: 0x000000, alpha: dark ? 0.40 : 0.20 });
+    } else if (detail === 'shelf') {
+      // Wall shelf: 2px board, lit top, shadowed underside, two L brackets.
+      node.rect(x + 1, topY + 1, Math.max(1, w - 2), 1).fill({ color: tone.lip, alpha: dark ? 0.14 : 0.50 });
+      node.rect(x, frontY + h - 1, w, 1).fill({ color: 0x000000, alpha: dark ? 0.40 : 0.20 });
+      // Brackets at both ends: horizontal arm + vertical leg.
+      const bW = Math.max(3, Math.round(w * 0.045));
+      for (const bx of [x + Math.max(2, w * 0.05), x + w - Math.max(2, w * 0.05) - bW]) {
+        node.rect(bx, frontY + h, bW, 2).fill({ color: officeTone('metal').front });
+        node.rect(bx + bW - 2, frontY + h, 2, Math.max(3, h * 2.2)).fill({ color: officeTone('metal').front, alpha: 0.9 });
+      }
+    } else if (detail === 'cup') {
+      // Shelf cup: body, dark mouth, handle, 1px shadow on the shelf.
+      node.rect(x, topY + Math.max(1, d * 0.28), w, Math.max(2, h - d * 0.28)).fill({ color: tone.front });
+      node.ellipse(x + w / 2, topY + Math.max(1, d * 0.28), w * 0.5, Math.max(1, d * 0.22))
+        .fill({ color: mixHex(tone.front, 0x000000, dark ? 0.45 : 0.30) });
+      node.ellipse(x + w / 2, topY + Math.max(1, d * 0.28), w * 0.5, Math.max(1, d * 0.22))
+        .stroke({ width: 1, color: tone.lip, alpha: dark ? 0.20 : 0.55 });
+      node.rect(x + w, topY + Math.max(1, d * 0.34), Math.max(1, w * 0.16), Math.max(1, h * 0.34))
+        .fill({ color: tone.front });
+      node.rect(x, topY + h - 1, w, 1).fill({ color: 0x000000, alpha: dark ? 0.35 : 0.16 });
+    } else if (detail === 'sofa-leg') {
+      // Short block foot with a lit top and a floor shadow.
+      node.rect(x, frontY, w, h).fill({ color: tone.front });
+      node.rect(x, frontY, w, 1).fill({ color: tone.lip, alpha: dark ? 0.14 : 0.40 });
+      node.rect(x, frontY + h - 1, w, 1).fill({ color: 0x000000, alpha: dark ? 0.36 : 0.18 });
+    } else if (detail === 'sofa-base') {
+      // Plinth: dark, recessed, with a lit top lip under the seat cushions.
+      node.rect(x + 2, frontY + 2, Math.max(1, w - 4), 1).fill({ color: 0x000000, alpha: 0.14 });
+      node.rect(x, frontY + h - 2, w, 2).fill({ color: 0x000000, alpha: dark ? 0.30 : 0.10 });
+      node.rect(x, topY + 1, w, 1).fill({ color: tone.lip, alpha: dark ? 0.08 : 0.22 });
+    } else if (detail === 'sofa-back') {
+      // 2026-10-28 第八轮：靠背原本在中央画了一条**深色竖缝**（alpha 0.20–0.30），
+      // 在 1:1 下像把靠背劈成两块板。真实双人沙发的靠背是两片软垫**贴在一起**，
+      // 缝是浅压痕而不是黑线。所以：缝改成极淡的 1px、两侧各加一条受光肋，
+      // 顶部圆角收边、底边压出与坐垫的接触阴影。
+      const r = Math.max(3, Math.min(w, h) * 0.14);
+      node.roundRect(x, frontY, w, Math.max(1, h + inset), r).fill({ color: tone.front });
+      // 顶部圆角受光（靠背上沿滚边）
+      node.roundRect(x + 1, frontY + 1, Math.max(1, w - 2), Math.max(2, Math.round(h * 0.14)), r * 0.8)
+        .fill({ color: tone.lip, alpha: dark ? 0.12 : 0.32 });
+      // 中缝：浅压痕（两条 1px，一亮一暗，模拟两片垫子贴合）
+      const seamX = x + w * 0.5;
+      node.rect(seamX, frontY + Math.max(3, h * 0.22), 1, Math.max(2, h * 0.58))
+        .fill({ color: tone.edge, alpha: dark ? 0.16 : 0.10 });
+      node.rect(seamX + 1, frontY + Math.max(3, h * 0.22), 1, Math.max(2, h * 0.58))
+        .fill({ color: tone.lip, alpha: dark ? 0.08 : 0.18 });
+      // 两片垫子各自微微鼓起：中央偏外各一条淡亮带
+      for (const side of [-1, 1]) {
+        const bx = x + w * (side < 0 ? 0.26 : 0.74);
+        node.roundRect(bx - Math.max(2, w * 0.10), frontY + h * 0.26,
+          Math.max(2, w * 0.20), Math.max(2, h * 0.44), 2)
+          .fill({ color: tone.lip, alpha: dark ? 0.06 : 0.14 });
+      }
+      // 与坐垫的接触阴影
+      node.rect(x, frontY + h - Math.max(2, Math.round(h * 0.10)), w, Math.max(2, Math.round(h * 0.10)))
+        .fill({ color: 0x000000, alpha: dark ? 0.24 : 0.11 });
+      // 顶面：一条受光窄边
+      node.rect(x + 1, topY + 1, Math.max(1, w - 2), 1)
+        .fill({ color: tone.lip, alpha: dark ? 0.14 : 0.46 });
+    } else if (detail === 'sofa-skirt') {
+      // Skirt: soft vertical folds, dark, with a lit top edge.
+      node.rect(x + 1, topY + 1, Math.max(1, w - 2), 1).fill({ color: tone.lip, alpha: dark ? 0.10 : 0.30 });
+      const folds = 5;
+      for (let i = 1; i < folds; i += 1) {
+        node.rect(x + (w * i) / folds, frontY + 1, 1, Math.max(1, h - 2))
+          .fill({ color: 0x000000, alpha: dark ? 0.18 : 0.08 });
+      }
+      node.rect(x, frontY + h - 2, w, 2).fill({ color: 0x000000, alpha: dark ? 0.34 : 0.14 });
+    } else if (detail === 'sofa-arm') {
+      // 2026-10-29 第十轮（用户："沙发扶手仍是硬方块，可以改成圆柱滚边"）。
+      //
+      // 真实布艺沙发的扶手是一个**圆柱滚边**：正视看是一段半圆（顶盖），
+      // 下面接一段垂直的扶手立面。原来整块画成一个圆角矩形，所以读起来是方块。
+      //
+      // 尺寸（实测）：扶手 21×37px。所以：
+      //   - 上半段 roll 直径 = 扶手宽 = 21px（半高 10.5px）
+      //   - 下半段 27px 垂直立面
+      // 圆柱的体积靠三样东西：顶面椭圆、圆柱侧面的横向明暗渐变（左亮右暗）、
+      // 以及底部与沙发座面相接的接触阴影。
+      // 关键几何（实测）：扶手 w=21px、正面高 36.5px、**顶面深 56.7px**。
+      // 顶面比宽度大得多，所以**不能画正圆**（正圆会被顶面拉扁、且盖住立面）。
+      // 正确的 2.5D 读法：顶面上是一条**纵向圆柱带**（从后到前贯穿整个扶手深度），
+      // 它的正面表现就是立在顶面前后方向的一根「圆管」，宽度 = 扶手宽。
+      const tubeR = Math.max(2, w / 2);          // 圆管半径 = 扶手宽的一半
+      // 圆管放在顶面**前部**（靠近观者那侧），后面留出扶手台面 —— 这样读作
+      // "扶手顶上的圆滚边"，而不是整块被一根管子替换。
+      const tubeH = Math.max(3, Math.min(w, d) * 0.62);
+      const tubeTop = topY + Math.max(0, d - tubeH) * 0.55;
+      const wallTop = topY + d * 0.72;            // 立面从顶面后段开始，被管子压住上缘
+      const wallH = Math.max(2, frontY + h - wallTop);
+      // ---- 扶手立面（圆管下方）：比滚边暗一档
+      node.rect(x, wallTop, w, wallH).fill({ color: mixHex(tone.front, 0x000000, dark ? 0.12 : 0.06) });
+      //   立面横向明暗：左侧受光（窗在左），右侧渐暗
+      node.rect(x, wallTop, Math.max(1, Math.round(w * 0.36)), wallH)
+        .fill({ color: tone.front, alpha: dark ? 0.50 : 0.66 });
+      node.rect(x + w - Math.max(2, Math.round(w * 0.30)), wallTop, Math.max(2, Math.round(w * 0.30)), wallH)
+        .fill({ color: 0x000000, alpha: dark ? 0.24 : 0.12 });
+      // ---- 圆柱带（顶面上的纵向圆管）
+      //   用一条横跨整个深度的圆角矩形 + 内部竖向明暗渐变来表现"圆管"。
+      node.roundRect(x, tubeTop, w, tubeH, tubeR * 0.92)
+        .fill({ color: tone.front });
+      //   圆柱母线高光：管子左 1/3 一条竖向亮带
+      node.roundRect(x + Math.max(1, w * 0.12), tubeTop + 1,
+        Math.max(1, w * 0.30), Math.max(2, tubeH - 2), 1)
+        .fill({ color: tone.lip, alpha: dark ? 0.14 : 0.42 });
+      //   管子右 1/4 暗面
+      node.roundRect(x + w - Math.max(2, w * 0.28), tubeTop + 1,
+        Math.max(1, w * 0.24), Math.max(2, tubeH - 2), 1)
+        .fill({ color: 0x000000, alpha: dark ? 0.26 : 0.13 });
+      //   管子两端：顶端一小段亮弧（圆管的头），底端一道暗弧（与立面的接缝）
+      node.ellipse(x + tubeR, tubeTop + Math.max(1, tubeH * 0.22), tubeR * 0.86, Math.max(1.2, tubeH * 0.22))
+        .fill({ color: tone.lip, alpha: dark ? 0.12 : 0.30 });
+      node.rect(x + 1, tubeTop + tubeH - 1, Math.max(1, w - 2), 1)
+        .fill({ color: 0x000000, alpha: dark ? 0.26 : 0.14 });
+      //   滚边轮廓：左上亮、右下暗
+      node.roundRect(x, tubeTop, w, tubeH, tubeR * 0.92)
+        .stroke({ width: 1, color: tone.edge, alpha: dark ? 0.34 : 0.20 });
+      // ---- 与坐垫相接的内侧接触阴影（靠座位的那一侧）
+      const innerSide = (part.x0 * scene.width < (scene.width * 0.5)) ? 'right' : 'left';
+      const shadeX = innerSide === 'right' ? x + w - 2 : x;
+      node.rect(shadeX, wallTop, 2, wallH)
+        .fill({ color: 0x000000, alpha: dark ? 0.20 : 0.09 });
+      // ---- 扶手底部落地阴影
+      node.rect(x, frontY + h - 1, w, 1).fill({ color: 0x000000, alpha: dark ? 0.30 : 0.14 });
+    } else if (detail === 'sofa-cushion') {
+      // 2026-10-28 第八轮（用户："那两个椭圆矩形放在那里，感觉怪怪的，
+      // 不像坐垫"）。根因是两个叠加的错误：
+      //   1. 圆角半径 min(w,d)*0.34 —— 坐垫 89×24px 时半径 13px，超过深度一半，
+      //      直接变成药丸/胶囊；
+      //   2. 外面又加了一圈 1px 深色描边，像贴纸轮廓。
+      //
+      // 真实沙发坐垫的读法：一块**近方形**的软垫，边角只有轻微倒角（2–3px），
+      // 靠背一侧压出阴影、前沿有瀑布式圆边、中间一道浅浅的分缝。
+      // 所以：小圆角 + 无描边 + 靠背侧阴影 + 前缘高光。
+      const r = Math.max(1.5, Math.min(3, Math.min(w, d) * 0.10));   // 轻微倒角，不是胶囊
+      // tone.top 与 tone.front 在 sofaSeat 材质下是**两个不同色**（top 是浅灰蓝、
+      // front 是更深的沙发灰）。坐垫抬起来的那块受光面必须用 top，否则整块垫子
+      // 和靠背一个颜色、看不出是软垫（2026-10-28 第八轮）。
+      const cushionFace = tone.top;
+      const cushionSide = mixHex(cushionFace, 0x000000, dark ? 0.20 : 0.12);
+      // 底座（垫子本体）：立面比顶面深一档，做出厚度。
+      node.roundRect(x, frontY, w, Math.max(2, h), r).fill({ color: cushionSide });
+      // 顶面：主体（受光的布面）
+      node.roundRect(x, topY, w, d, r).fill({ color: cushionFace });
+      // 蓬松感：顶面中上部一条更亮的宽带（坐垫被坐压后中间鼓起的部分）。
+      const puffH = Math.max(2, Math.round(d * 0.46));
+      node.roundRect(x + 1, topY + 1, Math.max(2, w - 2), puffH, r)
+        .fill({ color: tone.top, alpha: dark ? 0.30 : 0.62 });
+      // 靠背侧的压迫阴影：贴着后排的那条暗带，把垫子「压进」沙发。
+      const pressH = Math.max(2, Math.round(d * 0.22));
+      node.rect(x + 1, topY, Math.max(2, w - 2), pressH)
+        .fill({ color: 0x000000, alpha: dark ? 0.24 : 0.11 });
+      // 中间分缝：1px 暗线，两端各留 3px 不顶边（真实坐垫的缝不会切到角）。
+      node.rect(x + w / 2, topY + Math.max(2, d * 0.18), 1, Math.max(2, d * 0.66))
+        .fill({ color: tone.edge, alpha: dark ? 0.30 : 0.18 });
+      // 前缘瀑布：一条窄的亮边 + 一条暗缝，表现垫子向前卷过底座。
+      node.rect(x + 2, frontY, Math.max(2, w - 4), 1)
+        .fill({ color: tone.lip, alpha: dark ? 0.12 : 0.38 });
+      node.rect(x + 2, frontY + Math.max(1, h - 1), Math.max(2, w - 4), 1)
+        .fill({ color: 0x000000, alpha: dark ? 0.26 : 0.12 });
+    } else if (detail === 'magazine-stack') {
+      // 一摞杂志（2026-10-28 第九轮）。盒子的 z 已经是 6 层厚（0.007 ≈ 4.4px），
+      // 所以在正面画出 4 本侧边，顶面画最上面那本的封面。
+      //
+      // 关键是"堆叠感"：每本都有 1px 错位 + 轻微旋转感（用 x 偏移模拟），
+      // 侧面各有一条纸的亮边与暗缝，最上面那本封面有一块低 alpha 图块。
+      const layers = 4;
+      const bookH = Math.max(1, Math.floor(h / layers));
+      for (let i = 0; i < layers; i += 1) {
+        // 逐层错位：越靠下的书越往左一点，模拟堆放时的不整齐。
+        const shift = (layers - 1 - i) * 1;
+        const by = frontY + i * bookH;
+        const bw = Math.max(2, w - shift);
+        const bx = x + shift;
+        // 纸页侧边：底色 + 底边暗缝
+        node.rect(bx, by, bw, Math.max(1, bookH - 1))
+          .fill({ color: i % 2 === 0 ? tone.front : mixHex(tone.front, 0x000000, dark ? 0.08 : 0.04) });
+        // 每本顶边一条亮线 = 纸张边缘
+        node.rect(bx, by, bw, 1).fill({ color: tone.lip, alpha: dark ? 0.10 : 0.34 });
+        // 层间阴影
+        node.rect(bx, by + Math.max(1, bookH - 1), bw, 1)
+          .fill({ color: 0x000000, alpha: dark ? 0.26 : 0.13 });
+      }
+      // 最上面那本的封面：顶面 + 一块图片区 + 标题条。
+      // 封面必须**比纸色深**，否则在浅木色茶几上看不见边界（第一版用 tone.front
+      // = paper 白，整摞糊成一片白）。
+      const topShift = (layers - 1) * 1;
+      const tw = Math.max(2, w - topShift);
+      const tx = x + topShift;
+      const coverTone = officeTone('accentSoft');
+      const coverBase = mixHex(coverTone.front, dark ? 0x000000 : 0xffffff, dark ? 0.30 : 0.10);
+      node.rect(tx, topY, tw, Math.max(1, d)).fill({ color: coverBase });
+      node.rect(tx, topY, tw, 1).fill({ color: tone.lip, alpha: dark ? 0.14 : 0.50 });
+      // 封面图块（低 alpha 的色块 = 一张照片，不画具体内容）
+      node.rect(tx + 2, topY + 2, Math.max(2, tw * 0.42), Math.max(1, d * 0.40))
+        .fill({ color: officeTone('accentSoft').front, alpha: dark ? 0.32 : 0.28 });
+      // 标题条 + 第二行
+      node.rect(tx + tw * 0.52, topY + 2, Math.max(2, tw * 0.40), 1)
+        .fill({ color: 0x000000, alpha: dark ? 0.26 : 0.16 });
+      node.rect(tx + tw * 0.52, topY + 4, Math.max(2, tw * 0.28), 1)
+        .fill({ color: 0x000000, alpha: dark ? 0.20 : 0.12 });
+      // 顶面轮廓
+      node.rect(tx, topY, tw, Math.max(1, d)).stroke({ width: 1, color: tone.edge, alpha: dark ? 0.34 : 0.22 });
+      // 整摞的接地阴影（在桌面上的投影）
+      node.ellipse(x + w * 0.5, frontY + h + 1, w * 0.52, Math.max(1, 2))
+        .fill({ color: 0x000000, alpha: dark ? 0.22 : 0.08 });
+    } else if (detail === 'table-leg') {
+      node.rect(x, frontY, w, h).fill({ color: tone.front });
+      node.rect(x, frontY, Math.max(1, w * 0.4), h).fill({ color: tone.lip, alpha: dark ? 0.14 : 0.40 });
+      node.rect(x, frontY + h - 2, w, 2).fill({ color: 0x000000, alpha: dark ? 0.32 : 0.14 });
+    } else if (detail === 'magazine') {
+      // Two offset sheets with a folded corner and a cover image block.
+      const ox = Math.max(1, Math.round(w * 0.06));
+      const oy = Math.max(1, Math.round(d * 0.10));
+      node.rect(x + ox, topY + oy, Math.max(1, w - ox), Math.max(1, d - oy))
+        .fill({ color: mixHex(tone.front, 0x000000, dark ? 0.12 : 0.05) });
+      node.rect(x, topY, Math.max(1, w - ox), Math.max(1, d - oy)).fill({ color: tone.front });
+      // Fold at the near corner.
+      node.moveTo(x + w - ox * 2, topY + d - oy)
+        .lineTo(x + w - ox, topY + d - oy)
+        .lineTo(x + w - ox, topY + d - oy * 2)
+        .closePath()
+        .fill({ color: mixHex(tone.front, 0x000000, dark ? 0.22 : 0.12) });
+      // Cover block: one low-alpha rectangle = a photo, not text.
+      node.rect(x + 2, topY + 2, Math.max(2, w * 0.44), Math.max(1, d * 0.36))
+        .fill({ color: officeTone('accentSoft').front, alpha: dark ? 0.35 : 0.30 });
+      node.rect(x + 3, topY + d * 0.62, Math.max(2, w * 0.50), 1).fill({ color: 0x000000, alpha: dark ? 0.24 : 0.14 });
+    } else if (detail === 'remote') {
+      node.rect(x + 1, topY + 1, Math.max(1, w - 2), Math.max(1, d - 2)).fill({ color: tone.front });
+      // Two buttons + an IR window.
+      node.circle(x + w * 0.5, topY + d * 0.38, Math.max(0.8, Math.min(w, d) * 0.14))
+        .fill({ color: mixHex(tone.front, 0xffffff, 0.25), alpha: 0.7 });
+      node.circle(x + w * 0.5, topY + d * 0.66, Math.max(0.8, Math.min(w, d) * 0.14))
+        .fill({ color: mixHex(tone.front, 0xffffff, 0.25), alpha: 0.7 });
+      node.rect(x + w * 0.5 - 1, topY + d - 2, 2, 1).fill({ color: 0xff6b6b, alpha: 0.5 });
+    } else if (detail === 'rug') {
+      // Woven rug: outer frame, inner frame, weave lines and short fringe.
+      node.roundRect(x + 1, topY + 1, Math.max(1, w - 2), Math.max(1, d - 2), 6)
+        .stroke({ width: 2, color: tone.edge, alpha: dark ? 0.45 : 0.34 });
+      node.roundRect(x + 7, topY + 7, Math.max(1, w - 14), Math.max(1, d - 14), 4)
+        .stroke({ width: 1, color: tone.lip, alpha: dark ? 0.10 : 0.28 });
+      // Weave: 5 low-alpha lines along the length.
+      for (let i = 1; i <= 5; i += 1) {
+        node.rect(x + 10, topY + (d * i) / 6, Math.max(1, w - 20), 1)
+          .fill({ color: tone.edge, alpha: dark ? 0.10 : 0.07 });
+      }
+      // Fringe on the two short ends: 2px tufts every 6px.
+      for (let fx = x + 6; fx < x + w - 6; fx += 6) {
+        node.rect(fx, topY + 2, 2, 3).fill({ color: tone.lip, alpha: dark ? 0.10 : 0.30 });
+        node.rect(fx, topY + d - 5, 2, 3).fill({ color: tone.lip, alpha: dark ? 0.10 : 0.30 });
+      }
+    } else if (detail === 'table') {
+      // Coffee table top: 4px slab with a chamfer and a front edge.
+      node.rect(x + 1, topY + 1, Math.max(1, w - 2), 1).fill({ color: tone.lip, alpha: dark ? 0.08 : 0.40 });
+      woodGrain(node, part, tone, dark);
+      const edgeH = Math.max(2, Math.round(h * 0.55));
+      node.rect(x, frontY + h - edgeH, w, edgeH).fill({ color: tone.edge, alpha: dark ? 0.38 : 0.24 });
+      node.rect(x, frontY + h - edgeH, w, 1).fill({ color: tone.lip, alpha: dark ? 0.12 : 0.36 });
+      node.rect(x, frontY + h - 1, w, 1).fill({ color: 0x000000, alpha: dark ? 0.34 : 0.16 });
+    } else if (detail === 'paper-lines') {
+      node.rect(x + 2, topY + 2, Math.max(1, w - 4), 1).fill({ color: 0x000000, alpha: 0.25 });
+      node.rect(x + 2, topY + 5, w * 0.55, 1).fill({ color: 0x000000, alpha: 0.2 });
+    } else if (detail === 'pillow') {
+      // Throw pillow: rounded square, domed face, centre crease, corner dents
+      // and a soft shadow where it leans on the back cushion. At 31×18px it has
+      // to read as fabric, so the corners are the whole story.
+      const r = Math.max(4, Math.min(w, h) * 0.42);
+      // Shadow cast onto the seat/back behind it.
+      node.roundRect(x + 2, frontY + 2, Math.max(1, w - 2), Math.max(1, h), r)
+        .fill({ color: 0x000000, alpha: dark ? 0.26 : 0.10 });
+      // Body.
+      node.roundRect(x, frontY, w, h, r).fill({ color: tone.front });
+      // Domed face (inset, lighter) — the pillow's volume.
+      node.roundRect(x + 2, frontY + 2, Math.max(1, w - 4), Math.max(1, h - 4), r * 0.72)
+        .fill({ color: tone.top, alpha: dark ? 0.30 : 0.55 });
+      // Top face sliver: pillows lean, so the top reads as a lit edge.
+      node.roundRect(x + 1, topY + 1, Math.max(1, w - 2), Math.max(1, d - 2), r * 0.7)
+        .fill({ color: tone.lip, alpha: dark ? 0.12 : 0.42 });
+      // Centre crease: a vertical line that stops short of the corners.
+      node.rect(x + w * 0.5, frontY + h * 0.24, 1, Math.max(1, h * 0.46))
+        .fill({ color: tone.edge, alpha: dark ? 0.38 : 0.24 });
+      // Corner dents: two dark notches at opposite corners.
+      for (const [dx, dy] of [[0.22, 0.24], [0.78, 0.74]]) {
+        node.circle(x + w * dx, frontY + h * dy, Math.max(1, Math.min(w, h) * 0.11))
+          .fill({ color: tone.edge, alpha: dark ? 0.16 : 0.10 });
+      }
+      // Silhouette.
+      node.roundRect(x, frontY, w, h, r).stroke({ width: 1, color: 0x000000, alpha: dark ? 0.30 : 0.15 });
     }
+  }
 
-    // Plants: pot box + layered leaves.
-    for (const plant of office.plants) {
-      const px = X(plant.x);
-      const py = Y(plant.y);
-      const r = W(plant.r);
-      const potH = HPX(0.014);
-      node.rect(px - r * 0.55, py, r * 1.1, potH).fill({ color: c.plantPot });
-      node.roundRect(px - r * 0.55, py - r * 0.35, r * 1.1, r * 0.45, 2).fill({ color: c.plantPot });
-      node.circle(px, py - r * 0.95, r * 0.70).fill({ color: c.plantLeaf });
-      node.circle(px - r * 0.5, py - r * 0.65, r * 0.48).fill({ color: c.plantLeaf, alpha: 0.85 });
-      node.circle(px + r * 0.5, py - r * 0.75, r * 0.44).fill({ color: c.plantLeaf, alpha: 0.75 });
+  // Contact shadow per group: two nested soft ellipses under each defining
+  // footprint. One hard ellipse read as a stain (2026-10-27 §10.7); two
+  // nested ones read as falloff.
+  const OFFICE_SHADOW_ALPHA = { light: 0.075, dark: 0.26 };
+  // 2026-10-28 第三轮：绿植改用图片素材（用户授权："如果确认如绿植这些你很难
+  // 精细化的用代码生成，那后面就回退到使用图片素材"）。
+  //
+  // 设计取舍：
+  //   - 结构类家具（桌/椅/显示器/台面/沙发）需要跟角色一起参与逐件遮挡排序，
+  //     素材反而是负担，继续代码绘制。
+  //   - 绿植是静态落地装饰，只按组排序（整组一个画家键），用素材没有代价，
+  //     而素材在叶体积、陶土质感、叶脉密度上明显比代码版好。
+  //
+  // 回退契约：纹理缺失（离线测试、素材未打包）时回退到代码绘制路径，所以
+  // `describeOffice` 仍产出完整的 parts，渲染结果不会变成空白。
+  function officeSpriteTexture(assetId) {
+    if (!assetId) return null;
+    const texture = officeTextureMap.get(assetId);
+    if (!texture || !(texture.width > 0) || !(texture.height > 0)) return null;
+    return texture;
+  }
+
+  function buildOfficeGroupNode(entry) {
+    if (entry.sprite && officeSpriteTexture(entry.sprite.assetId)) {
+      const sprite = new PIXI.Sprite(officeSpriteTexture(entry.sprite.assetId));
+      sprite.__officeGroupSprite = entry.sprite.assetId;
+      return sprite;
     }
+    return new PIXI.Graphics();
+  }
+
+  // 把精灵图按"盆底 = 组的前下边缘"落位。
+  //
+  // Anchor 用 (0.5, 1) 会让**纹理画布底边**贴地，而 1024² 素材的盆栽四周还有
+  // 大片空白（contentBbox 只占中间一部分），结果植物悬在地面上方、接触阴影
+  // 留在脚下（2026-10-28 实测）。所以这里按 contentBbox 计算真实的"盆底"位置：
+  // 把内容底边对到锚点，而不是画布底边。
+  function paintOfficeGroupSprite(node, entry) {
+    const spec = entry.sprite;
+    const texture = node && node.texture;
+    if (!spec || !texture || !(texture.width > 0)) return;
+    const asset = layoutAssetById(spec.assetId);
+    const bbox = asset && asset.contentBbox ? asset.contentBbox : null;
+    const anchorX = spec.footX * scene.width;
+    const anchorY = spec.footY * scene.height;
+    // 目标高度 = 屏幕像素高度；按内容高度换算缩放（内容占比 < 1 时纹理整体更大）。
+    const contentH = bbox ? bbox.h : 1;
+    const contentW = bbox ? bbox.w : 1;
+    const scale = Math.max(0.01, (spec.height * scene.height) / (texture.height * contentH));
+    node.scale.set(scale, scale);
+    node.anchor.set(0.5, 1);
+    node.x = anchorX;
+    // 内容底边落在 anchorY：画布底边要再往下 (1 - bbox.y - bbox.h)。
+    node.y = anchorY + (1 - (bbox ? bbox.y + bbox.h : 1)) * texture.height * scale;
+    // 诊断/测试用：素材在屏幕上的实际占位（内容盒，不含画布留白）。
+    node.__officeSpriteBox = {
+      w: texture.width * contentW * scale,
+      h: texture.height * contentH * scale,
+    };
+    // 暗色主题：素材是按亮房画的，直接贴会像发光的白剪影。乘一个中性灰
+    // 让它们落进夜景。注意 tint 是**乘算**，所以只能压暗、不能提亮。
+    // 亮色主题必须显式复位成白色，否则从暗色切回来会残留灰调。
+    if (codeSceneOptions.theme === 'dark') {
+      node.tint = 0x6f7479;
+    } else if (node.tint !== undefined) {
+      node.tint = 0xffffff;
+    }
+  }
+
+  function drawOfficeGroupShadow(node, entry) {
+    const casts = entry.kind === 'station-desk'
+      || entry.kind === 'station-back'
+      || entry.kind === 'lounge-sofa'
+      || entry.kind === 'lounge-table'
+      || entry.kind === 'lounge-lamp'
+      || entry.kind === 'kitchen'
+      || entry.kind === 'plant';
+    if (!casts) return;
+    const dark = codeSceneOptions.theme === 'dark';
+    const parts = entry.parts.filter((part) => (
+      part.kind === 'desk-top' || part.kind === 'sofa' || part.kind === 'table'
+      || part.kind === 'counter' || part.kind === 'fridge' || part.kind === 'plant-pot'
+      || part.kind === 'chair-base' || part.detail === 'chair-star'
+    ));
+    for (const part of parts) {
+      const x = part.x0 * scene.width;
+      const w = (part.x1 - part.x0) * scene.width;
+      const y = part.y1 * scene.height;
+      const isChair = part.kind === 'chair-base';
+      const rx = isChair ? w * 0.72 : w * 0.50;
+      const ry = isChair
+        ? Math.max(3, (part.y1 - part.y0) * scene.height * 0.34)
+        : Math.max(3, (part.y1 - part.y0) * scene.height * 0.22);
+      const a = dark ? OFFICE_SHADOW_ALPHA.dark : OFFICE_SHADOW_ALPHA.light;
+      node.ellipse(x + w / 2, y - 1, rx, ry).fill({ color: 0x000000, alpha: a });
+      node.ellipse(x + w / 2, y - 1, rx * 0.60, ry * 0.60).fill({ color: 0x000000, alpha: a * 0.85 });
+    }
+  }
+
+  function layoutOfficeGroups() {
+    if (projectionMode !== 'flat' || !codeSceneOptions.enabled || !codeSceneOptions.generatedFurniture) return;
+    const description = officeDescription || buildOfficeDescription();
+    if (!description) return;
+    if (!officeShadowNode) {
+      officeShadowNode = new PIXI.Graphics();
+      officeShadowNode.__furnitureId = 'generated-office-shadows';
+      layers.background.addChild(officeShadowNode);
+    }
+    officeShadowNode.clear();
+    const layer = layers['ground-entities'];
+    const seen = new Set();
+    for (const entry of description.groups) {
+      seen.add(entry.id);
+      let record = officeGroups.get(entry.id);
+      if (!record) {
+        // 2026-10-28 第三轮：带 `sprite` 描述的组（目前只有绿植）优先用图片
+        // 素材渲染。素材是 PIXI.Sprite（不是 Graphics），所以节点类型跟着
+        // 描述走；纹理缺失时 `buildOfficeGroupNode` 会退回 Graphics。
+        const node = buildOfficeGroupNode(entry);
+        node.__officeGroupId = entry.id;
+        layer.addChild(node);
+        record = { node, group: entry };
+        officeGroups.set(entry.id, record);
+      }
+      record.group = entry;
+      if (record.node && typeof record.node.clear === 'function') {
+        record.node.clear();
+        for (const part of entry.parts) drawOfficePart(record.node, part);
+      } else {
+        paintOfficeGroupSprite(record.node, entry);
+      }
+      drawOfficeGroupShadow(officeShadowNode, entry);
+    }
+    for (const [id, record] of [...officeGroups]) {
+      if (seen.has(id)) continue;
+      record.node.destroy();
+      officeGroups.delete(id);
+    }
+    sortOfficeGround();
+  }
+
+  // One painter pass: furniture groups and characters keyed by their
+  // front-bottom edge. No station re-keying here (unlike the legacy collage):
+  // the character art faces the camera and every station piece lives behind
+  // the seat, so a body keyed by its own foot point is in front of its chair
+  // and desk and behind anything closer to the camera. That IS the anti-穿模
+  // property the collage lacked: occlusion comes from geometry, not layers.
+  // 2.5D 代码家具的画家算法。
+  //
+  // 2026-10-28 第五轮：这里补回了**坐姿角色重挂**（旧贴图路径在 `sortGround`
+  // 的 M4.1h 段落里有等价逻辑，代码化分支一直漏着）。
+  //
+  // 需要它是因为用户给的顺序是「椅子 > 鲸鱼娘 > 桌子」，而角色只用脚点一个键：
+  //   - 站着/路过：脚点键天然正确（越靠下越靠前），不许动；
+  //   - 坐在工位里：脚点落在桌子底边附近，纯脚点排序会让她有时被桌板盖住。
+  //
+  // 所以只对**脚点落在自己工位带内**的角色，把键抬到工位堆叠键之上、
+  // 但仍严格低于椅子键 —— 这样"椅子压角色、角色压桌子"在任何一张工位上
+  // 都恒成立，而走廊行人与绕后的角色不受影响。
+  function sortOfficeGround() {
+    const layer = layers['ground-entities'];
+    const groups = [...officeGroups.values()];
+    const entries = [];
+    for (const record of entities.values()) {
+      if (!record.container) continue;
+      const point = record.__snapshot ? record.__snapshot.position : null;
+      const key = point ? point.y * scene.height : 0;
+      entries.push({ key, node: record.container, id: record.employeeId, kind: 'character', point });
+    }
+    for (const record of groups) {
+      entries.push({ key: record.group.key * scene.height, node: record.node, id: record.group.id, kind: 'furniture' });
+    }
+    // 工位识别：组 id 形如 `<seatId>-back` / `<seatId>-desk`。
+    const stations = new Map();
+    for (const record of groups) {
+      const match = /-([a-z]+)$/.exec(record.group.id || '');
+      if (!match || (match[1] !== 'back' && match[1] !== 'desk')) continue;
+      const prefix = record.group.id.slice(0, match.index);
+      if (!stations.has(prefix)) stations.set(prefix, { back: null, desk: null, stackKey: -Infinity });
+      stations.get(prefix)[match[1]] = record.group;
+    }
+    const stationList = [...stations.values()].filter((st) => st.back && st.desk);
+    for (const st of stationList) {
+      // 堆叠键 = 工位里除椅子之外最高的那个键（通常是桌面道具/显示器）。
+      st.stackKey = Math.max(st.desk.key, st.back.key - 1);
+      for (const g of groups) {
+        if (!g.group.id.startsWith(`${st.desk.id.slice(0, -'-desk'.length)}-`)) continue;
+        if (g.group.id.endsWith('-back')) continue;
+        st.stackKey = Math.max(st.stackKey, g.group.key);
+      }
+    }
+    for (const entry of entries) {
+      if (entry.kind !== 'character' || !entry.point) continue;
+      for (const st of stationList) {
+        const deskParts = st.desk.parts;
+        const back = st.back;
+        const x0 = Math.min(...deskParts.map((p) => p.x0));
+        const x1 = Math.max(...deskParts.map((p) => p.x1));
+        const yTop = Math.min(...back.parts.map((p) => p.y0));
+        const yBot = Math.max(...deskParts.map((p) => p.y1));
+        if (entry.point.x < x0 || entry.point.x > x1) continue;
+        if (entry.point.y < yTop || entry.point.y > yBot) continue;
+        // 抬到 堆叠键之上、椅子键之下：椅子仍压角色，角色压桌子。只升不降。
+        const target = Math.min((st.stackKey + 0.5 / scene.height) * scene.height, back.key * scene.height - 0.5);
+        if (target > entry.key) entry.key = target;
+        break;
+      }
+    }
+    entries.sort((a, b) => (a.key - b.key) || String(a.id).localeCompare(String(b.id)));
+    applyGroundOrder(layer, entries);
+    return entries.map((entry) => entry.id);
   }
 
   // P3.4: a soft contact shadow under every furniture footprint. It is what
@@ -1021,7 +3189,7 @@ async function createOfficeRenderer(options) {
   function drawFurnitureGrounding(node) {
     // The generated office hides the legacy furniture; its shadows must not
     // survive as ghost blobs (2026-10-27, first generated-scene screenshot).
-    if (officeDescription) return;
+    if (officeDescription || projectionMode === 'iso') return;
     const dark = codeSceneOptions.theme === 'dark';
     for (const record of furnitureRecords.values()) {
       if (record.kind !== 'sprite' && record.kind !== 'graphics') continue;
@@ -1045,7 +3213,7 @@ async function createOfficeRenderer(options) {
   // desk art a slab thickness, so the rectangle reads as furniture rather than
   // a pasted box. Drawn above the back-furniture sprites, under the characters.
   function drawFurnitureEdges(node) {
-    if (officeDescription) return;
+    if (officeDescription || projectionMode === 'iso') return;
     const dark = codeSceneOptions.theme === 'dark';
     for (const record of furnitureRecords.values()) {
       if (record.kind !== 'sprite' && record.kind !== 'graphics') continue;
@@ -1070,11 +3238,14 @@ async function createOfficeRenderer(options) {
   // Re-projects every persistent furniture node to the live scene size.
   // Sprites only get transform updates; Graphics redraw their rects in place.
   function layoutFurniture() {
-    if (codeSceneOptions.enabled && codeSceneOptions.generatedFurniture) officeDescription = buildOfficeDescription();
+    if (projectionMode === 'iso') officeDescription = null;
+    else if (codeSceneOptions.enabled && codeSceneOptions.generatedFurniture) officeDescription = buildOfficeDescription();
     for (const record of furnitureRecords.values()) {
       if (record.kind === 'floor') {
         record.node.clear();
-        if (codeSceneOptions.enabled) {
+        if (projectionMode === 'iso') {
+          drawIsoRoom(record.node);
+        } else if (codeSceneOptions.enabled) {
           drawCodeScene(record.node);
         } else {
           const bandY = scene.height * 0.32;
@@ -1082,13 +3253,8 @@ async function createOfficeRenderer(options) {
         }
       } else if (record.kind === 'code') {
         record.node.clear();
-        if (codeSceneOptions.enabled) drawCodeMonitor(record.node, record);
-      } else if (record.kind === 'office-back') {
-        record.node.clear();
-        if (codeSceneOptions.enabled) drawGeneratedOffice(record.node, 'back');
-      } else if (record.kind === 'office-front') {
-        record.node.clear();
-        if (codeSceneOptions.enabled) drawGeneratedOffice(record.node, 'front');
+        // In the isometric preview the flat monitor records have no meaning.
+        if (codeSceneOptions.enabled && projectionMode !== 'iso') drawCodeMonitor(record.node, record);
       } else if (record.kind === 'shadows') {
         record.node.clear();
         if (codeSceneOptions.enabled) drawFurnitureGrounding(record.node);
@@ -1125,6 +3291,11 @@ async function createOfficeRenderer(options) {
         drawFurnitureGraphics(record.node, record.item);
       }
     }
+    // I2: iso furniture lives on the ground layer as one node per box, sorted
+    // with the characters; the flat furniture nodes above are hidden.
+    layoutIsoFurniture();
+    // 2.5D coded office: one node per group, also on the ground layer.
+    layoutOfficeGroups();
   }
 
   // ---- entity lifecycle (persistent nodes) ---------------------------------
@@ -1322,8 +3493,9 @@ async function createOfficeRenderer(options) {
     const geometryBounds = pack && pack.geometry ? pack.geometry.visibleBounds.height : 64;
     const scale = visibleHeight / geometryBounds;
     const frame = frameGeometryFor(employee);
-    const footX = employee.position.x * scene.width;
-    const footY = employee.position.y * scene.height;
+    const foot = footScreenOf(employee.position);
+    const footX = foot.x;
+    const footY = foot.y;
     record.__layout = { visibleHeight, scale };
     record.__frameAnchor = { ...frame.anchor };
     record.__fallbackReason = frame.fallbackReason;
@@ -1437,12 +3609,22 @@ async function createOfficeRenderer(options) {
   let groundOrder = [];
 
   function sortGround() {
+    // I2: in the isometric preview the ground pass is one painter's algorithm
+    // over furniture boxes and characters keyed by (x + y) — the flat
+    // station-band re-keying below is meaningless there.
+    if (projectionMode === 'iso') return sortIsoGround();
+    // 2.5D coded office: the same idea in flat projection (front-bottom edge).
+    if (codeSceneOptions.enabled && codeSceneOptions.generatedFurniture) return sortOfficeGround();
     const layer = layers['ground-entities'];
     const ordered = layout.sortGroundEntities(
       [...entities.values()]
         .filter((record) => record.container)
         .map((record) => ({
-          footY: record.__snapshot ? record.__snapshot.position.y : 0,
+          footY: record.__snapshot
+            ? (projectionMode === 'iso'
+              ? (record.__snapshot.position.x + record.__snapshot.position.y)
+              : record.__snapshot.position.y)
+            : 0,
           layer: 0,
           entityType: 'employee',
           id: record.employeeId,
@@ -2120,12 +4302,17 @@ async function createOfficeRenderer(options) {
       if (mode !== 'static' && app && app.renderer) app.renderer.resize(width, height);
       if (mode === 'static') return;
       // furniture nodes persist: resize only re-projects transforms/rects,
-      // so sprite identity and texture references are never recreated
+      // so sprite identity and texture references are never recreated.
+      // The iso camera must be rebuilt BEFORE anything projects through it.
+      if (projectionMode === 'iso') rebuildIsoCamera();
       if (layers) { layoutFurniture(); sortGround(); }
       // 2026-09-25（性能）：缩放是"投影变了、快照没变"——两处跳过逻辑都必须失效：
       // 场景可视签名（强制重画一次）与逐员工签名（强制重投影脚点/缩放/字号）。
       lastRenderSignature = null;
       for (const record of entities.values()) record.__sig = null;
+      if (projectionMode === 'iso') {
+        if (currentSnapshot) presentationClock && presentationClock.reset();
+      }
       if (currentSnapshot) applySnapshot(currentSnapshot);
       else renderNow();
     },
@@ -2358,6 +4545,7 @@ async function createOfficeRenderer(options) {
           buffers: presentationClock ? presentationClock.stats() : null,
         },
         // P3.1: the code-drawn scene switch + the geometry it last produced.
+        projection: projectionMode,
         codeScene: {
           enabled: codeSceneOptions.enabled,
           theme: codeSceneOptions.theme,
@@ -2367,10 +4555,15 @@ async function createOfficeRenderer(options) {
             ? [...furnitureRecords.values()].filter((record) => record.kind === 'code').length
             : 0,
           generatedFurniture: codeSceneOptions.generatedFurniture,
-          generatedDesks: codeSceneOptions.enabled && officeDescription ? officeDescription.stats.desks : 0,
+          generatedDesks: codeSceneOptions.enabled && officeDescription ? officeDescription.stats.deskCount : 0,
           generatedLounge: !!(codeSceneOptions.enabled && officeDescription && officeDescription.stats.hasLounge),
           generatedKitchen: !!(codeSceneOptions.enabled && officeDescription && officeDescription.stats.hasKitchen),
+          generatedGroups: codeSceneOptions.enabled && officeDescription ? officeDescription.stats.groupCount : 0,
+          generatedParts: codeSceneOptions.enabled && officeDescription ? officeDescription.stats.partCount : 0,
           ...(codeSceneStats || {}),
+          // I2: iso furniture is only present in the preview projection.
+          isoFurniture: projectionMode === 'iso' && isoDescription ? { ...isoDescription.stats } : null,
+          isoPartNodeCount: isoFurniture.size,
         },
         fps: monitor && typeof monitor.stats === 'function' ? monitor.stats() : null,
         foreground,

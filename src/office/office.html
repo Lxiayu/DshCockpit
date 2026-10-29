@@ -283,11 +283,20 @@
       REGISTRY['presentation-clock'] = await loadModule('./render/presentation-clock.js');
       REGISTRY['code-scene'] = await loadModule('./render/code-scene.js');
       REGISTRY['code-office'] = await loadModule('./render/code-office.js');
+      REGISTRY['iso-projection'] = await loadModule('./render/iso-projection.js');
+      REGISTRY['iso-office'] = await loadModule('./render/iso-office.js');
+      // P3.5: the pack's exported frames carry a 1px near-white rectangle on
+      // the visibleBounds perimeter. Invisible on the light office, it reads
+      // as a ghost box around every character on the dark scene — strip it
+      // when the texture is built (no art or geometry change).
+      REGISTRY['frame-hygiene'] = await loadModule('./render/frame-hygiene.js');
       REGISTRY['pixi-office-renderer'] = await loadModule('./render/pixi-office-renderer.js', (spec) => {
         if (spec === './fps-monitor.js') return REGISTRY['fps-monitor'];
         if (spec === './presentation-clock.js') return REGISTRY['presentation-clock'];
         if (spec === './code-scene.js') return REGISTRY['code-scene'];
         if (spec === './code-office.js') return REGISTRY['code-office'];
+        if (spec === './iso-projection.js') return REGISTRY['iso-projection'];
+        if (spec === './iso-office.js') return REGISTRY['iso-office'];
         if (spec === '../layout-assets.js') return REGISTRY['layout-assets'];
         throw new Error('require unsupported: ' + spec);
       });
@@ -382,12 +391,32 @@
       if (pack) {
         const animations = packOutcome.animations;
         const frames = new Set();
+        const frameBounds = new Map();
         for (const id of Object.keys(animations.animations)) {
-          for (const frame of animations.animations[id].frames) frames.add(frame.file);
+          for (const frame of animations.animations[id].frames) {
+            frames.add(frame.file);
+            if (frame.visibleBounds && !frameBounds.has(frame.file)) frameBounds.set(frame.file, frame.visibleBounds);
+          }
         }
+        const hygiene = REGISTRY['frame-hygiene'];
         await Promise.all([...frames].map((file) => new Promise((resolve) => {
           const img = new Image();
-          img.onload = () => { textures.set(file, window.PIXI.Texture.from(img)); resolve(); };
+          img.onload = () => {
+            const bounds = frameBounds.get(file);
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const context = canvas.getContext('2d', { willReadFrequently: true });
+            context.drawImage(img, 0, 0);
+            if (bounds) {
+              const data = context.getImageData(0, 0, canvas.width, canvas.height);
+              if (hygiene.stripGuideRing(data.data, canvas.width, bounds) > 0) {
+                context.putImageData(data, 0, 0);
+              }
+            }
+            textures.set(file, window.PIXI.Texture.from(canvas));
+            resolve();
+          };
           img.onerror = () => resolve(); // missing frame -> renderer placeholder
           img.src = `./characters/${officePackId}/${file}`;
         })));
@@ -408,7 +437,58 @@
       const officeTextures = new Map();
       const officeTextureErrors = [];
       const officeAssetSrcById = new Map(REGISTRY['layout-assets'].LAYOUT_ASSETS.map((asset) => [asset.id, asset.src]));
-      const furnitureAssetIds = [...new Set(layout.furniture().map((item) => item.assetId).filter(Boolean))];
+      // 2026-10-28 第三轮：代码化办公室（`?officeLayout=generated`）的绿植改用
+      // 图片素材绘制，所以这些素材也必须在这里预加载。它们不是 fixture 家具，
+      // 所以显式列出来；缺失时渲染器会回退到代码绘制，不会崩。
+      const GENERATED_PLANT_ASSET_IDS = [
+        'flat-plant-monstera', 'flat-plant-snake', 'flat-plant-succulent', 'flat-plant-a',
+        // 2026-10-28 第三轮：办公椅也回退到旧图片素材（用户点名要的）
+        'flat-chair',
+      ];
+      // 素材是"独立插画"配色，直接贴进中性灰场景会像贴纸：陶土盆饱和 0.58，
+      // 而场景其余物件在 0.16–0.18。但**不能一律全局去饱和**——虎皮兰/龟背竹的
+      // 叶片本身接近单色，拉灰之后整株变成灰色塑料（2026-10-28 实测）。
+      //
+      // 所以只压"暖色/陶土"这一族通道：把红通道往绿通道收敛，绿色本身基本不动。
+      // 结果：陶土盆 sat 0.58 → ≈0.22，叶片保留原本的绿。
+      // 离屏一次性处理（每个素材一次），不影响帧率。
+      const desaturateImage = (image, amount) => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = image.naturalWidth || image.width;
+          canvas.height = image.naturalHeight || image.height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(image, 0, 0);
+          const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const px = data.data;
+          for (let i = 0; i < px.length; i += 4) {
+            if (px[i + 3] === 0) continue;
+            const r = px[i]; const g = px[i + 1]; const b = px[i + 2];
+            // 只在"红明显高于绿"的像素上动作（陶土/木色），绿色像素不动。
+            const warmth = Math.max(0, r - g);
+            if (warmth > 4) {
+              const pull = warmth * amount * 0.85;
+              px[i] = Math.round(r - pull);
+              px[i + 2] = Math.round(b + pull * 0.18);
+            } else {
+              // 冷/绿色区：只做极轻的整体降饱和，保留叶色层次。
+              const gray = r * 0.299 + g * 0.587 + b * 0.114;
+              const light = amount * 0.16;
+              px[i] = Math.round(r + (gray - r) * light);
+              px[i + 1] = Math.round(g + (gray - g) * light);
+              px[i + 2] = Math.round(b + (gray - b) * light);
+            }
+          }
+          ctx.putImageData(data, 0, 0);
+          return canvas;
+        } catch {
+          return image;
+        }
+      };
+      const furnitureAssetIds = [...new Set([
+        ...layout.furniture().map((item) => item.assetId).filter(Boolean),
+        ...(officeSearchParams.get('officeLayout') === 'generated' ? GENERATED_PLANT_ASSET_IDS : []),
+      ])];
       await Promise.all(furnitureAssetIds.map((assetId) => new Promise((resolve) => {
         const src = officeAssetSrcById.get(assetId);
         if (!src) {
@@ -417,7 +497,22 @@
           return;
         }
         const image = new Image();
-        image.onload = () => { officeTextures.set(assetId, window.PIXI.Texture.from(image)); resolve(); };
+        image.onload = () => {
+          // 只有代码化场景的绿植需要去饱和；fixture 家具维持素材原色。
+          // 去饱和在离屏 canvas 上做一次，然后把**同一份解码结果**交回原有
+          // 的 `PIXI.Texture.from(image)` 路径（契约：每份素材一个 PIXI 纹理，
+          // 不引入全局缓存）。
+          if (GENERATED_PLANT_ASSET_IDS.includes(assetId)) {
+            const processed = desaturateImage(image, 0.55);
+            if (processed !== image) {
+              officeTextures.set(assetId, window.PIXI.Texture.from(processed));
+              resolve();
+              return;
+            }
+          }
+          officeTextures.set(assetId, window.PIXI.Texture.from(image));
+          resolve();
+        };
         image.onerror = () => { officeTextureErrors.push({ assetId, src, code: 'OFFICE_TEXTURE_MISSING', reason: 'IMAGE_DECODE_FAILED' }); resolve(); };
         image.src = src;
       })));
@@ -443,17 +538,26 @@
       }
       document.documentElement.dataset.theme = initialTheme;
       const generatedLayout = officeSearchParams.get('officeLayout') === 'generated';
+      // P3-I1 preview: `?projection=iso` renders the isometric room shell.
+      // Default stays flat until the projection is accepted.
+      const projectionParam = officeSearchParams.get('projection');
+      const projectionMode = projectionParam === 'iso' ? 'iso' : 'flat';
       const codeSceneOptions = {
         enabled: codeSceneParam !== '0',
         generatedFurniture: generatedLayout,
         theme: sceneThemeOverride || initialTheme,
         accent: /^[a-z]{3,10}$/.test(sceneAccentParam) ? sceneAccentParam : 'indigo',
-        characterScale: Number.isFinite(characterScaleParam) && characterScaleParam > 0 ? characterScaleParam : 1.18,
+        // 2026-10-28 第四轮：家具放大后（桌宽 114→178px）角色没变，桌/角色比例
+        // 从旧素材方案的 0.64 涨到 1.00——用户反馈"鲸鱼娘有些太小了"。
+        // 角色本身像素高度两版一致（178px），所以这不是渲染 bug，是**相对比例**
+        // 变了。把默认比例 1.18 → 1.50 找回来（桌/角色 ≈0.83，视觉上角色重新
+        // 压住家具）。仍可用 ?characterScale= 覆盖。
+        characterScale: Number.isFinite(characterScaleParam) && characterScaleParam > 0 ? characterScaleParam : 1.50,
       };
       // The canvas is letterboxed inside the stage; the bars must follow the
       // scene theme or the dark room sits in a bright frame.
       if (codeSceneOptions.enabled) {
-        stage.style.background = codeSceneOptions.theme === 'dark' ? '#141210' : '#efece5';
+        stage.style.background = codeSceneOptions.theme === 'dark' ? '#141414' : '#efece5';
       }
       const renderer = await REGISTRY['pixi-office-renderer'].createOfficeRenderer({
         PIXI: window.PIXI,
@@ -463,6 +567,7 @@
         officeTextures,
         officeTextureErrors,
         codeScene: codeSceneOptions,
+        projection: projectionMode,
         // Task 7A: the approved workstation-1 calibration propagated to all
         // six stations; every desk renders from the same managed catalog.
         texturedWorkstations: ['desk-1', 'desk-2', 'desk-3', 'desk-4', 'desk-5', 'desk-6'],

@@ -16,9 +16,9 @@
 const THEMES = Object.freeze({
   light: Object.freeze({
     id: 'light',
-    floorA: 0xfaf9f6,
-    floorB: 0xf3f2ee,
-    grout: 0xe4e2dc,
+    floorA: 0xf8f8f6,
+    floorB: 0xf1f1ee,
+    grout: 0xe5e5e1,
     band: 0xecebe6,
     edge: 0xd9d7d0,
     zoneFill: 0xf1efe8,
@@ -30,28 +30,28 @@ const THEMES = Object.freeze({
     base: 0xe6e2d9,
     windowGlass: 0xdfeaf2,
     windowFrame: 0xcdc7bb,
-    windowGlow: 0xfff1cf,
-    deskTop: 0xe8dcc8,
-    deskSide: 0xcbbba3,
-    deskEdge: 0xa8967c,
-    deskFront: 0xc2af8f,
-    counterFront: 0xa7b0b6,
-    sofaFront: 0x7f8f9f,
+    windowGlow: 0xffe9be,
+    deskTop: 0xe3d3b8,
+    deskSide: 0xb9a281,
+    deskEdge: 0x8d7a5d,
+    deskFront: 0xbfa885,
+    counterFront: 0x98a2a9,
+    sofaFront: 0x66757f,
     monitorBody: 0x4b5158,
-    monitorScreen: 0xdbe7ee,
+    monitorScreen: 0xd6e6f0,
     monitorEdge: 0x3a3f45,
-    chairSeat: 0xaeb9c4,
-    chairBack: 0x8d99a6,
-    plantLeaf: 0x7fa585,
-    plantPot: 0xc8b6a5,
+    chairSeat: 0x8794a1,
+    chairBack: 0x5a6672,
+    plantLeaf: 0x6f9a75,
+    plantPot: 0xbfa88f,
     receptionTop: 0xefeae0,
     receptionSide: 0xe3ded3,
     receptionEdge: 0xd2ccc0,
-    sofa: 0x9aa7b8,
-    sofaSeat: 0xb3bfcc,
-    rug: 0xe9e2d6,
-    counterTop: 0xd4dade,
-    counterSide: 0xb6bec4,
+    sofa: 0x8a9aab,
+    sofaSeat: 0xa8b6c2,
+    rug: 0xeae3d6,
+    counterTop: 0xd7dde0,
+    counterSide: 0xaab2b8,
   }),
   dark: Object.freeze({
     id: 'dark',
@@ -70,17 +70,17 @@ const THEMES = Object.freeze({
     windowGlass: 0x3a4550,
     windowFrame: 0x4a4f55,
     windowGlow: 0xdfe8f0,
-    deskTop: 0x46494d,
-    deskSide: 0x373a3e,
-    deskEdge: 0x26282b,
-    deskFront: 0x2f3236,
+    deskTop: 0x525456,
+    deskSide: 0x424446,
+    deskEdge: 0x2d2f31,
+    deskFront: 0x3b3d3f,
     counterFront: 0x282d31,
     sofaFront: 0x2f363d,
-    monitorBody: 0x24272b,
+    monitorBody: 0x2e3032,
     monitorScreen: 0x6f828f,
     monitorEdge: 0x1c1e21,
-    chairSeat: 0x404347,
-    chairBack: 0x33363a,
+    chairSeat: 0x4a4c4e,
+    chairBack: 0x3a3c3e,
     plantLeaf: 0x566b5c,
     plantPot: 0x4a4a4c,
     receptionTop: 0x3d4044,
@@ -116,6 +116,17 @@ function clamp(value, min, max) {
 
 function themeOf(id) {
   return THEMES[id] || THEMES.light;
+}
+
+// Mix two 0xRRGGBB colours; t=0 returns a, t=1 returns b.
+function mixColor(a, b, t) {
+  const k = Math.min(1, Math.max(0, t));
+  const ar = (a >> 16) & 0xff; const ag = (a >> 8) & 0xff; const ab = a & 0xff;
+  const br = (b >> 16) & 0xff; const bg = (b >> 8) & 0xff; const bb = b & 0xff;
+  const r = Math.round(ar + (br - ar) * k);
+  const g = Math.round(ag + (bg - ag) * k);
+  const bl = Math.round(ab + (bb - ab) * k);
+  return (r << 16) | (g << 8) | bl;
 }
 
 function accentOf(id) {
@@ -157,6 +168,15 @@ function describeCodeScene(input) {
 
   const scale = clamp(Math.min(width / 1280, height / 840), 0.5, 1.6);
   const tilePx = Math.round(clamp(positiveNumber(options.tilePx, REFERENCE_TILE_PX * scale), TILE_MIN_PX, TILE_MAX_PX));
+  // The checker is an accent. The coded 2.5D office asks for a calmer floor so
+  // the furniture reads as the subject, not the grid: `checkerContrast` 0..1
+  // blends the odd tile toward the even one.
+  const checkerContrast = clamp(
+    Number.isFinite(options.checkerContrast) ? options.checkerContrast : 1,
+    0,
+    1
+  );
+  const checkerTint = mixColor(theme.floorA, theme.floorB, checkerContrast);
   const top = Math.round(height * FLOOR_TOP_RATIO);
   const columns = Math.max(1, Math.ceil(width / tilePx));
   const rows = Math.max(1, Math.ceil((height - top) / tilePx));
@@ -173,7 +193,7 @@ function describeCodeScene(input) {
         h: Math.min(tilePx, height - y),
         // The checker is a presentation accent, not a fact: an odd tile count
         // still alternates deterministically.
-        fill: (row + column) % 2 === 0 ? theme.floorA : theme.floorB,
+        fill: (row + column) % 2 === 0 ? theme.floorA : checkerTint,
       });
     }
   }
@@ -205,11 +225,22 @@ function describeCodeScene(input) {
   ].filter((band) => band.h > 0);
   const baseH = Math.max(3, Math.round(height * 0.006));
   // The top row of desks sits against the wall; the window lives on the free
-  // left stretch of the wall so monitors never overlap the glass.
+  // stretch of the wall so monitors never overlap the glass. The coded office
+  // moves it to the gap between the kitchen and the left desk column
+  // (`windowX`), where nothing tall climbs in front of the glass.
+  const windowX = clamp(Number.isFinite(options.windowX) ? options.windowX : 0.07, 0, 0.75);
+  // 2026-10-28 第三轮（用户："你可以减小窗户大小来增大茶水间"）：窗宽从 0.20
+  // 收到 0.13，右移到桌子列之前的墙尾，把腾出来的墙面让给茶水间。
+  // `windowW` 可覆盖，默认 0.20（未启用代码化场景时保持历史宽度）。
+  const windowW = clamp(
+    Number.isFinite(options.windowW) ? options.windowW : 0.20,
+    0.08,
+    0.30
+  );
   const windowRect = {
-    x: Math.round(width * 0.07),
+    x: Math.round(width * windowX),
     y: Math.round(wallH * 0.12),
-    w: Math.round(width * 0.20),
+    w: Math.round(width * windowW),
     h: Math.round(wallH * 0.38),
   };
   const window = {
@@ -226,19 +257,32 @@ function describeCodeScene(input) {
     // keeps a much subtler cool-white pool. The second narrower band is a
     // cheap two-step gradient without shaders.
     glow: {
-      x: Math.round(windowRect.x - width * 0.04),
-      y: top,
-      w: Math.round(windowRect.w + width * 0.08),
-      h: Math.round(height * 0.08),
       color: theme.windowGlow,
-      alpha: theme.id === 'dark' ? 0.10 : 0.26,
-      inner: {
-        x: Math.round(windowRect.x + windowRect.w * 0.18),
-        y: top,
-        w: Math.round(windowRect.w * 0.64),
-        h: Math.round(height * 0.05),
-        alpha: theme.id === 'dark' ? 0.06 : 0.16,
-      },
+      // Three nested bands instead of two: a 34% single rectangle read as a
+      // yellow placemat. Same trick as the checker — cheap alpha falloff.
+      bands: [
+        {
+          x: Math.round(windowRect.x - width * 0.05),
+          y: top,
+          w: Math.round(windowRect.w + width * 0.10),
+          h: Math.round(height * 0.090),
+          alpha: theme.id === 'dark' ? 0.030 : 0.070,
+        },
+        {
+          x: Math.round(windowRect.x - width * 0.025),
+          y: top,
+          w: Math.round(windowRect.w + width * 0.05),
+          h: Math.round(height * 0.075),
+          alpha: theme.id === 'dark' ? 0.035 : 0.090,
+        },
+        {
+          x: Math.round(windowRect.x + windowRect.w * 0.15),
+          y: top,
+          w: Math.round(windowRect.w * 0.70),
+          h: Math.round(height * 0.045),
+          alpha: theme.id === 'dark' ? 0.045 : 0.110,
+        },
+      ],
     },
   };
 

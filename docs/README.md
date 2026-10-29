@@ -52,6 +52,7 @@
 | `docs/plans/active/HARNESS-V0.7-P2-PLAN-2026-10-27.md` | **进行中** | P2：专用 Team runtime（cwd=工作区）、变更捕获、Verification Runner、受控 retry |
 | `docs/plans/active/OFFICE-V3-VISUAL-PLAN-2026-10-27.md` | **进行中** | P3 视觉重构：呈现时钟、代码环景、伪 3D 生成布局、dsh-pet 式交互（P3.0/P3.1/P3.3/P3.4 已落地） |
 | `docs/plans/active/OFFICE-V3-ISOMETRIC-PLAN-2026-10-27.md` | **I0 完成，待评审 I1** | 等轴测投影：投影数学、画家算法遮挡、命中测试、I0–I4 分阶段与回退 |
+| `docs/plans/active/OFFICE-V3-CODED-2.5D-PLAN-2026-10-27.md` | **进行中（原型）** | 2.5D 代码化家具：几何套件、画家算法遮挡、材质系统、装饰布局；家具/道具不再用图片拼贴 |
 
 进行中的计划放 `docs/plans/active/`；完成的移入 `completed/`。
 

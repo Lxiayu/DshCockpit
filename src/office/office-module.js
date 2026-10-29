@@ -257,7 +257,10 @@ const DEFAULT_SETTINGS = Object.freeze({
   restAreaAttraction: 0.6,
   restAreaDwellMs: 12000,
   restDwellMs: 6000,
-  leftRoamDwellMs: 18000,
+  // 2026-10-29 第十一轮：左翼漫游列 x 0.27 → 0.335（避开立体家具），步程缩短
+  // 后左半区时间占比下降，用 HOLD 时间补回 40~50% 契约。须与 behavior-scheduler
+  // 的默认值一致（启动时校验两处不漂移）。
+  leftRoamDwellMs: 17000,
   midRouteRerouteChance: 0.12,
   detourChance: 0.15,
   personality: true,
@@ -2683,6 +2686,41 @@ function createOfficeModule(options = {}) {
   //     re-plans against the CURRENT reservations (findRoute's BFS then goes
   //     around the obstacle; task walkers are exempt — their route is
   //     protected by the yield above).
+  // 2026-10-29 第十二轮：**相邻节点互换死锁**的确定性破环。
+  //
+  // 症状（实测 seed five-a / five-c 都出现）：两名 task-bound 员工各自站在
+  // 对方的目标节点上 —— A 在 roam-1 要去 roam-2、B 在 roam-2 要去 roam-1
+  // （或 A 在 roam-6 要去 desk-5-leave、B 反之）。两人的下一步都必然擦过
+  // 对方身体，occupant gate 让双方每一步都返回 wait，于是永久冻结
+  // （实测 240s+ 一动不动，位置差 0）。
+  //
+  // 判据刻意收得很窄，四条必须同时成立：
+  //   1. 双方都是 task-bound（都在往自己工位走的路上）；
+  //   2. 我的下一个节点 ≈ 对方身体所在位置；
+  //   3. 对方的下一个节点 ≈ 我的身体所在位置；
+  //   4. 我的 id 字典序更小 —— 一方先过，等待图因此无环。
+  // 只有"严格互换"才放行；普通靠近、单向避让、绕行都不受影响
+  // （社交距离契约 M4.1a/M4.1e 的回归测试必须仍然通过）。
+  function swapPriorityFor(rec, peerId) {
+    if (!rec || !rec.position || !peerId) return false;
+    const peer = employees.get(peerId);
+    if (!peer || !peer.position || !peer.route) return false;
+    if (!rec.route || rec.route.length <= 1) return false;
+    if (!isTaskBound(rec) || !isTaskBound(peer)) return false;
+    const myNext = nodesById.get(rec.route[Math.min(rec.routeIndex + 1, rec.route.length - 1)]);
+    const peerNext = nodesById.get(peer.route[Math.min(peer.routeIndex + 1, peer.route.length - 1)]);
+    if (!myNext || !peerNext) return false;
+    const minDim = Math.min(scene.width, scene.height);
+    const near = (a, b) => {
+      const dx = (a.x - b.x) * scene.width;
+      const dy = (a.y - b.y) * scene.height;
+      return Math.hypot(dx, dy) <= 0.06 * minDim;   // 约 38px：相邻节点级别
+    };
+    const swapping = near(myNext.position, peer.position) && near(peerNext.position, rec.position);
+    if (!swapping) return false;
+    return String(rec.employeeId) < String(peer.employeeId);
+  }
+
   function handleBlocked(rec, at, blockedByOwner) {
     if (blockedByOwner) rec.debugStepBlockedBy = blockedByOwner;
     else rec.debugStepBlockedBy = rec.debugStepBlockedBy || 'unknown';
@@ -2758,7 +2796,21 @@ function createOfficeModule(options = {}) {
   }
 
   function stepMovement(rec, at) {
-    if (!rec.route || rec.route.length === 0) return;
+    if (!rec.route || rec.route.length === 0) {
+      // 2026-10-29 第十二轮：task-bound 员工在 move 相位却没有路线时，原先是
+      // 直接 return —— 既不移动、也不重试，人就永久停在半路（实测
+      // orchestrator 在 roam-1 冻结 240s，routeLen 0 而阶段仍是 move）。
+      // 补一条与 handleBlocked 同阈值的重试：周期性重新规划任务路线。
+      if (isTaskBound(rec) && rec.workstation && rec.transition
+          && rec.transition.kind === 'task-start' && rec.transition.phase === 'move') {
+        if (rec.blockedSinceMs === null) rec.blockedSinceMs = at;
+        if (at - rec.blockedSinceMs >= 700 && at - (rec.taskReplanAskedAt || 0) >= 1000) {
+          rec.taskReplanAskedAt = at;
+          planTaskRoute(rec, at);
+        }
+      }
+      return;
+    }
     if (!rec.pathReservation && rec.route.length > 1) {
       tryAcquirePathReservation(rec, at);
       if (!rec.pathReservation) {
@@ -2792,6 +2844,16 @@ function createOfficeModule(options = {}) {
       route: rec.route,
     });
     if (step.reservationAction === 'wait') {
+      // 2026-10-29：相邻节点互换死锁 —— 获得优先权的一方直接推进，
+      // 不再 wait（见 swapPriorityFor 的判据说明）。
+      if (step.blockedBy && swapPriorityFor(rec, step.blockedBy.owner)) {
+        rec.debugSwapBypass = (rec.debugSwapBypass || 0) + 1;
+        noteDiagnostic('TASK_SWAP_BYPASS');
+        rec.position = { x: nextNode.position.x, y: nextNode.position.y };
+        rec.facing = facingFor(rec.position, nextNode.position);
+        arriveAtNode(rec, nextNodeId, at);
+        return;
+      }
       rec.debugWaitDetail = JSON.stringify({ from: rec.position, to: nextNode.position, target: nextNodeId, mode: step.mode || null, kind: step.blockedBy && step.blockedBy.reservationId ? 'reservation' : 'occupant-or-node' });
       // M4.1a: drop the leg claim so the corridor stays available for movers
       // (a hold must never outlive actual progress — a node-blocked walker

@@ -407,7 +407,24 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
   //     stays (it is the shorter way), so one occupied node no longer strands
   //     the whole wing.
   const LEFT_WING_FOOTPRINT = Object.freeze({ width: 0.05, height: 0.05 });
-  const LEFT_WING_COLUMN_X = 0.27;
+  // 2026-10-29 第十一轮：0.27 → 0.38。
+  //
+  // 0.27（=259px）是**旧家具布局**下的取值：那时左半区还没有现在的茶水间台面、
+  // 沙发/地毯。家具放大重排之后，这条竖列直接穿过了三件东西（实测屏幕坐标）：
+  //   roam-11 (259,432) → 落在沙发里
+  //   roam-10 (259,479) → 落在地毯里
+  //   roam-8  (259,526) → 落在地毯里
+  // 鲸鱼娘"走到左边"就变成了"走进沙发"，这正是用户说的走位不好看。
+  //
+  // 实测左半区家具的最右缘是地毯的 307px；左侧工位列最左缘 417px。两者之间
+  // 有一条 **110px 宽、纵向完全无家具**的空廊。0.38 = 365px 落在空廊正中
+  // （左右各约 58px / 52px 余量），六个休息点全部落在开阔地面。
+  // 0.38 = 365px 是"绝对居中"的安全值，但离家具 58px —— 鲸鱼娘走到的位置
+  // 和她要"看"的沙发/茶水间之间隔着一整条空道，读起来不像"在休息区"。
+  // 收紧到 0.35 = 336px：节点左缘 312px，与地毯右缘(307px)留 5px 净空，
+  // 与左工位列左缘(417px)留 57px 走道 —— 既是贴边的"站在家具旁边"，
+  // 也仍然是一条完全无家具的纵向通道。
+  const LEFT_WING_COLUMN_X = 0.335;
   const LEFT_WING_TAGS = Object.freeze(['roaming', 'rest-area']);
   const LEFT_WING_REST_TAGS = Object.freeze(['roaming', 'rest-area', 'resting']);
   // The second gateway's two transit nodes are NOT roaming targets: they exist
@@ -739,8 +756,9 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
     'chat-a': { x: centerX(corridorX - 0.008), y: centerY(rowGap1Y + 0.14) },
     'chat-b': { x: centerX(corridorX - 0.008), y: centerY(rowGap1Y + 0.21) },
     'roam-5': { x: centerX(corridorX + 0.027), y: centerY(rowGap2Y) },
-    'roam-8': { x: centerX(0.27), y: centerY((rowGap2Y + bottomY) / 2) },
-    'roam-9': { x: centerX(0.27), y: centerY(bottomY) },
+    // 2026-10-29: 与 LEFT_WING_COLUMN_X 同列（原来硬编码 0.27，与新家具冲突）
+    'roam-8': { x: centerX(LEFT_WING_COLUMN_X), y: centerY((rowGap2Y + bottomY) / 2) },
+    'roam-9': { x: centerX(LEFT_WING_COLUMN_X), y: centerY(bottomY) },
     'roam-3': { x: centerX(corridorX + 0.007), y: centerY(bottomY) },
     'roam-6': { x: centerX(corridorX - 0.043), y: centerY(bottomY) },
     'roam-4': { x: centerX(rightCorridorX), y: centerY(bottomY) },
@@ -763,6 +781,11 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
   corridorIdeals['roam-15'] = { x: centerX(LEFT_WING_COLUMN_X), y: centerY(leftColumnTopY + leftColumnStepY * 3) };
   corridorIdeals['roam-11'] = { x: centerX(LEFT_WING_COLUMN_X), y: centerY(leftColumnTopY + leftColumnStepY * 4) };
   corridorIdeals['roam-10'] = { x: centerX(LEFT_WING_COLUMN_X), y: centerY(leftColumnTopY + leftColumnStepY * 5) };
+  // 2026-10-29：roam-14（第二网关的底部横道节点）**保持在 0.47**。
+  // 曾试着把它对齐到新的列 x=0.35，结果五工位用例里右下角两名员工卡在
+  // y≈0.985 出不去 —— 该节点是 roam-4 ↔ roam-8 的必经点，挪动它会改变
+  // 右侧走廊的让路顺序。让它留在原地，斜线段 roam-14→roam-8 走的是
+  // x 336..451 的开阔地面（地毯右缘 307，绿植右缘 79），并不穿家具。
   corridorIdeals['roam-14'] = { x: centerX(0.47), y: centerY(bottomGateY) };
 
   // M4.1f: approach/leave 的理想点从“座位正下方固定偏移”改为“中央走廊内、

@@ -15,6 +15,7 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const { describeCodeScene, THEMES, ACCENTS, FLOOR_TOP_RATIO } = require('../src/office/render/code-scene.js');
+const { fitCamera, project } = require('../src/office/render/iso-projection.js');
 const officeRenderer = require('../src/office/render/pixi-office-renderer.js');
 const officeLayout = require('../src/office/runtime/office-layout.js');
 
@@ -76,7 +77,17 @@ test('code scene: walls, window and the weakened reception belong to the descrip
   assert.ok(d.walls.window.x >= 0 && d.walls.window.x + d.walls.window.w <= 1280);
   assert.ok(d.walls.window.y >= 0 && d.walls.window.y + d.walls.window.h <= d.floor.y);
   assert.equal(d.walls.window.mullions.length, 2);
-  assert.ok(d.walls.window.glow.h > 0, 'the window casts a light pool on the floor');
+  // 2026-10-27 quality pass: the light pool is three nested bands (a single
+  // 34% rectangle read as a yellow placemat), all starting at the floor line.
+  assert.equal(d.walls.window.glow.bands.length, 3, 'the window casts a stepped light pool');
+  for (const band of d.walls.window.glow.bands) {
+    assert.ok(band.h > 0 && band.w > 0, 'every glow band covers floor');
+    assert.equal(band.y, d.floor.y, 'glow starts at the floor line, never on the wall');
+  }
+  // The window can be moved along the wall (coded office) but never off it.
+  const moved = describeCodeScene({ scene: { width: 1280, height: 840 }, layout: layout(), windowX: 0.245 });
+  assert.ok(moved.walls.window.x > d.walls.window.x, 'windowX shifts the window');
+  assert.ok(moved.walls.window.x + moved.walls.window.w <= 1280);
 
   // Approved "keep but weaken": one low counter inside the reserve zone,
   // never a tall wall.
@@ -190,8 +201,9 @@ function makeStubPixi() {
   return { Application, Container, Sprite, Graphics, Text, Texture, Ticker, VERSION: '8.5.2-stub' };
 }
 
-async function createView(codeScene, scene, snapshot = null) {
+async function createView(codeScene, scene, snapshot = null, projection = null) {
   return officeRenderer.createOfficeRenderer({
+    projection,
     PIXI: makeStubPixi(),
     layout: layout(),
     pack: null,
@@ -298,10 +310,99 @@ test('code scene renderer: the accepted look keeps the textured furniture (no ge
   view.destroy();
 });
 
+test('iso preview: characters are drawn at their projected feet and stay hittable', async () => {
+  const view = await createView(null, null, ONE_EMPLOYEE, 'iso');
+  assert.equal(view.diagnostics().projection, 'iso');
+  const camera = fitCamera({ width: 1280, height: 840, worldWidth: 1, worldDepth: 1, maxHeight: 0.34, margin: 20 });
+  const expected = project(camera, { x: ONE_EMPLOYEE.employees[0].position.x, y: ONE_EMPLOYEE.employees[0].position.y, z: 0 });
+  const foot = view.entities.get('coder').__footPx;
+  assert.ok(Math.abs(foot.x - expected.x) < 1e-6, `iso foot x ${foot.x} vs ${expected.x}`);
+  assert.ok(Math.abs(foot.y - expected.y) < 1e-6, `iso foot y ${foot.y} vs ${expected.y}`);
+  assert.equal(view.hitTest(foot.x, foot.y), 'coder');
+  view.destroy();
+});
+
+test('iso preview: flat stays the default projection', async () => {
+  const view = await createView(null, null, ONE_EMPLOYEE);
+  assert.equal(view.diagnostics().projection, 'flat');
+  const foot = view.entities.get('coder').__footPx;
+  assert.ok(Math.abs(foot.x - 0.5 * 1280) < 1e-6);
+  assert.ok(Math.abs(foot.y - 0.6 * 840) < 1e-6);
+  view.destroy();
+});
+
 test('code scene renderer: the shipping look keeps the frozen 92.4px character band', async () => {
   const view = await createView(null, null, ONE_EMPLOYEE);
   assert.equal(view.diagnostics().codeScene.characterScale, 1);
   assert.equal(view.diagnostics().codeScene.generatedDesks, 0);
   assert.equal(view.entities.get('coder').__layout.visibleHeight, Math.round(840 * 0.11 * 100) / 100);
+  view.destroy();
+});
+
+// ---------------------------------------------------------------------------
+// I2：等轴测家具与角色的统一画家算法
+// ---------------------------------------------------------------------------
+const ISO_SEAT = layout().workstations().instances[0].seat.position;
+
+function seatedSnapshot(extra = []) {
+  return {
+    ...ONE_EMPLOYEE,
+    employees: [
+      {
+        ...ONE_EMPLOYEE.employees[0],
+        employeeId: 'coder',
+        position: { x: ISO_SEAT.x, y: ISO_SEAT.y },
+      },
+      ...extra,
+    ],
+  };
+}
+
+test('iso furniture: boxes are mounted and interleaved with the seated body', async () => {
+  const view = await createView({ enabled: true }, null, seatedSnapshot(), 'iso');
+  const diagnostics = view.diagnostics();
+  assert.ok(diagnostics.codeScene.isoFurniture, 'iso furniture stats are reported');
+  assert.equal(diagnostics.codeScene.isoFurniture.stationCount, 6);
+  assert.ok(diagnostics.codeScene.isoPartNodeCount > 40);
+
+  const order = view.groundPaintOrder();
+  const index = (id) => order.findIndex((entry) => entry.id === id);
+  const coder = index('coder');
+  assert.ok(coder >= 0, 'the character is in the ground pass');
+  assert.ok(index('desk-1-desk') >= 0, 'desk-1 desk is in the ground pass');
+  assert.ok(index('desk-1-chair-back') >= 0, 'desk-1 backrest is in the ground pass');
+
+  // Seated contract: backrest draws first, then the body, then the desk panel
+  // that hides her legs, then the cushion in front of her feet.
+  assert.ok(index('desk-1-chair-back') < coder, 'backrest draws behind the seated body');
+  assert.ok(coder < index('desk-1-desk'), 'the seated body draws before its desk');
+  assert.ok(coder < index('desk-1-desk-panel'), 'the desk panel covers the seated legs');
+  const cushion = order.find((entry) => entry.id === 'desk-1-chair-seat');
+  assert.ok(cushion && cushion.key > order[coder].key, 'the cushion draws in front of the foot point');
+  view.destroy();
+});
+
+test('iso furniture: a corridor walker keeps its own foot key', async () => {
+  const walker = {
+    ...ONE_EMPLOYEE.employees[0],
+    employeeId: 'walker',
+    position: { x: 0.06, y: 0.9 },
+    movement: 'walking',
+  };
+  const view = await createView({ enabled: true }, null, seatedSnapshot([walker]), 'iso');
+  const order = view.groundPaintOrder();
+  const walkerEntry = order.find((entry) => entry.id === 'walker');
+  assert.ok(walkerEntry, 'the walker is in the ground pass');
+  assert.ok(Math.abs(walkerEntry.key - (0.06 + 0.9)) < 1e-9, `walker key ${walkerEntry.key}`);
+  const desk = order.find((entry) => entry.id === 'desk-1-desk');
+  assert.ok(walkerEntry.key > desk.key, 'a walker closer to the camera draws over the desks');
+  view.destroy();
+});
+
+test('iso furniture: no iso nodes exist in the flat projection', async () => {
+  const view = await createView({ enabled: true }, null, seatedSnapshot());
+  assert.equal(view.diagnostics().codeScene.isoFurniture, null);
+  assert.equal(view.diagnostics().codeScene.isoPartNodeCount, 0);
+  assert.equal(view.groundPaintOrder().every((entry) => entry.kind === 'character'), true);
   view.destroy();
 });

@@ -101,7 +101,13 @@ const DEFAULT_CONFIG = Object.freeze({
   // Tuned with the headless harness (assessment doc §已实施): the left HOLD time
   // per visit — not the draw share — is what moves the measured left-half share,
   // because the wing's single-file corridor caps how many trips can be in flight.
-  leftRoamDwellMs: 18000,
+  // 2026-10-29 第十一轮：18000 → 24000。
+  // 左侧漫游列从 x=0.27 移到 x=0.35（避开新家具），到走廊的距离缩短 21%，
+  // 单程步程变短 → 左半区 TIME 占比从 0.45 掉到 0.347（实测），跌破 40% 契约。
+  // 正解不是把列移回家具里，而是补 HOLD 时间 —— 这段注释本来就写着
+  // "left HOLD time per visit is what moves the measured left-half share"。
+  // 18000 × 1.30 ≈ 24000 把占比拉回带内。
+  leftRoamDwellMs: 17000,
   // Share of roaming walks that re-target at an intermediate waypoint (one
   // fresh decision mid-walk) — "允许中途换点".
   midRouteRerouteChance: 0.12,
