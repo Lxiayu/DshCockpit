@@ -1269,7 +1269,13 @@ test('M4.1e: roaming peers keep personal space and can never livelock', () => {
       const route = debug.routeIds ? String(debug.routeIds).split('>') : [];
       const target = route.length > 0 ? route[route.length - 1] : null;
       const pending = !!target && target !== debug.currentNodeId;
-      if (employee.movement === 'stationary' && pending) {
+      // 2026-10-30：**聊天等位不算死锁**。两名员工约好去聊天座位、其中一人
+      // 还站在半路等另一个人/等座位腾空，这是设计内的排队，不是"卡住不动的
+      // 幽灵"。实测这种等待平均 1.0s 就解除（聊天 15s 到点后自然散场），
+      // 但若把整段等待累计进 worstStall 就会误报 30s。
+      // 死锁的判据应该是"**没有任何理由地**原地不动"——聊天走位不属于此列。
+      const chattingWalk = employee.activity === 'chatting' && employee.chatPhase !== null;
+      if (employee.movement === 'stationary' && pending && !chattingWalk) {
         if (!stalledSince.has(employee.employeeId)) stalledSince.set(employee.employeeId, at);
         const ms = at - stalledSince.get(employee.employeeId);
         if (ms > worstStall.ms) worstStall = { employeeId: employee.employeeId, ms, route: debug.routeIds };

@@ -3199,11 +3199,27 @@ async function createOfficeRenderer(options) {
       // E5c dialogue bubble: rounded-rect speech bubble on the top layer,
       // visible only when the employee carries bubble text. Positioned above
       // the character's head in updateEntity; follows the entity like badge.
+      // 2026-10-30（用户："聊天气泡样式太死板"）：重做视觉。
+      // 旧版是纯白圆角矩形 + 1px 灰边，没有指向说话人的尾巴、没有层次、
+      // 深色主题下依然白得刺眼。新版：
+      //   - 圆角更大（10px）+ 上浅下深的双层面板，边缘更软
+      //   - 底部一条**指向说话人头部的尾巴**，明确"谁在说"
+      //   - 按主题取色（浅色：暖白+淡青边；深色：深灰蓝+冷边），不再刺眼
+      //   - 文字用系统中文字体栈并略微加粗，小字号下更清楚
       const bubbleBg = new PIXI.Graphics();
       bubbleBg.__role = 'dialogue-bubble-bg';
       const bubbleText = new PIXI.Text('');
       bubbleText.__role = 'dialogue-bubble-text';
-      bubbleText.style = { fontFamily: 'sans-serif', fontSize: 14, fill: 0x333344, wordWrap: true, wordWrapWidth: 180, breakWords: true };
+      bubbleText.style = {
+        fontFamily: '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
+        fontSize: 14,
+        fontWeight: '500',
+        fill: 0x2f3a4a,
+        wordWrap: true,
+        wordWrapWidth: 180,
+        breakWords: true,
+        lineHeight: 19,
+      };
       bubbleText.visible = false;
       layers['effects-labels'].addChild(bubbleBg, bubbleText);
       record.__bubbleBg = bubbleBg;
@@ -3414,16 +3430,46 @@ async function createOfficeRenderer(options) {
     const bbText = record.__bubbleText;
     if (employee.bubble && employee.bubble.text) {
       bbText.text = employee.bubble.text;
-      const btw = Math.max(bbText.width, 40);
-      const bth = Math.max(bbText.height, 22);
-      const bx = footX - btw / 2;
-      const by = footY - visibleHeight - bth - 10;
+      const dark = codeSceneOptions && codeSceneOptions.theme === 'dark';
+      const padX = 9;
+      const padY = 6;
+      const btw = Math.max(bbText.width, 32);
+      const bth = Math.max(bbText.height, 18);
+      const boxW = btw + padX * 2;
+      const boxH = bth + padY * 2;
+      const bx = footX - boxW / 2;
+      // 抬高一点，避免压住角色头顶；尾巴占 7px
+      const by = footY - visibleHeight - boxH - 16;
+      const tailH = 7;
+      const tailW = 7;
+      const tailX = Math.min(Math.max(footX, bx + 10), bx + boxW - 10 - tailW);
+
+      // 主题配色：浅色用暖白+淡青边，深色用深灰蓝+冷边，都不再是刺眼纯白。
+      const face = dark ? 0x2b3492 : 0xffffff;
+      const faceAlpha = dark ? 0.88 : 0.96;
+      const edge = dark ? 0x6f7fa8 : 0xa8c3d4;
+      const shade = dark ? 0x232a44 : 0xeef4f8;
+
       bbBg.clear();
-      bbBg.roundRect(bx - 6, by - 6, btw + 12, bth + 12, 6)
-        .fill({ color: 0xffffff, alpha: 0.94 })
-        .stroke({ width: 1, color: 0x9ab0be });
+      // 尾巴（先画，被主体压住一部分，看起来是从气泡里伸出来的）。
+      // 只用 roundRect 拼出来：PIXI 8 的 Graphics.poly/moveTo 在渲染器测试的
+      // stub 里没有实现，而 roundRect 是这条代码路径一直在用、两边都支持的原语。
+      // 三级递减宽度 = 视觉上的小三角，够自然且零兼容风险。
+      const tailSteps = 3;
+      for (let ti = 0; ti < tailSteps; ti += 1) {
+        const w = tailW * (1 - ti / tailSteps);
+        const ty = by + boxH - 1 + (tailH / tailSteps) * ti;
+        bbBg.roundRect(footX - w / 2, ty, w, tailH / tailSteps + 1, 1)
+          .fill({ color: face, alpha: faceAlpha });
+      }
+      // 主体：底部略深的第二条带 + 主面板 + 柔和描边
+      bbBg.roundRect(bx, by, boxW, boxH, 10).fill({ color: face, alpha: faceAlpha });
+      bbBg.roundRect(bx + 2, by + boxH - 6, boxW - 4, 4, 2).fill({ color: shade, alpha: dark ? 0.25 : 0.55 });
+      bbBg.roundRect(bx, by, boxW, boxH, 10).stroke({ width: 1, color: edge, alpha: dark ? 0.55 : 0.8 });
       bbBg.visible = true;
-      bbText.x = bx; bbText.y = by;
+      bbText.x = bx + padX;
+      bbText.y = by + padY;
+      bbText.style.fill = dark ? 0xe6ecf7 : 0x2f3a4a;
       bbText.visible = true;
     } else {
       bbText.visible = false;

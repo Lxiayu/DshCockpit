@@ -761,7 +761,6 @@
       "from": "roam-2",
       "to": "chat-a",
       "behaviors": [
-        "roaming",
         "chatting",
         "resting"
       ],
@@ -771,7 +770,6 @@
       "from": "roam-3",
       "to": "chat-b",
       "behaviors": [
-        "roaming",
         "chatting",
         "resting"
       ],
@@ -781,7 +779,6 @@
       "from": "chat-a",
       "to": "chat-b",
       "behaviors": [
-        "roaming",
         "chatting",
         "resting"
       ],

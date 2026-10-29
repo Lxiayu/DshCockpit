@@ -44,12 +44,21 @@ function collector(office) {
 const anyoneMoving = (office) => office.state().employees.some((e) => e.movement === 'moving');
 
 /** 确定性推进到"全员静止"的窗口（漫游者的 dwell 期；办公室并非总是静止 ——
- *  有人走动时每 tick 推送是**正确**行为，M2 钉的就是它）。 */
+ *  有人走动时每 tick 推送是**正确**行为，M2 钉的就是它）。
+ *
+ *  2026-10-30：原实现只要**出现一帧**全员静止就返回。聊天时长改为"入座后
+ *  才计时"以后，世界明显更活跃，"全员静止"常常只持续一两帧 —— 于是测试抓到
+ *  的那个瞬间，下一 tick 就有人起步，25 tick 窗口自然每 tick 都变（got 25）。
+ *  这里改为要求**连续 6 帧**静止才算找到稳定窗口，语义仍是"找一个静止期"，
+ *  只是不再抓住瞬时假静止。 */
 function tickUntilStationary(office, maxMs = 240000) {
   const steps = Math.round(maxMs / officeModule.TICK_MS);
+  let quiet = 0;
   for (let i = 0; i < steps; i += 1) {
     office.tickOnce();
-    if (!anyoneMoving(office)) return i + 1;
+    if (anyoneMoving(office)) { quiet = 0; continue; }
+    quiet += 1;
+    if (quiet >= 6) return i + 1 - (quiet - 1);
   }
   return -1;
 }

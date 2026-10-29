@@ -663,7 +663,6 @@
       "from": "roam-2",
       "to": "chat-a",
       "behaviors": [
-        "roaming",
         "chatting"
       ],
       "bidirectional": true
@@ -672,7 +671,6 @@
       "from": "roam-3",
       "to": "chat-b",
       "behaviors": [
-        "roaming",
         "chatting"
       ],
       "bidirectional": true
@@ -681,7 +679,6 @@
       "from": "chat-a",
       "to": "chat-b",
       "behaviors": [
-        "roaming",
         "chatting"
       ],
       "bidirectional": true

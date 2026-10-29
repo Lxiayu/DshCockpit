@@ -505,7 +505,16 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
   // 目标搜索在 flat 图上永远不可达，又退回原地休息）。
   const FLAT_CHAIN_BEHAVIORS = Object.freeze(['roaming', 'task', 'sleeping', 'chatting', 'resting']);
   const FLAT_CORRIDOR_BEHAVIORS = Object.freeze(['roaming', 'task', 'sleeping', 'chatting', 'resting']);
-  const FLAT_CHAT_BEHAVIORS = Object.freeze(['roaming', 'chatting', 'resting']);
+  // 2026-10-30（M4.1e 30s 停滞 + "面板说在聊、画面没聊"的根因）：
+  // chat-a / chat-b 原来也带 'roaming'，于是它们成了漫游者的**合法中转站**
+  // （roam-3 ↔ chat-b ↔ chat-a ↔ roam-2 是一条通顺的漫游路径）。漫游者会
+  // 正当地走到并停在聊天座位上（实测 coder 在 t=18.9s 走进 chat-b 就不动了），
+  // 而聊天要求"两人恰好各站一个座位"才算入座 —— 于是聊天走位者永远等不到
+  // 对方让开（停滞 30.3s，契约上限 20s），两人谁也聊不成。
+  //
+  // 修复：chat 座位只对 'chatting' 与 'resting' 开放，不再接受 roaming。
+  // 聊天走位本身用 'chatting' behavior 规划，不受影响。
+  const FLAT_CHAT_BEHAVIORS = Object.freeze(['chatting', 'resting']);
   const isChainEdge = (edge) => [edge.from, edge.to]
     .some((id) => /^desk-[1-6]-(?:approach|leave)$/.test(id));
   const hasSeatEndpoint = (edge) => [edge.from, edge.to]

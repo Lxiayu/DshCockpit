@@ -566,6 +566,9 @@ function createOfficeModule(options = {}) {
   // clear the corpus per-pair cooldown (see the bubble block).
   let dialogueConversationKey = null;
   let dialogueConversationStartedAt = null;
+  // 2026-10-30：当前会话"双方都已入座"的时刻（chatDurationMs 的计时起点）。
+  let chatSeatedSinceMs = null;
+  let chatSeatedIdentity = null;
   let redactor = createPrivacyRedactor({ mode: settings.privacyMode });
 
   const nodesById = new Map(layout.nodes().map((node) => [node.id, node]));
@@ -665,6 +668,12 @@ function createOfficeModule(options = {}) {
       reachedSeat: false,
       routeRetryAt: null,
       routeRetryDeadline: null,
+      // 2026-10-30（M4.1e 30s 停滞的真因）：`blockedSinceMs` 原先没有在 rec 上
+      // 初始化，初始值 undefined；而所有判定写成 `at - rec.blockedSinceMs >= N`
+      // → 表达式变成 NaN，`NaN >= N` 恒为 false，于是**耐心/让位/重规划这整套
+      // 阶梯从未生效过**（"等人者站在原地盯着挡路者三十秒，什么也不做"）。
+      // 这是"死锁补丁永远打不完"的一个隐藏原因：兜底机制装了，但开关没打开。
+      blockedSinceMs: null,
       // 2026-09-26 工位缺陷修复：绑定落在半路上时先走完脚下这段本地行走，
       // 再规划任务路线（true = 任务路线挂起，等 in-flight leg 归零）。
       taskRoutePending: false,
@@ -1360,14 +1369,15 @@ function createOfficeModule(options = {}) {
     const seatId = pair.a === rec.employeeId ? pair.seatA : pair.seatB;
     if (typeof seatId !== 'string' || !nodesById.has(seatId)) return false;
     const fromNodeId = nearestNodeId(rec.position);
-    const route = movement.findRoute({
+    const plan = (reservations) => movement.findRoute({
       fromNodeId,
       toNodeId: seatId,
       behavior: 'chatting',
-      reservations: scheduler.reservations(),
+      reservations,
       nowMs: at,
       employeeId: rec.employeeId,
     });
+    const route = plan(scheduler.reservations());
     if (!Array.isArray(route)) return false;
     rec.replanChatAt = (rec.replanChatAt || 0) + 1;
     planRoute(rec, route, seatId, at);
@@ -2714,7 +2724,7 @@ function createOfficeModule(options = {}) {
     else rec.debugStepBlockedBy = rec.debugStepBlockedBy || 'unknown';
     if (rec.state.movement === 'moving') reduce(rec, { type: 'movement/status', movement: 'stationary' });
     ensureParkClaim(rec, at);
-    if (rec.blockedSinceMs === null) rec.blockedSinceMs = at;
+    if (rec.blockedSinceMs == null) rec.blockedSinceMs = at;
     // M4.1h: a roam mission to the left rest area gets the longer patience (see
     // ROAM_MISSION_PATIENCE_MS); tasks and ordinary roam traffic keep 700ms.
     const onMission = !isTaskBound(rec) && (isLeftAreaTarget(rec) || rec.state.activity === 'chatting');
@@ -2789,7 +2799,7 @@ function createOfficeModule(options = {}) {
       // 补一条与 handleBlocked 同阈值的重试：周期性重新规划任务路线。
       if (isTaskBound(rec) && rec.workstation && rec.transition
           && rec.transition.kind === 'task-start' && rec.transition.phase === 'move') {
-        if (rec.blockedSinceMs === null) rec.blockedSinceMs = at;
+        if (rec.blockedSinceMs == null) rec.blockedSinceMs = at;
         if (at - rec.blockedSinceMs >= 700 && at - (rec.taskReplanAskedAt || 0) >= 1000) {
           rec.taskReplanAskedAt = at;
           planTaskRoute(rec, at);
@@ -3052,9 +3062,39 @@ function createOfficeModule(options = {}) {
     // A chat also ENDS after chatDurationMs — before M4.1d nothing ever called
     // endChat, so an undisturbed pair stood at the water cooler forever.
     let chatPair = scheduler.activeChatPair();
-    if (chatPair && at - chatPair.startedAt >= settings.chatDurationMs) {
+    // 2026-10-30（用户报"从来没看到过聊天"的核心成因之一）：
+    // `chatDurationMs`（15s）原来从**配对建立**开始计时，而配对建立后两人还要
+    // 各自走到聊天座位 —— 实测这段走位平均 60s、最长 223s，10 分钟窗口里
+    // 走位占掉 365s 而真正坐着聊只有 24s（94% 的时间在走位）。
+    // 结果是绝大多数聊天在"还没坐下"时就到期解散，用户永远看不到气泡。
+    //
+    // 正确语义：15 秒是**面谈时长**，不是"含通勤的约会时长"。
+    // 计时起点改为"两人都已在座位上"的那一刻，走位不计入。
+    // 走位本身仍受既有机制保护（chat 走位有走廊优先权，见 hasWalkPriority），
+    // 只是不会再被一个从出发就起跑的计时器提前掐断。
+    const seatedNow = chatPair
+      && employees.get(chatPair.a) && employees.get(chatPair.b)
+      && employees.get(chatPair.a).state.movement === 'stationary'
+      && employees.get(chatPair.b).state.movement === 'stationary'
+      && employees.get(chatPair.a).currentNodeId === chatPair.seatA
+      && employees.get(chatPair.b).currentNodeId === chatPair.seatB;
+    // 会话身份 + 入座时刻分开记（chatPair 本身是冻结对象，不能挂字段）。
+    const chatIdentity = chatPair ? `${chatPair.a}|${chatPair.b}|${chatPair.startedAt}` : null;
+    if (!chatPair) {
+      chatSeatedSinceMs = null;
+      chatSeatedIdentity = null;
+    } else if (seatedNow) {
+      if (chatSeatedIdentity !== chatIdentity) {
+        chatSeatedIdentity = chatIdentity;
+        chatSeatedSinceMs = at;
+      }
+    }
+    const chatElapsed = chatPair && chatSeatedSinceMs !== null ? at - chatSeatedSinceMs : 0;
+    if (chatPair && seatedNow && chatElapsed >= settings.chatDurationMs) {
       try { scheduler.endChat({ nowMs: at }); } catch { /* scheduler stays optional */ }
       chatPair = scheduler.activeChatPair();
+      chatSeatedSinceMs = null;
+      chatSeatedIdentity = null;
     }
     for (const rec of employees.values()) {
       const inPair = !!(chatPair && (chatPair.a === rec.employeeId || chatPair.b === rec.employeeId));
@@ -4457,6 +4497,7 @@ function createOfficeModule(options = {}) {
       stepBlockedBy: rec.debugStepBlockedBy || null,
       waitDetail: rec.debugWaitDetail || null,
       yieldAskedAt: rec.yieldAskedAt || null,
+      blockedSinceMs: rec.blockedSinceMs == null ? null : rec.blockedSinceMs,
       // M4.1h: how many times this walker dropped a live roam route at an
       // intermediate waypoint and re-targeted ("允许中途换点").
       retargets: rec.debugRetargets || 0,

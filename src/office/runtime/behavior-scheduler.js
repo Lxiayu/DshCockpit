@@ -461,6 +461,25 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
     const at = atOrDefault(nowMs);
     const all = allReservations(externalReservations);
 
+    // 2026-10-30（M4.1e 30s 停滞的真因，也是"面板说在聊、画面却没聊"的根源）：
+    // 建立配对前先检查**两个座位此刻是否被别的身体实际占着**。
+    //
+    // 原来的逻辑只用预留（acquireReservation）判断座位可用性。但一个静止的
+    // 漫游者站在 chat-b 上时**不一定持有该节点的 park 预留**（它可能是路过
+    // 时把 currentNodeId 落在那里、随后 hasPath=false 原地停住），于是预留
+    // 检查通过、配对成立，两人开始往座位走 —— 而座位上已经站了一个人，
+    // 谁也到不了，一直等到 endChat 收场。实测停滞 30.3s（契约上限 20s）。
+    //
+    // 这里补一条"身体优先"的预检：座位上有别人站着，这次就不配对。
+    for (const seat of seats) {
+      for (const other of employees.values()) {
+        if (other.employeeId === employeeId || other.employeeId === partnerId) continue;
+        if (other.currentNodeId === seat.id) {
+          return fail('CHAT_SEAT_OCCUPIED', { seat: seat.id, employeeId: other.employeeId });
+        }
+      }
+    }
+
     // Both legs are planned through the movement contract BEFORE any seat is
     // reserved: an unreachable leg means no chat and no reservation churn.
     const routeA =
@@ -871,7 +890,26 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
         // M4.1b: roaming never targets the roaming-tagged desk-*-leave nodes —
         // they made walkers wander to other people's workstations (reads as
         // "串工位"); every other roaming-tagged spot stays eligible.
-        .filter((node) => (behavior === 'roaming' ? !node.id.startsWith('desk-') : true))
+        // 2026-10-30（M4.1e 30s 停滞的真因，用户报"聊天面板说在聊但画面没聊"）：
+        // 漫游目标池里原来包含 chat-a/chat-b（它们带 roaming 标签，且是
+        // roam-3↔chat-b↔chat-a↔roam-2 这条通顺漫游路径的中转站）。
+        // 后果：漫游者会正当地**站在聊天座位上**不动，而聊天要求"两人恰好
+        // 各自站在 seatA/seatB"才算入座 —— 于是聊天走位者永远等不到对方让开
+        // （实测停滞 30.3s，契约上限 20s），两人谁也聊不成。
+        // 与 desk-* 同理：聊天座位是**专用终点**，不是漫游歇脚点。
+        // 注意只排除"作为漫游目标"，通行能力（chatting/resting 边）不受影响。
+        .filter((node) => {
+          if (behavior !== 'roaming') return true;
+          // desk-*：漫游不串工位（M4.1b）。
+          if (node.id.startsWith('desk-')) return false;
+          // chat-*：聊天座位是专用终点，不是漫游歇脚点。
+          // 2026-10-30 实测：漫游者会站上去不动，而聊天要求"两人恰好各站
+          // 一个座位"才算入座 → 等人者停滞 30s+，两人谁也聊不成。
+          // 注意只排除 chatter 自己的**目标**；它进出座位靠 chatting 边，
+          // 不受影响（本过滤只作用于 roaming 候选池）。
+          if (node.id.startsWith('chat-')) return false;
+          return true;
+        })
         .map((node) => node.id);
       // M4.1g: the left rest area joins the roaming pool. Layouts that declare
       // it (rest-area/lounge/left-wing tags) contribute those nodes even

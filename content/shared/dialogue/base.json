@@ -3,36 +3,266 @@
   "description": "基础语料库：跨角色通用短句，按 topic 分组。运行时按上下文（pair 状态/相位/事件）选取最匹配的 topic。",
   "topics": {
     "greeting": [
-      { "id": "g-01", "text": "早", "weight": 3 },
-      { "id": "g-02", "text": "来了？", "weight": 2 },
-      { "id": "g-03", "text": "哟", "weight": 1, "if": { "timeOfDay": "morning" } },
-      { "id": "g-04", "text": "辛苦", "weight": 2, "if": { "peerActivity": "working" } }
+      {
+        "id": "b-g-01",
+        "text": "早啊",
+        "weight": 3
+      },
+      {
+        "id": "b-g-02",
+        "text": "来了？",
+        "weight": 2
+      },
+      {
+        "id": "b-g-03",
+        "text": "哟，今天挺早",
+        "weight": 2
+      },
+      {
+        "id": "b-g-04",
+        "text": "昨天那个问题解决了没",
+        "weight": 2
+      },
+      {
+        "id": "b-g-05",
+        "text": "睡得怎么样",
+        "weight": 2
+      },
+      {
+        "id": "b-g-06",
+        "text": "我先泡杯茶",
+        "weight": 2
+      },
+      {
+        "id": "b-g-07",
+        "text": "今天这天气真不错",
+        "weight": 2
+      },
+      {
+        "id": "b-g-08",
+        "text": "刚看到你提交了",
+        "weight": 1
+      },
+      {
+        "id": "b-g-09",
+        "text": "这周过得真快",
+        "weight": 1
+      },
+      {
+        "id": "b-g-10",
+        "text": "你那边还顺利吧",
+        "weight": 2
+      }
     ],
     "task-start": [
-      { "id": "ts-01", "text": "开工了", "weight": 2 },
-      { "id": "ts-02", "text": "这个任务有点意思", "weight": 1 },
-      { "id": "ts-03", "text": "交给我吧", "weight": 2 }
+      {
+        "id": "b-ts-01",
+        "text": "开工了",
+        "weight": 3
+      },
+      {
+        "id": "b-ts-02",
+        "text": "这个任务有点意思",
+        "weight": 2
+      },
+      {
+        "id": "b-ts-03",
+        "text": "交给我吧",
+        "weight": 2
+      },
+      {
+        "id": "b-ts-04",
+        "text": "先理一下思路再动手",
+        "weight": 2
+      },
+      {
+        "id": "b-ts-05",
+        "text": "这活估计得花点时间",
+        "weight": 2
+      },
+      {
+        "id": "b-ts-06",
+        "text": "正好是我熟悉的领域",
+        "weight": 2
+      },
+      {
+        "id": "b-ts-07",
+        "text": "我先看看现有的代码",
+        "weight": 2
+      },
+      {
+        "id": "b-ts-08",
+        "text": "有需要随时叫我",
+        "weight": 1
+      },
+      {
+        "id": "b-ts-09",
+        "text": "这个规模还行，不算大",
+        "weight": 1
+      }
     ],
     "task-done": [
-      { "id": "td-01", "text": "搞定了", "weight": 3 },
-      { "id": "td-02", "text": "下一个", "weight": 2 },
-      { "id": "td-03", "text": "还行", "weight": 1 }
+      {
+        "id": "b-td-01",
+        "text": "搞定了",
+        "weight": 3
+      },
+      {
+        "id": "b-td-02",
+        "text": "下一个",
+        "weight": 2
+      },
+      {
+        "id": "b-td-03",
+        "text": "还行，比想的简单",
+        "weight": 2
+      },
+      {
+        "id": "b-td-04",
+        "text": "测试也过了",
+        "weight": 2
+      },
+      {
+        "id": "b-td-05",
+        "text": "这版应该没问题了",
+        "weight": 2
+      },
+      {
+        "id": "b-td-06",
+        "text": "总算跑通了",
+        "weight": 2
+      },
+      {
+        "id": "b-td-07",
+        "text": "顺手把注释也补了",
+        "weight": 1
+      },
+      {
+        "id": "b-td-08",
+        "text": "有不对的地方随时说",
+        "weight": 2
+      }
     ],
     "task-fail": [
-      { "id": "tf-01", "text": "再试一次", "weight": 2 },
-      { "id": "tf-02", "text": "这次不行", "weight": 1 },
-      { "id": "tf-03", "text": "问题出在哪", "weight": 2 }
+      {
+        "id": "b-tf-01",
+        "text": "再试一次",
+        "weight": 2
+      },
+      {
+        "id": "b-tf-02",
+        "text": "这次不行",
+        "weight": 2
+      },
+      {
+        "id": "b-tf-03",
+        "text": "问题出在哪呢",
+        "weight": 2
+      },
+      {
+        "id": "b-tf-04",
+        "text": "边界条件没考虑到",
+        "weight": 2
+      },
+      {
+        "id": "b-tf-05",
+        "text": "我再看看日志",
+        "weight": 2
+      },
+      {
+        "id": "b-tf-06",
+        "text": "换个思路试试",
+        "weight": 2
+      },
+      {
+        "id": "b-tf-07",
+        "text": "差一点点，奇怪",
+        "weight": 1
+      }
     ],
     "pantry": [
-      { "id": "p-01", "text": "米缸还有半缸", "weight": 2 },
-      { "id": "p-02", "text": "咖啡机又坏了", "weight": 1, "if": { "nearProp": "coffee" } },
-      { "id": "p-03", "text": "水吧台刚补货", "weight": 1 }
+      {
+        "id": "b-p-01",
+        "text": "米缸还有半缸",
+        "weight": 2
+      },
+      {
+        "id": "b-p-02",
+        "text": "咖啡机又坏了",
+        "weight": 2
+      },
+      {
+        "id": "b-p-03",
+        "text": "水吧台刚补货",
+        "weight": 2
+      },
+      {
+        "id": "b-p-04",
+        "text": "谁把最后一盒牛奶喝了",
+        "weight": 2
+      },
+      {
+        "id": "b-p-05",
+        "text": "这茶味道不错，哪买的",
+        "weight": 2
+      },
+      {
+        "id": "b-p-06",
+        "text": "冰箱里有昨天剩的蛋糕",
+        "weight": 1
+      },
+      {
+        "id": "b-p-07",
+        "text": "下午一起点外卖？",
+        "weight": 2
+      },
+      {
+        "id": "b-p-08",
+        "text": "我得再来一杯",
+        "weight": 1
+      }
     ],
     "roaming": [
-      { "id": "r-01", "text": "走两步", "weight": 2 },
-      { "id": "r-02", "text": "伸个懒腰", "weight": 1 },
-      { "id": "r-03", "text": "思路卡了", "weight": 2 }
+      {
+        "id": "b-r-01",
+        "text": "走两步",
+        "weight": 2
+      },
+      {
+        "id": "b-r-02",
+        "text": "伸个懒腰",
+        "weight": 2
+      },
+      {
+        "id": "b-r-03",
+        "text": "思路卡了，出去转转",
+        "weight": 2
+      },
+      {
+        "id": "b-r-04",
+        "text": "坐久了腰有点酸",
+        "weight": 2
+      },
+      {
+        "id": "b-r-05",
+        "text": "今天太阳挺好",
+        "weight": 1
+      },
+      {
+        "id": "b-r-06",
+        "text": "看一下窗边那盆花",
+        "weight": 1
+      },
+      {
+        "id": "b-r-07",
+        "text": "该起来动动了",
+        "weight": 2
+      }
     ]
   },
-  "limits": { "bubbleMs": 3200, "maxConcurrent": 2, "cooldownMs": 30000 }
+  "limits": {
+    "bubbleMs": 3200,
+    "maxConcurrent": 2,
+    "cooldownMs": 30000
+  }
 }
