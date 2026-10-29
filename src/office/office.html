@@ -487,7 +487,7 @@
       };
       const furnitureAssetIds = [...new Set([
         ...layout.furniture().map((item) => item.assetId).filter(Boolean),
-        ...(officeSearchParams.get('officeLayout') === 'generated' ? GENERATED_PLANT_ASSET_IDS : []),
+        ...GENERATED_PLANT_ASSET_IDS,
       ])];
       await Promise.all(furnitureAssetIds.map((assetId) => new Promise((resolve) => {
         const src = officeAssetSrcById.get(assetId);
@@ -537,7 +537,10 @@
         } catch { /* the page stays light if the shell cannot answer */ }
       }
       document.documentElement.dataset.theme = initialTheme;
-      const generatedLayout = officeSearchParams.get('officeLayout') === 'generated';
+      // 2026-10-29（用户拍板）：办公室**只保留代码化 2.5D 这一版**，旧的贴图
+      // 布局路径已彻底移除。原来这里是 `?officeLayout=generated` 的 opt-in
+      // 开关，现在恒为 true，不再有"两套页面混着"的状态。
+      const generatedLayout = true;
       // P3-I1 preview: `?projection=iso` renders the isometric room shell.
       // Default stays flat until the projection is accepted.
       const projectionParam = officeSearchParams.get('projection');

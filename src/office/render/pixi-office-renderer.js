@@ -489,7 +489,6 @@ async function createOfficeRenderer(options) {
   const officeTextureMap = officeTextures instanceof Map ? officeTextures : new Map();
   const loaderErrors = Array.isArray(officeTextureErrors) ? officeTextureErrors : [];
   const calibratedDesks = Array.isArray(texturedWorkstations) ? texturedWorkstations : [];
-  const ROLE_ORDER = Object.freeze({ main: 0, back: 1 });
   const furnitureRecords = new Map(); // furnitureId -> record (persistent nodes)
   const officeTextureMissing = [];
 
@@ -510,30 +509,7 @@ async function createOfficeRenderer(options) {
     return item.assetId;
   }
 
-  function drawFurnitureGraphics(graphics, item) {
-    for (const [partName, rect] of Object.entries(item.parts || {})) {
-      const x = rect.x * scene.width;
-      const y = rect.y * scene.height;
-      const w = rect.width * scene.width;
-      const h = rect.height * scene.height;
-      if (item.kind === 'zone-marker') {
-        graphics.rect(x, y, w, h).fill({ color: COLORS.reserveZone, alpha: 0.5 });
-        graphics.rect(x, y, w, h).stroke({ width: 1, color: COLORS.zoneOutline, alpha: 0.8 });
-      } else if (partName === 'front') {
-        graphics.roundRect(x, y, w, h, 3).fill({ color: COLORS.deskFront });
-      } else if (item.kind === 'desk-back') {
-        graphics.roundRect(x, y, w, h, 3).fill({ color: COLORS.deskTop });
-      } else if (item.kind === 'chair') {
-        graphics.roundRect(x, y, w, h, 4).fill({ color: COLORS.chair });
-      } else if (item.kind === 'plant') {
-        graphics.circle(x + w / 2, y + h / 2, Math.min(w, h) / 2).fill({ color: COLORS.plant });
-      } else if (item.kind === 'shelf') {
-        graphics.rect(x, y, w, h).fill({ color: COLORS.shelf });
-      } else {
-        graphics.rect(x, y, w, h).fill({ color: COLORS.deskWood });
-      }
-    }
-  }
+  // 2026-10-29：drawFurnitureGraphics（旧贴图路径的占位图形绘制）已随旧路径移除。
 
   function buildFurniture({ recordMissing = true } = {}) {
     const floor = new PIXI.Graphics();
@@ -546,105 +522,11 @@ async function createOfficeRenderer(options) {
     // draft depth (layer 升序) with the fixture array order as tie-break;
     // the isometric fixture has no depth and keeps its array order. Fixture
     // order breaks ties within a role.
-    const items = layout.furniture().map((item, index) => ({ item, index }));
-    items.sort((a, b) => {
-      const rank = (entry) => (entry.item.layer === 'front-occluders' ? 2 : ROLE_ORDER[furnitureRole(entry.item)]);
-      if (rank(a) !== rank(b)) return rank(a) - rank(b);
-      const depthA = typeof a.item.depth === 'number' ? a.item.depth : null;
-      const depthB = typeof b.item.depth === 'number' ? b.item.depth : null;
-      if (depthA !== null && depthB !== null && depthA !== depthB) return depthA - depthB;
-      return a.index - b.index;
-    });
-    for (const { item } of items) {
-      const layer = layers[item.layer];
-      if (!layer) continue;
-      const partEntries = Object.entries(item.parts || {});
-      if (partEntries.length === 0) continue;
-      // P3.4: the flat monitor art reads as a plain light rectangle in the
-      // dark room (its bezel is the bright outline). In the code scene the
-      // monitor alone is redrawn as a bezel + screen + stand, using the same
-      // fixture rect; every other prop keeps its art.
-      if (codeSceneOptions.enabled && item.kind === 'monitor') {
-        const graphics = new PIXI.Graphics();
-        graphics.__furnitureId = item.id;
-        graphics.__furnitureRole = furnitureRole(item);
-        const sortable = item.sortY === true;
-        (sortable ? layers['ground-entities'] : layer).addChild(graphics);
-        furnitureRecords.set(item.id, {
-          item, node: graphics, kind: 'code', rect: partEntries[0][1], mirrorRect: null, sortable,
-        });
-        continue;
-      }
-      const wantedAssetId = wantedAssetFor(item);
-      const texture = wantedAssetId ? officeTextureMap.get(wantedAssetId) : null;
-      if (texture && texture.width > 0 && texture.height > 0) {
-        const sprite = new PIXI.Sprite(texture);
-        sprite.__furnitureId = item.id;
-        sprite.__furnitureRole = furnitureRole(item);
-        const tint = furnitureTintFor(item);
-        if (tint !== null) sprite.tint = tint;
-        sprite.anchor.set(0.5, 0.5);
-        if (item.kind === 'monitor' && item.assetId === 'prop-monitor-back-right-top' && furnitureTint === null) {
-          // Task 6b: a very light screen outline so the light-gray isometric
-          // monitor stays discernible on the light office background (no dark
-          // theme). Flat monitor art brings its own contrast — no outline.
-          // The code dark theme hides it too: tinted art plus a light outline
-          // reads as a stray box around every desk.
-          const outline = new PIXI.Graphics();
-          outline.__role = 'monitor-contrast';
-          outline.rect(150, 190, 725, 660).stroke({ width: 8, color: 0x74818c, alpha: 0.45 });
-          sprite.addChild(outline);
-        }
-        // M4.1c: flat furniture (sortY) joins the ONE geometric pass with the
-        // characters, ordered by its bottom edge — a walker in the corridor
-        // (larger footY) draws over desks/chairs, while a seated body is
-        // occluded by whatever stands in front of it. Everything else keeps
-        // its explicit declared layer.
-        const sortable = item.sortY === true;
-        (sortable ? layers['ground-entities'] : layer).addChild(sprite);
-        // Golden-workstation occlusion: the textured front panel mirrors the
-        // desk body's rect so the desk reads as ONE piece while the front
-        // copy still paints above characters (fixture-declared occluder).
-        const mirrorId = /-front$/.test(item.id) ? `${item.id.replace(/-front$/, '')}-back` : null;
-        const mirror = mirrorId ? furnitureRecords.get(mirrorId) : null;
-        furnitureRecords.set(item.id, {
-          item,
-          node: sprite,
-          kind: 'sprite',
-          rect: partEntries[0][1],
-          mirrorRect: mirror && mirror.rect ? mirror.rect : null,
-          sortable,
-        });
-      } else {
-        const graphics = new PIXI.Graphics();
-        graphics.__furnitureId = item.id;
-        graphics.__furnitureRole = furnitureRole(item);
-        // M4.1c: a sortY item keeps its place in the geometric pass even when
-        // its texture is missing — occlusion must not depend on whether art
-        // loaded. Placeholders without sortY stay on their declared layer.
-        const sortable = item.sortY === true;
-        (sortable ? layers['ground-entities'] : layer).addChild(graphics);
-        furnitureRecords.set(item.id, {
-          item,
-          node: graphics,
-          kind: 'graphics',
-          rect: partEntries[0][1],
-          mirrorRect: null,
-          sortable,
-        });
-        if (wantedAssetId && recordMissing) {
-          const reason = texture
-            ? 'TEXTURE_INVALID'
-            : (loaderErrors.find((entry) => entry.assetId === wantedAssetId) || {}).reason || 'TEXTURE_NOT_PROVIDED';
-          officeTextureMissing.push({
-            furnitureId: item.id,
-            assetId: wantedAssetId,
-            code: 'OFFICE_TEXTURE_MISSING',
-            reason,
-          });
-        }
-      }
-    }
+    // 2026-10-29（用户拍板）：旧贴图家具绘制路径已整体移除，办公室只保留
+    // 代码化 2.5D 一版。这里不再遍历 layout.furniture() 生成 sprite/graphics
+    // 节点 —— 全部家具由 buildOfficeDescription() + drawOfficeGroupNode() 用
+    // PIXI.Graphics 现场绘制，并在 sortOfficeGround() 里做一次画家算法排序。
+    // floor 与 shadows/edges 两个容器仍然保留：它们是新旧共用的承载节点。
     // P3.4: grounding + material overlays. They live under/over the furniture
     // sprites but only exist in the code scene, so the shipping look never
     // gains extra nodes.
@@ -892,32 +774,8 @@ async function createOfficeRenderer(options) {
 
   // P3.4: code-drawn monitor (bezel + screen + stand). It replaces only the
   // monitor art in the code scene; the rect comes from the fixture.
-  function drawCodeMonitor(node, record) {
-    const description = codeSceneDescription;
-    if (!description || !record.rect) return;
-    const c = description.colors;
-    const x = record.rect.x * scene.width;
-    const y = record.rect.y * scene.height;
-    const w = record.rect.width * scene.width;
-    const h = record.rect.height * scene.height;
-    const bezelH = Math.round(h * 0.72);
-    const bezelW = Math.round(w * 0.92);
-    const bx = x + (w - bezelW) / 2;
-    const by = y;
-    const radius = Math.max(2, Math.round(w * 0.05));
-    // Stand first (behind the panel).
-    const standW = Math.max(4, Math.round(w * 0.16));
-    const standH = Math.max(3, Math.round(h * 0.16));
-    node.rect(x + (w - standW) / 2, by + bezelH - 1, standW, standH).fill({ color: c.monitorBody });
-    node.roundRect(x + (w - standW * 1.8) / 2, by + bezelH + standH - 2, standW * 1.8, 2, 1)
-      .fill({ color: c.monitorEdge });
-    // Bezel + screen.
-    node.roundRect(bx, by, bezelW, bezelH, radius).fill({ color: c.monitorBody });
-    node.roundRect(bx + bezelW * 0.07, by + bezelH * 0.07, bezelW * 0.86, bezelH * 0.86, Math.max(1, radius - 1))
-      .fill({ color: c.monitorScreen });
-    node.rect(bx + bezelW * 0.07, by + bezelH * 0.07, bezelW * 0.86, Math.max(1, bezelH * 0.18))
-      .fill({ color: 0xffffff, alpha: 0.10 });
-  }
+  // 2026-10-29：drawCodeMonitor（旧路径的 monitor 重绘）已随旧路径移除。
+
 
   function buildOfficeDescription() {
     const workstations = typeof layout.workstations === 'function' ? layout.workstations() : null;
@@ -3252,44 +3110,17 @@ async function createOfficeRenderer(options) {
           record.node.rect(0, bandY, scene.width, scene.height - bandY).fill({ color: COLORS.floorLine, alpha: 0.35 });
         }
       } else if (record.kind === 'code') {
+        // 2026-10-29：'code' 记录来自旧贴图路径的 monitor 重绘，该路径已移除。
         record.node.clear();
-        // In the isometric preview the flat monitor records have no meaning.
-        if (codeSceneOptions.enabled && projectionMode !== 'iso') drawCodeMonitor(record.node, record);
       } else if (record.kind === 'shadows') {
         record.node.clear();
         if (codeSceneOptions.enabled) drawFurnitureGrounding(record.node);
       } else if (record.kind === 'edges') {
         record.node.clear();
         if (codeSceneOptions.enabled) drawFurnitureEdges(record.node);
-      } else if (record.kind === 'sprite') {
-        const rect = record.mirrorRect || record.rect;
-        const texture = record.node.texture;
-        const asset = layoutAssetById(record.item.assetId);
-        const bbox = asset && asset.contentBbox;
-        if (bbox) {
-          // Task E4 contentBbox viewport fit (mirrors the editor's art-box
-          // contract): the OPAQUE ART fills the fixture rect exactly — the
-          // sprite is scaled by the art width and shifted so the bbox center
-          // lands on the rect center. The compiler derives the rect from the
-          // same bbox, so the aspect always matches (no squash).
-          const artScale = (rect.width * scene.width) / (bbox.w * texture.width);
-          record.node.scale.set(artScale, artScale);
-          record.node.x = (rect.x + rect.width / 2) * scene.width - (bbox.x + bbox.w / 2 - 0.5) * texture.width * artScale;
-          record.node.y = (rect.y + rect.height / 2) * scene.height - (bbox.y + bbox.h / 2 - 0.5) * texture.height * artScale;
-        } else {
-          // Uniform scale fitted on the part rect's width, texture center on
-          // the rect center: the part keeps its natural aspect (no squash) and
-          // stays centered on its declared footprint. Height derives from the
-          // texture aspect, mirroring the approved draft composition.
-          const scale = (rect.width * scene.width) / texture.width;
-          record.node.scale.set(scale, scale);
-          record.node.x = (rect.x + rect.width / 2) * scene.width;
-          record.node.y = (rect.y + rect.height / 2) * scene.height;
-        }
-      } else if (record.kind === 'graphics') {
-        record.node.clear();
-        drawFurnitureGraphics(record.node, record.item);
       }
+      // 2026-10-29：'sprite' / 'graphics' 记录来自已移除的旧贴图路径，
+      // layoutFurniture 不再需要处理它们。
     }
     // I2: iso furniture lives on the ground layer as one node per box, sorted
     // with the characters; the flat furniture nodes above are hidden.

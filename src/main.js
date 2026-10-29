@@ -1044,10 +1044,9 @@ function openOfficeView() {
   // M4.2: the office is a main-area view INSIDE the main window (not an
   // independent window anymore). Switching back keeps the page alive.
   const view = getWindowManager().showOfficeShellView({
-    // 2026-10-29（临时预览开关）：带上 officeLayout=generated 才能看到
-    // 代码化 2.5D 办公室（默认仍是旧贴图版）。这是本轮为"在真实程序里看效果"
-    // 临时打开的，随时可还原成不带参数的形式。
-    url: `${OFFICE_RUNTIME_SCHEME}://local/office.html?pack=${officeCharacterPackId()}&officeLayout=generated`,
+    // 2026-10-29：办公室只剩代码化 2.5D 一版（旧贴图路径已移除），
+    // 不再需要 officeLayout 参数。
+    url: `${OFFICE_RUNTIME_SCHEME}://local/office.html?pack=${officeCharacterPackId()}`,
     onVisibility: (viewId, visible) => officeModuleInstance.noteVisibility({ viewId, visible }),
   });
   return view ? { ok: true, viewId: 'office-shell-1' } : { ok: false, code: 'OFFICE_VIEW_LIMIT' };

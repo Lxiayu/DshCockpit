@@ -915,62 +915,6 @@ const FLAT_LAYOUT_FIXTURE = JSON.parse(
   fs.readFileSync(path.join(ROOT, 'src', 'office', 'fixtures', 'office-layout-flat.json'), 'utf8')
 );
 
-test('latch → 「重试渲染」后注入的美术贴图仍在：家具仍是贴图 sprite，不是 32 个占位块', async () => {
-  const { PIXI } = makeStubPixi();
-  const raf = makeRaf();
-  const clock = makeClock();
-  const destroyed = [];
-  // 渲染器只在 texture.width/height > 0 时走贴图 sprite 路径（否则占位块）
-  const fakeTexture = (id) => ({ id, width: 64, height: 64, destroy() { destroyed.push(id); } });
-  // 页面注入的两张 map：家具素材（flat 夹具的 15 个 assetId）+ 角色帧
-  const flatFurniture = FLAT_LAYOUT_FIXTURE.furniture || [];
-  const flatAssetIds = [...new Set(flatFurniture.map((item) => item.assetId).filter(Boolean))];
-  assert.equal(flatAssetIds.length, 15, 'flat 夹具声明 15 个家具素材（与生产诊断一致）');
-  const officeTextures = new Map(flatAssetIds.map((id) => [id, fakeTexture(id)]));
-  const textures = new Map([['idle-0.png', fakeTexture('idle-0.png')]]);
-
-  const view = await officeRenderer.createOfficeRenderer({
-    PIXI,
-    layout: officeLayout.createOfficeLayout(FLAT_LAYOUT_FIXTURE),
-    pack: null,
-    textures,
-    officeTextures,
-    officeTextureErrors: [],
-    texturedWorkstations: ['desk-1', 'desk-2', 'desk-3', 'desk-4', 'desk-5', 'desk-6'],
-    scene: { width: 1280, height: 840 },
-    snapshot: SNAPSHOT,
-    mount: null,
-    devicePixelRatio: 1,
-    fpsMonitor: { ...FPS_CONFIG, now: () => clock.nowMs, scheduleFrame: raf.scheduleFrame, cancelFrame: raf.cancelFrame },
-  });
-
-  const boot = view.officeDiagnostics();
-  assert.equal(boot.texturedFurniture.length, 32, 'boot：32 件家具全部走贴图 sprite');
-  assert.equal(boot.placeholderFurniture.length, 0, 'boot：没有占位块');
-
-  latchForReal(view, raf, clock); // 走真监控器阶梯：低开销档 → static（degradeToStatic 已跑）
-  assert.equal(view.mode, 'static');
-  assert.deepEqual(destroyed, [], 'latch 不得释放页面注入的贴图（页面不会重建它们）');
-  assert.equal(officeTextures.size, flatAssetIds.length, '家具 map 仍是完整的');
-  assert.equal(textures.size, 1, '角色帧 map 仍是完整的');
-
-  const outcome = await view.retryRendering(); // 用户点「重试渲染」
-  assert.equal(outcome, 'recovered');
-  assert.equal(view.mode, 'webgl', '画面回到 webgl');
-  assert.equal(view.diagnosticCode, null);
-  const after = view.officeDiagnostics();
-  assert.equal(after.texturedFurniture.length, 32, '恢复后 32 件家具仍是贴图 sprite');
-  assert.equal(after.placeholderFurniture.length, 0, '恢复后没有退化成占位块');
-  assert.equal(view.diagnostics().officeTextureCount, flatAssetIds.length, '贴图计数与 boot 一致');
-  assert.deepEqual(destroyed, [], '整条恢复链都没释放页面注入的贴图');
-});
-
-// ---------------------------------------------------------------------------
-// ⑥ P2 诊断包（2026-09-26）: the renderer report carries optional fps /
-// renderProfile telemetry over the SAME office:visibility invoke — strictly
-// validated, additive only (legacy 3-key payloads normalize identically).
-// ---------------------------------------------------------------------------
-
 test('module: the renderer report accepts optional fps/renderProfile and stores fresh telemetry', () => {
   const { module, lines } = makeLoggingModule();
 

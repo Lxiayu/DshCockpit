@@ -113,49 +113,6 @@ const computedIds = (view) => view.groundPaintOrder().map((entry) => entry.id);
 //    actual == computed；坐姿角色必须一直在自己椅子之前（M4.1h 契约不被任何
 //    一推破坏）。
 // ---------------------------------------------------------------------------
-test('M4.1h-R: ground layer actual child order equals the computed painter order on EVERY push (no z-order flip-flop)', async () => {
-  const PIXI = stubPIXI();
-  const view = await createFlatRenderer(PIXI);
-  const layout = officeLayout.createOfficeLayout(FLAT_LAYOUT_FIXTURE);
-  const seat = layout.nodeById('desk-3');
-
-  const pushAndCheck = (employee, label) => {
-    view.applySnapshot(baseSnapshot([employee]));
-    const actual = childIds(view);
-    const computed = computedIds(view);
-    assert.deepEqual(actual, computed, `${label}: actual ground-children order must equal the computed painter order`);
-    const charAt = actual.indexOf(employee.employeeId);
-    const chairAt = actual.indexOf(`${employee.seatNodeId}-chair`);
-    return { charAt, chairAt };
-  };
-
-  // 坐姿工作动画循环：位置不变，只有 frameIndex 变（旧缺陷在这必现：第 2 推起
-  // 角色被摘到全家具之上且不再恢复——node-repro-prefix.txt 的 4/4 推错序）。
-  for (let frame = 0; frame < 8; frame += 1) {
-    const { charAt, chairAt } = pushAndCheck(employeeSnapshot({
-      position: { ...seat.position },
-      animation: { resource: 'working', frameIndex: frame, fallbackReason: null },
-    }), `seated work frame ${frame}`);
-    assert.ok(charAt < chairAt, `seated body stays behind her chair on frame ${frame} (${charAt} < ${chairAt})`);
-  }
-
-  // 走动：从座位向下穿过工位带到走廊（位置每推都在变，跨越家具键）。
-  for (let step = 0; step <= 24; step += 1) {
-    const y = Math.min(0.98, seat.position.y + step * 0.012);
-    const { charAt, chairAt } = pushAndCheck(employeeSnapshot({
-      activity: 'roaming',
-      animation: { resource: 'walk-down', frameIndex: step % 4, fallbackReason: null },
-      position: { x: seat.position.x, y },
-    }), `walk step ${step}`);
-    if (charAt < chairAt === false) {
-      // 走出工位带后越过椅子键是合法的（她在椅子下方=更近处）；非法的是"实际序
-      // 与计算序不一致"，上面已逐推断言。这里只记录越过后必然保持越过。
-      assert.ok(charAt > chairAt, `after passing the chair the walker stays in front (step ${step})`);
-    }
-  }
-  view.destroy();
-});
-
 test('M4.1h-R2: repeated pushes with UNCHANGED geometry never re-order the layer (monotonic, no paint-order churn)', async () => {
   const PIXI = stubPIXI();
   const view = await createFlatRenderer(PIXI);
@@ -349,41 +306,3 @@ test('perf-R: identical snapshot pushes paint NOTHING; every visible change (pos
 // ⑤ prop 重挂不动点：两层支撑链（水吧 → 茶几 → 电话机）必须收敛为严格递增，
 //    且实际挂载序一致（"只跑一遍"的实现会让电话机落在茶几之下）。
 // ---------------------------------------------------------------------------
-test('M4.1c-R: nested prop chains re-key to a FIXED POINT (prop on prop on support)', async () => {
-  const draft = JSON.parse(JSON.stringify(FLAT_LAYOUT_FIXTURE));
-  // 三层几何（scene 归一化坐标）：
-  //   水吧 draft-55：x 0.55..0.75，y 0.40..0.52（底边键 = 0.52 * 840 = 436.8）
-  //   茶几 draft-53：x 0.66..0.80（footX 0.73 落在水吧跨度内），y 0.42..0.51
-  //     —— 原始键 428.4 < 水吧键，被重挂抬到 436.8 + 0.5 = 437.3；
-  //   电话 draft-58：x 0.755..0.795（footX 0.775 在茶几跨度内、**在水吧跨度外**），
-  //     y 0.455..0.485 —— 原始键 407.4，必须跟着茶几**最终**键走到 437.8。
-  // 只跑一遍的实现会让电话停在 428.9（茶几第一轮的旧键之下）→ 电话被茶几盖住。
-  const bar = draft.furniture.find((item) => item.id === 'draft-55');
-  bar.parts.main = { x: 0.55, y: 0.40, width: 0.20, height: 0.12 };
-  const tea = draft.furniture.find((item) => item.id === 'draft-53');
-  tea.parts.main = { x: 0.66, y: 0.42, width: 0.14, height: 0.09 };
-  const phone = draft.furniture.find((item) => item.id === 'draft-58');
-  phone.parts.main = { x: 0.755, y: 0.455, width: 0.04, height: 0.03 };
-  const PIXI = stubPIXI();
-  const view = await createFlatRenderer(PIXI, { layout: officeLayout.createOfficeLayout(draft) });
-  const keys = new Map(view.groundPaintOrder().map((entry) => [entry.id, entry.key]));
-  for (const id of ['draft-55', 'draft-53', 'draft-58']) assert.ok(keys.has(id), `${id} is in the merged pass`);
-  assert.ok(keys.get('draft-55') < keys.get('draft-53'), `tea table paints after its support (bar ${keys.get('draft-55').toFixed(1)} < tea ${keys.get('draft-53').toFixed(1)})`);
-  assert.ok(keys.get('draft-53') < keys.get('draft-58'), `phone paints after the tea table it rests on (tea ${keys.get('draft-53').toFixed(1)} < phone ${keys.get('draft-58').toFixed(1)})`);
-  assert.ok(Math.abs(keys.get('draft-53') - 437.3) < 0.6, `tea re-keyed onto the bar (${keys.get('draft-53').toFixed(1)} ≈ 437.3)`);
-  // 只跑一遍的实现会把电话停在第一轮的旧值 428.9（茶几抬升前的键）→ 电话被茶几
-  // 盖住；不动点实现必须让电话的最终键**严格高于**茶几的最终键（电话随后被更近
-  // 处的下一支撑物（desk-4 桌体）接走也是算法的既定语义——键只增不减）。
-  assert.ok(keys.get('draft-58') > 437.3 + 0.25,
-    `phone followed the tea table's FINAL key (${keys.get('draft-58').toFixed(1)} > tea-final 437.3; the broken single pass left it at 428.9)`);
-  assert.deepEqual(childIds(view), computedIds(view), 'actual children order equals the computed painter order');
-  // 不动点：再推同场景（动画帧变化强制重算），键不再漂移。
-  view.applySnapshot(baseSnapshot([employeeSnapshot({
-    employeeId: 'coder',
-    position: { x: 0.10, y: 0.90 },
-    animation: { resource: 'working', frameIndex: 1, fallbackReason: null },
-  })]));
-  const keys2 = new Map(view.groundPaintOrder().map((entry) => [entry.id, entry.key]));
-  assert.equal(keys2.get('draft-58'), keys.get('draft-58'), 'phone key is stable at the fixed point across pushes');
-  view.destroy();
-});
