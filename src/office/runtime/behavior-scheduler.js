@@ -408,7 +408,44 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
     return pairs;
   }
 
-  // 挑一组本次会话使用的座位：跳过被别的身体占着的那一对。
+  // 2026-10-30（用户："左右站位只该出现在空间够大的地方"）：
+  // 判断一组座位**左右两侧是否真的有空间**再决定用不用它。
+  //
+  // 为什么需要运行时判定：横向并排时两人各自朝对方侧身，如果这对座位夹在
+  // 两列办公桌之间（两侧就是别人的工位），画面就变成"上面一个朝右看、
+  // 下面一个朝左看"的怪姿势。空间是**场景事实**，不是座位的静态属性。
+  //
+  // 用显式 `chat-side-by-side` 标签识别"需要横向空间"的对，而不是比较 dx/dy：
+  // 编译器的 spiral 会把坐标微调（实测 chat-d 被推成 dx=21/dy=-25），
+  // 靠几何推断会误判成纵向对。
+  const CHAT_SIDE_PROBE = 0.042; // 半个身位（约 40px @960）
+  function pairHasSideSpace(pair) {
+    const [a, b] = pair;
+    if (!a || !b || !a.position || !b.position) return false;
+    const sideBySide = Array.isArray(a.tags) && a.tags.includes('chat-side-by-side');
+    if (!sideBySide) return true; // 纵向对：本条不适用
+    const halfSpan = Math.abs(a.position.x - b.position.x) / 2
+      + (a.footprint ? a.footprint.width / 2 : 0.02);
+    const leftEdge = Math.min(a.position.x, b.position.x) - halfSpan;
+    const rightEdge = Math.max(a.position.x, b.position.x) + halfSpan;
+    // "同排"判据用一倍的座位高度（约 25px），而不是 3 倍：
+    // 3 倍会把纵向相邻的节点（roam-8 与座位 y 差 44px）也算成"挤在旁边"，
+    // 于是明明空旷的横向对也被剔除。
+    const bandTolerance = (a.footprint ? a.footprint.height : 0.04) * 1.2;
+    for (const node of graph.nodes) {
+      if (!node || !node.position) continue;
+      if (node.id === a.id || node.id === b.id) continue;
+      if (Math.abs(node.position.y - a.position.y) > bandTolerance) continue;
+      const radius = Math.max(node.footprint ? node.footprint.width / 2 : 0.02, node.safeRadius || 0.02);
+      const need = radius + CHAT_SIDE_PROBE;
+      if (Math.abs(node.position.x - leftEdge) < need) return false;
+      if (Math.abs(node.position.x - rightEdge) < need) return false;
+    }
+    return true;
+  }
+
+  // 挑一组本次会话使用的座位：跳过被别的身体占着的那一对，
+  // 并**排除左右空间不足的横向对**（那样会摆出"各自朝外看"的怪姿势）。
   function chooseChatSeatPair(pairMemberIds) {
     const pairs = chatSeatPairs();
     if (pairs.length === 0) return null;
@@ -418,8 +455,13 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
       if (pairMemberIds.includes(other.employeeId)) continue;
       occupied.add(other.currentNodeId);
     }
-    const free = pairs.filter(([a, b]) => !occupied.has(a.id) && !occupied.has(b.id));
-    const pool = free.length > 0 ? free : pairs;
+    // 先按"没被身体占着"过滤，再按"左右空间够"过滤。
+    // 空间不足的横向对被剔除；若因此一组都不剩，退回只按占用过滤
+    //（宁可并排，也不能永远不聊天）。
+    const notOccupied = pairs.filter(([a, b]) => !occupied.has(a.id) && !occupied.has(b.id));
+    const base = notOccupied.length > 0 ? notOccupied : pairs;
+    const roomy = base.filter((pair) => pairHasSideSpace(pair));
+    const pool = roomy.length > 0 ? roomy : base;
     // 确定性选择（同一对成员永远算出同一组座位），避免两人各算一组。
     // 注意用 `Math.imul` + `>>> 0` 做 32 位 FNV：朴素写法的乘法会超出
     // JS 双精度整数精度，低位几乎恒定，实测所有配对都命中第 0 组 ——

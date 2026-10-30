@@ -662,8 +662,8 @@
     {
       "id": "chat-c",
       "position": {
-        "x": 0.610275365401379,
-        "y": 0.6658683630507369
+        "x": 0.3854,
+        "y": 0.9048
       },
       "footprint": {
         "width": 0.04,
@@ -671,15 +671,16 @@
       },
       "safeRadius": 0.032,
       "tags": [
-        "chatting"
+        "chatting",
+        "chat-side-by-side"
       ],
       "capacity": 1
     },
     {
       "id": "chat-d",
       "position": {
-        "x": 0.6582753654013791,
-        "y": 0.6658683630507369
+        "x": 0.4333,
+        "y": 0.9048
       },
       "footprint": {
         "width": 0.04,
@@ -687,7 +688,8 @@
       },
       "safeRadius": 0.032,
       "tags": [
-        "chatting"
+        "chatting",
+        "chat-side-by-side"
       ],
       "capacity": 1
     }
@@ -1180,8 +1182,18 @@
       "bidirectional": true
     },
     {
-      "from": "roam-3",
+      "from": "roam-11",
       "to": "chat-c",
+      "behaviors": [
+        "roaming",
+        "chatting",
+        "resting"
+      ],
+      "bidirectional": true
+    },
+    {
+      "from": "roam-11",
+      "to": "chat-d",
       "behaviors": [
         "roaming",
         "chatting",

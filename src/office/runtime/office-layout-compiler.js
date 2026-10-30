@@ -493,14 +493,20 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
   // 于是聊天座位有两组：chat-a/b 对应"前后"，chat-c/d 对应"左右"，
   // 选座时按对挑选（见 behavior-scheduler 的 chooseChatSeatPair）。
   const CHAT_SIDE_FOOTPRINT = Object.freeze({ width: 0.04, height: 0.04 });
-  const CHAT_SIDE_TAGS = Object.freeze(['chatting']);
+  // 2026-10-30：用**显式标签**而不是坐标推断来区分两种站位。
+  // 坐标会被编译器的 spiral 微调（实测 chat-d 被推到 (461,395)，
+  // dx=21/dy=-25 已不再是横向对），靠 dx/dy 比较判断站位不可靠。
+  const CHAT_SIDE_TAGS = Object.freeze(['chatting', 'chat-side-by-side']);
   const CHAT_SIDE_NODES = Object.freeze([
     Object.freeze({ id: 'chat-c', position: null, footprint: CHAT_SIDE_FOOTPRINT, tags: CHAT_SIDE_TAGS, capacity: 1, safeRadius: 0.032 }),
     Object.freeze({ id: 'chat-d', position: null, footprint: CHAT_SIDE_FOOTPRINT, tags: CHAT_SIDE_TAGS, capacity: 1, safeRadius: 0.032 }),
   ]);
+  // 接入口选左翼第一列最近的 roam-11（322,432），边短且不穿家具。
+  // 早先接 roam-3/roam-14 都会拉出长边穿过家具区，编译要么
+  // OFFICE_COMPILE_GRAPH_BLOCKED，要么把座位 spiral 到别处。
   const CHAT_SIDE_EDGES = Object.freeze([
-    // 接到下方横道 roam-3，并让两座互通（与 chat-a/chat-b 同款拓扑）
-    Object.freeze({ from: 'roam-3', to: 'chat-c', behaviors: Object.freeze(['roaming', 'chatting', 'resting']), bidirectional: true }),
+    Object.freeze({ from: 'roam-11', to: 'chat-c', behaviors: Object.freeze(['roaming', 'chatting', 'resting']), bidirectional: true }),
+    Object.freeze({ from: 'roam-11', to: 'chat-d', behaviors: Object.freeze(['roaming', 'chatting', 'resting']), bidirectional: true }),
     Object.freeze({ from: 'chat-c', to: 'chat-d', behaviors: Object.freeze(['roaming', 'chatting', 'resting']), bidirectional: true }),
   ]);
 
@@ -804,9 +810,25 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
     'roam-1': { x: centerX(corridorX + 0.047), y: centerY(rowGap1Y + 0.14) },
     'chat-a': { x: centerX(corridorX - 0.008), y: centerY(rowGap1Y + 0.14) },
     'chat-b': { x: centerX(corridorX - 0.008), y: centerY(rowGap1Y + 0.21) },
-    // 横向对：同 y、横向相距约 46px（@960）。落在 rowGap2 上方的开阔带。
-    'chat-c': { x: centerX(corridorX - 0.075), y: centerY(rowGap2Y - 0.035) },
-    'chat-d': { x: centerX(corridorX - 0.075 + 0.048), y: centerY(rowGap2Y - 0.035) },
+    // 横向对（用户 2026-10-30 二次反馈）：原来放在两列办公桌**之间的过道**里，
+    // 那条通道只有约 84px 宽，两侧都是工位家具 —— 两人横向并排时会变成
+    // "上面一个向右看、下面一个向左看"的怪姿势，反而更抽象。
+    // 横向站位需要**左右都有余量**的宽敞区，所以移到页面**最下方的开阔带**
+    // （y≈600，实测该处上下左右各 25~40px 内无家具、无其它节点）。
+    // 用户 2026-10-30 二次反馈：横向站位需要左右都有余量，放两列桌子之间的
+    // 过道会变成"一个朝右一个朝左"的怪姿势。移到页面最下方的开阔带
+    // （x 0.395~0.443、y 0.905）：与 roam-9(0.335,0.969) / roam-14(0.47,0.986)
+    // 都保持 ≥45px，且该处无家具。
+    // 用户 2026-10-30 二次反馈：横向站位要放**空间够大**的地方
+    // （页面最下方 / 左侧家具区），放两列桌子之间的过道会变成
+    // "上面一个朝右看、下面一个朝左看"的怪姿势。
+    // 实测全图扫描后，只有左休息区这一带满足"左右各半个身位无其它节点"：
+    // (440,420) 与 (486,420)，两侧 25px 内无家具、69px 内无同排节点。
+    // 用户 2026-10-30 二次反馈：横向站位必须放**空间够大**的地方
+    // （页面最下方 / 左侧家具区）。这一对是按"编译器障碍模型 + 节点间距"
+    // 全图扫描后净空最大的位置（60px），位于页面最下方的开阔带。
+    'chat-c': { x: centerX(0.3854), y: centerY(0.9048) },
+    'chat-d': { x: centerX(0.4333), y: centerY(0.9048) },
     'roam-5': { x: centerX(corridorX + 0.027), y: centerY(rowGap2Y) },
     // 2026-10-29: 与 LEFT_WING_COLUMN_X 同列（原来硬编码 0.27，与新家具冲突）
     'roam-8': { x: centerX(LEFT_WING_COLUMN_X), y: centerY((rowGap2Y + bottomY) / 2) },

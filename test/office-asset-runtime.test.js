@@ -1043,8 +1043,8 @@ test('E4 compiler: the approved flat draft compiles into a canonical isomorphic 
   const CHAT_SIDE_IDS = ['chat-c', 'chat-d'];
   assert.equal(layout.nodes.length, 27 + LEFT_WING_IDS.length + CHAT_SIDE_IDS.length,
     'isometric nodes + left-wing extension + the horizontal chat seat pair');
-  // +2：chat-c 接入 roam-3、chat-c↔chat-d 互通
-  assert.equal(layout.edges.length, 40 + 12 - 11 + 2, 'isometric + left-wing edges + 2 horizontal chat edges');
+  // +3：chat-c 与 chat-d 各接一条 roam-11、外加两座互通
+  assert.equal(layout.edges.length, 40 + 12 - 11 + 3, 'isometric + left-wing edges + 3 horizontal chat edges');
   const isSeatId = (id) => /^desk-[1-6]$/.test(id);
   const isCorridorNodeId = (id) => /^(roam|chat)-/.test(id);
   for (const edge of layout.edges) {
@@ -1089,7 +1089,8 @@ test('E4 compiler: the approved flat draft compiles into a canonical isomorphic 
     // 2026-10-30：chat-c/chat-d 是**编译器新增**的横向聊天座位，
     // canonical fixture 里没有对应条目，单独校验它们的契约。
     if (CHAT_SIDE_IDS.includes(node.id)) {
-      assert.deepEqual([...node.tags], ['chatting'], `${node.id} is a chat seat`);
+      // 横向对额外带 chat-side-by-side 标签（运行时据此判定左右空间）
+      assert.deepEqual([...node.tags].sort(), ['chat-side-by-side', 'chatting'], `${node.id} is a side-by-side chat seat`);
       assert.equal(node.capacity, 1, `${node.id} holds exactly one`);
       assert.equal(node.safeRadius, 0.032, `${node.id} keeps the chat safeRadius`);
       continue;
@@ -1110,8 +1111,8 @@ test('E4 compiler: the approved flat draft compiles into a canonical isomorphic 
     'roam-8>roam-10', 'roam-10>roam-11', 'roam-11>roam-15', 'roam-15>roam-12', 'roam-12>roam-16', 'roam-16>roam-13',
     // 2026-10-30：第二条左通道（x=0.40）的 4 条梯形边
     'roam-17>roam-13', 'roam-17>roam-16',
-    // 2026-10-30：横向聊天座位对的 2 条边
-    'roam-3>chat-c', 'chat-c>chat-d',
+    // 2026-10-30：横向聊天座位对的 3 条边
+    'roam-11>chat-c', 'roam-11>chat-d', 'chat-c>chat-d',
   ]);
   const isoEdgeKeys = CANONICAL_OFFICE_LAYOUT.edges
     .filter((edge) => !(isSeatId(edge.from) && isCorridorNodeId(edge.to))
