@@ -260,7 +260,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   // 2026-10-29 第十一轮：左翼漫游列 x 0.27 → 0.335（避开立体家具），步程缩短
   // 后左半区时间占比下降，用 HOLD 时间补回 40~50% 契约。须与 behavior-scheduler
   // 的默认值一致（启动时校验两处不漂移）。
-  leftRoamDwellMs: 17000,
+  leftRoamDwellMs: 18000,
   midRouteRerouteChance: 0.12,
   detourChance: 0.15,
   personality: true,
@@ -3091,7 +3091,24 @@ function createOfficeModule(options = {}) {
     }
     const chatElapsed = chatPair && chatSeatedSinceMs !== null ? at - chatSeatedSinceMs : 0;
     if (chatPair && seatedNow && chatElapsed >= settings.chatDurationMs) {
+      // 2026-10-30（用户报"聊完天状态变巡游，人却站着不动"）：原来只调
+      // scheduler.endChat()，它清的是 scheduler 的预留表；module 侧每个 rec
+      // 还有 parkReservation（坐座位时申请的节点预留）**没被释放**，两人聊完
+      // 仍各自占着 chat-a/chat-b，形成死锁环（coder 停 chat-b 要去 roam-3，
+      // researcher 停 roam-3 要去 chat-b，互等唯一通路）。
+      // 会话结束时把两位成员的 module 侧预留一并释放即可。
+      const ending = chatPair;
       try { scheduler.endChat({ nowMs: at }); } catch { /* scheduler stays optional */ }
+      for (const memberId of [ending.a, ending.b]) {
+        const member = employees.get(memberId);
+        if (!member) continue;
+        releaseParkClaim(member);
+        releasePathReservation(member);
+        member.route = null;
+        member.routeIndex = 0;
+        member.targetNodeId = null;
+        member.blockedSinceMs = null;
+      }
       chatPair = scheduler.activeChatPair();
       chatSeatedSinceMs = null;
       chatSeatedIdentity = null;

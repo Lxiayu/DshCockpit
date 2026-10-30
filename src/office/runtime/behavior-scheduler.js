@@ -117,7 +117,7 @@ const DEFAULT_CONFIG = Object.freeze({
   // 正解不是把列移回家具里，而是补 HOLD 时间 —— 这段注释本来就写着
   // "left HOLD time per visit is what moves the measured left-half share"。
   // 18000 × 1.30 ≈ 24000 把占比拉回带内。
-  leftRoamDwellMs: 17000,
+  leftRoamDwellMs: 18000,
   // Share of roaming walks that re-target at an intermediate waypoint (one
   // fresh decision mid-walk) — "允许中途换点".
   midRouteRerouteChance: 0.12,

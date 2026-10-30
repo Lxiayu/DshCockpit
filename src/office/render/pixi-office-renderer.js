@@ -3210,15 +3210,23 @@ async function createOfficeRenderer(options) {
       bubbleBg.__role = 'dialogue-bubble-bg';
       const bubbleText = new PIXI.Text('');
       bubbleText.__role = 'dialogue-bubble-text';
+      // 2026-10-30 二次重设计（用户："新气泡和旧版差不多，再设计一下"）：
+      // 第一版只是"圆角大一点 + 加个尾巴"，视觉上仍是一块平白板子。
+      // 这一版按鲸鱼娘的社区形象（蓝色、海洋、软萌）做成**水泡感气泡**：
+      //   - 海蓝双色渐变面板（上浅下深），像一颗被光照到的水泡
+      //   - 外圈一圈更淡的"水膜"描边 + 顶部一道高光
+      //   - 尾巴做成水滴形（三阶递减），不再是生硬的小三角
+      //   - 文字用深蓝墨色、15px、行高更松，读起来更软
       bubbleText.style = {
         fontFamily: '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
-        fontSize: 14,
-        fontWeight: '500',
-        fill: 0x2f3a4a,
+        fontSize: 15,
+        fontWeight: '600',
+        fill: 0x1e3a5f,
         wordWrap: true,
-        wordWrapWidth: 180,
+        wordWrapWidth: 176,
         breakWords: true,
-        lineHeight: 19,
+        lineHeight: 21,
+        align: 'left',
       };
       bubbleText.visible = false;
       layers['effects-labels'].addChild(bubbleBg, bubbleText);
@@ -3242,11 +3250,14 @@ async function createOfficeRenderer(options) {
   // translated by the interpolation pump INSTEAD of being redrawn. Resetting
   // the offsets here means a fresh snapshot always redraws from a clean origin.
   function resetEntityOffsets(record) {
-    const nodes = [record.container, record.__selectionRing, record.__badge,
-      record.__marker, record.__bubbleBg, record.__bubbleText];
-    for (const node of nodes) {
-      if (node && node.position && typeof node.position.set === 'function') node.position.set(0, 0);
+    // 容器本身仍然归零（它是 ground-entities 里的相对位移承载者）。
+    if (record.container && record.container.position
+        && typeof record.container.position.set === 'function') {
+      record.container.position.set(0, 0);
     }
+    // effects 层的偏移只清记录，不动节点的绝对坐标
+    //（节点坐标由 updateEntity 重新按绝对场景坐标写入）。
+    record.__effectsOffset = { x: 0, y: 0 };
   }
 
   // Moves the already-drawn entity to an interpolated foot point. Everything
@@ -3264,10 +3275,16 @@ async function createOfficeRenderer(options) {
     // Always write the offset (including the settle-to-zero frame): the
     // previous frame's translation must be cleared, never left behind.
     record.container.position.set(dx, dy);
-    for (const node of [record.__selectionRing, record.__badge, record.__marker,
-      record.__bubbleBg, record.__bubbleText]) {
-      if (node && node.position && typeof node.position.set === 'function') node.position.set(dx, dy);
-    }
+    // 2026-10-30（用户报"气泡文字跑到页面左上角"的真因）：
+    // 原来这里对 badge/marker/bubble 也调用 `position.set(dx, dy)`。
+    // 但 `dx/dy` 是**相对上一帧的快照位移**，而这些节点在 updateEntity 里
+    // 是用**绝对场景坐标**绘制的（badge.x = footX + …、bbText.x = bx + …）。
+    // 于是插值一跑，它们的绝对坐标就被写成纯位移量：驻留时 dx=dy=0，
+    // 气泡文字直接被搬到了画布左上角 (0,0) —— 正是用户截图里看到的现象。
+    //
+    // 正确做法：这里的节点**不直接位移**，只把偏移量记到 record 上，
+    // 由 updateEntity 在绝对坐标上叠加（见 effectsOffsetOf 的用法）。
+    record.__effectsOffset = { x: dx, y: dy };
     // hitTest must follow the drawing, not the snapshot.
     record.__footPx = { x: footX, y: footY };
     return moved;
@@ -3318,6 +3335,9 @@ async function createOfficeRenderer(options) {
   function updateEntity(record, employee) {
     resetEntityOffsets(record);
     record.__snapshot = employee;
+    // 2026-10-30：呈现时钟的插值偏移（相对上一帧快照），叠加到所有
+    // effects-labels 节点的**绝对**坐标上。见 placeEntity 的说明。
+    const fxOffset = record.__effectsOffset || { x: 0, y: 0 };
     if (mode === 'static') return;
 
     // Task E5a-R2: the editor-composed character height. The snapshot carries
@@ -3394,8 +3414,8 @@ async function createOfficeRenderer(options) {
     const count = employee.queueCount || 0;
     badge.text = String(count);
     badge.visible = count > 0;
-    badge.x = footX + Math.max(14, visibleHeight * 0.26);
-    badge.y = footY - visibleHeight - 10;
+    badge.x = footX + Math.max(14, visibleHeight * 0.26) + fxOffset.x;
+    badge.y = footY - visibleHeight - 10 + fxOffset.y;
 
     const marker = record.__marker;
     if (employee.marker === 'chat-ellipsis') {
@@ -3420,8 +3440,8 @@ async function createOfficeRenderer(options) {
     } else {
       marker.visible = false;
     }
-    marker.x = footX;
-    marker.y = footY - visibleHeight - 12;
+    marker.x = footX + fxOffset.x;
+    marker.y = footY - visibleHeight - 12 + fxOffset.y;
 
     // E5c dialogue bubble: rounded-rect speech bubble above the character's
     // head, visible only when the snapshot carries bubble text. The bg
@@ -3444,32 +3464,49 @@ async function createOfficeRenderer(options) {
       const tailW = 7;
       const tailX = Math.min(Math.max(footX, bx + 10), bx + boxW - 10 - tailW);
 
-      // 主题配色：浅色用暖白+淡青边，深色用深灰蓝+冷边，都不再是刺眼纯白。
-      const face = dark ? 0x2b3492 : 0xffffff;
-      const faceAlpha = dark ? 0.88 : 0.96;
-      const edge = dark ? 0x6f7fa8 : 0xa8c3d4;
-      const shade = dark ? 0x232a44 : 0xeef4f8;
+      // 海蓝水泡配色：浅色主题用"奶白→浅海蓝"，深色主题用"深海军蓝→蓝紫"。
+      const faceTop = dark ? 0x2f3d78 : 0xf2f8ff;
+      const faceBottom = dark ? 0x1d2650 : 0xd8ebfb;
+      const faceAlpha = dark ? 0.94 : 0.97;
+      const edge = dark ? 0x7f93c9 : 0x8fc0e0;
+      const rim = dark ? 0x4a5c96 : 0xb9ddf0;
+      const inkDark = 0xdfe9fb;
 
       bbBg.clear();
+      // Graphics 用局部绘制坐标，插值偏移通过它自身的 position 承载
+      //（它的局部坐标是相对盒子起点的，不是绝对场景坐标）。
+      if (bbBg.position && typeof bbBg.position.set === 'function') bbBg.position.set(fxOffset.x, fxOffset.y);
       // 尾巴（先画，被主体压住一部分，看起来是从气泡里伸出来的）。
       // 只用 roundRect 拼出来：PIXI 8 的 Graphics.poly/moveTo 在渲染器测试的
       // stub 里没有实现，而 roundRect 是这条代码路径一直在用、两边都支持的原语。
       // 三级递减宽度 = 视觉上的小三角，够自然且零兼容风险。
-      const tailSteps = 3;
+      // 尾巴：水滴形（4 阶递减，比 3 阶更柔）
+      const tailSteps = 4;
       for (let ti = 0; ti < tailSteps; ti += 1) {
-        const w = tailW * (1 - ti / tailSteps);
-        const ty = by + boxH - 1 + (tailH / tailSteps) * ti;
-        bbBg.roundRect(footX - w / 2, ty, w, tailH / tailSteps + 1, 1)
-          .fill({ color: face, alpha: faceAlpha });
+        const w = Math.max(2, tailW * (1 - ti / tailSteps) * 1.25);
+        const ty = by + boxH - 2 + (tailH / tailSteps) * ti;
+        const c = ti < 2 ? faceBottom : faceBottom;
+        bbBg.roundRect(footX - w / 2, ty, w, tailH / tailSteps + 1.5, Math.min(3, w / 2))
+          .fill({ color: c, alpha: faceAlpha });
       }
-      // 主体：底部略深的第二条带 + 主面板 + 柔和描边
-      bbBg.roundRect(bx, by, boxW, boxH, 10).fill({ color: face, alpha: faceAlpha });
-      bbBg.roundRect(bx + 2, by + boxH - 6, boxW - 4, 4, 2).fill({ color: shade, alpha: dark ? 0.25 : 0.55 });
-      bbBg.roundRect(bx, by, boxW, boxH, 10).stroke({ width: 1, color: edge, alpha: dark ? 0.55 : 0.8 });
+      // 主体：上浅下深的三段叠色，模拟水泡受光
+      bbBg.roundRect(bx, by, boxW, boxH, 12).fill({ color: faceTop, alpha: faceAlpha });
+      bbBg.roundRect(bx, by + boxH * 0.45, boxW, boxH * 0.55, 12).fill({ color: faceBottom, alpha: faceAlpha * 0.95 });
+      // 顶部高光：一条内缩的亮弧（用圆角矩形近似）
+      bbBg.roundRect(bx + 4, by + 3, Math.max(6, boxW - 8), Math.max(3, boxH * 0.26), 6)
+        .fill({ color: dark ? 0x6f86c8 : 0xffffff, alpha: dark ? 0.16 : 0.72 });
+      // 外圈水膜边 + 内圈亮边
+      bbBg.roundRect(bx, by, boxW, boxH, 12).stroke({ width: 1.6, color: edge, alpha: dark ? 0.62 : 0.92 });
+      bbBg.roundRect(bx + 1.5, by + 1.5, boxW - 3, boxH - 3, 10.5).stroke({ width: 0.8, color: rim, alpha: dark ? 0.34 : 0.6 });
       bbBg.visible = true;
-      bbText.x = bx + padX;
-      bbText.y = by + padY;
-      bbText.style.fill = dark ? 0xe6ecf7 : 0x2f3a4a;
+      bbText.x = bx + padX + fxOffset.x;
+      bbText.y = by + padY + fxOffset.y;
+      if (typeof bbText.style === 'object' && bbText.style) bbText.style.fill = dark ? inkDark : 0x1e3a5f;
+      if (globalThis.__bubbleDiagCount === undefined) globalThis.__bubbleDiagCount = 0;
+      if (globalThis.__bubbleDiagCount < 3 && typeof window !== 'undefined') {
+        globalThis.__bubbleDiagCount += 1;
+        console.log('[bubble-diag] text= + bbText.text +  x=' + bbText.x + ' y=' + bbText.y + ' w=' + bbText.width + ' h=' + bbText.height + ' bx=' + bx + ' by=' + by + ' footY=' + footY); }
+
       bbText.visible = true;
     } else {
       bbText.visible = false;

@@ -512,9 +512,18 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
   // 而聊天要求"两人恰好各站一个座位"才算入座 —— 于是聊天走位者永远等不到
   // 对方让开（停滞 30.3s，契约上限 20s），两人谁也聊不成。
   //
-  // 修复：chat 座位只对 'chatting' 与 'resting' 开放，不再接受 roaming。
-  // 聊天走位本身用 'chatting' behavior 规划，不受影响。
-  const FLAT_CHAT_BEHAVIORS = Object.freeze(['chatting', 'resting']);
+  // 2026-10-30 二次修正（用户报"聊完天状态变成巡游，人却站在原地说不动"）：
+  // 上一版把 chat 边的 'roaming' 整个删掉，确实阻止了漫游者把座位当中转站，
+  // 但**副作用更严重**：聊完天后角色 activity 变回 'roaming'，而它脚下就是
+  // chat-a/chat-b —— 从这俩节点出发的 roaming 边不存在了，findRoute 直接
+  // UNREACHABLE，路线为 null，人永远走不出来（实测 orchestrator/coder 卡死在
+  // chat-a/chat-b 上）。这是把"别停留"错做成"别通行"。
+  //
+  // 正确分工：
+  //   - 边保持 'roaming'（**可以走**，聊完能离开）
+  //   - 漫游**候选池**排除 chat-*（**不停留**，见 behavior-scheduler 的候选过滤）
+  // 两者合起来才是"可通行、不可停留"。
+  const FLAT_CHAT_BEHAVIORS = Object.freeze(['roaming', 'chatting', 'resting']);
   const isChainEdge = (edge) => [edge.from, edge.to]
     .some((id) => /^desk-[1-6]-(?:approach|leave)$/.test(id));
   const hasSeatEndpoint = (edge) => [edge.from, edge.to]
