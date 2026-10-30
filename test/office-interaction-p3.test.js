@@ -166,7 +166,7 @@ test('drag: the drawn character follows the pointer and freezes while the simula
   view.destroy();
 });
 
-test('drag: release eases back to the simulation position (not the drop point)', async () => {
+test('drag: endDrag reports the DROP point so the simulation can keep the character there', async () => {
   const pump = makeFramePump();
   const clock = { nowMs: 0 };
   const view = await createView({ pump, clock });
@@ -178,8 +178,18 @@ test('drag: release eases back to the simulation position (not the drop point)',
   clock.nowMs = 32;
   view.applySnapshot(snapshotAt(48, 0.6, 0.4));
 
-  const from = view.endDrag();
-  assert.deepEqual(from, { x: 356, y: 386 });
+  // 2026-10-30（用户："拖拽后会回到原来的位置，我想要拖到哪就停到哪"）：
+  // 渲染层自身的"松手缓动"保留（它负责视觉过渡），但 endDrag 现在必须
+  // **回报拖拽落点**（dropPosition，归一化场景坐标），页面据此调
+  // office:place 把位置写回模拟 —— 写回后快照位置就等于落点，
+  // 缓动的终点也正是放手处，视觉上"拖到哪就停到哪"。
+  const released = view.endDrag();
+  assert.deepEqual(released.from, { x: 356, y: 386 });
+  assert.ok(released.dropPosition, 'endDrag must report where the character was dropped');
+  assert.equal(released.employeeId, 'coder');
+  // 拖了 (+100, +50)：落点 = 快照位置 + 位移，按场景尺寸归一化
+  assert.equal(Math.round(released.dropPosition.x * 1280), 0.6 * 1280 + 100);
+  assert.equal(Math.round(released.dropPosition.y * 840), 0.4 * 840 + 50);
   assert.equal(view.dragOffset().releasing, true);
   assert.equal(pump.pending !== null, true, 'the return animation arms the presentation pump');
 
@@ -241,11 +251,16 @@ test('interaction boundary: drag and double-click never dispatch office actions'
   assert.doesNotMatch(dblBody, /bridge\.(dispatch|cancel|interrupt|pending)/, 'double-click never issues an office action');
 });
 
-test('interaction boundary: focus is a shell-owned channel and office:* stays at eight', () => {
+test('interaction boundary: focus is a shell-owned channel and office:* stays at nine', () => {
   const preload = read('src/office/office-preload.js');
   const allowed = preload.match(/const ALLOWED_CHANNELS = Object\.freeze\(\[([\s\S]*?)\]\)/);
   assert.ok(allowed, 'the channel whitelist is declared literally');
-  assert.equal((allowed[1].match(/'office:[a-z]+'/g) || []).length, 8, 'office:* remains the frozen eight');
+  // 2026-10-30：8 → 9。新增 office:place（拖拽落点写回）。
+  // 这是一次**有意**的窄接口扩展，不是顺手加通道：用户要求"拖到哪就停到哪"，
+  // 而落点必须写回模拟（渲染层偏移会被下一帧快照覆盖）。载荷只有
+  // employeeId + 归一化坐标，无身份/文本信息，与既有 office:* 同一最小面。
+  assert.equal((allowed[1].match(/'office:[a-z]+'/g) || []).length, 9, 'office:* is nine (added office:place)');
+  assert.match(preload, /'office:place'/, 'office:place is whitelisted');
   assert.match(preload, /focusMember: \(employeeId\) => ipcRenderer\.invoke\('shell:office-focus'/);
 
   const main = read('src/main.js');

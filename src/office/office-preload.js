@@ -40,6 +40,10 @@ const ALLOWED_CHANNELS = Object.freeze([
   // fetch its detailRef payload. One channel with an `action` discriminator,
   // mirroring office:settings.
   'office:pending',
+  // 2026-10-30（用户："拖拽后弹回原位，我想拖到哪就停到哪"）：
+  // 拖拽落点写回模拟位置。只传 employeeId + 归一化场景坐标，不含任何身份/
+  // 文本信息，与本文件既有的最小面一致。
+  'office:place',
 ]);
 
 const MAX_PAYLOAD_BYTES = 8 * 1024;
@@ -117,6 +121,7 @@ contextBridge.exposeInMainWorld('officeBridge', {
   // ({ mode, diagnosticCode, recoveryAttempts }) to the SAME invoke so renderer
   // mode changes reach the shell log without a new channel. The bare boolean
   // form stays supported (legacy callers / tests).
+  placeEmployee: (employeeId, position) => invokeAllowed('office:place', { employeeId, position }),
   notifyVisibility: (visible, renderer) => invokeAllowed(
     'office:visibility',
     renderer === undefined || renderer === null ? { visible: !!visible } : { visible: !!visible, renderer }

@@ -1113,13 +1113,13 @@ test('main process registers the office runtime protocol handler after Electron 
 test('office-preload.js exposes only the whitelisted office bridge API', () => {
   execFileSync(process.execPath, ['--check', path.join(ROOT, 'src', 'office', 'office-preload.js')]);
   const source = fs.readFileSync(path.join(ROOT, 'src', 'office', 'office-preload.js'), 'utf8');
-  // eight channels since P3 (office:pending answers pending requests + fetches
-  // their spec §4 detailRef); the delivery API stays invoke-only.
-  for (const channel of ['office:state', 'office:dispatch', 'office:cancel', 'office:interrupt', 'office:settings', 'office:diagnostics', 'office:visibility', 'office:pending']) {
+  // nine channels since 2026-10-30 (office:place writes a drag drop-point back
+  // into the simulation); the delivery API stays invoke-only.
+  for (const channel of ['office:state', 'office:dispatch', 'office:cancel', 'office:interrupt', 'office:settings', 'office:diagnostics', 'office:visibility', 'office:pending', 'office:place']) {
     assert.ok(source.includes(`'${channel}'`), `preload references ${channel}`);
   }
   assert.doesNotMatch(source, /ipcRenderer\.send\(/, 'invoke only, no raw send channels');
-  assert.doesNotMatch(source, /['"]office:(?!(state|dispatch|cancel|interrupt|settings|diagnostics|visibility|pending))/, 'no other office channels (shell:office-* is the shell namespace)');
+  assert.doesNotMatch(source, /['"]office:(?!(state|dispatch|cancel|interrupt|settings|diagnostics|visibility|pending|place))/, 'no other office channels (shell:office-* is the shell namespace)');
 });
 
 test('office page resolves the production character pack from a portable descriptor', () => {

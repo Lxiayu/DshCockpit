@@ -30,6 +30,7 @@ const KERNEL_MODULES = Object.freeze([
   'asset-pack.js',
   'behavior-scheduler.js',
   'dialogue-engine.js',
+  'employee-placement.js',
   'employee-profile.js',
   'employee-registry.js',
   'follow-address.js',

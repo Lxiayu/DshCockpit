@@ -60,6 +60,7 @@ const { createDialogueEngine } = require('./runtime/dialogue-engine.js');
 const { createEmployeeRegistry } = require('./runtime/employee-registry.js');
 const { createOfficeState, reduceOfficeState } = require('./runtime/state-reducer.js');
 const { createTransitionController } = require('./runtime/transition-controller.js');
+const { resolvePlacement, validatePlacePayload } = require('./runtime/employee-placement.js');
 const { resolveAnimation } = require('./runtime/animation-controller.js');
 const { createRuntimeAdapter } = require('./runtime/runtime-adapter.js');
 const { CLASSIFIED_SEATS: CLASSIFIED_SUBAGENT_SEATS } = require('./runtime/subagent-classifier.js');
@@ -2575,6 +2576,22 @@ function createOfficeModule(options = {}) {
     }
   }
 
+  // 2026-10-30：拖拽落点写回（解析在 runtime/employee-placement.js）。
+  function placeEmployeeAt({ employeeId, position } = {}) {
+    const rec = employees.get(employeeId);
+    const isTaskBoundNow = !!(rec && rec.transition && rec.transition.kind === 'task-start');
+    const resolved = resolvePlacement({ nodes: layout.nodes(), employee: rec || null, position, isTaskBound: isTaskBoundNow });
+    if (!resolved.ok) return Object.freeze({ ok: false, code: resolved.code });
+    releasePathReservation(rec); releaseParkClaim(rec);
+    rec.route = null; rec.routeIndex = 0; rec.targetNodeId = null;
+    rec.segment = null; rec.blockedSinceMs = null; rec.replanAskedAt = 0;
+    rec.position = { ...resolved.position };
+    rec.currentNodeId = resolved.nodeId; rec.arrivedNodeId = resolved.nodeId;
+    reduce(rec, { type: 'movement/status', movement: 'stationary' });
+    ensureParkClaim(rec, logicalMs);
+    return Object.freeze({ ok: true, employeeId, nodeId: resolved.nodeId, position: Object.freeze({ ...rec.position }) });
+  }
+
   function arriveAtNode(rec, nodeId, at) {
     const node = nodesById.get(nodeId);
     if (node) rec.position = { x: node.position.x, y: node.position.y };
@@ -3062,23 +3079,16 @@ function createOfficeModule(options = {}) {
     // A chat also ENDS after chatDurationMs — before M4.1d nothing ever called
     // endChat, so an undisturbed pair stood at the water cooler forever.
     let chatPair = scheduler.activeChatPair();
-    // 2026-10-30（用户报"从来没看到过聊天"的核心成因之一）：
-    // `chatDurationMs`（15s）原来从**配对建立**开始计时，而配对建立后两人还要
-    // 各自走到聊天座位 —— 实测这段走位平均 60s、最长 223s，10 分钟窗口里
-    // 走位占掉 365s 而真正坐着聊只有 24s（94% 的时间在走位）。
-    // 结果是绝大多数聊天在"还没坐下"时就到期解散，用户永远看不到气泡。
-    //
-    // 正确语义：15 秒是**面谈时长**，不是"含通勤的约会时长"。
-    // 计时起点改为"两人都已在座位上"的那一刻，走位不计入。
-    // 走位本身仍受既有机制保护（chat 走位有走廊优先权，见 hasWalkPriority），
-    // 只是不会再被一个从出发就起跑的计时器提前掐断。
+    // 2026-10-30：`chatDurationMs` 改为从"两人都已入座"起算。旧口径从配对
+    // 建立就起跑，而走位平均 60s/最长 223s，导致 94% 的聊天在还没坐下时就
+    // 到期解散（10 分钟窗口里坐着聊只有 24s）。15s 应是面谈时长，不含通勤。
     const seatedNow = chatPair
       && employees.get(chatPair.a) && employees.get(chatPair.b)
       && employees.get(chatPair.a).state.movement === 'stationary'
       && employees.get(chatPair.b).state.movement === 'stationary'
       && employees.get(chatPair.a).currentNodeId === chatPair.seatA
       && employees.get(chatPair.b).currentNodeId === chatPair.seatB;
-    // 会话身份 + 入座时刻分开记（chatPair 本身是冻结对象，不能挂字段）。
+    // chatPair 是冻结对象，入座时刻另记。
     const chatIdentity = chatPair ? `${chatPair.a}|${chatPair.b}|${chatPair.startedAt}` : null;
     if (!chatPair) {
       chatSeatedSinceMs = null;
@@ -3091,12 +3101,9 @@ function createOfficeModule(options = {}) {
     }
     const chatElapsed = chatPair && chatSeatedSinceMs !== null ? at - chatSeatedSinceMs : 0;
     if (chatPair && seatedNow && chatElapsed >= settings.chatDurationMs) {
-      // 2026-10-30（用户报"聊完天状态变巡游，人却站着不动"）：原来只调
-      // scheduler.endChat()，它清的是 scheduler 的预留表；module 侧每个 rec
-      // 还有 parkReservation（坐座位时申请的节点预留）**没被释放**，两人聊完
-      // 仍各自占着 chat-a/chat-b，形成死锁环（coder 停 chat-b 要去 roam-3，
-      // researcher 停 roam-3 要去 chat-b，互等唯一通路）。
-      // 会话结束时把两位成员的 module 侧预留一并释放即可。
+      // 2026-10-30：endChat 只清 scheduler 的预留表；module 侧每人的
+      // parkReservation 没释放，两人聊完仍占着 chat-a/chat-b 形成死锁环。
+      // 这里把它们一并释放。
       const ending = chatPair;
       try { scheduler.endChat({ nowMs: at }); } catch { /* scheduler stays optional */ }
       for (const memberId of [ending.a, ending.b]) {
@@ -3419,22 +3426,12 @@ function createOfficeModule(options = {}) {
       // "Seated at the workstation" means physically AT the own desk seat node
       // (that includes the startup pose and resting at the desk) or inside the
       // task's sit/work phases.
-      // 2026-10-30（用户报的 bug1）：判断"人是否真的坐在自己工位上"。
-      //
-      // 原来这里把 task-start 的 sit/work 相位**直接**当成"已落座"，于是
-      // 只要任务一开始、角色还走在半路上被同伴挡住（movement 变成
-      // stationary 而不是 moving），animationStateFor 就已经返回 'working'，
-      // 画面立刻切成侧背坐姿 —— 用户看到的"鲸鱼娘坐在空地上"就是这个。
-      // 实测复现：phase=move / movement=stationary / anim=working-back /
-      // 位置 (0.722,0.528)，离她的座位十万八千里。
-      //
-      // 现在要求**物理上确实在自己的座位节点**（或 approach 段已结束且
-      // 位置已锚定到 seat）。这是"事实优先于意图"：任务是意图，位置是事实。
-      // `reachedSeat` 由 completeSegment() 在 approach-to-seat 段**真正插值到
-      // 座位锚点**时置位（见 completeSegment），是"已落座"的权威事实。
-      // 再用 currentNodeId===seatNodeId 兜住"一直坐着没动"的稳态（启动姿势、
-      // 工位休息）——那种情况 segment 早就结束了，reachedSeat 也可能已被
-      // 后续阶段清掉。
+      // 2026-10-30（bug1）：原来把 task-start 的 sit/work 相位直接当成
+      // "已落座"，于是角色走在半路被挡住时（movement=stationary）就切成侧背
+      // 坐姿 —— 也就是"坐在空地上"。现要求物理上真的在座位节点（reachedSeat
+      // 由 approach-to-seat 插值完成时置位）：事实优先于意图。
+      // reachedSeat 由 completeSegment 在真正插值到座位锚点时置位；
+      // 再用 currentNodeId===seatNodeId 兜住"一直坐着没动"的稳态。
       const physicallyAtOwnSeat = !!rec.seatNodeId
         && (rec.reachedSeat === true || rec.currentNodeId === rec.seatNodeId);
       const seatedAtWorkstation = physicallyAtOwnSeat;
@@ -4463,6 +4460,7 @@ function createOfficeModule(options = {}) {
     //（main.js stopEventsFeed 调用；模块内部路径，无新 office:* 通道）。
     expirePendingFromRuntime,
     noteVisibility,
+    placeEmployeeAt,
     isPaused,
     getSettings,
     validateSettings,
@@ -4618,6 +4616,7 @@ function validateOfficeIpcPayload(channel, payload) {
         },
       };
     }
+    case 'office:place': return validatePlacePayload(payload, keys, EMPLOYEE_IDS);
     case 'office:settings': {
       if (keys.length === 1 && payload.action === 'get') return { ok: true, value: { action: 'get' } };
       if (keys.length === 2 && payload.action === 'set' && isPlainObject(payload.settings)) {

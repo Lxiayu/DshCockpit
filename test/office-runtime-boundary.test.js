@@ -490,6 +490,7 @@ test('boundary: the composition root require set is frozen (new logic must not m
     './runtime/approval-risk.js',
     './runtime/behavior-scheduler.js',
     './runtime/dialogue-engine.js',
+    './runtime/employee-placement.js',
     './runtime/employee-profile.js',
     './runtime/employee-registry.js',
     './runtime/movement-controller.js',

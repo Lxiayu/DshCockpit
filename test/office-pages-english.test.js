@@ -148,9 +148,11 @@ test('office preloads expose the shared dictionary and the shell language channe
     assert.match(src, /getLanguage:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('shell:get-language'\)/, `${name} pulls the shell language`);
     assert.match(src, /onLanguage:/, `${name} subscribes to shell:language pushes`);
   }
-  // no new office:* channel: the office preload surface stays the pinned eight
+  // 2026-10-30：8 → 9。新增 office:place（拖拽落点写回模拟），
+  // 载荷只有 employeeId + 归一化坐标；这是一次有意的最小面扩展。
   const officeChannels = officePreload.match(/'office:[a-z-]+'/g) || [];
-  assert.equal(new Set(officeChannels).size, 8, `still exactly the eight office:* channels (${[...new Set(officeChannels)].join(', ')})`);
+  assert.equal(new Set(officeChannels).size, 9, `exactly nine office:* channels (${[...new Set(officeChannels)].join(', ')})`);
+  assert.ok(new Set(officeChannels).has("'office:place'"), 'office:place is part of the pinned surface');
   const main = read('src/main.js');
   assert.match(main, /ipcMain\.handle\('shell:get-i18n'/, 'main hands out the shared dictionary tables');
   assert.match(main, /\{ t, resolveLanguage, STRINGS \} = require\('\.\/i18n'\)/, 'the tables come from the SAME src/i18n.js import');

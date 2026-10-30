@@ -649,8 +649,18 @@ test('selection ring is exclusive and hit testing resolves the nearest employee'
   view.setSelection(null);
   assert.equal(view.entities.get('coder').__selectionRing.visible, false);
 
-  const hit = view.hitTest(0.5 * VIEWPORT.width + 4, 0.6 * VIEWPORT.height + 4);
-  assert.equal(hit, 'coder', 'hit near the coder foot resolves coder');
+  // 2026-10-30（用户："把脚下圆形交互区改成鲸鱼娘全身，不超过身体边界"）：
+  // 命中判定从"以脚点为圆心的圆"改成"角色立绘的身体矩形"。
+  // 这里验证三件事：脚部命中、**头部命中**（新能力）、身体外不命中。
+  const coder = view.entities.get('coder');
+  const box = coder.__bodyBox;
+  assert.ok(box, 'the renderer records a body box per entity');
+  const cx = (box.x0 + box.x1) / 2;
+  assert.equal(view.hitTest(cx, box.y1 - 2), 'coder', 'hit at the feet resolves coder');
+  assert.equal(view.hitTest(cx, (box.y0 + box.y1) / 2), 'coder', 'hit at mid-body resolves coder');
+  assert.equal(view.hitTest(cx, box.y0 + 3), 'coder', 'hit at the HEAD resolves coder (new behaviour)');
+  assert.equal(view.hitTest(box.x0 - 6, (box.y0 + box.y1) / 2), null, 'just outside the body edge misses');
+  assert.equal(view.hitTest(box.x1 + 6, (box.y0 + box.y1) / 2), null, 'just outside the other edge misses');
   const miss = view.hitTest(2, 2);
   assert.equal(miss, null, 'far corner hits nobody');
   view.destroy();

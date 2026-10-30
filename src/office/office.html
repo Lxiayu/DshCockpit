@@ -1535,7 +1535,13 @@
         if (!dragGuard.id) return false;
         const wasActive = dragGuard.active;
         if (wasActive) {
-          renderer.endDrag();
+          // 2026-10-30（用户："拖拽后弹回原位，我想拖到哪就停到哪"）：
+          // endDrag 现在回报拖拽落点（归一化场景坐标），把它写回模拟位置，
+          // 角色就真的停在放手的地方，而不是缓动回原来的快照位置。
+          const dropped = renderer.endDrag();
+          if (dropped && dropped.dropPosition && dragGuard.id && typeof bridge.placeEmployee === 'function') {
+            try { bridge.placeEmployee(dragGuard.id, dropped.dropPosition); } catch { /* 位置写回失败不打断交互 */ }
+          }
           // The click that follows this pointerup must not pin/re-select: the
           // gesture was a drag, not a click.
           suppressClick = true;

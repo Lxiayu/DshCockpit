@@ -3287,6 +3287,15 @@ async function createOfficeRenderer(options) {
     record.__effectsOffset = { x: dx, y: dy };
     // hitTest must follow the drawing, not the snapshot.
     record.__footPx = { x: footX, y: footY };
+    // 身体盒同样要跟着画出来的位置走（拖拽/插值期间不能停在快照位置，
+    // 否则鼠标点在"画出来的角色"身上却命不中）。
+    if (record.__bodyBox) {
+      const bx = footX - record.__bodyBox.x0 + (record.__placedAt ? record.__placedAt.x - footX : 0);
+      const prevFoot = record.__bodyBox;
+      const w = prevFoot.x1 - prevFoot.x0;
+      const h = prevFoot.y1 - prevFoot.y0;
+      record.__bodyBox = { x0: footX - w / 2, x1: footX + w / 2, y0: footY - h, y1: footY };
+    }
     return moved;
   }
 
@@ -3397,6 +3406,29 @@ async function createOfficeRenderer(options) {
       sprite.y = footY - frame.anchor.y * scale;
     }
 
+    // 2026-10-30（用户："把脚下圆形交互区改成鲸鱼娘全身，但不超过身体边界"）：
+    // 记录这只角色的**身体包围盒**（屏幕像素），供 hitTest 做矩形命中。
+    // 用精灵当前的实际占位算：可见高度 visibleHeight + 纹理宽高比推出的宽度；
+    // 没有纹理（占位像素图）时用占位体的 0.42 宽。
+    // 盒子以脚点为底边中心、向上 visibleHeight，横向按纹理长宽比收窄，
+    // 所以"能点到的就是画出来的那个人"，不会延伸到空白处。
+    {
+      const tex = record.__sprite && record.__sprite.texture;
+      const texW = tex && tex.width ? tex.width : 0;
+      const texH = tex && tex.height ? tex.height : 0;
+      let bodyW = visibleHeight * 0.42;
+      if (texW > 0 && texH > 0) {
+        // 角色立绘很"瘦"：真实可见宽度约为纹理宽的 55%（两侧是透明留白）。
+        bodyW = (texW / texH) * visibleHeight * 0.55;
+      }
+      bodyW = Math.max(20, Math.min(bodyW, visibleHeight * 1.2));
+      record.__bodyBox = {
+        x0: footX - bodyW / 2,
+        x1: footX + bodyW / 2,
+        y0: footY - visibleHeight,
+        y1: footY,
+      };
+    }
     const shadow = record.__shadow;
     shadow.clear();
     shadow.circle(footX, footY, Math.max(6, visibleHeight * 0.16)).fill({ color: COLORS.shadow, alpha: 0.35 });
@@ -4236,18 +4268,44 @@ async function createOfficeRenderer(options) {
       if (mode !== 'static') applySelection();
     },
 
+    // 2026-10-30（用户："原来脚下有个圆形交互区，改成鼠标放到鲸鱼娘全身"）：
+    // 旧实现是**以脚点为圆心的圆**（半径 0.35 可见高度），于是只有点到角色
+    // 脚下那块地面才命中，点上半身尤其是头部完全没反应 —— 与"看着点在身上
+    // 却没反应"的直觉严重不符。
+    //
+    // 新实现用 updateEntity 记下的 `__bodyBox`（角色立绘的真实矩形占位）：
+    // 鼠标落在角色身体的任意部位都命中，且**不会超出身体边界**（盒子就是
+    // 画出来的那个人；两侧透明留白已经按纹理长宽比收窄掉了）。
+    //
+    // 重叠时按"离盒中心最近"挑一个；盒内再按纵向位置做一点权重，让点头部
+    // 更倾向选这一个人而不是身后经过的另一个。
     hitTest(px, py) {
       if (mode === 'static' || destroyed) return null;
       let best = null;
-      let bestDistance = Infinity;
+      let bestScore = Infinity;
       for (const record of entities.values()) {
         if (!record.__snapshot) continue;
-        const foot = record.__footPx;
-        const distance = Math.hypot(foot.x - px, foot.y - py);
-        const radius = Math.max(24, record.__layout.visibleHeight * 0.35);
-        if (distance <= radius && distance < bestDistance) {
+        const box = record.__bodyBox;
+        if (!box) {
+          // 兜底：还没画过身体盒的（极端早期帧）仍用旧圆形判定
+          const foot = record.__footPx;
+          if (!foot) continue;
+          const d = Math.hypot(foot.x - px, foot.y - py);
+          if (d <= Math.max(24, record.__layout.visibleHeight * 0.35) && d < bestScore) {
+            best = record.employeeId;
+            bestScore = d;
+          }
+          continue;
+        }
+        if (px < box.x0 || px > box.x1 || py < box.y0 || py > box.y1) continue;
+        const cx = (box.x0 + box.x1) / 2;
+        const cy = (box.y0 + box.y1) / 2;
+        const halfH = Math.max(1, (box.y1 - box.y0) / 2);
+        // 纵向归一化距离（0 = 身体中线，1 = 头顶/脚底），横向按像素
+        const score = Math.abs(px - cx) + Math.abs(py - cy) / halfH * 12;
+        if (score < bestScore) {
           best = record.employeeId;
-          bestDistance = distance;
+          bestScore = score;
         }
       }
       return best;
@@ -4299,10 +4357,28 @@ async function createOfficeRenderer(options) {
       return true;
     },
 
+    // 2026-10-30（用户："拖拽后会回到原来的位置，我想拖到哪就停到哪"）：
+    // 原来这里是 "presentation only" —— 松手后缓动回快照位置（见下方 release
+    // 分支），用户的拖拽等于白做。现在改为把**拖拽落点**回报给页面，由页面
+    // 调 office:place 把它写回模拟位置，角色就真的停在放手的地方。
+    //
+    // 返回值新增 `dropPosition`（归一化场景坐标）。仍保留 from（脚点屏幕像素）
+    // 以兼容既有调用方与测试。
     endDrag() {
       if (!dragState.employeeId) return null;
-      const record = entities.get(dragState.employeeId);
+      const draggedId = dragState.employeeId;
+      const record = entities.get(draggedId);
       const from = record && record.__footPx ? { x: record.__footPx.x, y: record.__footPx.y } : null;
+      // 放手处 = 快照脚点（__placedAt）+ 本次拖拽的累计位移。
+      // __placedAt 记的是"这一帧快照的位置"（不含拖拽偏移，偏移由容器
+      // position 承载），所以拖拽量必须显式加回来。
+      const placed = record && record.__placedAt ? record.__placedAt : from;
+      const dropPx = placed
+        ? { x: placed.x + (dragState.dx || 0), y: placed.y + (dragState.dy || 0) }
+        : null;
+      const dropPosition = dropPx
+        ? { x: dropPx.x / Math.max(1, scene.width), y: dropPx.y / Math.max(1, scene.height) }
+        : null;
       if (!presentationClock || !from) {
         // No animation pump: snap back to the simulation position immediately.
         clearDrag();
@@ -4310,14 +4386,14 @@ async function createOfficeRenderer(options) {
           placeEntity(record, record.__snapshot.position, presentationNow());
           renderNow();
         }
-        return from;
+        return { from, dropPosition, employeeId: draggedId };
       }
       dragState.release = { from, at: presentationNow() };
       dragState.baseFoot = null;
       dragState.dx = 0;
       dragState.dy = 0;
       schedulePresentationFrame();
-      return from;
+      return { from, dropPosition, employeeId: draggedId };
     },
 
     isDragging: () => dragState.employeeId !== null,
