@@ -117,7 +117,7 @@ const DEFAULT_CONFIG = Object.freeze({
   // 正解不是把列移回家具里，而是补 HOLD 时间 —— 这段注释本来就写着
   // "left HOLD time per visit is what moves the measured left-half share"。
   // 18000 × 1.30 ≈ 24000 把占比拉回带内。
-  leftRoamDwellMs: 17000,
+  leftRoamDwellMs: 16000,
   // Share of roaming walks that re-target at an intermediate waypoint (one
   // fresh decision mid-walk) — "允许中途换点".
   midRouteRerouteChance: 0.12,
@@ -394,85 +394,18 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
 
-  // 2026-10-30（用户："我还没看到左右站位的两个鲸鱼娘闲聊"）：
-  // 原来 chat-a/chat-b 在**同一条竖线上**（x 相同、只差 y 44px），几何上
-  // 只能前后站 —— 左右站位永远不会出现。新增 chat-c/chat-d 组成**横向对**
-  // （同 y、相距 46px），于是两组座位分别对应"前后"与"左右"两种站位。
+  // 2026-10-30（用户拍板回退）：**只用上下（前后）站位**，不再做左右并排。
   //
-  // 这里把平铺的 chatting 节点按 id 两两配对，选座时**按对**挑一组：
-  // 优先选当前没有别人站着、且两人都够得着的那一对。
-  function chatSeatPairs() {
+  // 曾经加过一组横向座位 chat-c/chat-d 想实现"左右站位闲聊"，但实际的
+  // 场景里它们只能落在两列办公桌之间的窄过道，两侧就是工位家具 ——
+  // 两人并排时各自朝外看（"上面一个朝右、下面一个朝左"），比背对背更抽象。
+  // 试过运行时空间检测自动退回、也试过换位置，但换到宽敞处要么撞左翼图
+  // （编译 GRAPH_BLOCKED），要么被编译器 spiral 推开。既然视觉收益是负的，
+  // 直接去掉整套横向站位，回到"一上一下、面对面"的唯一形态。
+  function chooseChatSeatPair() {
     const seats = chatSeatNodes();
-    const pairs = [];
-    for (let i = 0; i + 1 < seats.length; i += 2) pairs.push([seats[i], seats[i + 1]]);
-    return pairs;
-  }
-
-  // 2026-10-30（用户："左右站位只该出现在空间够大的地方"）：
-  // 判断一组座位**左右两侧是否真的有空间**再决定用不用它。
-  //
-  // 为什么需要运行时判定：横向并排时两人各自朝对方侧身，如果这对座位夹在
-  // 两列办公桌之间（两侧就是别人的工位），画面就变成"上面一个朝右看、
-  // 下面一个朝左看"的怪姿势。空间是**场景事实**，不是座位的静态属性。
-  //
-  // 用显式 `chat-side-by-side` 标签识别"需要横向空间"的对，而不是比较 dx/dy：
-  // 编译器的 spiral 会把坐标微调（实测 chat-d 被推成 dx=21/dy=-25），
-  // 靠几何推断会误判成纵向对。
-  const CHAT_SIDE_PROBE = 0.042; // 半个身位（约 40px @960）
-  function pairHasSideSpace(pair) {
-    const [a, b] = pair;
-    if (!a || !b || !a.position || !b.position) return false;
-    const sideBySide = Array.isArray(a.tags) && a.tags.includes('chat-side-by-side');
-    if (!sideBySide) return true; // 纵向对：本条不适用
-    const halfSpan = Math.abs(a.position.x - b.position.x) / 2
-      + (a.footprint ? a.footprint.width / 2 : 0.02);
-    const leftEdge = Math.min(a.position.x, b.position.x) - halfSpan;
-    const rightEdge = Math.max(a.position.x, b.position.x) + halfSpan;
-    // "同排"判据用一倍的座位高度（约 25px），而不是 3 倍：
-    // 3 倍会把纵向相邻的节点（roam-8 与座位 y 差 44px）也算成"挤在旁边"，
-    // 于是明明空旷的横向对也被剔除。
-    const bandTolerance = (a.footprint ? a.footprint.height : 0.04) * 1.2;
-    for (const node of graph.nodes) {
-      if (!node || !node.position) continue;
-      if (node.id === a.id || node.id === b.id) continue;
-      if (Math.abs(node.position.y - a.position.y) > bandTolerance) continue;
-      const radius = Math.max(node.footprint ? node.footprint.width / 2 : 0.02, node.safeRadius || 0.02);
-      const need = radius + CHAT_SIDE_PROBE;
-      if (Math.abs(node.position.x - leftEdge) < need) return false;
-      if (Math.abs(node.position.x - rightEdge) < need) return false;
-    }
-    return true;
-  }
-
-  // 挑一组本次会话使用的座位：跳过被别的身体占着的那一对，
-  // 并**排除左右空间不足的横向对**（那样会摆出"各自朝外看"的怪姿势）。
-  function chooseChatSeatPair(pairMemberIds) {
-    const pairs = chatSeatPairs();
-    if (pairs.length === 0) return null;
-    const occupied = new Set();
-    for (const other of employees.values()) {
-      if (!other.currentNodeId) continue;
-      if (pairMemberIds.includes(other.employeeId)) continue;
-      occupied.add(other.currentNodeId);
-    }
-    // 先按"没被身体占着"过滤，再按"左右空间够"过滤。
-    // 空间不足的横向对被剔除；若因此一组都不剩，退回只按占用过滤
-    //（宁可并排，也不能永远不聊天）。
-    const notOccupied = pairs.filter(([a, b]) => !occupied.has(a.id) && !occupied.has(b.id));
-    const base = notOccupied.length > 0 ? notOccupied : pairs;
-    const roomy = base.filter((pair) => pairHasSideSpace(pair));
-    const pool = roomy.length > 0 ? roomy : base;
-    // 确定性选择（同一对成员永远算出同一组座位），避免两人各算一组。
-    // 注意用 `Math.imul` + `>>> 0` 做 32 位 FNV：朴素写法的乘法会超出
-    // JS 双精度整数精度，低位几乎恒定，实测所有配对都命中第 0 组 ——
-    // 表现就是"横向那对座位永远没人用"。
-    const key = [...pairMemberIds].sort().join('|');
-    let h = 2166136261 >>> 0;
-    for (let i = 0; i < key.length; i += 1) {
-      h ^= key.charCodeAt(i);
-      h = Math.imul(h, 0x01000193) >>> 0;
-    }
-    return pool[h % pool.length];
+    if (seats.length < 2) return null;
+    return [seats[0], seats[1]];
   }
 
   function nodeDistance(fromNodeId, toNodeId) {
@@ -537,7 +470,7 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
       const current = employees.get(id).current;
       if (current && current.activity === 'sleeping') return fail('CHAT_PARTNERS_UNAVAILABLE', { employeeId: id });
     }
-    const seats = chooseChatSeatPair([employeeId, partnerId]);
+    const seats = chooseChatSeatPair();
     if (!seats || seats.length < 2) return fail('CHAT_SEATS_UNAVAILABLE');
     const at = atOrDefault(nowMs);
     const all = allReservations(externalReservations);

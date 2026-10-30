@@ -263,7 +263,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   // 2026-10-29 第十一轮：左翼漫游列 x 0.27 → 0.335（避开立体家具），步程缩短
   // 后左半区时间占比下降，用 HOLD 时间补回 40~50% 契约。须与 behavior-scheduler
   // 的默认值一致（启动时校验两处不漂移）。
-  leftRoamDwellMs: 17000,
+  leftRoamDwellMs: 16000,
   midRouteRerouteChance: 0.12,
   detourChance: 0.15,
   personality: true,

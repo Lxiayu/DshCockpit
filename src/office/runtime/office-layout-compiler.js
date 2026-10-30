@@ -486,31 +486,7 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
     Object.freeze({ from: 'roam-17', to: 'roam-16', behaviors: Object.freeze(['roaming']), bidirectional: true }),
   ]);
 
-  // 2026-10-30（用户："我还没看到左右站位的两个鲸鱼娘闲聊"）：
-  // canonical 的 chat-a/chat-b 投影到 flat 后落在**同一条竖线**上（x 相同、
-  // 只差 y 44px），几何上只能前后站 —— 左右站位永远不会出现。
-  // 这里新增一对**横向座位** chat-c/chat-d（同 y、横向相距 46px），
-  // 于是聊天座位有两组：chat-a/b 对应"前后"，chat-c/d 对应"左右"，
-  // 选座时按对挑选（见 behavior-scheduler 的 chooseChatSeatPair）。
-  const CHAT_SIDE_FOOTPRINT = Object.freeze({ width: 0.04, height: 0.04 });
-  // 2026-10-30：用**显式标签**而不是坐标推断来区分两种站位。
-  // 坐标会被编译器的 spiral 微调（实测 chat-d 被推到 (461,395)，
-  // dx=21/dy=-25 已不再是横向对），靠 dx/dy 比较判断站位不可靠。
-  const CHAT_SIDE_TAGS = Object.freeze(['chatting', 'chat-side-by-side']);
-  const CHAT_SIDE_NODES = Object.freeze([
-    Object.freeze({ id: 'chat-c', position: null, footprint: CHAT_SIDE_FOOTPRINT, tags: CHAT_SIDE_TAGS, capacity: 1, safeRadius: 0.032 }),
-    Object.freeze({ id: 'chat-d', position: null, footprint: CHAT_SIDE_FOOTPRINT, tags: CHAT_SIDE_TAGS, capacity: 1, safeRadius: 0.032 }),
-  ]);
-  // 接入口选左翼第一列最近的 roam-11（322,432），边短且不穿家具。
-  // 早先接 roam-3/roam-14 都会拉出长边穿过家具区，编译要么
-  // OFFICE_COMPILE_GRAPH_BLOCKED，要么把座位 spiral 到别处。
-  const CHAT_SIDE_EDGES = Object.freeze([
-    Object.freeze({ from: 'roam-11', to: 'chat-c', behaviors: Object.freeze(['roaming', 'chatting', 'resting']), bidirectional: true }),
-    Object.freeze({ from: 'roam-11', to: 'chat-d', behaviors: Object.freeze(['roaming', 'chatting', 'resting']), bidirectional: true }),
-    Object.freeze({ from: 'chat-c', to: 'chat-d', behaviors: Object.freeze(['roaming', 'chatting', 'resting']), bidirectional: true }),
-  ]);
-
-  const topoNodes = [...topology.nodes, ...LEFT_WING_NODES, ...CHAT_SIDE_NODES];
+  const topoNodes = [...topology.nodes, ...LEFT_WING_NODES];
 
   // M4.1f 穿模修正（flat 投影专用拓扑适配）：canonical 拓扑的 desk-N↔roam-X
   // 直连边服务于 isometric 的 walk-behind 语义（斜穿自家工位读作绕到桌后）。
@@ -556,7 +532,7 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
     .every((id) => /^roam-/.test(id));
   const isChatEdge = (edge) => [edge.from, edge.to]
     .some((id) => /^chat-/.test(id));
-  const flatEdges = [...topology.edges, ...LEFT_WING_EDGES, ...CHAT_SIDE_EDGES]
+  const flatEdges = [...topology.edges, ...LEFT_WING_EDGES]
     .filter((edge) => isChainEdge(edge) || !hasSeatEndpoint(edge))
     .map((edge) => {
       if (isChainEdge(edge)) return { ...edge, behaviors: [...FLAT_CHAIN_BEHAVIORS] };
@@ -824,11 +800,6 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
     // "上面一个朝右看、下面一个朝左看"的怪姿势。
     // 实测全图扫描后，只有左休息区这一带满足"左右各半个身位无其它节点"：
     // (440,420) 与 (486,420)，两侧 25px 内无家具、69px 内无同排节点。
-    // 用户 2026-10-30 二次反馈：横向站位必须放**空间够大**的地方
-    // （页面最下方 / 左侧家具区）。这一对是按"编译器障碍模型 + 节点间距"
-    // 全图扫描后净空最大的位置（60px），位于页面最下方的开阔带。
-    'chat-c': { x: centerX(0.3854), y: centerY(0.9048) },
-    'chat-d': { x: centerX(0.4333), y: centerY(0.9048) },
     'roam-5': { x: centerX(corridorX + 0.027), y: centerY(rowGap2Y) },
     // 2026-10-29: 与 LEFT_WING_COLUMN_X 同列（原来硬编码 0.27，与新家具冲突）
     'roam-8': { x: centerX(LEFT_WING_COLUMN_X), y: centerY((rowGap2Y + bottomY) / 2) },

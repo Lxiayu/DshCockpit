@@ -658,40 +658,6 @@
         "rest-area"
       ],
       "capacity": 2
-    },
-    {
-      "id": "chat-c",
-      "position": {
-        "x": 0.3854,
-        "y": 0.9048
-      },
-      "footprint": {
-        "width": 0.04,
-        "height": 0.04
-      },
-      "safeRadius": 0.032,
-      "tags": [
-        "chatting",
-        "chat-side-by-side"
-      ],
-      "capacity": 1
-    },
-    {
-      "id": "chat-d",
-      "position": {
-        "x": 0.4333,
-        "y": 0.9048
-      },
-      "footprint": {
-        "width": 0.04,
-        "height": 0.04
-      },
-      "safeRadius": 0.032,
-      "tags": [
-        "chatting",
-        "chat-side-by-side"
-      ],
-      "capacity": 1
     }
   ],
   "edges": [
@@ -1176,36 +1142,6 @@
         "roaming",
         "task",
         "sleeping",
-        "chatting",
-        "resting"
-      ],
-      "bidirectional": true
-    },
-    {
-      "from": "roam-11",
-      "to": "chat-c",
-      "behaviors": [
-        "roaming",
-        "chatting",
-        "resting"
-      ],
-      "bidirectional": true
-    },
-    {
-      "from": "roam-11",
-      "to": "chat-d",
-      "behaviors": [
-        "roaming",
-        "chatting",
-        "resting"
-      ],
-      "bidirectional": true
-    },
-    {
-      "from": "chat-c",
-      "to": "chat-d",
-      "behaviors": [
-        "roaming",
         "chatting",
         "resting"
       ],

@@ -1039,12 +1039,12 @@ test('E4 compiler: the approved flat draft compiles into a canonical isomorphic 
   const LEFT_WING_TARGET_IDS = ['roam-10', 'roam-11', 'roam-12', 'roam-13', 'roam-15', 'roam-16', 'roam-17'];
   const LEFT_WING_RESTING_IDS = ['roam-11', 'roam-12', 'roam-13'];
   const LEFT_WING_TRANSIT_IDS = ['roam-8', 'roam-9', 'roam-14'];
-  // 2026-10-30：+2 横向聊天座位（chat-c/chat-d），让左右站位闲聊成为可能。
-  const CHAT_SIDE_IDS = ['chat-c', 'chat-d'];
-  assert.equal(layout.nodes.length, 27 + LEFT_WING_IDS.length + CHAT_SIDE_IDS.length,
-    'isometric nodes + left-wing extension + the horizontal chat seat pair');
-  // +3：chat-c 与 chat-d 各接一条 roam-11、外加两座互通
-  assert.equal(layout.edges.length, 40 + 12 - 11 + 3, 'isometric + left-wing edges + 3 horizontal chat edges');
+  // 2026-10-30 回退：横向聊天座位对已整体移除（视觉收益为负），
+  // 聊天只用 chat-a/chat-b 这一组上下（前后）站位。
+  assert.equal(layout.nodes.length, 27 + LEFT_WING_IDS.length,
+    'isometric nodes + the left-wing extension');
+  assert.equal(layout.edges.length, 40 + 12 - 11,
+    'isometric + the 12 left-wing edges − the 11 direct seat↔roam edges');
   const isSeatId = (id) => /^desk-[1-6]$/.test(id);
   const isCorridorNodeId = (id) => /^(roam|chat)-/.test(id);
   for (const edge of layout.edges) {
@@ -1086,15 +1086,6 @@ test('E4 compiler: the approved flat draft compiles into a canonical isomorphic 
       }
       continue;
     }
-    // 2026-10-30：chat-c/chat-d 是**编译器新增**的横向聊天座位，
-    // canonical fixture 里没有对应条目，单独校验它们的契约。
-    if (CHAT_SIDE_IDS.includes(node.id)) {
-      // 横向对额外带 chat-side-by-side 标签（运行时据此判定左右空间）
-      assert.deepEqual([...node.tags].sort(), ['chat-side-by-side', 'chatting'], `${node.id} is a side-by-side chat seat`);
-      assert.equal(node.capacity, 1, `${node.id} holds exactly one`);
-      assert.equal(node.safeRadius, 0.032, `${node.id} keeps the chat safeRadius`);
-      continue;
-    }
     const iso = isoById.get(node.id);
     assert.notEqual(iso, undefined, `unexpected node ${node.id}`);
     assert.deepEqual(node.tags, iso.tags, `${node.id} tags preserved`);
@@ -1111,8 +1102,6 @@ test('E4 compiler: the approved flat draft compiles into a canonical isomorphic 
     'roam-8>roam-10', 'roam-10>roam-11', 'roam-11>roam-15', 'roam-15>roam-12', 'roam-12>roam-16', 'roam-16>roam-13',
     // 2026-10-30：第二条左通道（x=0.40）的 4 条梯形边
     'roam-17>roam-13', 'roam-17>roam-16',
-    // 2026-10-30：横向聊天座位对的 3 条边
-    'roam-11>chat-c', 'roam-11>chat-d', 'chat-c>chat-d',
   ]);
   const isoEdgeKeys = CANONICAL_OFFICE_LAYOUT.edges
     .filter((edge) => !(isSeatId(edge.from) && isCorridorNodeId(edge.to))

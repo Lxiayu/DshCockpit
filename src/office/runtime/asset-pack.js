@@ -28,21 +28,23 @@
 const SCHEMA_VERSION = 1;
 const DIRECTIONS = Object.freeze(['none', 'left', 'right', 'up', 'down']);
 const WALK_DIRECTIONS = Object.freeze(['left', 'right', 'up', 'down']);
-// 2026-10-30（用户："两个鲸鱼娘前后站位闲聊时应该面对面"）：
-// 纵向（up/down）原来首选 `side-back` —— 于是前后对立的两个人**都显示背影**，
-// 读起来像各自背对背，完全不像在交谈。
+// 2026-10-30（用户拍板）：上下站位闲聊时，**上面那个朝下（用正面素材）、
+// 下面那个朝上（用背面素材）** —— 这才符合"面对面说话"的直觉：
+// 观者看画面上方的人时看到她的脸，看下方的人时看到她的背影（她正对着观众
+// 对面的那个人）。
 //
-// 角色包没有"正面"帧（只有 side-left / side-right / side-back），所以
-// "面对面"只能用**相对的侧面**来表达：一个朝左、一个朝右，看起来就是
-// 侧身对着彼此说话。这是素材能力内的最佳表达。
-//   up  （站在下方、朝上看对方）→ 优先 side-left
-//   down（站在上方、朝下看对方）→ 优先 side-right
-// 两人朝向不同，视觉上就形成了"面对面"的一对。
+// 素材能力：角色包没有专门的"正面聊天"帧，但有 `idle`（正面站立）与
+// `side-back`（背面）。所以：
+//   down（站在上方、朝下看对方）→ 用正面 idle 家族
+//   up  （站在下方、朝上看对方）→ 用背面 side-back
+// 左右两个方向仍用对应的侧面素材（这类朝向不在闲聊场景出现，保留兜底）。
 const SIDE_PREFERENCE = Object.freeze({
   left: Object.freeze(['side-left', 'side-right', 'side-back']),
   right: Object.freeze(['side-right', 'side-left', 'side-back']),
-  up: Object.freeze(['side-left', 'side-right', 'side-back']),
-  down: Object.freeze(['side-right', 'side-left', 'side-back']),
+  // 朝上：面对屏幕外/背对观众 → 背面
+  up: Object.freeze(['side-back', 'side-left', 'side-right']),
+  // 朝下：面对观众/正对下方那个人 → 正面（idle 家族即正面素材）
+  down: Object.freeze(['idle', 'side-left', 'side-back']),
   none: Object.freeze(['side-back', 'side-left', 'side-right']),
 });
 // Required capabilities invalidate the pack (SPEC-02: idle + four walk
