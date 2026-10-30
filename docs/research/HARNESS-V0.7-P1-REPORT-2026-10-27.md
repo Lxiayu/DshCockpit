@@ -102,6 +102,8 @@
   `shell:office-present` 让该员工暂停移动并转正面（模块 `setPresenting`，纯呈现、无事实）；
   卡片刻度只来自快照（姓名/状态/动作/任务#/产物数/今日完成），点击钉住、Esc 关闭。
 - **边界**：`office:*` 仍 8 个；新增 `shell:office-present` / `shell:office-layout`（壳命名空间）。
+  > 注（2026-10-30 追记）：此处记录的是 P1 当时的边界。之后因拖拽落点写回新增了
+  > `office:place`，当前为 9 个 —— 以 `AGENTS.md` 与契约测试为准。
 
 CDP 真机验证（Electron 37）：坞出现在右侧；办公室画布重排到 1046px；悬停后 `presenting=true`、
 `facing=down`、位置 2 秒不变；钉住后移开卡片仍在；Esc 后 `presenting=false`；展开全屏/返回办公室均正常。

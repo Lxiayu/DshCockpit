@@ -38,6 +38,7 @@
 | `docs/research/TEAM-RUNTIME-OSS-RESEARCH-2026-10.md` | 参考 | Agent-team OSS 调研（58 仓），支撑 Team Runtime 立场 |
 | `docs/research/DSH-EXECUTION-BACKEND-COMPAT-2026-10.md` | 参考（已按 v0.6 校正） | dsh 执行后端映射盘点；artifact/crash 缺口已由壳侧物化与 WP1 合成覆盖 |
 | `docs/research/HARNESS-V0.7-P1-REPORT-2026-10-27.md` | 进行中（待真机） | v0.7 P1 报告：工作区/产物/工作台、变异矩阵、真机脚本、已知缺口 |
+| `docs/research/WHALE-GIRL-LORE-RESEARCH-2026-10.md` | 参考（长期有效） | 鲸鱼娘社区生态调研：四条硬设定、83 条台词、五类禁用清单、「鱼片」查证结论。**闲聊语料库与内容红线测试的依据** |
 
 ## 4. 计划与报告
 
@@ -46,13 +47,14 @@
 | `docs/plans/completed/HARNESS-V0.6-PLAN-2026-10-25.md` | 已完成 | v0.6 五工作包计划（续跑/过程可见/首帧/推送/归档） |
 | `docs/plans/completed/HARNESS-V0.6-REPORT-2026-10-26.md` | 已完成 | v0.6 完成报告：变异矩阵、真机脚本、遗留 |
 | `docs/plans/completed/2026-08-30-virtual-office-runtime-implementation.md` | 已完成 | 办公室运行时 Task 0–9（历史记录；路径按当时结构） |
+| `docs/plans/completed/OFFICE-V3-INTERACTION-STAGE-REPORT-2026-10-30.md` | 已完成 | 互动层阶段报告：6 个缺陷修复、左右站位回退、语料调研、高内聚拆分、5 条遗留规则 |
 
 | `docs/plans/active/HARNESS-V0.7-P1-PLAN-2026-10-27.md` | **进行中** | v0.7 P1 实施：工作区/产物落地/工作台/门禁；含与上位文档的偏差声明 |
 | `docs/plans/active/HARNESS-V0.7-P1.5-DOCK-PLAN-2026-10-27.md` | **进行中** | P1.5：工作坞并入办公室（右栏收成浮动待办）、角色悬停卡与暂停呈现 |
 | `docs/plans/active/HARNESS-V0.7-P2-PLAN-2026-10-27.md` | **进行中** | P2：专用 Team runtime（cwd=工作区）、变更捕获、Verification Runner、受控 retry |
 | `docs/plans/active/OFFICE-V3-VISUAL-PLAN-2026-10-27.md` | **进行中** | P3 视觉重构：呈现时钟、代码环景、伪 3D 生成布局、dsh-pet 式交互（P3.0/P3.1/P3.3/P3.4 已落地） |
 | `docs/plans/active/OFFICE-V3-ISOMETRIC-PLAN-2026-10-27.md` | **I0 完成，待评审 I1** | 等轴测投影：投影数学、画家算法遮挡、命中测试、I0–I4 分阶段与回退 |
-| `docs/plans/active/OFFICE-V3-CODED-2.5D-PLAN-2026-10-27.md` | **进行中（原型）** | 2.5D 代码化家具：几何套件、画家算法遮挡、材质系统、装饰布局；家具/道具不再用图片拼贴 |
+| `docs/plans/active/OFFICE-V3-CODED-2.5D-PLAN-2026-10-27.md` | **进行中（互动层已收口）** | 2.5D 代码化家具 + §21 走路系统重构 + §22 互动层打磨（拖拽/交互区/闲聊朝向/语料）。视觉细化仍可继续 |
 
 进行中的计划放 `docs/plans/active/`；完成的移入 `completed/`。
 
