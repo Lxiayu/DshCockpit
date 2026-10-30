@@ -82,6 +82,7 @@ const { toolPhraseZhOf, toolPhraseKeyOf, questionSummaryZh, PHRASE_KEYS, PHRASE_
 // billing-day helper the shell's usage block uses (UTC+8), so "今日" can never
 // mean two different days in one panel.
 const { billingDayKey } = require('./runtime/usage-snapshot.js');
+const { createDayRecordStore } = require('./runtime/day-record-store.js');
 
 const TICK_MS = 16;
 // M2 (2026-09-16): the renderer paints on snapshot pushes (its Pixi ticker is
@@ -209,6 +210,7 @@ const OFFICE_IPC_CHANNELS = Object.freeze([
   'office:diagnostics',
   'office:visibility',
   'office:pending',
+  'office:place',
 ]);
 
 const PROVEN_CAPABILITIES = Object.freeze({
@@ -261,7 +263,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   // 2026-10-29 第十一轮：左翼漫游列 x 0.27 → 0.335（避开立体家具），步程缩短
   // 后左半区时间占比下降，用 HOLD 时间补回 40~50% 契约。须与 behavior-scheduler
   // 的默认值一致（启动时校验两处不漂移）。
-  leftRoamDwellMs: 18000,
+  leftRoamDwellMs: 17000,
   midRouteRerouteChance: 0.12,
   detourChance: 0.15,
   personality: true,
@@ -889,51 +891,6 @@ function createOfficeModule(options = {}) {
   const DAY_RECORD_TOOL_KINDS_CAP = 8;
   const DAY_RECORD_TOOL_ROWS_CAP = 5;
   const DAY_RECORD_RECENT_CAP = 6;
-  const dayRecords = new Map(); // employeeId -> record state (see emptyDayRecord)
-  function emptyDayRecord() {
-    return {
-      dayKey: null,
-      tasks: 0,
-      completed: 0,
-      failed: 0,
-      cancelled: 0,
-      usage: { input: 0, output: 0, cacheRead: 0, total: 0 },
-      cost: 0,
-      durationMs: 0,
-      tools: new Map(), // toolKind -> count (bounded by DAY_RECORD_TOOL_KINDS_CAP)
-      toolsTotal: 0,
-      // Last DAY_RECORD_RECENT_CAP logged kinds for this employee (the record
-      // timeline rows). Bounded ring; a day rollover drops it with the record.
-      recentRing: [],
-    };
-  }
-  function dayRecordFor(employeeId) {
-    let record = dayRecords.get(employeeId);
-    if (!record) {
-      record = emptyDayRecord();
-      record.employeeId = employeeId;
-      dayRecords.set(employeeId, record);
-    }
-    return record;
-  }
-  /** The record's current real day key, or null without a realClock. */
-  function currentDayKey() {
-    return realClock ? billingDayKey(realClock()) : null;
-  }
-  /** Reset the record when the real calendar day rolled over (midnight). A no-op
-   * without a realClock (dayKey stays null — the session-window fallback). */
-  function rollDayRecordIfNeeded(record) {
-    const key = currentDayKey();
-    if (key !== null && record.dayKey !== null && record.dayKey !== key) {
-      const fresh = emptyDayRecord();
-      fresh.employeeId = record.employeeId;
-      fresh.dayKey = key;
-      dayRecords.set(record.employeeId, fresh);
-      return fresh;
-    }
-    if (key !== null && record.dayKey === null) record.dayKey = key;
-    return record;
-  }
   const adapters = new Map(); // raw root sessionId -> adapter
   // Raw Harness root sessionId -> CURRENT active internal binding handle.
   // The registry keeps session ids single-use, so turn 2+ of the same raw
@@ -1041,62 +998,32 @@ function createOfficeModule(options = {}) {
     return stamp;
   }
 
-  /** P4: add one finalized turn's attribution to an employee's day record. */
-  function accrueDayRecordUsage(employeeId, stamp) {
-    if (!employeeId || !stamp) return;
-    const record = rollDayRecordIfNeeded(dayRecordFor(employeeId));
-    const u = stamp.turnUsage || {};
-    record.usage.input += Number.isFinite(Number(u.input)) ? Number(u.input) : 0;
-    record.usage.output += Number.isFinite(Number(u.output)) ? Number(u.output) : 0;
-    record.usage.cacheRead += Number.isFinite(Number(u.cacheRead)) ? Number(u.cacheRead) : 0;
-    record.usage.total += Number.isFinite(Number(u.total)) ? Number(u.total) : 0;
-    record.cost += Number.isFinite(Number(stamp.turnCost)) ? Number(stamp.turnCost) : 0;
-    record.durationMs += Number.isFinite(Number(stamp.turnDurationMs)) ? Number(stamp.turnDurationMs) : 0;
-  }
+  // 2026-10-30（高内聚拆分）：每日记录 / turn 用量 / 工具统计这一组逻辑
+  // 与办公室业务流程无耦合，已抽到 runtime/day-record-store.js。
+  // 这里只保留与活动日志相关的两个适配（它们要写 activityLog/realMs）。
+  const dayStore = createDayRecordStore({ realClock });
+  const dayRecordFor = (employeeId) => dayStore.recordFor(employeeId);
+  const currentDayKey = () => dayStore.currentDayKey();
+  const rollDayRecordIfNeeded = (record) => dayStore.rollIfNeeded(record);
+  const bumpDayRecordCount = (record, kind) => dayStore.bumpCount(record, kind);
+  const accrueDayRecordUsage = (employeeId, stamp) => dayStore.accrueUsage(employeeId, stamp);
+  const tallyDayRecordTool = (employeeId, toolKind) => dayStore.tallyTool(employeeId, toolKind);
 
   function noteLog(kind, employeeId, detail) {
     const entry = detail
       ? { atMs: logicalMs, employeeId, kind, ...detail }
       : { atMs: logicalMs, employeeId, kind };
-    // P4: the REAL event instant (main.js-injected clock) beside the logical
-    // one. null when no realClock was injected — the day record and the
-    // record timeline then fall back to the session-window behaviour and the
-    // page never labels them 今日.
+    // P4: 真实事件时刻（main.js 注入的 realClock）与逻辑时刻并列。
+    // 没有 realClock 时为 null —— 日记录与时间线退化为"会话窗口"。
     entry.realMs = realClock ? realClock() : null;
     if (employeeId) {
-      const record = rollDayRecordIfNeeded(dayRecordFor(employeeId));
-      bumpDayRecordCount(record, kind);
-      record.recentRing.push({ kind, atMs: entry.atMs, realMs: entry.realMs });
-      while (record.recentRing.length > DAY_RECORD_RECENT_CAP) record.recentRing.shift();
+      const record = dayStore.rollIfNeeded(dayStore.recordFor(employeeId));
+      dayStore.bumpCount(record, kind);
+      dayStore.pushTimeline(record, { kind, atMs: entry.atMs, realMs: entry.realMs });
     }
     activityLog.push(entry);
     if (activityLog.length > ACTIVITY_LOG_LIMIT) activityLog.splice(0, activityLog.length - ACTIVITY_LOG_LIMIT);
     return entry;
-  }
-
-  /** P4: count one activity-log kind into an employee's day record. Only the
-   * four task-outcome kinds are counted; everything else (sleep / chat /
-   * control) stays in the log and the record timeline. */
-  function bumpDayRecordCount(record, kind) {
-    const field = {
-      'task-started': 'tasks',
-      'result-completed': 'completed',
-      'result-failed': 'failed',
-      'result-cancelled': 'cancelled',
-    }[kind];
-    if (field) record[field] += 1;
-  }
-
-  /** P4: tally one runtime/tool fact (M5 tool/call journal event) into the
-   * employee's day record, as the fixed zh phrase family — the 常用工具 row.
-   * Bounded: at most DAY_RECORD_TOOL_KINDS_CAP distinct kinds per day, and a
-   * day rollover resets the tally with the rest of the record. */
-  function tallyDayRecordTool(employeeId, toolKind) {
-    if (!employeeId || typeof toolKind !== 'string' || toolKind === '') return;
-    const record = rollDayRecordIfNeeded(dayRecordFor(employeeId));
-    if (!record.tools.has(toolKind) && record.tools.size >= DAY_RECORD_TOOL_KINDS_CAP) return;
-    record.tools.set(toolKind, (record.tools.get(toolKind) || 0) + 1);
-    record.toolsTotal += 1;
   }
 
   // P1 运行时体检：退避窗口参数。非法/越界值回落默认——构造参数坏值绝不改变
@@ -2576,7 +2503,7 @@ function createOfficeModule(options = {}) {
     }
   }
 
-  // 2026-10-30：拖拽落点写回（解析在 runtime/employee-placement.js）。
+  // 2026-10-30：拖拽落点写回（解析在 runtime/employee-placement.js）
   function placeEmployeeAt({ employeeId, position } = {}) {
     const rec = employees.get(employeeId);
     const isTaskBoundNow = !!(rec && rec.transition && rec.transition.kind === 'task-start');
@@ -4655,7 +4582,7 @@ function validateOfficeIpcPayload(channel, payload) {
   }
 }
 
-// Registers the seven office:* handlers on the injected ipcMain. Dependency
+// Registers the office:* handlers on the injected ipcMain. Dependency
 // injection keeps this module free of any Electron import (pure Node tests).
 function registerOfficeIpc({ ipcMain, module, log = () => {}, enabled = true }) {
   if (!ipcMain || typeof ipcMain.handle !== 'function') throw new TypeError('registerOfficeIpc requires ipcMain');
@@ -4685,6 +4612,7 @@ function registerOfficeIpc({ ipcMain, module, log = () => {}, enabled = true }) 
             return { ok: true, diagnostics: module.diagnostics() };
           case 'office:visibility':
             return module.noteVisibility(validation.value);
+          case 'office:place': return module.placeEmployeeAt(validation.value);
           // P3 待你处理: answer → the shared respondToRuntime path (module.answerPending);
           // detail → the main.js resolver behind the spec §4 detailRef.
           case 'office:pending':

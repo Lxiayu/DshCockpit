@@ -54,8 +54,12 @@ const KERNEL_MODULES = Object.freeze([
 // 显式 IO 边界模块：允许 node:fs / node:path（/zlib/crypto），因为它们的职责
 // 就是 IO 或校验。usage-snapshot.js 自身只用到纯 billingDayKey，但静态边经
 // `../../cost.js` 拖入 shell 的 fs——按"最坏可达性"归类为 IO 边界，而不是假装纯。
+// 2026-10-30：day-record-store.js 与 usage-snapshot.js 同为"按最坏可达性归类"
+// 的 IO 边界 —— 它只用到纯函数 billingDayKey，但静态边经 usage-snapshot 拖入
+// ../../cost.js（shell 的 fs）。按既有规范归到这里，而不是假装纯内核。
 const IO_BOUNDARY_MODULES = Object.freeze([
   'character-pack-installer.js',
+  'day-record-store.js',
   'office-persistence.js',
   'usage-snapshot.js',
   'validate-character-pack.js',

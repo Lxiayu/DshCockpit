@@ -470,10 +470,11 @@ test('polish ⑤: main.js refreshes session presets live (seed tick + detail fet
   assert.match(main, /officePresetResyncTick % 12 === 0/, 'the re-list cadence is bounded (12 × 5s)');
   // the refresh failure path stays honest — no invented preset
   assert.match(main, /catch \{ \/\* advisory: the modal falls back to the honest unknown note \*\/ \}/);
-  // no new office:* IPC channel for P4: exactly the eight P1–P3 channels
+  // 2026-10-30: 8 → 9，新增 office:place（拖拽落点写回模拟）。
+  // 载荷只有 employeeId + 归一化坐标，不引入新的业务语义通道。
   assert.deepEqual([...officeModule.OFFICE_IPC_CHANNELS].sort(), [
     'office:cancel', 'office:diagnostics', 'office:dispatch', 'office:interrupt',
-    'office:pending', 'office:settings', 'office:state', 'office:visibility',
+    'office:pending', 'office:place', 'office:settings', 'office:state', 'office:visibility',
   ]);
 });
 

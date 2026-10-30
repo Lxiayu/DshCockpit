@@ -1529,6 +1529,8 @@
       // moves the drawn node and eases it back to the snapshot position; no
       // dispatch/interrupt is ever sent from here.
       const DRAG_THRESHOLD_PX = 4;
+      // CSS 像素 → scene 像素的换算比（由 resize() 维护）。
+      let sceneToCssScale = 1;
       const dragGuard = { id: null, startX: 0, startY: 0, active: false, pointerId: null };
       let suppressClick = false;
       function endDragGesture(event) {
@@ -1594,7 +1596,8 @@
             }
           }
           if (dragGuard.active) {
-            renderer.dragTo(dx, dy);
+            // 指针位移是 CSS 像素，渲染器要的是 scene 像素：除以缩放比换算。
+            renderer.dragTo(dx / sceneToCssScale, dy / sceneToCssScale);
             return;
           }
         }
@@ -1995,6 +1998,11 @@
           const letterboxScale = Math.min(rect.width / ref.referenceWidth, rect.height / ref.referenceHeight);
           const sceneW = ref.referenceWidth * letterboxScale;
           const sceneH = ref.referenceHeight * letterboxScale;
+          // 2026-10-30（用户："拖拽还是回到原点/落点不对"）：记录 CSS→scene 的缩放比。
+          // 指针事件给的是 CSS 像素，而渲染器的 scene 坐标是另一套尺度；
+          // 窗口 1280×840 / 参考 960×630 时两者差 1.333 倍，直接把 CSS 位移
+          // 当 scene 位移用会让落点放大 33%，吸附到很远的错误节点。
+          sceneToCssScale = letterboxScale;
           renderer.resize({ width: sceneW, height: sceneH });
           const canvas = stage.querySelector('canvas');
           if (canvas) {

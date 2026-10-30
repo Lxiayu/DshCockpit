@@ -180,13 +180,14 @@ const UI_ENV = Object.freeze({
 // 1. 通道与门控
 // ===========================================================================
 
-test('team-ui: the channel is shell:team — office:* stays frozen at 8 channels', () => {
+test('team-ui: the channel is shell:team — office:* is pinned at 9 channels', () => {
   assert.match(SRC, /ipcMain\.handle\('shell:team'/);
   const channels = /const OFFICE_IPC_CHANNELS = Object\.freeze\(\[([\s\S]*?)\]\);/
     .exec(fs.readFileSync(path.join(ROOT, 'src/office/office-module.js'), 'utf8'));
   assert.ok(channels);
   const list = channels[1].split(',').map((x) => x.trim().replace(/^'|'$/g, '')).filter(Boolean);
-  assert.equal(list.length, 8, 'office:* must stay at exactly 8 channels');
+  // 2026-10-30: 8 → 9 (office:place, drag drop-point write-back)
+  assert.equal(list.length, 9, 'office:* is pinned at exactly 9 channels');
   assert.equal(list.includes('office:team'), false);
   // preload 暴露的是 shell 通道直通（与 getTheme 同模式），不走 office 白名单。
   const preload = fs.readFileSync(path.join(ROOT, 'src/office/office-preload.js'), 'utf8');

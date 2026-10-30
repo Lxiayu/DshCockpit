@@ -790,13 +790,15 @@ test('two office views consume one main-process snapshot/clock (no per-view simu
 // office:settings ('answer' | 'detail'). The channel is whitelisted in
 // office-module.js, mirrored in office-preload.js and payload-validated in
 // the main process like every other office channel.
-test('exactly the eight office:* IPC channels are declared (P3 adds office:pending)', () => {
+test('office:* IPC channels are pinned (2026-10-30: nine, added office:place)', () => {
   assert.deepEqual([...officeModule.OFFICE_IPC_CHANNELS].sort(), [
     'office:cancel',
     'office:diagnostics',
     'office:dispatch',
     'office:interrupt',
     'office:pending',
+    // 2026-10-30: 拖拽落点写回，载荷只有 employeeId + 归一化坐标。
+    'office:place',
     'office:settings',
     'office:state',
     'office:visibility',

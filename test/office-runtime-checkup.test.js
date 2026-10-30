@@ -337,7 +337,7 @@ test('tool phrase: adapter maps BOTH tool/call shapes identically (unit pin on t
   assert.deepEqual(tools, ['Legacy', 'Modern']);
 });
 
-test('office:* IPC channels stay exactly eight (no new channel for the checkup work)', () => {
+test('office:* IPC channels are pinned (2026-10-30: nine, added office:place)', () => {
   // 通道名单来自模块源码常量；这里以快照断言钉死（体检工作全部复用现有通道）。
   const source = fs.readFileSync(path.join(ROOT, 'src', 'office', 'office-module.js'), 'utf8');
   const match = /const OFFICE_IPC_CHANNELS = Object\.freeze\(\[([\s\S]*?)\]\);/.exec(source);
@@ -346,6 +346,9 @@ test('office:* IPC channels stay exactly eight (no new channel for the checkup w
   assert.deepEqual(channels, [
     'office:state', 'office:dispatch', 'office:cancel', 'office:interrupt',
     'office:settings', 'office:diagnostics', 'office:visibility', 'office:pending',
+    // 2026-10-30：拖拽落点写回（用户要求"拖到哪就停到哪"）。
+    // 载荷只有 employeeId + 归一化坐标，是有意的最小面扩展。
+    'office:place',
   ]);
 });
 

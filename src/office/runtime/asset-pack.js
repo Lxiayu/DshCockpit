@@ -28,11 +28,21 @@
 const SCHEMA_VERSION = 1;
 const DIRECTIONS = Object.freeze(['none', 'left', 'right', 'up', 'down']);
 const WALK_DIRECTIONS = Object.freeze(['left', 'right', 'up', 'down']);
+// 2026-10-30（用户："两个鲸鱼娘前后站位闲聊时应该面对面"）：
+// 纵向（up/down）原来首选 `side-back` —— 于是前后对立的两个人**都显示背影**，
+// 读起来像各自背对背，完全不像在交谈。
+//
+// 角色包没有"正面"帧（只有 side-left / side-right / side-back），所以
+// "面对面"只能用**相对的侧面**来表达：一个朝左、一个朝右，看起来就是
+// 侧身对着彼此说话。这是素材能力内的最佳表达。
+//   up  （站在下方、朝上看对方）→ 优先 side-left
+//   down（站在上方、朝下看对方）→ 优先 side-right
+// 两人朝向不同，视觉上就形成了"面对面"的一对。
 const SIDE_PREFERENCE = Object.freeze({
   left: Object.freeze(['side-left', 'side-right', 'side-back']),
   right: Object.freeze(['side-right', 'side-left', 'side-back']),
-  up: Object.freeze(['side-back', 'side-left', 'side-right']),
-  down: Object.freeze(['side-back', 'side-left', 'side-right']),
+  up: Object.freeze(['side-left', 'side-right', 'side-back']),
+  down: Object.freeze(['side-right', 'side-left', 'side-back']),
   none: Object.freeze(['side-back', 'side-left', 'side-right']),
 });
 // Required capabilities invalidate the pack (SPEC-02: idle + four walk

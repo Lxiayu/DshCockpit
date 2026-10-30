@@ -486,7 +486,25 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
     Object.freeze({ from: 'roam-17', to: 'roam-16', behaviors: Object.freeze(['roaming']), bidirectional: true }),
   ]);
 
-  const topoNodes = [...topology.nodes, ...LEFT_WING_NODES];
+  // 2026-10-30（用户："我还没看到左右站位的两个鲸鱼娘闲聊"）：
+  // canonical 的 chat-a/chat-b 投影到 flat 后落在**同一条竖线**上（x 相同、
+  // 只差 y 44px），几何上只能前后站 —— 左右站位永远不会出现。
+  // 这里新增一对**横向座位** chat-c/chat-d（同 y、横向相距 46px），
+  // 于是聊天座位有两组：chat-a/b 对应"前后"，chat-c/d 对应"左右"，
+  // 选座时按对挑选（见 behavior-scheduler 的 chooseChatSeatPair）。
+  const CHAT_SIDE_FOOTPRINT = Object.freeze({ width: 0.04, height: 0.04 });
+  const CHAT_SIDE_TAGS = Object.freeze(['chatting']);
+  const CHAT_SIDE_NODES = Object.freeze([
+    Object.freeze({ id: 'chat-c', position: null, footprint: CHAT_SIDE_FOOTPRINT, tags: CHAT_SIDE_TAGS, capacity: 1, safeRadius: 0.032 }),
+    Object.freeze({ id: 'chat-d', position: null, footprint: CHAT_SIDE_FOOTPRINT, tags: CHAT_SIDE_TAGS, capacity: 1, safeRadius: 0.032 }),
+  ]);
+  const CHAT_SIDE_EDGES = Object.freeze([
+    // 接到下方横道 roam-3，并让两座互通（与 chat-a/chat-b 同款拓扑）
+    Object.freeze({ from: 'roam-3', to: 'chat-c', behaviors: Object.freeze(['roaming', 'chatting', 'resting']), bidirectional: true }),
+    Object.freeze({ from: 'chat-c', to: 'chat-d', behaviors: Object.freeze(['roaming', 'chatting', 'resting']), bidirectional: true }),
+  ]);
+
+  const topoNodes = [...topology.nodes, ...LEFT_WING_NODES, ...CHAT_SIDE_NODES];
 
   // M4.1f 穿模修正（flat 投影专用拓扑适配）：canonical 拓扑的 desk-N↔roam-X
   // 直连边服务于 isometric 的 walk-behind 语义（斜穿自家工位读作绕到桌后）。
@@ -532,7 +550,7 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
     .every((id) => /^roam-/.test(id));
   const isChatEdge = (edge) => [edge.from, edge.to]
     .some((id) => /^chat-/.test(id));
-  const flatEdges = [...topology.edges, ...LEFT_WING_EDGES]
+  const flatEdges = [...topology.edges, ...LEFT_WING_EDGES, ...CHAT_SIDE_EDGES]
     .filter((edge) => isChainEdge(edge) || !hasSeatEndpoint(edge))
     .map((edge) => {
       if (isChainEdge(edge)) return { ...edge, behaviors: [...FLAT_CHAIN_BEHAVIORS] };
@@ -786,6 +804,9 @@ function compileOfficeLayout({ draft, assets, draftWidths, characterFoot, topolo
     'roam-1': { x: centerX(corridorX + 0.047), y: centerY(rowGap1Y + 0.14) },
     'chat-a': { x: centerX(corridorX - 0.008), y: centerY(rowGap1Y + 0.14) },
     'chat-b': { x: centerX(corridorX - 0.008), y: centerY(rowGap1Y + 0.21) },
+    // 横向对：同 y、横向相距约 46px（@960）。落在 rowGap2 上方的开阔带。
+    'chat-c': { x: centerX(corridorX - 0.075), y: centerY(rowGap2Y - 0.035) },
+    'chat-d': { x: centerX(corridorX - 0.075 + 0.048), y: centerY(rowGap2Y - 0.035) },
     'roam-5': { x: centerX(corridorX + 0.027), y: centerY(rowGap2Y) },
     // 2026-10-29: 与 LEFT_WING_COLUMN_X 同列（原来硬编码 0.27，与新家具冲突）
     'roam-8': { x: centerX(LEFT_WING_COLUMN_X), y: centerY((rowGap2Y + bottomY) / 2) },

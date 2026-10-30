@@ -117,7 +117,7 @@ const DEFAULT_CONFIG = Object.freeze({
   // 正解不是把列移回家具里，而是补 HOLD 时间 —— 这段注释本来就写着
   // "left HOLD time per visit is what moves the measured left-half share"。
   // 18000 × 1.30 ≈ 24000 把占比拉回带内。
-  leftRoamDwellMs: 18000,
+  leftRoamDwellMs: 17000,
   // Share of roaming walks that re-target at an intermediate waypoint (one
   // fresh decision mid-walk) — "允许中途换点".
   midRouteRerouteChance: 0.12,
@@ -394,6 +394,45 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
 
+  // 2026-10-30（用户："我还没看到左右站位的两个鲸鱼娘闲聊"）：
+  // 原来 chat-a/chat-b 在**同一条竖线上**（x 相同、只差 y 44px），几何上
+  // 只能前后站 —— 左右站位永远不会出现。新增 chat-c/chat-d 组成**横向对**
+  // （同 y、相距 46px），于是两组座位分别对应"前后"与"左右"两种站位。
+  //
+  // 这里把平铺的 chatting 节点按 id 两两配对，选座时**按对**挑一组：
+  // 优先选当前没有别人站着、且两人都够得着的那一对。
+  function chatSeatPairs() {
+    const seats = chatSeatNodes();
+    const pairs = [];
+    for (let i = 0; i + 1 < seats.length; i += 2) pairs.push([seats[i], seats[i + 1]]);
+    return pairs;
+  }
+
+  // 挑一组本次会话使用的座位：跳过被别的身体占着的那一对。
+  function chooseChatSeatPair(pairMemberIds) {
+    const pairs = chatSeatPairs();
+    if (pairs.length === 0) return null;
+    const occupied = new Set();
+    for (const other of employees.values()) {
+      if (!other.currentNodeId) continue;
+      if (pairMemberIds.includes(other.employeeId)) continue;
+      occupied.add(other.currentNodeId);
+    }
+    const free = pairs.filter(([a, b]) => !occupied.has(a.id) && !occupied.has(b.id));
+    const pool = free.length > 0 ? free : pairs;
+    // 确定性选择（同一对成员永远算出同一组座位），避免两人各算一组。
+    // 注意用 `Math.imul` + `>>> 0` 做 32 位 FNV：朴素写法的乘法会超出
+    // JS 双精度整数精度，低位几乎恒定，实测所有配对都命中第 0 组 ——
+    // 表现就是"横向那对座位永远没人用"。
+    const key = [...pairMemberIds].sort().join('|');
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < key.length; i += 1) {
+      h ^= key.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return pool[h % pool.length];
+  }
+
   function nodeDistance(fromNodeId, toNodeId) {
     const from = nodesById.get(fromNodeId);
     const to = nodesById.get(toNodeId);
@@ -456,8 +495,8 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
       const current = employees.get(id).current;
       if (current && current.activity === 'sleeping') return fail('CHAT_PARTNERS_UNAVAILABLE', { employeeId: id });
     }
-    const seats = chatSeatNodes();
-    if (seats.length < 2) return fail('CHAT_SEATS_UNAVAILABLE');
+    const seats = chooseChatSeatPair([employeeId, partnerId]);
+    if (!seats || seats.length < 2) return fail('CHAT_SEATS_UNAVAILABLE');
     const at = atOrDefault(nowMs);
     const all = allReservations(externalReservations);
 
@@ -471,6 +510,8 @@ function createBehaviorScheduler({ graph, movement, clock = null, seed = 'office
     // 谁也到不了，一直等到 endChat 收场。实测停滞 30.3s（契约上限 20s）。
     //
     // 这里补一条"身体优先"的预检：座位上有别人站着，这次就不配对。
+    // chooseChatSeatPair() 已优先返回"没人站着"的那一对；只有两组都被占时
+    // 才会退回到占用对，这时才需要拒绝（否则又回到"走到座位前发现有人"的僵持）。
     for (const seat of seats) {
       for (const other of employees.values()) {
         if (other.employeeId === employeeId || other.employeeId === partnerId) continue;
