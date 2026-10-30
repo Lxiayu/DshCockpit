@@ -83,3 +83,45 @@ test('the bundled production corpus is valid for the engine (resources copy)', (
     for (const entry of engine.entriesFor(topic)) assert.ok(entry.text && entry.text.length > 0, `${topic}:${entry.id} has text`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// 2026-10-30：语料内容红线（依据 artifacts/whale-lore-research.md 的社区调研）
+// ---------------------------------------------------------------------------
+test('dialogue corpus stays inside the community-safe content boundary', () => {
+  const files = [
+    path.join(ROOT, 'resources', 'dialogue', 'base.json'),
+    path.join(ROOT, 'resources', 'dialogue', 'characters', 'deepseek-default.json'),
+  ];
+  // 每一类都写明"为什么禁用"，避免后人以为是随意黑名单。
+  const BANNED = [
+    { pattern: /鱼片/, why: '社区语感里=生鱼片/切片，且是"对用户"的称呼，同事互聊不成立' },
+    { pattern: /主人|爸爸/, why: '对用户/越界亲密称呼；同事关系里不成立，且部分社区人设明确反对' },
+    { pattern: /便宜货|涨价|加钱|降智|上错模型/, why: '绑定 API 定价/技术自贬，与产品可信度冲突' },
+    { pattern: /溟月|上善无形|ZipZipPipe|女仆装/, why: '原型版权 CC BY-NC-SA 非商用，商业化产品不能玩梗式提及' },
+    { pattern: /AI画|手绘|正统|男版/, why: '社区真实引战话题（画师被冲至删稿），一票否决' },
+    { pattern: /玉足|白丝|出浴|涩|丝袜/, why: '擦边软色情，正是当年争议来源，商用必须彻底切割' },
+    { pattern: /减肥|又胖了|肥猪/, why: '体重羞辱（对她或对用户），双向红线' },
+    { pattern: /DeepSleep|CoT|MoE|token余额/, why: '术语化，非技术用户零理解' },
+  ];
+  for (const file of files) {
+    const text = fs.readFileSync(file, 'utf8');
+    for (const { pattern, why } of BANNED) {
+      const hit = text.match(pattern);
+      assert.equal(hit, null, `${path.basename(file)} 命中禁用内容「${hit && hit[0]}」：${why}`);
+    }
+  }
+});
+
+test('the character corpus never addresses the user (peers talk to each other)', () => {
+  // 场景是鲸鱼娘 A 对鲸鱼娘 B 闲聊 —— 同事之间不会互称"鱼片/主人"。
+  // 这条测试把"不出现用户称呼"固定下来，避免以后又加回去。
+  const corpus = JSON.parse(fs.readFileSync(
+    path.join(ROOT, 'resources', 'dialogue', 'characters', 'deepseek-default.json'), 'utf8',
+  ));
+  for (const [topic, entries] of Object.entries(corpus.overrides)) {
+    for (const entry of entries) {
+      assert.doesNotMatch(entry.text, /鱼片|主人|爸爸/, `${topic}:${entry.id} 不能称呼用户「${entry.text}」`);
+      assert.ok(entry.text.length > 0 && entry.text.length <= 30, `${topic}:${entry.id} 长度合理`);
+    }
+  }
+});

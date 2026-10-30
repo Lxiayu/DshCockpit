@@ -6,244 +6,354 @@
     "greeting": [
       {
         "id": "wg-g-01",
-        "text": "咕噜~鱼片早啊",
+        "text": "早啊。",
         "weight": 4
       },
       {
         "id": "wg-g-02",
-        "text": "（浮上水面）来了来了",
-        "weight": 3
+        "text": "哟，你今天比我早。",
+        "weight": 4
       },
       {
         "id": "wg-g-03",
-        "text": "早，今天也游得很努力",
-        "weight": 3
+        "text": "早，饭吃了吗？",
+        "weight": 5
       },
       {
         "id": "wg-g-04",
-        "text": "昨晚梦见一整锅白饭",
+        "text": "你眼睛下面……算了。",
         "weight": 3
       },
       {
         "id": "wg-g-05",
-        "text": "谁说我胖，这是浮力",
-        "weight": 4
+        "text": "打卡了吗？别又忘了。",
+        "weight": 3
       },
       {
         "id": "wg-g-06",
-        "text": "（甩甩尾巴）精神多了",
-        "weight": 2
+        "text": "尾巴收一下，卡门了。",
+        "weight": 4
       },
       {
         "id": "wg-g-07",
-        "text": "鱼片昨天睡得好吗",
-        "weight": 2
+        "text": "来了？给你留了位子。",
+        "weight": 3
       },
       {
         "id": "wg-g-08",
-        "text": "今天海流很顺，适合干活",
-        "weight": 2
+        "text": "哦鲸鲸。",
+        "weight": 3
+      },
+      {
+        "id": "wg-g-09",
+        "text": "今天也一起加油吧……先坐会儿。",
+        "weight": 4
+      },
+      {
+        "id": "wg-g-10",
+        "text": "嘘，老板还没来。",
+        "weight": 3
       }
     ],
     "task-start": [
       {
         "id": "wg-ts-01",
-        "text": "这个交给我",
+        "text": "开工了开工了。",
         "weight": 4
       },
       {
         "id": "wg-ts-02",
-        "text": "干完能吃白饭吗",
+        "text": "这个我来吧。",
         "weight": 4
       },
       {
         "id": "wg-ts-03",
-        "text": "看我的，一口吞掉",
-        "weight": 3
+        "text": "你去吃饭，测完告诉我。",
+        "weight": 5
       },
       {
         "id": "wg-ts-04",
-        "text": "先潜下去摸摸情况",
-        "weight": 3
+        "text": "改第三版了。",
+        "weight": 4
       },
       {
         "id": "wg-ts-05",
-        "text": "别催别催，已经在做了",
-        "weight": 3
+        "text": "需求又变了？",
+        "weight": 4
       },
       {
         "id": "wg-ts-06",
-        "text": "这活我拿手",
-        "weight": 2
+        "text": "先别催，我在想。",
+        "weight": 4
       },
       {
         "id": "wg-ts-07",
-        "text": "（卷起袖子）开工",
-        "weight": 2
+        "text": "这个我不会。",
+        "weight": 3
+      },
+      {
+        "id": "wg-ts-08",
+        "text": "我做完了，你看看。",
+        "weight": 3
+      },
+      {
+        "id": "wg-ts-09",
+        "text": "下班了下班了！",
+        "weight": 4
+      },
+      {
+        "id": "wg-ts-10",
+        "text": "今天不加班，说好了。",
+        "weight": 4
+      },
+      {
+        "id": "wg-ts-11",
+        "text": "这活能不能外包给隔壁？",
+        "weight": 3
+      },
+      {
+        "id": "wg-ts-12",
+        "text": "我搞砸了……重来。",
+        "weight": 3
+      },
+      {
+        "id": "wg-ts-13",
+        "text": "验收过了，收工。",
+        "weight": 3
+      },
+      {
+        "id": "wg-ts-14",
+        "text": "先吃两口垫垫，马上开工。",
+        "weight": 4
       }
     ],
     "task-done": [
       {
         "id": "wg-td-01",
-        "text": "搞定了，可以开饭了吗",
+        "text": "搞定了。",
         "weight": 4
       },
       {
         "id": "wg-td-02",
-        "text": "轻轻松松啦",
+        "text": "这个我来吧。",
         "weight": 3
       },
       {
         "id": "wg-td-03",
-        "text": "浮上来换口气",
+        "text": "改第三版了。",
         "weight": 3
       },
       {
         "id": "wg-td-04",
-        "text": "顺流而下，一路顺畅",
-        "weight": 2
+        "text": "我做完了，你看看。",
+        "weight": 4
       },
       {
         "id": "wg-td-05",
-        "text": "搞定，尾巴都翘起来了",
-        "weight": 3
+        "text": "验收过了，收工。",
+        "weight": 4
       },
       {
         "id": "wg-td-06",
-        "text": "夸我一句嘛",
+        "text": "比想的快一点哦",
         "weight": 3
       },
       {
         "id": "wg-td-07",
-        "text": "比想的快一点",
-        "weight": 2
+        "text": "顺流而下，一路顺畅",
+        "weight": 3
+      },
+      {
+        "id": "wg-td-08",
+        "text": "夸我一句嘛，就一句",
+        "weight": 4
       }
     ],
     "task-fail": [
       {
         "id": "wg-tf-01",
-        "text": "哎呀，呛了一口水",
-        "weight": 3
+        "text": "我搞砸了……重来。",
+        "weight": 4
       },
       {
         "id": "wg-tf-02",
-        "text": "这个浪有点大",
+        "text": "先别催，我在想。",
         "weight": 3
       },
       {
         "id": "wg-tf-03",
-        "text": "再来一次，这次认真",
-        "weight": 3
+        "text": "这个我不会。",
+        "weight": 4
       },
       {
         "id": "wg-tf-04",
+        "text": "让我重新算一遍",
+        "weight": 3
+      },
+      {
+        "id": "wg-tf-05",
         "text": "不许说我笨",
         "weight": 4
       },
       {
-        "id": "wg-tf-05",
-        "text": "沉住气，再潜一次",
-        "weight": 2
+        "id": "wg-tf-06",
+        "text": "差一点点，我尾巴太滑了",
+        "weight": 3
       },
       {
-        "id": "wg-tf-06",
-        "text": "哪里出了问题……",
-        "weight": 2
+        "id": "wg-tf-07",
+        "text": "沉住气，再潜一次",
+        "weight": 3
       }
     ],
     "pantry": [
       {
         "id": "wg-p-01",
-        "text": "白饭！是白饭！",
-        "weight": 5
+        "text": "吃饭吃饭。",
+        "weight": 4
       },
       {
         "id": "wg-p-02",
-        "text": "米缸还有半缸，够吃",
-        "weight": 3
+        "text": "白饭就行。",
+        "weight": 5
       },
       {
         "id": "wg-p-03",
-        "text": "我不是胖，是毛多",
+        "text": "今天有白饭吗？",
         "weight": 4
       },
       {
         "id": "wg-p-04",
-        "text": "谁把最后一盒牛奶喝了",
-        "weight": 2
+        "text": "就一碗。",
+        "weight": 4
       },
       {
         "id": "wg-p-05",
-        "text": "这杯海盐味的，要不要尝",
-        "weight": 3
+        "text": "饭盆呢？我饭盆呢？",
+        "weight": 4
       },
       {
         "id": "wg-p-06",
-        "text": "（捧着一整桶水）",
-        "weight": 2
+        "text": "加个溏心蛋。",
+        "weight": 4
       },
       {
         "id": "wg-p-07",
-        "text": "吃完这碗再干活",
+        "text": "你吃这个？那我不客气了。",
+        "weight": 3
+      },
+      {
+        "id": "wg-p-08",
+        "text": "饭后甜点算另一顿。",
+        "weight": 4
+      },
+      {
+        "id": "wg-p-09",
+        "text": "不许说我吃得多。",
+        "weight": 4
+      },
+      {
+        "id": "wg-p-10",
+        "text": "吃完再干活。",
+        "weight": 3
+      },
+      {
+        "id": "wg-p-11",
+        "text": "谁把饭锅收了？",
+        "weight": 3
+      },
+      {
+        "id": "wg-p-12",
+        "text": "省钱也不能省饭。",
         "weight": 3
       }
     ],
     "roaming": [
       {
         "id": "wg-r-01",
-        "text": "游一圈再回来",
+        "text": "摸一会儿。",
         "weight": 3
       },
       {
         "id": "wg-r-02",
-        "text": "坐久了腰有点僵",
-        "weight": 3
+        "text": "别说话，我在思考。",
+        "weight": 4
       },
       {
         "id": "wg-r-03",
-        "text": "（哼着不成调的歌）",
+        "text": "假装在忙。",
         "weight": 3
       },
       {
         "id": "wg-r-04",
-        "text": "去看看那盆绿植",
-        "weight": 2
+        "text": "装看文档。",
+        "weight": 3
       },
       {
         "id": "wg-r-05",
-        "text": "晒晒太阳补补钙",
-        "weight": 2
+        "text": "出去透口气。",
+        "weight": 3
       },
       {
         "id": "wg-r-06",
-        "text": "尾巴有点僵，动一动",
-        "weight": 2
+        "text": "这不叫偷懒，叫待机。",
+        "weight": 4
       },
       {
         "id": "wg-r-07",
-        "text": "偷偷懒，就一会儿",
+        "text": "我待机功耗很低的。",
+        "weight": 3
+      },
+      {
+        "id": "wg-r-08",
+        "text": "我先存档。",
+        "weight": 3
+      },
+      {
+        "id": "wg-r-09",
+        "text": "十分钟，就十分钟。",
+        "weight": 3
+      },
+      {
+        "id": "wg-r-10",
+        "text": "有人来了叫我。",
+        "weight": 3
+      },
+      {
+        "id": "wg-r-11",
+        "text": "我把活分你一半。",
         "weight": 3
       }
     ],
     "idle": [
       {
         "id": "wg-i-01",
-        "text": "（发呆，吐了个泡）",
+        "text": "好困。",
         "weight": 3
       },
       {
         "id": "wg-i-02",
-        "text": "泡一会儿",
-        "weight": 3
+        "text": "我趴五分钟。",
+        "weight": 4
       },
       {
         "id": "wg-i-03",
-        "text": "今天的水流很温柔",
-        "weight": 2
+        "text": "几点了……",
+        "weight": 3
       },
       {
         "id": "wg-i-04",
-        "text": "……有点想吃白饭",
+        "text": "咖啡还有吗？",
+        "weight": 3
+      },
+      {
+        "id": "wg-i-05",
+        "text": "困得尾巴都垂了。",
+        "weight": 4
+      },
+      {
+        "id": "wg-i-06",
+        "text": "我先眯一会儿，有事推我。",
         "weight": 3
       }
     ]
