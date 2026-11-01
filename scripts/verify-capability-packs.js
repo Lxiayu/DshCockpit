@@ -61,7 +61,13 @@ async function main() {
       results.push({ id: name, state: 'not-verified', reason: `manifest invalid: ${validated.errors.join('; ')}` });
       continue;
     }
-    const verify = await runVerify(validated.value, { runner, cwd: workDir });
+    // 注入包目录：verify 命令不能靠相对路径（CI 在临时目录里跑），
+    // 必须能定位到自己的包。这是 verify 可移植的关键。
+    const verify = await runVerify(validated.value, {
+      runner,
+      cwd: workDir,
+      env: { DSH_PACK_DIR: path.join(PACKS_DIR, name) },
+    });
     results.push({ id: validated.value.id, version: validated.value.version, ...verify });
   }
 

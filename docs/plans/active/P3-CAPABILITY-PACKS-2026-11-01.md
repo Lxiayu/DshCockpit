@@ -132,3 +132,56 @@ S4 是第一个真实用户，S5 是证据。
 - ❌ 5 个以上 Pack（先做 1 个走通全链路）
 - ❌ MemoryProvider 抽象（无第二实现，见 AGENTS.md §2.6）
 - ❌ 自研 plugin loader（消费官方）
+
+---
+
+## 8. S6：第一个 Starter Kit（追加分解，2026-11-01）
+
+### 选择：`research-report`
+
+路线图给的是二选一（`research-report` 或 `code-change`）。选前者的理由：
+
+| 候选 | 依赖 | 5 分钟能出产物？ | 结论 |
+|---|---|---|---|
+| **research-report** | 无外部依赖（本地文件 + 模板） | ✅ 写一个 .md 即可 | ✅ **选它** |
+| code-change | 需要真实 repo + 测试通过 | ⚠ 失败模式多（环境/依赖） | 后续 |
+
+关键判断：**Starter Kit 的验收标准是"5 分钟内拿到真实产物"**，
+不是"功能强大"。`code-change` 的失败模式（依赖没装、测试本来就红）
+会把"5 分钟"变成"半小时排错"，直接违反验收标准。
+
+### 第一性原理：Starter Kit 与 Capability Pack 的区别
+
+这两个概念容易混。区别在于**面向谁**：
+
+| | Capability Pack | Starter Kit |
+|---|---|---|
+| 面向 | 已经会用的人（加能力） | **完全的新手**（第一次用） |
+| 内容 | manifest + verify | manifest + verify + **模板 + 说明** |
+| 成功标准 | verify 通过 | **新手拿到一个真实文件** |
+
+所以 Starter Kit ⊃ Capability Pack：它是"带引导的 Pack"。
+
+### 设计决定：产物必须是真文件，不是内存状态
+
+「5 分钟内拿到真实产物」里的"真实"很关键：
+- ❌ 界面上显示"报告已生成"（内存里有个对象）
+- ✅ 磁盘上有一个 `.md` 文件，用户能打开、能改、能分享
+
+所以 `research-report` 的 verify 必须**检查那个文件真的存在且非空**。
+
+### 实施
+
+| 步 | 内容 |
+|---|---|
+| S6.1 | `capability-packs/research-report/manifest.json`（含模板声明） |
+| S6.2 | `capability-packs/research-report/template.md`（报告骨架） |
+| S6.3 | `scripts/starter-kit.js` —— 脚手架：创建报告文件 + 跑 verify |
+| S6.4 | 测试：5 分钟内可完成、产物非空、幂等 |
+
+### 验收标准补充
+
+- [ ] 一条命令产出真实 .md 文件（非空、含模板骨架）
+- [ ] 重复执行不覆盖用户已写的内容（幂等 + 不破坏）
+- [ ] verify 检查文件真实存在而非"声称已生成"
+- [ ] 新手不需要懂 Mission / Harness / Provider 就能用

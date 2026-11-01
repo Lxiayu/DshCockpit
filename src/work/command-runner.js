@@ -35,7 +35,7 @@ function createCommandRunner({
   /**
    * @returns {Promise<{ok, exitCode, signal, timedOut, durationMs, output, truncated}>}
    */
-  function run({ command, cwd } = {}) {
+  function run({ command, cwd, env = null } = {}) {
     const text = typeof command === 'string' ? command.trim() : '';
     if (text === '') return Promise.resolve({ ok: false, code: 'VERIFY_COMMAND_REQUIRED' });
     if (typeof cwd !== 'string' || cwd === '') return Promise.resolve({ ok: false, code: 'VERIFY_CWD_REQUIRED' });
@@ -46,7 +46,8 @@ function createCommandRunner({
       try {
         child = spawnImpl(shell.bin, [...shell.args, text], {
           cwd,
-          env: { ...process.env },
+          // 调用方可注入额外 env（例如 Pack 的 verify 需要定位自己的目录）
+          env: { ...process.env, ...(env || {}) },
           windowsHide: true,
           stdio: ['ignore', 'pipe', 'pipe'],
         });

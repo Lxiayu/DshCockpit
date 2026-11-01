@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "research-report",
+  "version": "1.0.0",
+  "title": "研究报告",
+  "description": "新手的第一个 Starter Kit：用一份结构化模板产出一份真实的研究报告 .md 文件。不需要理解 Mission / Harness / Provider——只需要回答模板里的几个问题。",
+  "requires": {
+    "platforms": [
+      "darwin",
+      "linux",
+      "win32"
+    ],
+    "commands": [
+      "node"
+    ]
+  },
+  "provides": {
+    "capabilities": [
+      "research.report",
+      "starter-kit"
+    ]
+  },
+  "verify": {
+    "command": "node -e \"const fs=require('fs'),path=require('path');const dir=process.env.DSH_PACK_DIR;if(!dir){console.error('DSH_PACK_DIR not set');process.exit(1)}const t=fs.readFileSync(path.join(dir,'template.md'),'utf8');if(t.trim().length<50){console.error('template too small');process.exit(1)}if(!t.includes('{{TITLE}}')){console.error('template missing title placeholder');process.exit(1)}fs.writeFileSync('kit-selftest.md',t.replace('{{TITLE}}','selftest'));const out=fs.readFileSync('kit-selftest.md','utf8');if(out.trim().length<50){console.error('render produced too little');process.exit(1)}fs.rmSync('kit-selftest.md');console.log('research-report template ok')\"",
+    "expectExitCode": 0,
+    "timeoutMs": 15000
+  }
+}

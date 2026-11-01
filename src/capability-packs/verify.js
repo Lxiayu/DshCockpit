@@ -62,7 +62,7 @@ async function checkCommands(commands, runner) {
  * @returns {Promise<{state:string, reason:string|null, exitCode:number|null, output:string, durationMs:number}>}
  */
 async function runVerify(manifest, opts = {}) {
-  const { runner, platform = process.platform, cwd = process.cwd() } = opts;
+  const { runner, platform = process.platform, cwd = process.cwd(), env = null } = opts;
   if (!runner || typeof runner.run !== 'function') {
     return result('not-verified', 'no command runner provided', null, '', 0);
   }
@@ -95,6 +95,9 @@ async function runVerify(manifest, opts = {}) {
   const r = await runner.run({
     command: verify.command,
     cwd,
+    // env 注入让 verify 能定位自己的包目录（CI 在临时目录里跑，
+    // 相对路径不可靠）。这是 verify 可移植的关键。
+    ...(env ? { env } : {}),
     ...(Number.isInteger(verify.timeoutMs) ? { timeoutMs: verify.timeoutMs } : {}),
   });
   const durationMs = Number.isFinite(r && r.durationMs) ? r.durationMs : (Date.now() - started);
