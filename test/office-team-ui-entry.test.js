@@ -180,14 +180,17 @@ const UI_ENV = Object.freeze({
 // 1. 通道与门控
 // ===========================================================================
 
-test('team-ui: the channel is shell:team — office:* is pinned at 9 channels', () => {
+test('team-ui: the channel is shell:team — office:* is pinned at 10 channels', () => {
   assert.match(SRC, /ipcMain\.handle\('shell:team'/);
   const channels = /const OFFICE_IPC_CHANNELS = Object\.freeze\(\[([\s\S]*?)\]\);/
     .exec(fs.readFileSync(path.join(ROOT, 'src/office/office-module.js'), 'utf8'));
   assert.ok(channels);
   const list = channels[1].split(',').map((x) => x.trim().replace(/^'|'$/g, '')).filter(Boolean);
   // 2026-10-30: 8 → 9 (office:place, drag drop-point write-back)
-  assert.equal(list.length, 9, 'office:* is pinned at exactly 9 channels');
+    // 2026-11-01：9 → 10。新增 office:open-desk（白板点击 → 打开 Mission Desk）。
+  // 它不写任何状态，只请求开窗口，语义等同点菜单项——
+  // 不违反"办公室不是输入面"（铁律 5 禁止的是写状态，不是导航）。
+  assert.equal(list.length, 10, 'office:* is pinned at exactly 10 channels');
   assert.equal(list.includes('office:team'), false);
   // preload 暴露的是 shell 通道直通（与 getTheme 同模式），不走 office 白名单。
   const preload = fs.readFileSync(path.join(ROOT, 'src/office/office-preload.js'), 'utf8');

@@ -472,8 +472,10 @@ test('polish ⑤: main.js refreshes session presets live (seed tick + detail fet
   assert.match(main, /catch \{ \/\* advisory: the modal falls back to the honest unknown note \*\/ \}/);
   // 2026-10-30: 8 → 9，新增 office:place（拖拽落点写回模拟）。
   // 载荷只有 employeeId + 归一化坐标，不引入新的业务语义通道。
+  // 2026-11-01: 9 → 10（office:open-desk — 白板点击打开 Mission Desk，纯导航不写状态）
   assert.deepEqual([...officeModule.OFFICE_IPC_CHANNELS].sort(), [
     'office:cancel', 'office:diagnostics', 'office:dispatch', 'office:interrupt',
+    'office:open-desk',
     'office:pending', 'office:place', 'office:settings', 'office:state', 'office:visibility',
   ]);
 });

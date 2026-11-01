@@ -349,6 +349,9 @@ test('office:* IPC channels are pinned (2026-10-30: nine, added office:place)', 
     // 2026-10-30：拖拽落点写回（用户要求"拖到哪就停到哪"）。
     // 载荷只有 employeeId + 归一化坐标，是有意的最小面扩展。
     'office:place',
+    // 2026-11-01：9 → 10。白板点击 → 打开 Mission Desk。
+    // 不写状态，只请求开窗口——不违反"办公室不是输入面"。
+    'office:open-desk',
   ]);
 });
 

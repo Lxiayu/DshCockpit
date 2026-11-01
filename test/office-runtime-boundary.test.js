@@ -494,6 +494,11 @@ test('boundary: the composition root require set is frozen (new logic must not m
     // 同样是为了**避免**组合根膨胀（4800 行硬上限）；拆出的是隐私边界，
     // 它值得被单独审查与测试，而不是埋在一个 4800 行的文件里。
     './office-mission-board.js',
+    // 2026-11-01：白板 → Mission Desk 的导航通道。
+    // 抽出来的理由与上面几条一致：**避免组合根膨胀**（4800 行硬上限）。
+    // 额外好处：这个模块不 require 任何 store/reducer/projection，
+    // "它不碰状态"这件事在文件边界上一目了然。
+    './office-desk-nav.js',
     './layout-assets.js',
     './runtime/animation-controller.js',
     './runtime/approval-risk.js',

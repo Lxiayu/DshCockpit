@@ -348,9 +348,11 @@ test('⑤ office.html shows the expired note instead of the plain empty state (A
 // office:dispatch，无新通道)。
 // ---------------------------------------------------------------------------
 
-test('office:* channels are pinned at nine; office:dispatch gains only an optional text field', () => {
+test('office:* channels are pinned at ten; office:dispatch gains only an optional text field', () => {
   // 2026-10-30: 8 → 9 (office:place, drag drop-point write-back)
-  assert.equal(officeModule.OFFICE_IPC_CHANNELS.length, 9);
+  // 2026-11-01: 9 → 10 (office:open-desk: board click opens the Mission Desk;
+  //             pure navigation, writes no state — does not break 「办公室不是输入面」)
+  assert.equal(officeModule.OFFICE_IPC_CHANNELS.length, 10);
   const withText = officeModule.validateOfficeIpcPayload('office:dispatch', { employeeId: 'coder', text: '追加任务' });
   assert.equal(withText.ok, true);
   assert.deepEqual(withText.value, { employeeId: 'coder', text: '追加任务' });

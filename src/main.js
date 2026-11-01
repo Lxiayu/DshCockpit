@@ -1192,6 +1192,8 @@ function ensureOfficeModule() {
       // 所以这里注入一个**纯读取**的 provider：它只返回已派生好的数据。
       // 写入方向是反的——办公室永不写 Mission（domain-model 铁律：单一作者）。
       missionBoardProvider: () => currentMissionBoard(),
+    // 白板点击 → 打开 Mission Desk（复用已有的 auxWindows.openMissionDesk）
+    openDeskWindow: () => auxWindows.openMissionDesk(),
       pack: loadProductionCharacterPack(),
       layout: runtimeLayout ? runtimeLayout.fixture : undefined,
       dialogue: loadOfficeDialogueCorpus() || undefined,

@@ -1086,7 +1086,9 @@
             if (m.openQuestions > 0) meta.classList.add('needs-you');
             li.appendChild(meta);
 
-            const open = () => { window.dshShell.openMissionDesk(); };
+            // 用 officeBridge（本视图唯一的桥），不是 dshShell ——
+            // 后者只存在于 settings 视图，这里调用会抛 TypeError。
+            const open = () => { window.officeBridge.openMissionDesk(); };
             li.addEventListener('click', open);
             li.addEventListener('keydown', (e) => {
               if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }

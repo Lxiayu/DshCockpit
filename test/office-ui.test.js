@@ -796,6 +796,8 @@ test('office:* IPC channels are pinned (2026-10-30: nine, added office:place)', 
     'office:diagnostics',
     'office:dispatch',
     'office:interrupt',
+    // 2026-11-01：9 → 10。白板点击 → 打开 Mission Desk（纯导航，不写状态）。
+    'office:open-desk',
     'office:pending',
     // 2026-10-30: 拖拽落点写回，载荷只有 employeeId + 归一化坐标。
     'office:place',
@@ -1115,13 +1117,13 @@ test('main process registers the office runtime protocol handler after Electron 
 test('office-preload.js exposes only the whitelisted office bridge API', () => {
   execFileSync(process.execPath, ['--check', path.join(ROOT, 'src', 'office', 'office-preload.js')]);
   const source = fs.readFileSync(path.join(ROOT, 'src', 'office', 'office-preload.js'), 'utf8');
-  // nine channels since 2026-10-30 (office:place writes a drag drop-point back
-  // into the simulation); the delivery API stays invoke-only.
-  for (const channel of ['office:state', 'office:dispatch', 'office:cancel', 'office:interrupt', 'office:settings', 'office:diagnostics', 'office:visibility', 'office:pending', 'office:place']) {
+  // ten channels since 2026-11-01 (office:open-desk requests the Mission Desk
+  // window — pure navigation, writes no state); the delivery API stays invoke-only.
+  for (const channel of ['office:state', 'office:dispatch', 'office:cancel', 'office:interrupt', 'office:settings', 'office:diagnostics', 'office:visibility', 'office:pending', 'office:place', 'office:open-desk']) {
     assert.ok(source.includes(`'${channel}'`), `preload references ${channel}`);
   }
   assert.doesNotMatch(source, /ipcRenderer\.send\(/, 'invoke only, no raw send channels');
-  assert.doesNotMatch(source, /['"]office:(?!(state|dispatch|cancel|interrupt|settings|diagnostics|visibility|pending|place))/, 'no other office channels (shell:office-* is the shell namespace)');
+  assert.doesNotMatch(source, /['"]office:(?!(state|dispatch|cancel|interrupt|settings|diagnostics|visibility|pending|place|open-desk))/, 'no other office channels (shell:office-* is the shell namespace)');
 });
 
 test('office page resolves the production character pack from a portable descriptor', () => {

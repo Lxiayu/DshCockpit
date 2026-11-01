@@ -48,6 +48,7 @@
 
 const fs = require('node:fs');
 const { validatePackAction, isPackAction, runPackAction } = require('./office-pack-actions.js');
+const { handleOpenDesk } = require('./office-desk-nav.js');
 const path = require('node:path');
 // P1 运行时体检（2026-09-26）：仿真时钟节流归因。monitorEventLoopDelay / ELU /
 // GC 记录都是主进程级观测（不是仿真状态），只服务 start() 驱动器的诊断块；
@@ -203,6 +204,7 @@ const PENDING_DETAIL_ALLOWLIST = Object.freeze([
 // (answering through the shared respondToRuntime $events/result path), so they
 // need their own whitelisted channel — mirroring the office:settings action
 // discriminator instead of inventing one channel per action.
+// 注意：常量内不要写行内注释——有测试按 split(',') 解析它。
 const OFFICE_IPC_CHANNELS = Object.freeze([
   'office:state',
   'office:dispatch',
@@ -213,6 +215,7 @@ const OFFICE_IPC_CHANNELS = Object.freeze([
   'office:visibility',
   'office:pending',
   'office:place',
+  'office:open-desk',
 ]);
 
 const PROVEN_CAPABILITIES = Object.freeze({
@@ -485,6 +488,9 @@ function createOfficeModule(options = {}) {
     // office-module 禁 fs，而 mission store 需要 fs —— 所以数据由主进程读好、
     // 派生好再注入。这个 provider 是**纯读取**：办公室永不写 Mission。
     missionBoardProvider = null,
+    // P3.5 复盘：白板点击要打开 Mission Desk。注入而不是直接 require，
+    // 因为窗口生命周期属于壳层（office-module 保持 pure-Node 边界）。
+    openDeskWindow = null,
     // Issue #24：角色包管理（由 main.js 注入）。
     // office-module 是**纯 Node 内核，禁止 fs/网络**，所以"读磁盘上的包目录"
     // 这件事必须由注入的管理器完成。这里只做 action 校验与转发，
@@ -4584,6 +4590,10 @@ function validateOfficeIpcPayload(channel, payload) {
       if (!EMPLOYEE_IDS.includes(payload.employeeId)) return { ok: false, code: 'PAYLOAD_INVALID' };
       return { ok: true, value: { employeeId: payload.employeeId } };
     }
+    case 'office:open-desk':
+      // 抽到独立模块：office-module 有 4800 行上限，而这个功能
+      // 与状态机无关（纯窗口导航），职责上也不属于这里。
+      return handleOpenDesk({ keys, openDeskWindow });
     case 'office:visibility': {
       // 2026-09-24 latch fix: `renderer` is the view-side renderer state the
       // page attaches on the EXISTING invoke (mode / diagnosticCode /

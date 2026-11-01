@@ -103,7 +103,10 @@ function registerCapabilityPacksIpc(ipcMain, ctx) {
     if (!found || !found.manifest) {
       return { ok: false, code: 'PACK_NOT_FOUND', reason: `no built-in pack named "${id}"` };
     }
-    const r = await installer.install(found.manifest);
+    // packDir 必须传：verify 命令靠 DSH_PACK_DIR 定位自己的包目录。
+    // 第一版没传 → 依赖该变量的包永远 VERIFY_FAILED（而验收用 stub 绕过了，
+    // 所以从未发现）。见 P3.5 复盘。
+    const r = await installer.install(found.manifest, { packDir: found.dir });
     // 把 verify 细节带回给 UI：用户要看到"为什么失败"
     return {
       ok: r.ok,

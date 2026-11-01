@@ -23,6 +23,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 
 const { validateManifest, platformSupport } = require('./manifest');
 const { runVerify } = require('./verify');
@@ -44,6 +45,33 @@ function emptyRecord() {
  * @param {string} [opts.platform]
  * @param {Function} [opts.log]
  */
+/**
+ * verify 的工作目录：一个**临时目录**，不是用户 cwd。
+ *
+ * 宁可每次新建（有微小成本），也不要让 verify 的副作用落在用户目录——
+ * 那是"装个包，结果仓库根多了个文件"的经典体验问题。
+ */
+function verifyCwd() {
+  try {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-pack-verify-'));
+    return dir;
+  } catch {
+    // 临时目录都建不出来时退回 tmpdir（仍然不是用户 cwd）
+    return os.tmpdir();
+  }
+}
+
+/** verify 需要的环境：让命令能定位自己的包目录。 */
+function packEnv(manifest, packDir) {
+  // 优先用调用方给的绝对路径；没有则按内置包布局猜（仅尽力而为）。
+  if (typeof packDir === 'string' && packDir !== '') {
+    return { DSH_PACK_DIR: path.resolve(packDir) };
+  }
+  const id = manifest && manifest.id;
+  if (!id) return null;
+  return { DSH_PACK_DIR: path.resolve(path.join('capability-packs', id)) };
+}
+
 function createCapabilityInstaller(opts = {}) {
   const { dataDir, runner, platform = process.platform, log = () => {} } = opts;
   if (!dataDir || typeof dataDir !== 'string') {
@@ -84,7 +112,10 @@ function createCapabilityInstaller(opts = {}) {
    *
    * @returns {Promise<{ok:boolean, code?:string, reason?:string, verify?:object}>}
    */
-  async function install(rawManifest) {
+  async function install(rawManifest, opts2 = {}) {
+    // packDir 单独传，不塞进 manifest：
+    // manifest 是 fail-closed 的（未知字段一律拒绝），往里加字段是错的。
+    const packDir = typeof opts2.packDir === 'string' ? opts2.packDir : null;
     const validated = validateManifest(rawManifest);
     if (!validated.ok) {
       return { ok: false, code: 'MANIFEST_INVALID', reason: validated.errors.join('; ') };
@@ -108,7 +139,18 @@ function createCapabilityInstaller(opts = {}) {
     }
 
     // ---- 跑一次 verify：装完立刻知道能不能用 ----
-    const verify = await runVerify(manifest, { runner, platform });
+    //
+    // 必须传 cwd 与包目录：
+    //   · cwd —— verify 会写临时文件，不能在用户当前目录里留垃圾
+    //   · DSH_PACK_DIR —— verify 命令靠它定位自己的包（模板、脚本等）
+    //
+    // 第一版两者都没传。后果是：依赖 DSH_PACK_DIR 的包（research-report）
+    // 永远 VERIFY_FAILED；不依赖的包（workspace-verification）则把文件
+    // 写进应用 cwd，在用户目录里留垃圾。
+    //
+    // 为什么一直没发现：真机验收把 `install` 通道整个 stub 掉了，
+    // 从未跑过真正的安装器。**验收用 stub 绕过被测对象，等于没验收。**
+    const verify = await runVerify(manifest, { runner, platform, cwd: verifyCwd(), env: packEnv(manifest, packDir) });
     if (verify.state === 'skipped' || verify.state === 'not-verified') {
       // 不能安装一个"验证不了"的包——那等于装了个不知道能不能用的东西
       return { ok: false, code: 'VERIFY_NOT_POSSIBLE', reason: verify.reason, verify };
@@ -173,7 +215,7 @@ function createCapabilityInstaller(opts = {}) {
         results.push({ id: entry.id, state: 'not-verified', reason: 'manifest not available' });
         continue;
       }
-      const verify = await runVerify(manifest, { runner, platform });
+      const verify = await runVerify(manifest, { runner, platform, cwd: verifyCwd(), env: packEnv(manifest) });
       results.push({ id: entry.id, version: entry.version, state: verify.state, reason: verify.reason });
     }
     return { ok: true, results };
@@ -193,4 +235,4 @@ function createCapabilityInstaller(opts = {}) {
   return { install, uninstall, list, healthCheck, assertClean, recordPath };
 }
 
-module.exports = { RECORD_SCHEMA_VERSION, RECORD_FILE, createCapabilityInstaller };
+module.exports = { RECORD_SCHEMA_VERSION, RECORD_FILE, createCapabilityInstaller, verifyCwd, packEnv };

@@ -150,9 +150,12 @@ test('office preloads expose the shared dictionary and the shell language channe
   }
   // 2026-10-30：8 → 9。新增 office:place（拖拽落点写回模拟），
   // 载荷只有 employeeId + 归一化坐标；这是一次有意的最小面扩展。
+  // 2026-11-01：9 → 10。新增 office:open-desk（白板点击打开 Mission Desk）。
+  // 它不写任何状态，只请求开窗口——不违反"办公室不是输入面"。
   const officeChannels = officePreload.match(/'office:[a-z-]+'/g) || [];
-  assert.equal(new Set(officeChannels).size, 9, `exactly nine office:* channels (${[...new Set(officeChannels)].join(', ')})`);
+  assert.equal(new Set(officeChannels).size, 10, `exactly ten office:* channels (${[...new Set(officeChannels)].join(', ')})`);
   assert.ok(new Set(officeChannels).has("'office:place'"), 'office:place is part of the pinned surface');
+  assert.ok(new Set(officeChannels).has("'office:open-desk'"), 'office:open-desk is part of the pinned surface');
   const main = read('src/main.js');
   assert.match(main, /ipcMain\.handle\('shell:get-i18n'/, 'main hands out the shared dictionary tables');
   assert.match(main, /\{ t, resolveLanguage, STRINGS \} = require\('\.\/i18n'\)/, 'the tables come from the SAME src/i18n.js import');

@@ -44,6 +44,16 @@ const ALLOWED_CHANNELS = Object.freeze([
   // 拖拽落点写回模拟位置。只传 employeeId + 归一化场景坐标，不含任何身份/
   // 文本信息，与本文件既有的最小面一致。
   'office:place',
+  // 2026-11-01（P3.5 复盘发现的断线）：白板点击要"进入 Mission Desk"。
+  //
+  // 为什么这不算违反"办公室不是输入面"：它**不改变任何状态**，
+  // 只请求打开一个已有窗口。语义等同用户点菜单项，不是写操作。
+  //
+  // 之前白板调用的是 `window.dshShell.openMissionDesk()` —— 但 office 视图
+  // 的 preload 从来不暴露 dshShell（那是 settings 的桥），且
+  // `shell:open-mission-desk` 处理器全仓不存在。点击必然抛 TypeError，
+  // 而离线测试只断言源码里出现了 `openMissionDesk` 字符串，所以全绿。
+  'office:open-desk',
 ]);
 
 const MAX_PAYLOAD_BYTES = 8 * 1024;
@@ -122,6 +132,8 @@ contextBridge.exposeInMainWorld('officeBridge', {
   // mode changes reach the shell log without a new channel. The bare boolean
   // form stays supported (legacy callers / tests).
   placeEmployee: (employeeId, position) => invokeAllowed('office:place', { employeeId, position }),
+  // 白板点击 → 打开 Mission Desk（唯一非读操作，但只请求开窗口，不改状态）
+  openMissionDesk: () => invokeAllowed('office:open-desk', {}),
   notifyVisibility: (visible, renderer) => invokeAllowed(
     'office:visibility',
     renderer === undefined || renderer === null ? { visible: !!visible } : { visible: !!visible, renderer }

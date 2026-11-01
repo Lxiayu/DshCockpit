@@ -205,6 +205,17 @@ test('ipc-contract: the office:* channel set matches the frozen contract', () =>
     'office:diagnostics',
     'office:dispatch',
     'office:interrupt',
+    // 2026-11-01：新增 office:open-desk（排序位置正确）。
+    //
+    // 为什么允许破例：冻结的目的是"办公室不是输入面"（铁律 5）——
+    // 不允许从办公室**写状态**。这个通道不写任何状态，只请求打开
+    // 一个已有窗口，语义等同点菜单项。
+    //
+    // 触发原因：白板点击调 `window.dshShell.openMissionDesk()`，但 office
+    // 视图的 preload 只暴露 officeBridge、处理器全仓不存在 → 点击必 TypeError，
+    // 而离线测试只查字符串所以全绿。修法不是假装修好，是给办公室一个
+    // 最小的、只读语义的导航出口。
+    'office:open-desk',
     'office:pending',
     'office:place',
     'office:settings',
