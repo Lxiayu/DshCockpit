@@ -707,6 +707,55 @@ function createOfficePageController({ bridge, onSnapshot = null, reducedMotion =
       }));
     },
 
+    // P2.3：项目白板的视图模型。
+    //
+    // 第一性原理：为什么这里只做"翻译"，不做判断
+    //
+    //   stale / available / 排序 / 截断都已经在派生层
+    //   （mission-board.js + office-mission-board.js）做完了。
+    //   如果渲染层再算一遍，就会出现"两处规则不一致"——
+    //   典型表现是白板显示"新鲜"但实际数据已 10 分钟没更新。
+    //
+    //   所以这里只把快照字段映射成 UI 需要的形状，并给出一个
+    //   **明确的空态种类**让页面决定文案：
+    //     · 'not-wired'   → 白板还没接通（开发期）
+    //     · 'read-failed' → 读 Mission 失败（故障）
+    //     · 'empty'       → 读到了，当前没有 active Mission（正常空态）
+    //     · 'ok'          → 有数据
+    missionBoardView() {
+      const board = snapshot ? snapshot.missionBoard : null;
+      if (!board) return { kind: 'not-wired', missions: [], totals: null, stale: true };
+      if (board.available !== true) {
+        // 区分故障与正常空态：用户看到的文案必须不同。
+        const kind = board.reason === 'no-active-missions' ? 'empty' : 'unavailable';
+        return {
+          kind,
+          reason: board.reason || null,
+          missions: [],
+          totals: board.totals || { activeMissions: 0, openQuestions: 0, decisions: 0 },
+          stale: board.stale === true,
+        };
+      }
+      return {
+        kind: 'ok',
+        reason: null,
+        stale: board.stale === true,
+        observedAtMs: board.observedAtMs,
+        moreCount: board.moreCount || 0,
+        missions: (board.missions || []).map((m) => ({
+          missionId: m.missionId,
+          label: m.label,
+          status: m.status,
+          workstreams: m.workstreamCount,
+          activeWorkstreams: m.activeWorkstreamCount,
+          decisions: m.decisionCount,
+          openQuestions: m.openQuestionCount,
+          deliverables: m.deliverableCount,
+        })),
+        totals: board.totals,
+      };
+    },
+
     // P2 §3 block 1: today's usage view model. Null while the shell has no
     // usage data yet (the snapshot stays honest instead of showing zeros).
     usageView() {
