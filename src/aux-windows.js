@@ -31,6 +31,7 @@ function createAuxWindows(deps) {
 
   let quickAskWindow = null;
   let searchWindow = null;
+  let missionDeskWindow = null;
   let loadingWindow = null;
   let pendingLoadingText = null;
 
@@ -177,9 +178,46 @@ function createAuxWindows(deps) {
     if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.show();
   }
 
+  // P1 Mission Desk（Issue #12）：项目级连续性的主界面。
+  // 独立窗口而不是塞进 settings.html —— 后者已 5918 行（TD-31），
+  // 再往里加只会让那个文件继续膨胀。
+  function createMissionDesk() {
+    if (missionDeskWindow && !missionDeskWindow.isDestroyed()) {
+      missionDeskWindow.show();
+      missionDeskWindow.focus();
+      return missionDeskWindow;
+    }
+    missionDeskWindow = new BrowserWindow({
+      width: 1040,
+      height: 720,
+      minWidth: 720,
+      minHeight: 480,
+      show: false,
+      backgroundColor: themeBackground(),
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        // 复用 settings-preload：Mission Desk 只需要 mission 桥，
+        // 但那个 preload 已经是最全的一个，且新增一个 preload 意味着
+        // 多一处需要同步的 surface。这里刻意复用。
+        preload: path.join(__dirname, 'settings-preload.js'),
+      },
+    });
+    missionDeskWindow.loadFile(path.join(__dirname, 'mission-desk.html'));
+    missionDeskWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+    missionDeskWindow.once('ready-to-show', () => missionDeskWindow.show());
+    missionDeskWindow.on('closed', () => { missionDeskWindow = null; });
+    return missionDeskWindow;
+  }
+
+  function openMissionDesk() { return createMissionDesk(); }
+  function hasMissionDesk() { return !!missionDeskWindow && !missionDeskWindow.isDestroyed(); }
+
   return {
     createQuickAsk, openQuickAsk, closeQuickAsk, hasQuickAsk,
     openSearchWindow, closeSearchWindow, hasSearch,
+    openMissionDesk, hasMissionDesk,
     createLoadingWindow, setLoading, closeLoading, showLoadingOnError,
   };
 }

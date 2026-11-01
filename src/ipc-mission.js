@@ -55,6 +55,7 @@ const ACTIONS = Object.freeze([
   'verifyDeliverables',   // 校验产物是否仍与登记时一致
   'getBrief',             // 生成 Mission Brief
   'diagnostics',          // 日志健康度 / 备份 / 归档状态 / 迁移计划
+  'openDesk',             // 打开 Mission Desk 窗口
 ]);
 
 function nowMs() { return Date.now(); }
@@ -67,6 +68,7 @@ function argString(v) { return typeof v === 'string' ? v.trim() : ''; }
  * @param {Function} ctx.workspaceDirOf   () => 当前工作区绝对路径（每次调用时求值）
  * @param {Function} [ctx.snapshotOf]     () => Harness 原始快照（可缺）
  * @param {Function} [ctx.clock]          () => Date.now()
+ * @param {Function} [ctx.openDeskWindow] () => void  打开 Mission Desk 窗口
  * @param {Function} [ctx.log]
  */
 function registerMissionIpc(ipcMain, ctx) {
@@ -74,6 +76,7 @@ function registerMissionIpc(ipcMain, ctx) {
     workspaceDirOf,
     snapshotOf = () => null,
     clock = nowMs,
+    openDeskWindow = null,
     log = () => {},
   } = ctx;
 
@@ -353,6 +356,19 @@ function registerMissionIpc(ipcMain, ctx) {
         migration: migration.planFile(r.store.file),
         workspaceDir: r.workspaceDir,
       };
+    },
+
+    openDesk() {
+      // 窗口打开失败要返回明确原因，而不是静默无反应
+      if (typeof openDeskWindow !== 'function') {
+        return fail('Mission Desk window opener is not wired', 'WINDOW_NOT_WIRED');
+      }
+      try {
+        openDeskWindow();
+        return { ok: true };
+      } catch (err) {
+        return fail(`cannot open Mission Desk: ${err.message}`, 'WINDOW_FAILED');
+      }
     },
   };
 

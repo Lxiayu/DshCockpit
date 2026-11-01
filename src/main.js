@@ -2724,6 +2724,7 @@ function registerIpc() {
   // 会立刻复制 shell:* 的过载问题（TD-01）。
   registerMissionIpc(ipcMain, {
     workspaceDirOf: () => settings.effective().workspace || os.homedir(),
+    openDeskWindow: () => auxWindows.openMissionDesk(),
     // Harness 快照：只读，且必须带时间戳（harness-reader 会强制校验）。
     // 这里从 runtimeMux/runtimeHealth 派生，缺失时返回 null（Mission 会显示"不可用"
     // 而不是谎报 running=false）。

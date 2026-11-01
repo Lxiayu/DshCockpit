@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'unsafe-inline'" />
+<title>Mission Desk</title>
+<link rel="stylesheet" href="theme.css" />
+<style>
+  /* Mission Desk —— P1 的第一个用户可见界面。
+   *
+   * 设计原则（来自 docs/design/mission-desk.md 与 domain-model §2.1.1）：
+   *
+   *   1. **Active / Focused / Running 三个轴必须视觉上分开**。
+   *      用户最容易被误导的地方就是把"我在看这个"当成"这个在跑"。
+   *      → 卡片上的 status 徽章（Active）与 running 圆点（Running）不放在一起，
+   *        且 running 必须带"x 秒前观察到"。
+   *
+   *   2. **多个 active 是常态，不是异常**。
+   *      → 不做"当前项目"这种单数表述；列表默认显示全部 active。
+   *      超过 10 个时给**轻量提示**（软上限），绝不阻止创建。
+   *
+   *   3. **实时状态不可用时明说**（不是显示"未运行"）。
+   *      → 没有 Harness 快照时显示"实时状态不可用"，而不是一个看起来确定的灰点。
+   *
+   *   4. **Brief 是可见的**，因为它就是 Agent 下次会读到的东西。
+   *      用户应该能直接看到"我的项目记忆长什么样"。
+   */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg-app, #14161a); color: var(--text-1); font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  body { display: flex; flex-direction: column; }
+
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border-1); flex: 0 0 auto; }
+  header h1 { font-size: 15px; margin: 0; flex: 1; }
+  .muted { color: var(--text-3, #8a919b); }
+  .tiny { font-size: 11px; }
+
+  button { border: 0; color: inherit; font: inherit; cursor: pointer; border-radius: 7px; padding: 6px 12px; background: var(--bg-hover, #24282f); }
+  button:hover, button:focus-visible { background: var(--border-2, #333a44); outline: none; }
+  button.primary { background: var(--acc, #599dff); color: #06101f; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+
+  main { display: flex; gap: 0; flex: 1 1 auto; min-height: 0; }
+  #list { flex: 0 0 320px; border-right: 1px solid var(--border-1); overflow: auto; padding: 10px; }
+  #detail { flex: 1 1 auto; overflow: auto; padding: 16px; min-width: 0; }
+
+  /* 卡片：status 与 running 分开呈现 */
+  .card { border: 1px solid var(--border-1); border-radius: 9px; padding: 10px 11px; margin-bottom: 8px; cursor: pointer; background: var(--bg-panel, #191c21); }
+  .card:hover { border-color: var(--border-2, #333a44); }
+  .card.sel { border-color: var(--acc, #599dff); }
+  .card .title { font-weight: 600; margin-bottom: 4px; overflow-wrap: anywhere; }
+  .card .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+  /* Mission 自身状态（我们拥有的） */
+  .badge { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: var(--bg-hover, #24282f); color: var(--text-2); letter-spacing: .02em; }
+  .badge.active { background: rgba(89,157,255,.16); color: #8fc0ff; }
+  .badge.paused { background: rgba(255,196,89,.14); color: #ffcf7a; }
+  .badge.completed { background: rgba(92,214,150,.15); color: #7fe0ad; }
+  .badge.abandoned { background: rgba(160,160,160,.14); color: #a9b0b8; }
+
+  /* Harness 的事实（只读，必须带时间） */
+  .live { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-3, #8a919b); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #555c66; flex: 0 0 7px; }
+  .dot.on { background: #5cd696; box-shadow: 0 0 0 3px rgba(92,214,150,.16); }
+  .dot.unknown { background: transparent; border: 1px solid #555c66; }
+
+  .empty { color: var(--text-3, #8a919b); padding: 24px 8px; text-align: center; }
+  .soft-hint { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: rgba(255,196,89,.1); color: #ffcf7a; font-size: 11px; }
+
+  h2 { font-size: 13px; margin: 18px 0 8px; color: var(--text-2); letter-spacing: .04em; text-transform: uppercase; }
+  h3 { font-size: 12px; margin: 14px 0 6px; color: var(--text-3, #8a919b); }
+  ul { margin: 0; padding-left: 18px; }
+  li { margin: 3px 0; overflow-wrap: anywhere; }
+
+  .kv { display: grid; grid-template-columns: 120px 1fr; gap: 4px 12px; }
+  .kv dt { color: var(--text-3, #8a919b); }
+  .kv dd { margin: 0; overflow-wrap: anywhere; }
+
+  pre#briefText { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg-panel, #191c21); border: 1px solid var(--border-1); border-radius: 9px; padding: 12px; font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; line-height: 1.55; margin: 0; }
+  .deliv { border: 1px solid var(--border-1); border-radius: 8px; padding: 7px 9px; margin-bottom: 6px; font-size: 12px; }
+  .deliv .status { font-size: 10px; padding: 1px 7px; border-radius: 999px; }
+  .st-unchanged { background: rgba(92,214,150,.15); color: #7fe0ad; }
+  .st-modified { background: rgba(255,196,89,.16); color: #ffcf7a; }
+  .st-missing { background: rgba(255,120,120,.16); color: #ff9d9d; }
+  .st-invalid, .st-unreadable { background: rgba(160,160,160,.14); color: #a9b0b8; }
+
+  dialog { border: 1px solid var(--border-2, #333a44); border-radius: 11px; background: var(--bg-panel, #191c21); color: var(--text-1); padding: 16px; width: min(460px, 92vw); }
+  dialog::backdrop { background: rgba(0,0,0,.5); }
+  dialog label { display: block; margin: 10px 0 4px; font-size: 12px; color: var(--text-2); }
+  dialog input, dialog textarea { width: 100%; background: var(--bg-input, #12141a); color: var(--text-1); border: 1px solid var(--border-1); border-radius: 7px; padding: 7px 9px; font: inherit; }
+  dialog textarea { min-height: 64px; resize: vertical; }
+  .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  .err { color: #ff9d9d; font-size: 12px; margin-top: 8px; min-height: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Mission Desk</h1>
+  <span id="counts" class="muted tiny"></span>
+  <button id="btnNew" class="primary">新建 Mission</button>
+</header>
+
+<main>
+  <aside id="list"></aside>
+  <section id="detail" class="empty">选择一个 Mission 查看详情</section>
+</main>
+
+<dialog id="dlg">
+  <form id="newForm" method="dialog">
+    <strong>新建 Mission</strong>
+    <label for="fTitle">标题</label>
+    <input id="fTitle" required maxlength="200" placeholder="例如：把产品转成 Agent-first 工作空间" />
+    <label for="fIntent">目标（你的原话，不会被模型改写）</label>
+    <textarea id="fIntent" required placeholder="一句话说明这个项目要达成什么"></textarea>
+    <label for="fConstraint">边界（可留空；用户确认过的不许越界）</label>
+    <input id="fConstraint" maxlength="300" placeholder="例如：不许改 office 业务代码" />
+    <div class="err" id="dlgErr"></div>
+    <div class="dlg-actions">
+      <button type="button" id="btnCancel">取消</button>
+      <button type="submit" class="primary" id="btnCreate">创建</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+'use strict';
+
+// 这个页面只做三件事：调 IPC、渲染、把"不确定"如实呈现。
+// 所有业务语义都在主进程（src/ipc-mission.js → src/mission/**）。
+
+const api = (action, payload) => window.dshShell.mission(action, payload);
+
+const state = {
+  missions: [],
+  selectedId: null,
+  detail: null,
+  brief: null,
+  verified: null,
+  liveAvailable: false,
+};
+
+const $ = (id) => document.getElementById(id);
+
+function el(tag, props = {}, children = []) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') node.className = v;
+    else if (k === 'text') node.textContent = v;
+    else node.setAttribute(k, v);
+  }
+  for (const c of children) node.append(c);
+  return node;
+}
+
+/** 把 observedAtMs 渲染成"x 秒前"，而不是一个绝对时间戳。
+ *  理由：用户关心的是"这个信息有多新"，不是"哪一刻"。
+
+ *  注意：**没有时间戳就返回 null**，调用方必须显示"不可用"，
+ *  绝不能退化成"未运行"。 */
+function relativeTime(observedAtMs) {
+  if (!Number.isFinite(observedAtMs)) return null;
+  const deltaSec = Math.max(0, Math.round((Date.now() - observedAtMs) / 1000));
+  if (deltaSec < 5) return '刚刚';
+  if (deltaSec < 60) return deltaSec + ' 秒前';
+  const m = Math.floor(deltaSec / 60);
+  if (m < 60) return m + ' 分钟前';
+  const h = Math.floor(m / 60);
+  return h + ' 小时前';
+}
+
+// ------------------------------------------------------------------ 渲染
+
+function renderList() {
+  const box = $('list');
+  box.textContent = '';
+  const active = state.missions.filter((m) => m.status === 'active');
+
+  if (state.missions.length === 0) {
+    box.append(el('div', { class: 'empty', text: '还没有 Mission。点右上角新建一个。' }));
+    $('counts').textContent = '';
+    return;
+  }
+
+  // 软上限提示：**只提示，不阻止**（domain-model §2.1.1）
+  $('counts').textContent =
+    '进行中 ' + active.length + ' / 共 ' + state.missions.length;
+
+  for (const m of state.missions) {
+    const row = el('div', { class: 'row' });
+    row.append(el('span', { class: 'badge ' + m.status, text: m.status }));
+
+    // Running 是 Harness 的事实，必须与 status 分开显示且带时间
+    const live = m.live || {};
+    if (live.available) {
+      const t = relativeTime(live.observedAtMs);
+      const dot = el('span', { class: 'dot' + (live.hasRunningAgent ? ' on' : '') });
+      row.append(el('span', { class: 'live' }, [dot, document.createTextNode(
+        live.hasRunningAgent ? 'Agent 在跑 · ' + t : '无 Agent · ' + t)]));
+    } else {
+      // 关键：不可用时明说，不显示灰点假装"未运行"
+      const dot = el('span', { class: 'dot unknown' });
+      row.append(el('span', { class: 'live' }, [dot, document.createTextNode('实时状态不可用')]));
+    }
+    if (live.awaitingUser) {
+      row.append(el('span', { class: 'badge', text: '等你决定' }));
+    }
+
+    const card = el('div', {
+      class: 'card' + (m.missionId === state.selectedId ? ' sel' : ''),
+      role: 'button',
+      tabindex: '0',
+    }, [el('div', { class: 'title', text: m.title }), row]);
+
+    card.addEventListener('click', () => selectMission(m.missionId));
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectMission(m.missionId); }
+    });
+    box.append(card);
+  }
+
+  if (active.length > 10) {
+    // 软提示（不是硬限制）：建议整理，但绝不阻止
+    box.append(el('div', {
+      class: 'soft-hint',
+      text: '你有 ' + active.length + ' 个进行中的 Mission。考虑归档一些？这只是提醒，不影响创建。',
+    }));
+  }
+}
+
+function renderDetail() {
+  const box = $('detail');
+  box.textContent = '';
+  box.className = '';
+  if (!state.detail) {
+    box.className = 'empty';
+    box.textContent = '选择一个 Mission 查看详情';
+    return;
+  }
+  const v = state.detail;
+  const m = v.mission;
+
+  // --- 头部 ---
+  const head = el('div', { class: 'row' });
+  head.append(el('span', { class: 'badge ' + m.status, text: m.status }));
+  const sel = el('select', {});
+  for (const s of ['active', 'paused', 'completed', 'abandoned']) {
+    const o = el('option', { value: s, text: s });
+    if (s === m.status) o.selected = true;
+    sel.append(o);
+  }
+  sel.addEventListener('change', async () => {
+    const r = await api('updateStatus', { missionId: m.missionId, to: sel.value });
+    if (!r.ok) { alert(r.reason); return; }
+    await refresh();
+  });
+  box.append(el('h3', { text: 'Mission 状态（我们拥有）' }), sel);
+
+  // --- 实时（Harness 的事实）---
+  const live = v.live || {};
+  const liveBlock = el('div', {});
+  if (live.available) {
+    liveBlock.append(el('div', {
+      class: 'tiny muted',
+      text: '观察到 ' + relativeTime(live.observedAtMs) + '（' + new Date(live.observedAtMs).toLocaleTimeString() + '）',
+    }));
+    liveBlock.append(el('div', {
+      class: 'tiny',
+      text: 'Agent 在跑：' + (live.hasRunningAgent ? '是' : '否')
+        + ' · 待审批 ' + live.pendingApprovals
+        + ' · 待回答 ' + live.pendingQuestions,
+    }));
+    liveBlock.append(el('div', {
+      class: 'tiny muted',
+      text: '这项状态由 Harness 提供，DshCockpit 只读不写（所以不会在重启后撒谎）。',
+    }));
+  } else {
+    liveBlock.append(el('div', {
+      class: 'tiny muted',
+      text: '实时状态不可用——没有 Harness 快照。这不代表"没有在跑"，只代表我们现在读不到。',
+    }));
+  }
+  box.append(el('h3', { text: '实时状态（Harness 拥有，只读）' }), liveBlock);
+
+  // --- 目标 ---
+  box.append(el('h2', { text: '目标' }));
+  box.append(el('div', { text: m.intent }));
+
+  // --- 边界 ---
+  box.append(el('h2', { text: '边界' }));
+  if (!m.constraints || m.constraints.length === 0) {
+    box.append(el('div', { class: 'muted tiny', text: '未声明边界。' }));
+  } else {
+    const ul = el('ul', {});
+    for (const c of m.constraints) {
+      ul.append(el('li', { text: c.text + (c.source === 'model' ? '（模型建议）' : '') }));
+    }
+    box.append(ul);
+  }
+
+  // --- 决策 ---
+  box.append(el('h2', { text: '决策（含理由）' }));
+  if (!v.decisions || v.decisions.length === 0) {
+    box.append(el('div', { class: 'muted tiny', text: '还没有记录决策。' }));
+  } else {
+    const ul = el('ul', {});
+    for (const d of v.decisions) {
+      const li = el('li', {});
+      li.append(el('div', { text: d.text + (d.status === 'superseded' ? '（已被 ' + (d.supersededBy || '?') + ' 取代）' : '') }));
+      li.append(el('div', { class: 'muted tiny', text: '为什么：' + d.rationale }));
+      ul.append(li);
+    }
+    box.append(ul);
+  }
+
+  // --- 未决问题 ---
+  const openQ = (v.questions || []).filter((q) => q.status === 'open');
+  box.append(el('h2', { text: '未决问题' }));
+  if (openQ.length === 0) {
+    box.append(el('div', { class: 'muted tiny', text: '没有未决问题。' }));
+  } else {
+    const ul = el('ul', {});
+    for (const q of openQ) {
+      const li = el('li', {});
+      li.append(el('div', { text: q.text }));
+      const wrap = el('div', { class: 'row', style: 'margin-top:4px' });
+      const input = el('input', { placeholder: '回答…', style: 'flex:1;min-width:120px' });
+      const btn = el('button', { text: '回答' });
+      btn.addEventListener('click', async () => {
+        const r = await api('answerQuestion', { questionId: q.questionId, answer: input.value, missionId: m.missionId });
+        if (!r.ok) { alert(r.reason); return; }
+        await refresh();
+      });
+      wrap.append(input, btn);
+      li.append(wrap);
+      ul.append(li);
+    }
+    box.append(ul);
+  }
+
+  // --- Workstreams ---
+  box.append(el('h2', { text: '工作流' }));
+  if (!v.workstreams || v.workstreams.length === 0) {
+    box.append(el('div', { class: 'muted tiny', text: '还没有工作流。' }));
+  } else {
+    const ul = el('ul', {});
+    for (const w of v.workstreams) {
+      ul.append(el('li', { text: '[' + w.status + '] ' + w.title }));
+    }
+    box.append(ul);
+  }
+
+  // --- 产物 ---
+  box.append(el('h2', { text: '产物' }));
+  const ver = state.verified;
+  if (!v.deliverables || v.deliverables.length === 0) {
+    box.append(el('div', { class: 'muted tiny', text: '还没有登记产物。' }));
+  } else {
+    for (const d of v.deliverables) {
+      const res = ver && ver.results ? ver.results.find((x) => x.deliverableId === d.deliverableId) : null;
+      const status = res ? res.status : 'unchecked';
+      const box2 = el('div', { class: 'deliv' });
+      const row = el('div', { class: 'row' });
+      row.append(el('span', { text: d.label }));
+      row.append(el('span', { class: 'status st-' + status, text: status }));
+      box2.append(row);
+      box2.append(el('div', { class: 'muted tiny', text: d.relPath + ' · sha256:' + String(d.digest).slice(0, 12) + '…' }));
+      if (res && res.status === 'modified') {
+        box2.append(el('div', { class: 'tiny', text: '内容已变化（登记时 ' + String(res.expected).slice(0, 8) + '… → 现在 ' + String(res.actual).slice(0, 8) + '…）' }));
+      }
+      if (res && res.status === 'missing') {
+        box2.append(el('div', { class: 'tiny', text: '文件已不存在：' + res.reason }));
+      }
+      box.append(box2);
+    }
+    const verifyBtn = el('button', { text: '校验产物是否仍是当时那一版' });
+    verifyBtn.addEventListener('click', async () => {
+      const r = await api('verifyDeliverables', { missionId: m.missionId });
+      if (!r.ok) { alert(r.reason); return; }
+      state.verified = r;
+      renderDetail();
+    });
+    box.append(verifyBtn);
+  }
+
+  // --- Brief ---
+  box.append(el('h2', { text: 'Mission Brief（下次会话 Agent 会读到这个）' }));
+  if (!state.brief) {
+    box.append(el('div', { class: 'muted tiny', text: '正在生成…' }));
+  } else if (state.brief.empty) {
+    box.append(el('div', { class: 'muted tiny', text: 'Brief 为空。' }));
+  } else {
+    box.append(el('div', {
+      class: 'tiny muted',
+      text: state.brief.bytes + ' 字节'
+        + (state.brief.truncated ? ' · 已截断（省略了 ' + JSON.stringify(state.brief.dropped) + '）' : ' · 未截断'),
+    }));
+    box.append(el('pre', { id: 'briefText', text: state.brief.text }));
+  }
+
+  // --- 诊断 ---
+  const diagBtn = el('button', { text: '诊断（日志健康 / 备份 / 迁移）' });
+  diagBtn.style.marginTop = '18px';
+  diagBtn.addEventListener('click', async () => {
+    const r = await api('diagnostics');
+    if (!r.ok) { alert(r.reason); return; }
+    alert(JSON.stringify(r, null, 2));
+  });
+  box.append(diagBtn);
+}
+
+// ------------------------------------------------------------------ 数据
+
+async function refresh() {
+  const list = await api('list');
+  if (!list.ok) {
+    $('list').textContent = '';
+    $('list').append(el('div', { class: 'empty', text: '无法读取 Mission：' + list.reason }));
+    return;
+  }
+  state.missions = list.missions || [];
+  if (state.selectedId && !state.missions.some((m) => m.missionId === state.selectedId)) {
+    state.selectedId = null;
+  }
+  renderList();
+  if (state.selectedId) await loadDetail(state.selectedId);
+  else renderDetail();
+}
+
+async function selectMission(missionId) {
+  state.selectedId = missionId;
+  state.verified = null;
+  state.brief = null;
+  renderList();
+  await loadDetail(missionId);
+}
+
+async function loadDetail(missionId) {
+  const r = await api('get', { missionId });
+  if (!r.ok) {
+    state.detail = null;
+    renderDetail();
+    return;
+  }
+  state.detail = { ...r.view, live: r.live };
+  renderDetail();
+  // Brief 单独取（它可能较大，且失败不应影响主视图）
+  const b = await api('getBrief', { missionId });
+  state.brief = b.ok ? b.brief : { empty: true };
+  renderDetail();
+}
+
+// ------------------------------------------------------------------ 交互
+
+$('btnNew').addEventListener('click', () => {
+  $('fTitle').value = '';
+  $('fIntent').value = '';
+  $('fConstraint').value = '';
+  $('dlgErr').textContent = '';
+  $('dlg').showModal();
+  $('fTitle').focus();
+});
+
+$('btnCancel').addEventListener('click', () => $('dlg').close());
+
+$('newForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const title = $('fTitle').value.trim();
+  const intent = $('fIntent').value.trim();
+  const constraintsText = $('fConstraint').value.trim();
+  if (!title || !intent) { $('dlgErr').textContent = '标题与目标都必须填写。'; return; }
+
+  const payload = { title, intent };
+  if (constraintsText) {
+    payload.constraints = [{ id: 'con-1', text: constraintsText, source: 'user' }];
+  }
+  const r = await api('create', payload);
+  if (!r.ok) { $('dlgErr').textContent = r.reason; return; }
+
+  $('dlg').close();
+  state.selectedId = r.missionId;
+  await refresh();
+});
+
+// 启动
+refresh();
+</script>
+</body>
+</html>

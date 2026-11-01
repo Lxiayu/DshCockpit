@@ -137,4 +137,9 @@ contextBridge.exposeInMainWorld('dshShell', {
   })),
   closeCenter: () => ipcRenderer.send('center:close'),
   returnToCockpit: () => ipcRenderer.send('center:return-cockpit'),
+  // P1 Mission Core（Issue #12）：单通道 + action 判别式。
+  // 这里只做一层转发，不做参数校验——校验在 src/ipc-mission.js（可纯 Node 测试）。
+  // 为什么不在 preload 里逐个列出 14 个方法：那会让每次新增 action 都要改
+  // preload（三处同步），而这层本来就没有语义。
+  mission: (action, payload) => ipcRenderer.invoke('mission:invoke', action, payload),
 });
