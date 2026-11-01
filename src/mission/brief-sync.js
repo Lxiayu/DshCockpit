@@ -160,6 +160,37 @@ function readSyncState(existing) {
  * 但**仍然复用**同一个路径约定（<workspace>/AGENTS.md），
  * 所以用户可以同时在设置页看到并编辑结果。
  */
+// 官方的指令文件上限（@deepseek-ai/dsh-agent-instructions
+// 的 DEFAULT_MAX_SOURCE_BYTES）。超过它整个文件会被忽略——
+// 静默失效，用户收不到任何提示。所以我们要在写入前先挡住。
+const MAX_INSTRUCTION_BYTES = 1048576;
+
+// 官方的项目根判定标记（projectRootMarkers）。
+// 没有 .git 的目录可能不被识别为项目根，于是 <workspace>/AGENTS.md
+// 根本不会被加载——这是"Brief 写了但没生效"最可能的真实原因。
+const PROJECT_ROOT_MARKERS = ['.git'];
+
+/**
+ * 检查工作区是否会因"不像项目根"而让 Brief 静默失效。
+ *
+ * 这不是拒绝写入（用户可能就是想要一个非 git 工作区），
+ * 而是**如实告知风险**——让调用方能提示用户，而不是静默失败。
+ */
+function inspectWorkspaceRoot(workspaceDir) {
+  const warnings = [];
+  if (!workspaceDir) return { warnings };
+  const looksLikeRoot = PROJECT_ROOT_MARKERS.some((marker) => {
+    try { return fs.existsSync(path.join(workspaceDir, marker)); } catch { return false; }
+  });
+  if (!looksLikeRoot) {
+    warnings.push(
+      'workspace has no .git — the runtime identifies project roots by .git, '
+      + 'so <workspace>/AGENTS.md may not be loaded automatically',
+    );
+  }
+  return { warnings, looksLikeRoot };
+}
+
 function syncToWorkspace({ workspaceDir, briefText, meta = {} }) {
   if (!workspaceDir) return { ok: false, reason: 'workspaceDir is required' };
   const file = path.join(workspaceDir, 'AGENTS.md');
@@ -180,6 +211,20 @@ function syncToWorkspace({ workspaceDir, briefText, meta = {} }) {
     return { ok: true, action: 'unchanged', file };
   }
 
+  // 超过官方上限 = 整个文件被忽略。宁可明确报错，也不要写一个读了等于没读的文件。
+  const contentBytes = Buffer.byteLength(merged.content, 'utf8');
+  if (contentBytes > MAX_INSTRUCTION_BYTES) {
+    return {
+      ok: false,
+      code: 'INSTRUCTION_TOO_LARGE',
+      reason: `AGENTS.md would be ${contentBytes} bytes, over the runtime limit of ${MAX_INSTRUCTION_BYTES}`,
+      file,
+    };
+  }
+
+  // 非致命但重要：没有 .git 时 Brief 可能不被加载
+  const rootInfo = inspectWorkspaceRoot(workspaceDir);
+
   // 原子写：唯一临时名，避免并发互踩
   try {
     const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
@@ -190,7 +235,7 @@ function syncToWorkspace({ workspaceDir, briefText, meta = {} }) {
     return { ok: false, reason: `cannot write ${file}: ${err.message}`, file };
   }
 
-  return { ok: true, action: merged.action, file };
+  return { ok: true, action: merged.action, file, warnings: rootInfo.warnings };
 }
 
 /** 撤销同步（只删标记块）。 */
@@ -244,4 +289,6 @@ module.exports = {
   syncToWorkspace,
   unsyncFromWorkspace,
   inspect,
+  inspectWorkspaceRoot,
+  MAX_INSTRUCTION_BYTES,
 };
