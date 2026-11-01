@@ -102,19 +102,25 @@ async function main() {
   // ---- 2. 单列布局成立（不是双栏被压扁）----
   const layout = await ev(`(() => {
     const list = document.getElementById('list').getBoundingClientRect();
+    const picker = document.getElementById('dockPicker').getBoundingClientRect();
     const detail = document.getElementById('detail').getBoundingClientRect();
     return {
+      pickerW: Math.round(picker.width),
       listW: Math.round(list.width), listH: Math.round(list.height),
       detailW: Math.round(detail.width), detailTop: Math.round(detail.top),
-      listBottom: Math.round(list.bottom),
+      pickerBottom: Math.round(picker.bottom),
       docW: Math.round(document.documentElement.clientWidth),
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth + 2,
     };
   })()`).catch(() => ({}));
+  // 2026-11-01：dock 模式下 #list 已整个 display:none（选择职责移到 picker），
+  // 所以"宽度"要量 picker，不是 list。量 list 会得到 0。
   record('the picker spans the full width (single column, not a squeezed双栏)',
-    Math.abs(layout.listW - layout.docW) < 40, `list=${layout.listW} doc=${layout.docW}`);
-  record('the detail pane sits BELOW the picker (vertical stack)', layout.detailTop >= layout.listBottom - 2,
-    `detailTop=${layout.detailTop} listBottom=${layout.listBottom}`);
+    Math.abs((layout.pickerW || 0) - layout.docW) < 40,
+    `picker=${layout.pickerW} doc=${layout.docW}`);
+  record('the detail pane sits BELOW the picker (vertical stack)',
+    layout.detailTop >= (layout.pickerBottom || 0) - 2,
+    `detailTop=${layout.detailTop} pickerBottom=${layout.pickerBottom}`);
   record('there is no horizontal overflow at 380px', layout.overflowX === false, String(layout.overflowX));
 
   // ---- 3. 内容真的是 Mission Desk，不是旧的任务面板 ----

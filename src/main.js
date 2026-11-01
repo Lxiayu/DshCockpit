@@ -2485,6 +2485,19 @@ function broadcastRuntimeHealth(health) {
  *
  * 为什么只给这几个字段：harness-reader 有白名单，raw sessionId / prompt /
  * 绝对路径一律丢弃。这里是第一道收窄，那边是第二道。 */
+/**
+ * 日志用的短会话 id。
+ *
+ * `session-<uuid>` 的 slice(0,8) 恰好只截到 "session-"，所有会话长得一样。
+ * 必须跳过固定前缀再截，才有区分度。
+ */
+function shortSessionId(id) {
+  const s = typeof id === 'string' ? id : '';
+  const m = s.match(/^session-([0-9a-f-]+)$/i);
+  if (m) return 's:' + m[1].slice(0, 8);
+  return s.slice(0, 12);
+}
+
 function runtimeSnapshotForMission() {
   try {
     // office 投影是"Agent 是否在跑 / 有没有 pending"的唯一派生来源。
@@ -5481,7 +5494,10 @@ function officeFollowSyncTick() {  const mux = runtimeMux;
         ingestOfficeFollowFrame(sessionId, value);
       });
       officeFollowStreams.set(sessionId, { streamId, misses: 0, reopens: 0, frames: 0 });
-      log(`[office] follow open (${sessionId.slice(0, 8)})`);
+      // sessionId 形如 "session-<uuid>"，slice(0,8) 恰好只截到 "session-"——
+      // 所有会话在日志里长得一样，排查时完全没用。
+      // 取 uuid 的前 8 位才有区分度。
+      log(`[office] follow open (${shortSessionId(sessionId)})`);
       // Spike-verified wire shape: a flat SessionFollowRequest. `assistantStream`
       // is z.literal(true).optional() on 0.1.5 — it must be OMITTED or `true`,
       // never `false` (the gateway rejects `false`). See
@@ -5568,7 +5584,7 @@ function ingestOfficeFollowFrame(sessionId, value) {
     if (mod && typeof mod.ingestHarnessSnapshot === 'function' && records.length > 0) {
       const res = mod.ingestHarnessSnapshot({ sessionId, records });
       if (res && res.ok) {
-        log(`[office] follow window (${sessionId.slice(0, 8)}): ${res.mode}`
+        log(`[office] follow window (${shortSessionId(sessionId)}): ${res.mode}`
           + ` (watermark ${res.watermark}, sync ${res.sync})`);
       } else {
         log(`[office] follow window (${sessionId.slice(0, 8)}): refused (${res && res.code})`);
