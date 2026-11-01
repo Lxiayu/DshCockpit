@@ -193,17 +193,63 @@ jobs:
             console.log("[verdict] " + version + " " + status + " :: " + JSON.stringify(lines));
           '
 
-      # !cancelled(): the ledger PR must be recorded even when the verdict
-      # above went red (incompatibility IS the data we want on record).
-      - name: Create Pull Request
+      # ---------------------------------------------------------------------
+      # Issue #21: 账本必须**真的**落地，而不是开一个没人合的 PR。
+      #
+      # 事故：PR #7 自 2026-09-17 起 OPEN 三个月，账本停在 0.1.5（2026-09-16），
+      # 而 CI 每日验证 0.2.1 全绿。设置页读取端做 `current === latestVerified`，
+      # 陈旧账本恰好满足等式 → 显示"已是最新已验证版本"。
+      #
+      # 修复策略（三层）：
+      #   L1 自动回写：直接推到 master（仅 docs/compat/** 路径），失败才回退开 PR
+      #   L2 超期检测：app 侧 compat-status 检查账本年龄（见 src/compat-status.js）
+      #   L3 自洽性门禁：check-compat-ledger.js 在推送前校验账本自身一致
+      # ---------------------------------------------------------------------
+      - name: Verify ledger self-consistency (gate before write-back)
         if: ${{ !cancelled() }}
+        run: node scripts/check-compat-ledger.js
+
+      - name: Commit ledger to master (L1 auto write-back)
+        id: writeback
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          set -e
+          if git diff --quiet -- docs/compat; then
+            echo "::notice::账本无变化，跳过回写"
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # 只提交 docs/compat/** —— 这是资产目录，自动更新走 PR 是过度流程
+          git add docs/compat
+          git commit -m "chore(compat): record upstream verification run [skip ci]"
+          # master 可能已被别的提交推进：rebase 后重试一次
+          git push origin HEAD:master || {
+            git pull --rebase origin master
+            git push origin HEAD:master
+          }
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::账本已直接回写 master（docs/compat/**）"
+
+      # 回退路径：直接推送失败（分支保护/权限）时才开 PR，且**标注需要人工处理**
+      - name: Fallback — open PR when direct push is blocked
+        if: ${{ !cancelled() && steps.writeback.outputs.pushed != 'true' }}
         uses: peter-evans/create-pull-request@v6
         with:
           branch: compat/auto-report
           delete-branch: true
-          title: 'chore(compat): upstream verification report'
+          title: 'chore(compat): upstream verification report (NEEDS HUMAN — auto-push failed)'
           body-path: docs/compat/discussion-body.md
           commit-message: 'chore(compat): record upstream compatibility run'
+
+      # Issue #21 根因防复发：回写失败必须**可见**，不能又静默陈旧三个月。
+      - name: Surface write-back failure
+        if: ${{ !cancelled() && steps.writeback.outputs.pushed != 'true' && steps.writeback.outcome == 'failure' }}
+        run: |
+          echo "::error::账本自动回写失败 —— 兼容信息可能开始陈旧，请检查分支保护规则或 workflow 权限"
+          exit 1
 
       # Optional announcement: set the repo variable COMPAT_DISCUSSION_CATEGORY_ID
       # to enable; the body template is generated next to the report.

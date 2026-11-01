@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "label": "upstream",
-  "message": "✅ rc.2 verified",
+  "message": "✅ rc.2 (healthy)",
   "color": "brightgreen"
 }

@@ -42,16 +42,27 @@ function parseUrlLine(text) {
   }
 }
 
-/** Assemble the verdict document written next to the CI logs. */
-function buildResult({ version, platform, startedAt, finishedAt, install, dumpConfig, healthCheck }) {
+/** Assemble the verdict document written next to the CI logs.
+ *
+ * schema 2（Issue #21）：把"release channel / 如何解析到该版本 / 环境探测结果"
+ * 一并记录，让账本可追溯且**不把 runtime 版本与通道混为一谈**。
+ * `gates` 保持原字段名（兼容既有报告渲染器），新增字段纯追加。 */
+function buildResult({
+  version, platform, startedAt, finishedAt, install, dumpConfig, healthCheck,
+  resolveTag = '', resolvedVia = '', nodeVersion = '',
+}) {
   const gates = { install, dumpConfig, healthCheck };
   const ok = Object.values(gates).every((g) => g && g.ok);
   return {
-    schema: 1,
+    schema: 2,
     package: PACKAGE_NAME,
     version,
     platform,
     ok,
+    // --- Issue #21 新增：通道与溯源（runtime 版本 != 通道）---
+    resolveTag: String(resolveTag || ''),
+    resolvedVia: String(resolvedVia || ''),
+    nodeVersion: String(nodeVersion || ''),
     startedAt: new Date(startedAt).toISOString(),
     finishedAt: new Date(finishedAt).toISOString(),
     gates,
@@ -200,22 +211,29 @@ async function gateHealthCheck(runtimeBinJs, dshHome) {
 async function run() {
   const startedAt = Date.now();
   const platform = `${process.platform}-${os.arch()}`;
-  let version = resolveExplicitVersion();
+  const nodeVersion = process.version;
+  const explicit = resolveExplicitVersion();
+  const tag = String(argValue('--resolve-tag') || '').trim();
+  let version = explicit;
+  // Issue #21: 通道必须与版本分开记录——"next" 与 "0.2.1-rc.5" 是两个维度。
+  let resolveTag = explicit ? '' : (tag || 'rc');
+  let resolvedVia = explicit ? 'explicit-version' : '';
   if (!version) {
-    const tag = argValue('--resolve-tag') || 'rc';
-    console.log(`[compat] resolving ${PACKAGE_NAME}@${tag} …`);
-    const resolved = await resolveFromDistTag(tag);
+    console.log(`[compat] resolving ${PACKAGE_NAME}@${resolveTag} …`);
+    const resolved = await resolveFromDistTag(resolveTag);
     if (!resolved.ok) {
       const result = buildResult({
         version: '', platform, startedAt, finishedAt: Date.now(),
         install: { ok: false, ms: 0, reason: resolved.reason },
         dumpConfig: { ok: false, ms: 0, reason: 'skipped' },
         healthCheck: { ok: false, ms: 0, reason: 'skipped' },
+        resolveTag, resolvedVia: `dist-tag:${resolveTag}`, nodeVersion,
       });
       emit(result);
       process.exit(1);
     }
     version = resolved.version;
+    resolvedVia = `dist-tag:${resolveTag}`;
   }
   console.log(`[compat] verifying ${PACKAGE_NAME}@${version} on ${platform}`);
   const dshHome = fs.mkdtempSync(path.join(os.tmpdir(), 'compat-dsh-home-'));
@@ -233,7 +251,10 @@ async function run() {
     try { fs.rmSync(dshHome, { recursive: true, force: true }); } catch { /* best effort */ }
   }
 
-  const result = buildResult({ version, platform, startedAt, finishedAt: Date.now(), install, dumpConfig, healthCheck });
+  const result = buildResult({
+    version, platform, startedAt, finishedAt: Date.now(), install, dumpConfig, healthCheck,
+    resolveTag, resolvedVia, nodeVersion,
+  });
   emit(result);
   process.exit(result.ok ? 0 : 2);
 }

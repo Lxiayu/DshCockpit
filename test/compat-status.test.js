@@ -98,17 +98,56 @@ test('the C-6 feature switch disables fetching entirely', async () => {
   assert.strictEqual(fs.existsSync(path.join(f.userDataDir, 'compat-cache.json')), false);
 });
 
-test('evaluate(): exact version match required (prefix/suffix versions are not compatible)', async () => {
+test('evaluate(): exact version match required (prefix/suffix versions are not compatible)', () => {
   const cs = createCompatStatus({
     getSettings: () => ({}),
     getRuntimeVersion: () => '',
     userDataDir: tmpDir('dsh-compat-x-'),
     fetchImpl: async () => ({ ok: true, json: async () => ({}) }),
   });
-  assert.deepStrictEqual(cs.evaluate('0.1.0-rc.9', payload('0.1.0-rc.9')).compatible, true);
-  assert.strictEqual(cs.evaluate('0.1.0-rc.8', payload('0.1.0-rc.9')).compatible, false);
-  assert.strictEqual(cs.evaluate('', payload('0.1.0-rc.9')).compatible, false);
-  assert.strictEqual(cs.evaluate('0.1.0-rc.9', null).compatible, false);
+  // Issue #21: `compatible` now ALSO requires the ledger conclusion to be fresh.
+  // A ledger timestamped 2026-08-23 is >7 days old by 2026-11-01, so these
+  // assertions pin an explicit `now` that sits right after the payload date.
+  const nearPayload = Date.parse('2026-08-24T00:00:00.000Z');
+  assert.strictEqual(cs.evaluate('0.1.0-rc.9', payload('0.1.0-rc.9'), nearPayload).compatible, true);
+  assert.strictEqual(cs.evaluate('0.1.0-rc.8', payload('0.1.0-rc.9'), nearPayload).compatible, false);
+  assert.strictEqual(cs.evaluate('', payload('0.1.0-rc.9'), nearPayload).compatible, false);
+  assert.strictEqual(cs.evaluate('0.1.0-rc.9', null, nearPayload).compatible, false);
+});
+
+test('evaluate(): a stale-but-matching ledger reports verifiedButStale, never a silent "all good"', () => {
+  const cs = createCompatStatus({
+    getSettings: () => ({}),
+    getRuntimeVersion: () => '',
+    userDataDir: tmpDir('dsh-compat-stale-'),
+    fetchImpl: async () => ({ ok: true, json: async () => ({}) }),
+  });
+  // payload is dated 2026-08-23; evaluate 70 days later (prerelease threshold = 7d)
+  const later = Date.parse('2026-11-01T00:00:00.000Z');
+  const ev = cs.evaluate('0.1.0-rc.9', payload('0.1.0-rc.9'), later);
+  assert.strictEqual(ev.compatible, false, 'stale ledger must NOT claim compatible');
+  assert.strictEqual(ev.fresh, false);
+  assert.strictEqual(ev.stale, true);
+  assert.strictEqual(ev.verified, true, 'the historical verification is still a FACT');
+  assert.strictEqual(ev.verifiedButStale, true);
+  assert.strictEqual(ev.staleThresholdDays, 7, 'prerelease channel uses the 7-day threshold');
+  assert.match(ev.reason, /re-verification recommended/);
+});
+
+test('evaluate(): stable versions use the 30-day threshold, not 7', () => {
+  const cs = createCompatStatus({
+    getSettings: () => ({}),
+    getRuntimeVersion: () => '',
+    userDataDir: tmpDir('dsh-compat-stable-'),
+    fetchImpl: async () => ({ ok: true, json: async () => ({}) }),
+  });
+  const ledger = { schema: 1, updatedAt: '2026-10-10T00:00:00.000Z', latestVerified: '0.2.0' };
+  // 22 days later: stale for prerelease (7d) but still FRESH for stable (30d)
+  const t = Date.parse('2026-11-01T00:00:00.000Z');
+  const ev = cs.evaluate('0.2.0', ledger, t);
+  assert.strictEqual(ev.staleThresholdDays, 30);
+  assert.strictEqual(ev.fresh, true, 'a stable version verified 22 days ago is still fresh');
+  assert.strictEqual(ev.compatible, true);
 });
 
 // ------------------------------------------------- report generator helpers
@@ -207,7 +246,8 @@ test('end-to-end: the CLI aggregates smoke artifacts into status/badge/markdown/
   assert.deepStrictEqual(status.runs[0].platforms, { 'win32-x64': 'pass', 'darwin-arm64': 'pass' });
 
   const badge = JSON.parse(fs.readFileSync(path.join(outDir, 'badge.json'), 'utf8'));
-  assert.strictEqual(badge.message, '✅ rc.11 verified');
+  // schema 2：badge 由账本 recommended 派生，并标注**实际达到的级别**（healthy，非 compatible）
+  assert.strictEqual(badge.message, '✅ rc.11 (healthy)');
 
   const mdFiles = fs.readdirSync(outDir).filter((n) => /^\d{4}-\d{2}-\d{2}-.*\.md$/.test(n));
   assert.strictEqual(mdFiles.length, 1, `dated markdown report written (${mdFiles.join(',')})`);

@@ -11,6 +11,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const policy = require('./compat-policy.js');
 
 const DEFAULT_URL = 'https://raw.githubusercontent.com/Lxiayu/DshCockpit/master/docs/compat/compat-status.json';
 const FETCH_TIMEOUT_MS = 12_000;
@@ -73,47 +74,98 @@ function createCompatStatus(deps) {
     }
   }
 
-  /** True when the active runtime version equals the latest verified version. */
-  function evaluate(currentVersion, data) {
-    const latestVerified = data && typeof data.latestVerified === 'string' ? data.latestVerified : '';
-    return {
-      latestVerified,
-      compatible: !!currentVersion && !!latestVerified && currentVersion === latestVerified,
-    };
+  /**
+   * Evaluate the active runtime against the compatibility ledger.
+   *
+   * Issue #21 (2026-11-01): the old version answered ONE question —
+   * "is current === latestVerified?" — and nothing else. That is how the app
+   * kept advertising "already on the latest verified version" for three months
+   * while CI had moved on: the ledger was stale, but equality alone still held.
+   *
+   * Now the answer separates three things that must never be conflated:
+   *   verified  — the ledger records a passing run for that version (a FACT;
+   *               **never** flips to false just because time passed)
+   *   fresh     — is that conclusion recent enough to act on (DOES decay,
+   *               at channel-dependent rates: prerelease 7d / stable 30d)
+   *   compatible— current runtime == verified version AND the conclusion is fresh
+   *
+   * A stale-but-matching ledger reports `verifiedButStale` rather than
+   * pretending either "all good" or "not verified".
+   */
+  function evaluate(currentVersion, data, nowMs) {
+    const at = typeof nowMs === 'number' ? nowMs : now();
+    return policy.evaluateLedger({
+      currentVersion,
+      ledger: data,
+      verifiedVersion: data && typeof data.latestVerified === 'string' ? data.latestVerified : '',
+      nowMs: at,
+    });
+  }
+
+  /** Ledger-level freshness (independent of which version is active). */
+  function freshness(ledger, nowMs) {
+    const at = typeof nowMs === 'number' ? nowMs : now();
+    return policy.ledgerFreshness(ledger, at);
   }
 
   /**
    * Status for the UI. Never throws.
-   * Returns { ok, enabled, source: 'live'|'cache'|'none', current, updatedAt,
-   *           latestVerified, compatible, reason? }.
+   *
+   * Returns { ok, enabled, source, current, updatedAt, latestVerified,
+   *           compatible, verified, fresh, stale, verifiedButStale,
+   *           ageDays, staleThresholdDays, ledgerStale, ledgerAgeDays, reason? }
+   *
+   * `compatible` is the ONLY field the UI may use to claim "you are on the
+   * latest verified version". `verified` alone means "this version was verified
+   * at some point" — it survives staleness and must never be rendered as a
+   * failure.
    */
   async function getStatus(force = false) {
     const currentVersion = String(getRuntimeVersion() || '');
     if (!getSettings().compatStatusEnabled) {
-      return { ok: true, enabled: false, source: 'none', current: currentVersion, latestVerified: '', compatible: false };
+      return {
+        ok: true, enabled: false, source: 'none', current: currentVersion,
+        latestVerified: '', compatible: false, verified: false, fresh: false,
+        stale: true, verifiedButStale: false, ledgerStale: false,
+      };
     }
     const cached = readCache();
-    const fresh = cached && (now() - cached.fetchedAt) < CACHE_TTL_MS;
-    if (!force && fresh) {
-      const ev = evaluate(currentVersion, cached.data);
-      return { ok: true, enabled: true, source: 'cache', current: currentVersion, updatedAt: cached.data.updatedAt || '', ...ev };
-    }
+    const cacheFresh = cached && (now() - cached.fetchedAt) < CACHE_TTL_MS;
+
+    const decorate = (data, source) => {
+      const ev = evaluate(currentVersion, data);
+      const lf = freshness(data);
+      return {
+        ok: true,
+        enabled: true,
+        source,
+        current: currentVersion,
+        updatedAt: (data && data.updatedAt) || '',
+        // ledger-level staleness: "this file has not been refreshed in a while",
+        // independent of whether the active version matches
+        ledgerStale: lf.known ? !lf.fresh : false,
+        ledgerAgeDays: lf.known ? Math.floor(lf.ageDays) : null,
+        ...ev,
+      };
+    };
+
+    if (!force && cacheFresh) return decorate(cached.data, 'cache');
     try {
       const data = await fetchLive();
       writeCache(data);
-      const ev = evaluate(currentVersion, data);
-      return { ok: true, enabled: true, source: 'live', current: currentVersion, updatedAt: data.updatedAt || '', ...ev };
+      return decorate(data, 'live');
     } catch (err) {
       log(`[compat] live fetch failed (${err.message}); ${cached ? 'serving stale cache' : 'no cache available'}`);
-      if (cached) {
-        const ev = evaluate(currentVersion, cached.data);
-        return { ok: true, enabled: true, source: 'cache', current: currentVersion, updatedAt: cached.data.updatedAt || '', ...ev };
-      }
-      return { ok: false, enabled: true, source: 'none', current: currentVersion, latestVerified: '', compatible: false, reason: err.message };
+      if (cached) return decorate(cached.data, 'cache');
+      return {
+        ok: false, enabled: true, source: 'none', current: currentVersion,
+        latestVerified: '', compatible: false, verified: false, fresh: false,
+        stale: true, verifiedButStale: false, ledgerStale: false, reason: err.message,
+      };
     }
   }
 
-  return { getStatus, evaluate, cacheFile: cacheFile, DEFAULT_URL };
+  return { getStatus, evaluate, freshness, cacheFile: cacheFile, DEFAULT_URL };
 }
 
 module.exports = { createCompatStatus, DEFAULT_URL, CACHE_TTL_MS };

@@ -14,7 +14,8 @@
     "build:mac": "node scripts/build.js --mac --publish never",
     "publish:win": "node scripts/build.js --win --publish always",
     "publish:mac": "node scripts/build.js --mac --publish always",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "check:compat-ledger": "node scripts/check-compat-ledger.js"
   },
   "author": "Lxiayu",
   "license": "MIT",

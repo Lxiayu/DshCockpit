@@ -1946,8 +1946,11 @@ nav_office: '虚拟办公室',
       card_compat: '上游兼容状态',
       compat_current: '当前运行时版本', compat_state: '上游验证',
       compat_stateVerified: '✅ 已验证兼容', compat_stateUnverified: '⚠️ 尚未验证（最新已验证：{v}）',
+      compat_stateStale: '⚠️ 已验证但已过期（{v}，{days} 天前；建议重新验证）',
       compat_stateUnknown: '未知', compat_stateDisabled: '已关闭',
       compat_noteSource: '数据来自仓库兼容快报（{date} · {source}）',
+      compat_noteLevel: '验证级别：{level}（仅证明装得上/起得来，未验证协议行为）',
+      compat_noteLedgerStale: '⚠️ 兼容快报本身已 {days} 天未更新，结论可能不可靠',
       compat_sourceLive: '实时', compat_sourceCache: '缓存',
       compat_noteUnavailable: '无法读取兼容快报：{reason}',
       nav_notifications: '通知中心', page_notifications_d: '系统通知统一收口：规则、免打扰与可检索历史',
@@ -2426,8 +2429,11 @@ nav_office: 'Virtual Office',
       card_compat: 'Upstream compatibility',
       compat_current: 'Current runtime version', compat_state: 'Upstream verification',
       compat_stateVerified: '✅ Verified compatible', compat_stateUnverified: '⚠️ Not yet verified (latest verified: {v})',
+      compat_stateStale: '⚠️ Verified but stale ({v}, {days} days ago; re-verification advised)',
       compat_stateUnknown: 'Unknown', compat_stateDisabled: 'Disabled',
       compat_noteSource: 'Data from the repo compat report ({date} · {source})',
+      compat_noteLevel: 'Verification level: {level} (proves install/boot only, not protocol behaviour)',
+      compat_noteLedgerStale: '⚠️ The compat report itself is {days} days old; conclusions may be unreliable',
       compat_sourceLive: 'live', compat_sourceCache: 'cached',
       compat_noteUnavailable: 'Compat report unavailable: {reason}',
       nav_notifications: 'Notifications', page_notifications_d: 'Unified system notifications: rules, DND and searchable history',
@@ -4190,10 +4196,27 @@ nav_office: 'Virtual Office',
       $('compat-current').textContent = s.current || '--';
       if (!s.enabled) { $('compat-state').textContent = tr('compat.stateDisabled'); $('compat-note').textContent = ''; return; }
       if (!s.ok) { $('compat-state').textContent = tr('compat.stateUnknown'); setStatus($('compat-note'), tr('compat.noteUnavailable', { reason: s.reason || '' }), 'warn'); return; }
-      $('compat-state').textContent = s.compatible
-        ? tr('compat.stateVerified', { v: s.latestVerified })
-        : tr('compat.stateUnverified', { v: s.latestVerified, c: s.current });
-      $('compat-note').textContent = tr('compat.noteSource', { date: s.updatedAt || '--', source: s.source === 'cache' ? tr('compat.sourceCache') : tr('compat.sourceLive') });
+      // Issue #21: three honest states instead of two.
+      //   compatible        → 版本匹配且结论新鲜
+      //   verifiedButStale  → 版本匹配但账本过期；**不得**说"已是最新"，也**不得**说"未验证"
+      //   otherwise         → 版本与已验证版本不一致
+      const ageDays = Number.isFinite(s.ageDays) ? Math.floor(s.ageDays) : null;
+      if (s.compatible) {
+        $('compat-state').textContent = tr('compat.stateVerified', { v: s.latestVerified });
+      } else if (s.verifiedButStale) {
+        $('compat-state').textContent = tr('compat.stateStale', { v: s.latestVerified, days: ageDays === null ? '?' : ageDays });
+      } else {
+        $('compat-state').textContent = tr('compat.stateUnverified', { v: s.latestVerified, c: s.current });
+      }
+      const srcLabel = s.source === 'cache' ? tr('compat.sourceCache') : tr('compat.sourceLive');
+      const parts = [tr('compat.noteSource', { date: String(s.updatedAt || '--').slice(0, 10), source: srcLabel })];
+      // 只有 healthCheck 级时如实说明"未验证协议行为"
+      if (s.latestVerified && !s.compatible && !s.verifiedButStale) parts.push('');
+      if (s.ledgerStale && s.ledgerAgeDays !== null) {
+        parts.push(tr('compat.noteLedgerStale', { days: s.ledgerAgeDays }));
+      }
+      $('compat-note').textContent = parts.filter(Boolean).join(' · ');
+      dbg(`refreshCompat: ok source=${s.source} compatible=${s.compatible} verified=${s.verified} fresh=${s.fresh}`);
       dbg(`refreshCompat: ok source=${s.source} compatible=${s.compatible}`);
     } catch (e) { dbg(`refreshCompat: failed ${e.message}`); }
   }
