@@ -31,6 +31,17 @@
     }
     /* 只有真实待办才亮红——0 待办时不亮，否则用户会学会无视它 */
     body[data-kind="needs-you"] #dot { background: #ff5c5c; }
+    /* P4 紧急度：在 needs-you 的基础上再分三档。
+       注意颜色不改语义——红仍然是"待办"，urgent 只是让它**更亮**；
+       later 让它**变柔**（视觉上"可以先放着"）。
+       这不是新语义，是同一语义的强度分级。 */
+    body[data-kind="needs-you"][data-urgency="urgent"] #dot {
+      background: #ff3b3b;
+      box-shadow: 0 0 0 3px rgba(255, 59, 59, .22);
+    }
+    body[data-kind="needs-you"][data-urgency="later"] #dot { background: #b06a6a; }
+    body[data-kind="needs-you"][data-urgency="later"] #label { color: #cfc4c4; }
+    body[data-kind="needs-you"][data-urgency="urgent"] #label { color: #ffc9c9; font-weight: 700; }
     body[data-kind="working"] #dot { background: #ffcf7a; }
     body[data-kind="idle"] #dot { background: #4ade80; }
     body[data-kind="disconnected"] #dot { background: #6b7280; }

@@ -110,6 +110,7 @@
 | `docs/plans/active/P4-RENDER-BACKEND-SEAM-2026-11-01.md` | **RenderBackend 接缝计划** | 为什么做接缝而不是抽象层；20 个方法里只有 2 个是技术特有 |
 | `docs/plans/active/P4-VERIFICATION-PROVIDER-DECISION-2026-11-01.md` | **VerificationProvider 决策** | 结论：不做接口（收益已获得，ADR 时机判断有误） |
 | `docs/plans/active/P4-EXPERIENCE-POLISH-2026-11-01.md` | **P4 体验打磨计划** | 先砍掉与设计文档冲突的"更多物件"；空状态 > 错误粒度 |
+| `docs/plans/active/P4-COMPANION-INFORMATION-2026-11-01.md` | **Companion 信息增强计划** | 小窗该回答"要不要现在看"；紧急度必须真实派生 |
 | `docs/plans/completed/HARNESS-V0.6-PLAN-2026-10-25.md` | 已完成 | v0.6 五工作包计划（续跑/过程可见/首帧/推送/归档） |
 | `docs/plans/completed/HARNESS-V0.6-REPORT-2026-10-26.md` | 已完成 | v0.6 完成报告：变异矩阵、真机脚本、遗留 |
 | `docs/plans/completed/2026-08-30-virtual-office-runtime-implementation.md` | 已完成 | 办公室运行时 Task 0–9（历史记录；路径按当时结构） |
@@ -141,6 +142,7 @@
 | `docs/quality/office-board-acceptance-2026-11-01.md` | **项目白板验收（2026-11-01）** | 10/10 通过；含一次错误诊断的纠正与 4 层探针缺件记录 |
 | `docs/quality/office-inbox-acceptance-2026-11-01.md` | **办公室收件箱验收（2026-11-01）** | 18/18 通过；补上纯逻辑测试测不到的视觉与交互证据 |
 | `docs/quality/companion-acceptance-2026-11-01.md` | **Companion 验收（2026-11-01）** | 11/11 通过；常驻小窗的四状态色彩与产品纪律实测 |
+| `docs/quality/companion-urgency-acceptance-2026-11-01.md` | **Companion 紧急度验收（2026-11-01）** | 13/13；三态文案/颜色实测不同，尺寸不变 |
 | `docs/quality/capability-packs-acceptance-2026-11-01.md` | **能力包验收（2026-11-01）** | 13/13 通过；抓到三个离线全绿的缺陷（状态清空、i18n 撞车、DOM id 撞车） |
 | `docs/quality/mission-desk-write-acceptance-2026-11-01.md` | **Desk 写入验收（2026-11-01）** | 11/11 通过；真实点击写入、sha256、状态切换全部实测 |
 | `docs/quality/mission-desk-empty-acceptance-2026-11-01.md` | **Desk 空状态验收（2026-11-01）** | 13/13 通过；空状态给起点、错误保留 code |

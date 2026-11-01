@@ -1,0 +1,71 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "the widget exposes urgency as a separate data attribute",
+      "ok": true,
+      "detail": "{\"u\":\"urgent\",\"n\":\"normal\",\"l\":\"later\"}"
+    },
+    {
+      "name": "kind stays \"needs-you\" in all three (urgency does not override it)",
+      "ok": true,
+      "detail": "{\"u\":\"needs-you\",\"n\":\"needs-you\",\"l\":\"needs-you\"}"
+    },
+    {
+      "name": "URGENT says \"see now\" (an action call, not an adjective)",
+      "ok": true,
+      "detail": "1 件待你处理 · 需要现在看"
+    },
+    {
+      "name": "LATER says \"can wait\" (permission to not interrupt — the valuable one)",
+      "ok": true,
+      "detail": "3 件待你处理 · 可以先放着"
+    },
+    {
+      "name": "NORMAL stays neutral (data supports neither call)",
+      "ok": true,
+      "detail": "3 件待你处理"
+    },
+    {
+      "name": "the three labels are pairwise DIFFERENT",
+      "ok": true,
+      "detail": "[\"1 件待你处理 · 需要现在看\",\"3 件待你处理\",\"3 件待你处理 · 可以先放着\"]"
+    },
+    {
+      "name": "URGENT uses a brighter red than plain needs-you",
+      "ok": true,
+      "detail": "urgent=rgb(255, 59, 59) normal=rgb(255, 92, 92)"
+    },
+    {
+      "name": "URGENT has a glow that normal does not",
+      "ok": true,
+      "detail": "urgent=rgba(255, 59, 59, 0.22) 0px 0px 0px 3px normal=none"
+    },
+    {
+      "name": "LATER is visually muted (softer than the alarm red)",
+      "ok": true,
+      "detail": "later=rgb(176, 106, 106)"
+    },
+    {
+      "name": "the widget stays 220x44 in every state (persistent widgets must not grow)",
+      "ok": true,
+      "detail": "{\"w\":220,\"h\":44}"
+    },
+    {
+      "name": "an idle widget carries NO urgency attribute (nothing to judge)",
+      "ok": true,
+      "detail": "null"
+    },
+    {
+      "name": "screenshots captured for all three urgency states",
+      "ok": true,
+      "detail": "urgent, normal, later"
+    },
+    {
+      "name": "the renderer had no fatal errors",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}
