@@ -58,6 +58,17 @@
 
 ## 详细条目
 
+**✅ 已启动修复（2026-11-01，Issue #22 Phase 0）**：
+
+按用户要求「行为测试先行、小步提取」，Phase 0 未搬任何代码，而是先建立两层安全网：
+
+1. **IPC 契约快照**（`test/ipc-contract.test.js`，8 项）—— 124 个通道的集合、命名规范、重复注册、preload↔handler 一致性、office:* 冻结集合、以及「哪些文件注册了 IPC 但未登记」。
+2. **已抽出域的行为测试**（`test/ipc-features.test.js`，20 项）—— 用假 ipcMain + 注入 ctx 直接调用 11 个 handler，全程不 require('electron')。
+
+**Phase 0 立刻抓到一个真实 bug**：`src/ipc-features.js` 的 `weekly:open-dir` 用了 `path.join`，但该文件**从未 require('node:path')** —— 一旦调用必然 ReferenceError。因为 main.js 顶层没有测试，handler 注册成功、调用才炸，所以这个缺陷一直存在。已修复并加回归测试。
+
+这正是「先给已抽出模块建测试」的价值：不是搬代码，而是先让「搬了有没有错」可被机械判定。
+
 ### TD-01 · `main.js` 已经不可测试地过载
 
 **位置**：`src/main.js`（6385 行）

@@ -5,6 +5,13 @@
 // main.js until their business domains are modularized (v0.4 plan).
 'use strict';
 
+// Issue #22 Phase 0：补上缺失的 require。
+// 原先 weekly:open-dir 用了 path.join 但本文件从未 require('node:path')，
+// 一旦被调用必然 ReferenceError —— 而 main.js 因为顶层没有单元测试，
+// 这个缺陷从未被发现（handler 注册成功，调用时才炸）。
+// 这正是「先给已抽出模块建行为测试」的价值。
+const path = require('node:path');
+
 /**
  * @param {object} ipcMain  electron ipcMain
  * @param {object} ctx — { bootCheck, nc, weeklyGet: () => weekly|null,
