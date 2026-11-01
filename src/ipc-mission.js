@@ -261,9 +261,23 @@ function registerMissionIpc(ipcMain, ctx) {
         missionId,
         text: argString(payload.text),
         rationale: argString(payload.rationale),
-        status: payload.status || 'accepted',
+        // ---- 治理漏洞修复（2026-11-01，审计 B-4）----
+        //
+        // 原来这里是 `payload.status || 'accepted'` 与 `|| 'user'`。
+        // 后果：任何调用方（包括未来的模型）**只要不传**这两个字段，
+        // 写出来的就是"用户已接受的决策"。
+        //
+        // user-journeys §5.4 明确要求「Agent 不能直接把东西标为已定决策」，
+        // 但那只是文档。现在把它变成代码：
+        //   · status 默认 'proposed' —— 提议，不是已接受
+        //   · decidedBy 默认 'model'  —— 来源未知时按"模型提议"处理，
+        //     让"是用户拍的板"成为一个需要显式声明的动作
+        //
+        // 这是**故意的 fail-safe**：宁可把一个真实用户决策标成"待确认"，
+        // 也不要让模型幻觉悄悄变成用户共识。
+        status: payload.status || 'proposed',
         decidedAtMs: clock(),
-        decidedBy: payload.decidedBy || 'user',
+        decidedBy: payload.decidedBy || 'model',
       };
       const check = schema.validateDecision(entity);
       if (!check.ok) return fail(`invalid decision: ${check.errors.join('; ')}`, 'DECISION_INVALID');

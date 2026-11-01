@@ -299,6 +299,14 @@ function renderDetail() {
   }
 
   // --- 决策 ---
+  //
+  // 第一性原理：没有写入的 Desk 不叫 Desk，叫报表。
+  // 报表不能支撑"跨会话不丢" —— 而 V2「不丢决策」正是本产品的核心主张。
+  //
+  // 设计要点（与 answerQuestion 的就地输入同一个模式，不新增弹窗）：
+  //   · 「决定」+「为什么」两个输入，理由必填（schema 强制）
+  //   · 默认走 proposed（提议），不是 accepted —— 见治理漏洞修复 S1
+  //   · 失败时显示具体原因，不只 {ok:false}
   box.append(el('h2', { text: '决策（含理由）' }));
   if (!v.decisions || v.decisions.length === 0) {
     box.append(el('div', { class: 'muted tiny', text: '还没有记录决策。' }));
@@ -307,10 +315,50 @@ function renderDetail() {
     for (const d of v.decisions) {
       const li = el('li', {});
       li.append(el('div', { text: d.text + (d.status === 'superseded' ? '（已被 ' + (d.supersededBy || '?') + ' 取代）' : '') }));
+      // 状态可见：proposed 与 accepted 必须让用户分得清，
+      // 否则"模型提议"会被误读成"已经拍板"。
+      const badge = el('span', {
+        class: 'tiny',
+        style: d.status === 'accepted'
+          ? 'margin-left:6px;color:#7ddca8'
+          : 'margin-left:6px;color:#ffcf7a',
+        text: d.status === 'accepted' ? '已接受' : (d.status === 'proposed' ? '提议中' : d.status),
+      });
+      li.firstChild.append(badge);
       li.append(el('div', { class: 'muted tiny', text: '为什么：' + d.rationale }));
       ul.append(li);
     }
     box.append(ul);
+  }
+  {
+    // 记录一条决策（就地表单）
+    const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
+    const txt = el('input', { placeholder: '决定了什么…', style: 'flex:1;min-width:140px' });
+    const why = el('input', { placeholder: '为什么（必填）…', style: 'flex:1;min-width:140px' });
+    const btn = el('button', { text: '记录决策' });
+    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
+    btn.addEventListener('click', async () => {
+      msg.textContent = '';
+      if (!txt.value.trim()) { msg.textContent = '请填写决定内容'; return; }
+      if (!why.value.trim()) { msg.textContent = '请填写理由 —— 没有理由的决策正是压缩会毁掉的东西'; return; }
+      btn.disabled = true;
+      let r;
+      try {
+        r = await api('recordDecision', {
+          missionId: m.missionId,
+          text: txt.value.trim(),
+          rationale: why.value.trim(),
+          // 用户在 UI 里点"记录决策"= 用户自己拍的板
+          status: 'accepted',
+          decidedBy: 'user',
+        });
+      } catch (e) { r = { ok: false, reason: e.message }; }
+      btn.disabled = false;
+      if (r && r.ok) { txt.value = ''; why.value = ''; await refresh(); }
+      else { msg.textContent = '失败：' + ((r && (r.reason || r.code)) || '未知错误'); }
+    });
+    wrap.append(txt, why, btn, msg);
+    box.append(wrap);
   }
 
   // --- 未决问题 ---
@@ -345,9 +393,51 @@ function renderDetail() {
   } else {
     const ul = el('ul', {});
     for (const w of v.workstreams) {
-      ul.append(el('li', { text: '[' + w.status + '] ' + w.title }));
+      const li = el('li', {});
+      const row = el('div', { class: 'row', style: 'gap:6px;align-items:center' });
+      row.append(el('span', { text: '[' + w.status + '] ' + w.title, style: 'flex:1' }));
+      // 状态切换：阻塞是一个高频动作，必须能就地标记，
+      // 而不是"再开一个编辑弹窗"。
+      for (const next of ['active', 'blocked', 'done'].filter((x) => x !== w.status)) {
+        const b = el('button', {
+          text: next === 'active' ? '进行中' : (next === 'blocked' ? '阻塞' : '完成'),
+          class: 'tiny',
+        });
+        b.addEventListener('click', async () => {
+          b.disabled = true;
+          const r = await api('updateWorkstreamStatus', {
+            missionId: m.missionId, workstreamId: w.workstreamId, to: next,
+          });
+          b.disabled = false;
+          if (r && r.ok) await refresh();
+          else alert('切换失败：' + ((r && (r.reason || r.code)) || '未知错误'));
+        });
+        row.append(b);
+      }
+      li.append(row);
+      ul.append(li);
     }
     box.append(ul);
+  }
+  {
+    // 新建工作流（就地表单）
+    const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
+    const title = el('input', { placeholder: '新工作流名称…', style: 'flex:1;min-width:160px' });
+    const btn = el('button', { text: '新建工作流' });
+    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
+    btn.addEventListener('click', async () => {
+      msg.textContent = '';
+      if (!title.value.trim()) { msg.textContent = '请填写名称'; return; }
+      btn.disabled = true;
+      let r;
+      try { r = await api('addWorkstream', { missionId: m.missionId, title: title.value.trim() }); }
+      catch (e) { r = { ok: false, reason: e.message }; }
+      btn.disabled = false;
+      if (r && r.ok) { title.value = ''; await refresh(); }
+      else { msg.textContent = '失败：' + ((r && (r.reason || r.code)) || '未知错误'); }
+    });
+    wrap.append(title, btn, msg);
+    box.append(wrap);
   }
 
   // --- 产物 ---
@@ -381,6 +471,39 @@ function renderDetail() {
       renderDetail();
     });
     box.append(verifyBtn);
+  }
+
+  {
+    // 登记产物。关键设计：registerDeliverable 会**真的读文件算 sha256**，
+    // 所以"登记成功"本身就证明文件存在。用户填一个不存在的路径会被拒绝——
+    // 这比"只存一个路径字符串"强得多（V3「产物是真实文件」的机械保证）。
+    const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
+    const label = el('input', { placeholder: '产物名称…', style: 'flex:1;min-width:120px' });
+    const rel = el('input', { placeholder: '相对工作区的路径，如 docs/report.md', style: 'flex:2;min-width:180px' });
+    const btn = el('button', { text: '登记产物' });
+    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
+    btn.addEventListener('click', async () => {
+      msg.textContent = '';
+      if (!label.value.trim()) { msg.textContent = '请填写产物名称'; return; }
+      if (!rel.value.trim()) { msg.textContent = '请填写相对路径'; return; }
+      btn.disabled = true;
+      let r;
+      try {
+        r = await api('registerDeliverable', {
+          missionId: m.missionId,
+          label: label.value.trim(),
+          relPath: rel.value.trim(),
+        });
+      } catch (e) { r = { ok: false, reason: e.message }; }
+      btn.disabled = false;
+      if (r && r.ok) { label.value = ''; rel.value = ''; await refresh(); }
+      else {
+        // 失败原因很有信息量：文件不存在 / 是目录 / 路径越界
+        msg.textContent = '失败：' + ((r && (r.reason || r.code)) || '未知错误');
+      }
+    });
+    wrap.append(label, rel, btn, msg);
+    box.append(wrap);
   }
 
   // --- Brief ---
