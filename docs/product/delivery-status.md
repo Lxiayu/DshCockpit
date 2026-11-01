@@ -34,7 +34,7 @@ P0（地基）7/8 · P1（Mission Core）✅ · P2（Office 落地）✅ · P3�
 | #19 | Settings 保护（分层回退 + .bak 链 + 原子写） | `src/settings-persistence.js`，18 项测试 |
 | #22 | IPC 安全网（契约快照 + 分域提取） | `test/ipc-contract.test.js` |
 | #17 | 符号引用替代会漂移的行号 | `scripts/source-ref.js`，17 项测试 |
-| **#23** | **`agentTeam` 字段形状验证** | ❌ **未达成** —— 需真实模型调用 |
+| **#23** | **`agentTeam` 字段形状验证** | ✅ **2026-11-01 达成** —— 官方 .d.ts 逐字段比对（5 项 exact match）+ Brief 跨会话真机 8/8 |
 
 ## 3. S1 —— Runtime 能力探测（TD-29 已解决）
 

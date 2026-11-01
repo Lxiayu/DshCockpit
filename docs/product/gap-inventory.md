@@ -71,16 +71,16 @@
 
 ## 4. 真正的缺口（3 个，都不是"规划被遗忘"）
 
-### 缺口 1：`agentTeam` 字段形状未验证（#23）
+### ~~缺口 1：`agentTeam` 字段形状未验证（#23）~~ ✅ 已解决
 
-| | |
-|---|---|
-| 阻塞什么 | P0 唯一未达成条件；Brief 跨会话生效验证；#11 Team Runtime 退役 |
-| 需要什么 | 真实模型调用（现在**已有** StepFun step-5-preview 可用，见下） |
-| 性质 | 依赖未满足，不是设计遗漏 |
+**两个子问题都已解决（2026-11-01）**：
 
-**状态更新**：本轮已接入 StepFun Step Plan + step-5-preview（1M 上下文、
-支持工具调用）。**#23 的前置条件现在具备了**，可以在下一轮实际执行。
+| 子问题 | 状态 | 证据 |
+|---|---|---|
+| 字段形状是什么 | ✅ | 从官方 `.d.ts` 逐字段比对，5 项 exact match；CI 有形状漂移门禁 |
+| Brief 是否真被下次会话读到 | ✅ | 真机 8/8：模型从 AGENTS.md 读出随机暗号 |
+
+**这消除了 P0 的唯一未达成条件，也消除了 P1 的唯一未验证项。**
 
 ### 缺口 2：`product-vision.md` §2.3 的 N2/N3 状态过时
 
@@ -119,7 +119,7 @@
 
 ---
 
-## 5.5 一次独立盘点审计的发现（2026-11-01，已修 5 项）
+## 5.5 一次独立盘点审计的发现（2026-11-01，已全部处置）
 
 一次独立只读审计发现了**比"未做"更严重的一类问题：做了但接不上**。
 
@@ -140,7 +140,7 @@
 | 高 | Mission Desk 的 7 个 action 无 UI | `recordDecision` / `registerDeliverable` / `addWorkstream` / `updateWorkstreamStatus` / `update` / `openQuestion` / `openDesk`。**V2「跨会话不丢决策」与 V3「产物是真实文件」目前没有可用通道** |
 | 高 | TD-03 / TD-05 标记"已修复"但代码没修 | 修复只落在 `settings-store.js`；`work/workspace-store.js` 与 `backup.js` 没接。按"存储已安全"做迁移会丢数据 |
 | ~~中~~ | ~~TaskRef 无生产者~~ | ✅ **已修 2026-11-01**：新增 `linkTaskRef`/`listTaskRefs` + Desk UI；`harnessRef` 走隐私派生（不存 sessionId） |
-| 中 | Brief 跨会话的两处风险 | 已加固（`.git` 检测 + 1 MiB 上限），但端到端仍未验证 |
+| ~~中~~ | ~~Brief 跨会话验证~~ | ✅ **已真机验证 2026-11-01**（8/8）：模型从 AGENTS.md 读出随机暗号。两处风险也已加固 |
 | — | `official-teams-shape.js` 零调用方 | ✅ **已判定为「刻意不接线」**（2026-11-01）：Office 已有 `team-office-adapter`+`team-office-bridge` 一条事实路径，再接一套就是双写（违反铁律 1）。已在模块头声明定位，并加机械门禁防止擅自 require。接线的正确时机是 ADR-0002 R2 等价性验证通过、旧 `team/runtime` 开始退役时**替换**而非并存 |
 | — | `RenderBackend` 接缝 | ✅ **已做 2026-11-01**：`src/office/render/render-backend-contract.js`（接缝不是抽象层；20 个方法里只有 3 个技术特有） |
 | — | `VerificationProvider` 接口 | ✅ **已评估，决定不做** 2026-11-01：收益（可测试/统一入口）已通过 `runVerify` + 注入 runner 获得；缺的是第二个实现，写代码解决不了。触发条件已写进 ADR-0003 |
