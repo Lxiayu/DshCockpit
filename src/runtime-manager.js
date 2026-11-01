@@ -15,6 +15,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const semver = require('semver');
+const runtimeCapability = require('./runtime-capability');
 
 const PACKAGE = '@deepseek-ai/dsh';
 const SMOKE_TIMEOUT_MS = 60_000;
@@ -36,15 +37,26 @@ const STARTUP_FAIL_THRESHOLD = 3;
 // 仍可安装，壳会记录 knownIssue、提示降级并保留一键回滚（容器优先：harness 可以坏，
 // 壳不能坏）。真正的崩溃保护由 watchdog + 回滚 + 降级态承担（见 docs/archive/strategy/
 // 2026-09-22-harness-upgrade-compat-plan.md）。
+// S1 / TD-29（2026-11-01）：版本号不再是兼容性判据。
+//
+// 原值 '<0.2.0-0' 的语义已经从"兼容性门禁"退化为"上次更新这个常量时的
+// 版本快照"——它会给 0.2.1-rc.5 判"不支持"，而 POC 已实测 16/16 通过。
+// 保留该常量仅作**展示用**字符串（设置页说明"已验证矩阵"），
+// 真正的判定改由 runtime-capability.js 的能力矩阵承担。
 const SUPPORTED_RUNTIME_RANGE = '<0.2.0-0';
 
-/** Is one runtime version inside the shell's supported range?
- * Unparseable/empty versions answer true: a local dev install must never be
- * blocked by a version-string technicality. */
+/** Is one runtime version inside the shell's VERIFIED matrix?
+ * 注意：这**不再是**"能否运行"的判据——只是"是否在已实测范围内"的事实。
+ * 判"能否运行"请用 canRunRuntime()。 */
 function isRuntimeSupported(version) {
-  const v = String(version || '').trim();
-  if (!semver.valid(v)) return true;
-  try { return semver.satisfies(v, SUPPORTED_RUNTIME_RANGE, { includePrerelease: true }); } catch { return true; }
+  return !runtimeCapability.needsCompatibilityNote(version);
+}
+
+/** 真正的运行判定：required 能力是否具备。
+ * 未验证版本**放行**（容器姿态：harness 可以坏，壳不能坏；
+ * 崩溃保护由 watchdog + 回滚 + 降级态承担）。 */
+function canRunRuntime(version) {
+  return runtimeCapability.canRun(version);
 }
 /** Hard deadline for one arborist install. rc runtimes are a 60+ package
  * monorepo; without this a stalled registry / cache lock would hold the
@@ -841,4 +853,4 @@ class RuntimeManager {
   }
 }
 
-module.exports = { RuntimeManager, isRuntimeSupported, SUPPORTED_RUNTIME_RANGE };
+module.exports = { RuntimeManager, isRuntimeSupported, canRunRuntime, SUPPORTED_RUNTIME_RANGE };

@@ -527,23 +527,54 @@ test('rollback throws when there is no previous version to return to', async () 
 
 // ---- shell ↔ runtime compatibility matrix (DESIGN.md §6.4) ------------------
 
-test('compat matrix covers the whole 0.1.x line (0.1.2+ no longer gated)', () => {
-  const { isRuntimeSupported, SUPPORTED_RUNTIME_RANGE } = require('../src/runtime-manager');
-  // 2026-09-22 用户拍板"放开更新挡板"：0.1.2+ 的 Remote API 改造已由兼容层覆盖，
-  // 矩阵放宽到整个 0.1.x；常量语义改为"已测试矩阵"，不再作为安装禁止条件
-  // （矩阵外版本照装 + 记 knownIssue + 降级提示 + 一键回滚，见 container 姿态）。
-  assert.strictEqual(SUPPORTED_RUNTIME_RANGE, '<0.2.0-0');
-  for (const v of ['0.1.0-rc.8', '0.1.1-rc.2', '0.1.1', '0.1.2-rc.1', '0.1.5-rc.2', '0.1.6-alpha.2']) {
-    assert.strictEqual(isRuntimeSupported(v), true, `${v} is inside the tested matrix`);
+test('S1/TD-29: compatibility is decided by CAPABILITIES, not by the version number', () => {
+  // 2026-11-01 语义变更（S1 / TD-29）。
+  //
+  // 旧断言：'0.2.x 在矩阵外' —— 这个结论已被 POC 推翻
+  // （docs/research/runtime-poc-report-2026-11-01.md：0.2.1-rc.5 与
+  //  0.2.2-alpha.2 各 16 pass / 0 fail，mux + 三个 session RPC + 6 个能力包全部可用）。
+  //
+  // 新判据是**能力**：壳层真正依赖的是 mux / session.list|create|page，
+  // 而不是 '<0.2.0-0' 这个字符串。版本号只是"是否已实测"的提示。
+  const { isRuntimeSupported, canRunRuntime, SUPPORTED_RUNTIME_RANGE } = require('../src/runtime-manager');
+  const cap = require('../src/runtime-capability');
+
+  // 常量保留但语义收窄为"展示用的已验证矩阵"
+  assert.strictEqual(SUPPORTED_RUNTIME_RANGE, '<0.2.0-0',
+    'the constant stays as a display string; it is no longer the gate');
+
+  // ---- 有实测证据的 0.1.2+ 与 0.2.x：都不是 unsupported ----
+  for (const v of ['0.1.2-rc.1', '0.1.5-rc.2', '0.1.6-alpha.2']) {
+    const r = canRunRuntime(v);
+    assert.strictEqual(r.allowed, true, `${v} must be runnable`);
+    assert.strictEqual(r.verdict, cap.VERDICTS.DEGRADED,
+      `${v} lacks agent-team/workspace.changes → degraded, not unsupported`);
   }
-  // 0.2.0 起属于矩阵外（可安装但会提示降级）
-  for (const v of ['0.2.0-0', '0.2.0', '0.3.1-rc.1']) {
-    assert.strictEqual(isRuntimeSupported(v), false, `${v} is outside the tested matrix`);
+
+  // ---- 0.2.x：POC 实测支持，**必须在矩阵内**（这是本次修复的核心）----
+  // 只列**实测过**的具体版本。0.2.0 虽同属 0.2.x 但从未被实测，
+  // 因此正确地判 unverified —— 矩阵不能用宽范围假装"整条线都测过"。
+  for (const v of ['0.2.1-rc.5', '0.2.2-alpha.2']) {
+    assert.strictEqual(isRuntimeSupported(v), true,
+      `${v} was verified by POC on 2026-11-01 and is now inside the matrix`);
+    assert.strictEqual(canRunRuntime(v).verdict, cap.VERDICTS.SUPPORTED,
+      `${v} has all required AND optional capabilities`);
   }
-  // never block on a version string we cannot parse (local dev installs)
-  assert.strictEqual(isRuntimeSupported(''), true);
-  assert.strictEqual(isRuntimeSupported(null), true);
-  assert.strictEqual(isRuntimeSupported('not-a-version'), true);
+
+  // ---- 未验证版本：放行但标记 unverified（**不是**不支持）----
+  for (const v of ['0.3.1-rc.1', '0.9.9']) {
+    const r = canRunRuntime(v);
+    assert.strictEqual(r.allowed, true, `${v} is untested, not forbidden (container posture)`);
+    assert.strictEqual(r.verdict, cap.VERDICTS.UNVERIFIED);
+    assert.strictEqual(isRuntimeSupported(v), false, `${v} is not in the verified matrix`);
+  }
+
+  // ---- 无法解析的版本串：永不阻断（本地 dev 安装）----
+  assert.strictEqual(canRunRuntime('').allowed, true);
+  assert.strictEqual(canRunRuntime(null).allowed, true);
+  assert.strictEqual(canRunRuntime('not-a-version').allowed, true);
+  assert.strictEqual(isRuntimeSupported('not-a-version'), false,
+    'a dev build is honestly "not in the verified matrix"');
 });
 
 test('the rc channel picks the newest non-alpha release (alpha is opt-in via pinned)', () => {
