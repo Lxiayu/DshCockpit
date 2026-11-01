@@ -44,10 +44,10 @@ src/office/render/            PixiJS 渲染器（flat 代码化 2.5D / iso 预�
 src/office/office-module.js   办公室组合根——4726 行，上限 4800（余量 74 行）
 src/work/                     单次工作项 MVP（⚠ 非 Mission Core 雏形，见 TD-15）
 src/mission/                  Mission Core 纯逻辑层（P1，8 模块 + IPC + UI 已完成）
-src/ipc-mission.js             Mission IPC（单通道 mission:invoke + 15 action）
+src/ipc-mission.js             Mission IPC（单通道 mission:invoke + 18 action）
 src/mission-desk.html          Mission Desk 窗口（P1 首个用户可见界面）
 src/workbench/                工作台（内容/引擎分离；⚠ 已从 asar 排除，见 TD-26）
-test/                         离线测试（node:test，cwd 必须是仓库根；161 套件 / 2289 项）
+test/                         离线测试（node:test，cwd 必须是仓库根；162 套件 / 2319 项）
 docs/                         文档，唯一索引 docs/README.md
 archive/ + docs/archive/      本地保险箱（git 忽略）
 ```
@@ -64,13 +64,13 @@ archive/ + docs/archive/      本地保险箱（git 忽略）
 ## 5. 命令与坑
 
 ```bash
-npm test                                   # 全量（约 2 分钟，2289 项）
+npm test                                   # 全量（约 2 分钟，2319 项）
 node --test test/docs-index.test.js        # 文档索引（毫秒级，改文档后必跑）
 node --check <file>                        # 语法检查
 ```
 
 - **cwd 坑**：Bash 默认 cwd 可能是仓库父目录。一律用绝对路径或 `zsh -c 'cd <repo> && ...'`。
-- **基线**：`CI=1 npm test` → **2289 passed / 0 failed / 1 skipped**（唯一有效基线）。
+- **基线**：`CI=1 npm test` → **2319 passed / 0 failed / 1 skipped**（唯一有效基线）。
   唯一 skip 是 E5a-R1 真机探针（需图形会话）——**Skip 不计作 Pass**，
   由 `scripts/ci-gate.js` 四态报告保证，见 `docs/quality/test-tiers-and-baseline.md`。
 - **pure Node 门禁**：`src/team/runtime/**` 与 `src/office/runtime/**` 禁止 Electron/DOM/fs/网络；
@@ -96,9 +96,12 @@ node --check <file>                        # 语法检查
   `src/runtime-capability.js` 用能力声明 + 已知矩阵 + 四态判定替代版本比较：
   `0.2.1-rc.5` / `0.2.2-alpha.2` 判 **supported**（POC 实测 16/16），`0.1.5-rc.2` 判 degraded
   （无 agent-team），未测过的版本判 **unverified 但放行**（"没测过 ≠ 不能用"）。
-- **P1 三层完成（2026-11-01）**：`src/mission/` 8 模块（纯逻辑）+ `src/ipc-mission.js`
-  （单通道 `mission:invoke` + 15 action）+ `src/mission-desk.html`（独立窗口 UI）。
-  共 162 项测试，含端到端（建→决策→产物→**重启后 Brief 字节相同**）。
+- **P1 完成（2026-11-01）**：Mission Core 四层全部落地——
+  `src/mission/`（9 模块纯逻辑）+ `src/ipc-mission.js`（18 action）
+  + `src/mission-desk.html`（UI）+ **Brief 同步进 `<workspace>/AGENTS.md`**。
+  最后一步是关键：dsh 每次 Session 启动都读 AGENTS.md，所以 Brief 写进去
+  就会在下次会话自动被 Agent 读到——**跨会话记忆真正生效**。
+  共 192 项 Mission 测试，含端到端（重启后 Brief 字节相同、用户手写内容永不丢失）。
   **未做**：真机验收（需 Electron 图形会话）。前置仍是 Issue #23。
 - **ADR-0001..0006 全部已接受**（2026-11-01）。ADR-0002 附退役硬约束 R0–R5（禁止直接删旧 Team Runtime）。
 - **已消除的债**：TD-02/03/05（#19 Settings 保护）、TD-10（#10 CI 门禁）、
