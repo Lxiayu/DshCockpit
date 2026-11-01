@@ -114,6 +114,7 @@
 | `docs/plans/active/P4-ATTENTION-AND-ABSENCE-2026-11-01.md` | **待办+离开期间+前端打磨计划** | 待办是排序机制；lastSeenAtMs 属 UI 偏好；37 处硬编码色须 token 化 |
 | `docs/plans/active/P4-UI-POLISH-AND-ENTITIES-2026-11-01.md` | **UI 打磨 + 三实体计划** | 层级靠 scale/weight 不靠颜色；先修引导重复 bug |
 | `docs/plans/active/RUNTIME-UPGRADE-0.2.1-2026-11-01.md` | **Runtime 升级 0.2.1-rc.5** | 10 条破坏性变更清单 + 10 个复查点 |
+| `docs/plans/active/RUNTIME-PROJECTIONS-ADOPTION-2026-11-01.md` | **采纳 session/projections** | 一次调用拿到结构化 userQuestions（含 options/plan-review） |
 | `docs/plans/completed/HARNESS-V0.6-PLAN-2026-10-25.md` | 已完成 | v0.6 五工作包计划（续跑/过程可见/首帧/推送/归档） |
 | `docs/plans/completed/HARNESS-V0.6-REPORT-2026-10-26.md` | 已完成 | v0.6 完成报告：变异矩阵、真机脚本、遗留 |
 | `docs/plans/completed/2026-08-30-virtual-office-runtime-implementation.md` | 已完成 | 办公室运行时 Task 0–9（历史记录；路径按当时结构） |
@@ -141,6 +142,7 @@
 | `docs/quality/mission-desk-dock-acceptance-2026-11-01.md` | **右栏改造验收（2026-11-01）** | 14/14；右栏从任务面板变成 Mission Desk |
 | `docs/quality/mission-desk-attention-acceptance-2026-11-01.md` | **待办+离开期间+双主题验收** | 19/19；两主题对比度全部 ≥AA |
 | `docs/quality/mission-desk-shared-context-acceptance-2026-11-01.md` | **三实体+UI层级验收** | 17/17；层级靠 scale/weight 不靠颜色 |
+| `docs/quality/mission-desk-structured-options-acceptance-2026-11-01.md` | **结构化选项验收** | 10/10；升级 0.2.1 直接解决缺口 1 |
 | `docs/quality/gpt-conversation-gap-analysis-2026-11-01.md` | **与 GPT 对话的差距分析** | 它自我推翻第一版；真实差距=右栏没用官方结构化交互 |
 | `docs/quality/status-brief-for-gpt-2026-11-01.md` | **给 GPT 的现状说明** | 可直接贴回做交叉验证；列出 3 个真实缺口 |
 | `docs/quality/testing-strategy.md` | 审计报告（2026-11-01） | 测试体系盘点：137 个套件真实构成、门禁类型、变异纪律、缺口与改进建议 |

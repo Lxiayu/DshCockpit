@@ -2486,6 +2486,39 @@ function broadcastRuntimeHealth(health) {
  * 为什么只给这几个字段：harness-reader 有白名单，raw sessionId / prompt /
  * 绝对路径一律丢弃。这里是第一道收窄，那边是第二道。 */
 /**
+ * 向运行时要一次会话投影（0.2.1 的 `session/projections`）。
+ *
+ * 为什么不用 mux.openStream：这是 unary 调用（问答式），走 mux.call 的
+ * HTTP 通道。实测参数形状必须恰好是 `{ request: { sessionId } }`——
+ * 写成 `{ request: { address: {...} } }` 会被 boundary validation 拒绝。
+ *
+ * @returns {Promise<{ok:boolean, value?:object, reason?:string}>}
+ */
+async function officeSessionProjections(sessionId) {
+  const mux = runtimeMux;
+  if (!mux || mux.state !== 'live') return { ok: false, reason: 'runtime mux is not live' };
+  // 不传 sessionId 时取"当前被 follow 的会话"。
+  //
+  // 为什么需要这个默认：Mission 按隐私规则**不存 raw sessionId**
+  // （只存派生句柄 sess-h-*），所以右栏根本拿不到 sessionId。
+  // 而 office 模块本来就持有这个运行时事实（它是 follow 流的 key），
+  // 由 main 侧挑选是唯一不破坏隐私边界的位置。
+  let target = sessionId;
+  if (!target) {
+    const keys = [...officeFollowStreams.keys()];
+    if (keys.length === 0) return { ok: false, reason: 'no followed session' };
+    target = keys[keys.length - 1];
+  }
+  try {
+    const res = await mux.call('session/projections', { request: { sessionId: target } });
+    if (!res || !res.ok) return { ok: false, reason: (res && res.reason) || 'projections unavailable' };
+    return { ok: true, value: res.value };
+  } catch (err) {
+    return { ok: false, reason: `projections failed: ${err.message}` };
+  }
+}
+
+/**
  * 日志用的短会话 id。
  *
  * `session-<uuid>` 的 slice(0,8) 恰好只截到 "session-"，所有会话长得一样。
@@ -3029,6 +3062,7 @@ function registerIpc() {
     // 这里从 runtimeMux/runtimeHealth 派生，缺失时返回 null（Mission 会显示"不可用"
     // 而不是谎报 running=false）。
     snapshotOf: () => runtimeSnapshotForMission(),
+    projectionsOf: (sessionId) => officeSessionProjections(sessionId),
     log,
   });
 

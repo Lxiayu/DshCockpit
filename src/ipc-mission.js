@@ -73,6 +73,7 @@ const ACTIONS = Object.freeze([
   'recordAssumption',
   'updateAssumptionStatus',
   'recordEvidence',
+  'sessionProjections',   // 只读：向运行时要结构化投影（含 userQuestions.options）
 ]);
 
 function nowMs() { return Date.now(); }
@@ -151,6 +152,9 @@ function registerMissionIpc(ipcMain, ctx) {
     snapshotOf = () => null,
     clock = nowMs,
     openDeskWindow = null,
+    // 只读的运行时投影获取器（由 main.js 注入，内部走 mux.call）。
+    // 注入而不是直接 require mux：ipc-mission 保持纯 Node 可测。
+    projectionsOf = null,
     log = () => {},
   } = ctx;
 
@@ -676,6 +680,55 @@ function registerMissionIpc(ipcMain, ctx) {
      * 明细；而待办明细正是这个 action 存在的理由（"哪几件事"而不只是"几件"）。
      * 但透传的字段仍然受 office 的 PENDING_ALLOWLIST 约束，不会有原始 prompt。
      */
+    /**
+     * 向运行时要结构化会话投影。
+     *
+     * 为什么需要它：0.2.1 新增 `session/projections`，一次调用就返回
+     * `userQuestions.active[].questions[]`——里面带 `options` / `multiSelect` /
+     * `intent(plan-review)`，正是我们右栏缺的结构化交互能力。
+     *
+     * 关键约束（不伪造）：
+     *   · 投影是**投影插件**提供的。插件未加载时 `values` 里没有该 key。
+     *   · 所以这里**必须**如实报告 available，不能假装拿到了。
+     *   · 调用方（右栏）在 available:false 时回落到 office 快照路径。
+     */
+    async sessionProjections(payload) {
+      // sessionId 可选：不传时由注入方选择"当前被 follow 的会话"。
+      // 原因是 Mission 按隐私规则不存 raw sessionId，右栏拿不到它。
+      const sessionId = argString(payload && payload.sessionId);
+      if (typeof projectionsOf !== 'function') {
+        return { ok: true, available: false, reason: 'runtime projections are not wired' };
+      }
+      let res;
+      try {
+        res = await projectionsOf(sessionId);
+      } catch (err) {
+        return { ok: true, available: false, reason: `projections failed: ${err.message}` };
+      }
+      if (!res || !res.ok) {
+        return { ok: true, available: false, reason: (res && res.reason) || 'projections unavailable' };
+      }
+      const values = res.value && res.value.values ? res.value.values : null;
+      if (!values) {
+        return { ok: true, available: false, reason: 'projection payload has no values' };
+      }
+      // 投影插件是否提供 userQuestions —— 缺了就是没启用，如实说
+      const uq = values.userQuestions;
+      const hasUserQuestions = !!uq && typeof uq === 'object'
+        && Array.isArray(uq.active) && Array.isArray(uq.settled);
+      return {
+        ok: true,
+        available: true,
+        asOfSeq: Number.isFinite(res.value.asOfSeq) ? res.value.asOfSeq : null,
+        userQuestionsAvailable: hasUserQuestions,
+        // 只有 active 的问题需要用户处理；settled 是历史
+        activeQuestions: hasUserQuestions ? uq.active : [],
+        settledCount: hasUserQuestions ? uq.settled.length : 0,
+        // 其余投影按需透传（当前 UI 不用 tokenUsage，但保留以便将来）
+        agentPreset: typeof values.agentPreset === 'string' ? values.agentPreset : null,
+      };
+    },
+
     attention() {
       let raw = null;
       try { raw = snapshotOf(); } catch { raw = null; }

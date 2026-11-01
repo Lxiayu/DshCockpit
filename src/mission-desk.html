@@ -156,7 +156,11 @@
      真机对比度实测：--text-4 在深色是 2.89:1、浅色 2.57:1，都低于 AA 4.5:1。
      --text-3 达标（深 5.6 / 浅 4.9）。 */
   .att-item-meta { font-size: 10.5px; color: var(--text-3); }
-  .att-item-actions { display: flex; gap: 6px; margin-top: 3px; }
+  .att-item-actions { display: flex; gap: 6px; margin-top: 3px; flex-wrap: wrap; }
+  /* 结构化选项：这是一组"选一个"的按钮，不是一串并列动作。
+     用换行 + 一致的宽度暗示它们互斥。 */
+  .att-options { display: flex; flex-direction: column; gap: 4px; width: 100%; margin-bottom: 2px; }
+  .att-options .att-btn { text-align: left; width: 100%; padding: 5px 10px; }
   .att-btn {
     font-size: 11px; padding: 3px 10px; border-radius: 6px; cursor: pointer;
     border: 1px solid var(--border-2); background: var(--bg-hover); color: var(--text-2);
@@ -380,6 +384,7 @@ const state = {
   syncState: null,
   attention: null,
   since: null,
+  projections: null,
   liveAvailable: false,
 };
 
@@ -610,18 +615,79 @@ function renderAttention() {
       allow.addEventListener('click', () => answerPending(item, 'granted'));
       actions.append(deny, allow);
     } else {
-      const input = el('input', { placeholder: '输入回答…', style: 'flex:1;min-width:0' });
-      const send = el('button', { class: 'att-btn primary', text: '回答' });
-      send.addEventListener('click', () => {
-        const v = input.value.trim();
-        if (v) answerPending(item, v);
-      });
-      actions.append(input, send);
+      // 提问：优先用运行时投影给出的**结构化选项**，拿不到才回落自由文本。
+      //
+      // 第一性原理：官方 ask_user_question 本来就带 `options`，
+      // 做成文本框等于把"选一个"降级成"自己打字"——用户既不知道
+      // 有哪些合法答案，也容易答出 Agent 无法解析的内容。
+      //
+      // 数据来源：session/projections 的 userQuestions.active[]（0.2.1 新增）。
+      // 这是**只读**的；回答仍走 office:pending（已验证可用）。
+      const struct = findStructuredQuestion(item);
+      if (struct && struct.options.length > 0) {
+        const opts = el('div', { class: 'att-options' });
+        for (const opt of struct.options) {
+          const btn = el('button', { class: 'att-btn', text: opt.label });
+          // plan-review 的判定不能靠选项顺序（官方文档明确 named rather than
+          // positional），所以这里只把 label 作为答案值，判定交给运行时。
+          btn.addEventListener('click', () => answerPending(item, opt.label));
+          opts.append(btn);
+        }
+        actions.append(opts);
+        // 仍给自定义输入：官方 AskUserQuestionItem 允许自由输入
+        const input = el('input', { placeholder: '或自定义回答…', style: 'flex:1;min-width:0' });
+        const send = el('button', { class: 'att-btn', text: '发送' });
+        send.addEventListener('click', () => {
+          const v = input.value.trim();
+          if (v) answerPending(item, v);
+        });
+        actions.append(input, send);
+      } else {
+        const input = el('input', { placeholder: '输入回答…', style: 'flex:1;min-width:0' });
+        const send = el('button', { class: 'att-btn primary', text: '回答' });
+        send.addEventListener('click', () => {
+          const v = input.value.trim();
+          if (v) answerPending(item, v);
+        });
+        actions.append(input, send);
+      }
     }
     row.append(actions);
     wrap.append(row);
   }
   return wrap;
+}
+
+/**
+ * 从运行时投影里找这条待办对应的结构化问题。
+ *
+ * 匹配策略：投影里的 `active[]` 每项有 `callId`，而 office 快照的
+ * pending item 有 `id`（也就是 callId）。先按 id 精确匹配；
+ * 匹配不到但有**唯一**一个 active 问题时，用它（常见情形：
+ * 同一时刻只有一个待回答的问题）。
+ *
+ * 拿不到就返回 null —— 调用方回落自由文本，**不猜**。
+ */
+function findStructuredQuestion(item) {
+  const p = state.projections;
+  if (!p || !p.userQuestionsAvailable || !Array.isArray(p.activeQuestions)) return null;
+  const active = p.activeQuestions.filter((x) => x && Array.isArray(x.questions) && x.questions.length > 0);
+  const pick = (entry) => {
+    const q = entry.questions[0];
+    const opts = Array.isArray(q.options)
+      ? q.options.filter((o) => o && typeof o.label === 'string' && o.label) : [];
+    return {
+      question: q.question,
+      detail: q.detail || null,
+      options: opts,
+      multiSelect: q.multiSelect === true,
+      intent: q.intent || null,
+    };
+  };
+  const byId = active.find((x) => x.callId && item && item.id && x.callId === item.id);
+  if (byId) return pick(byId);
+  if (active.length === 1) return pick(active[0]);
+  return null;
 }
 
 /**
@@ -1449,13 +1515,18 @@ async function loadDetail(missionId) {
   }
   state.detail = { ...r.view, live: r.live };
 
-  // 待办与"离开期间"并行取：它们互不依赖，串行会让右栏打开慢一拍。
-  const [att, since] = await Promise.all([
+  // 待办 / 离开期间 / 运行时投影 并行取：三者互不依赖，
+  // 串行会让右栏打开慢一拍。
+  const [att, since, proj] = await Promise.all([
     api('attention'),
     api('sinceLastSeen', { missionId }),
+    api('sessionProjections'),
   ]);
   state.attention = att.ok ? att : { ok: false, items: [], total: 0, available: false };
   state.since = since.ok ? since : { ok: false, entries: [], available: false };
+  // 运行时投影：给出结构化的 userQuestions（含 options / multiSelect / plan-review）。
+  // 拿不到时如实为 null —— 待办区会回落到 office 快照的纯文本路径。
+  state.projections = proj.ok && proj.available ? proj : null;
 
   renderDetail();
 

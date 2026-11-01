@@ -1,0 +1,56 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "structured options render as BUTTONS (not a text box)",
+      "ok": true,
+      "detail": "[\"实证研究：优先收集实验数据\",\"文献综述：优先梳理已有研究\",\"混合研究：两种方法结合\"]"
+    },
+    {
+      "name": "the option labels come from the runtime projection",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "options are visible",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "a custom-answer escape hatch is still offered (official allows free input)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "clicking an option sends the LABEL as the answer",
+      "ok": true,
+      "detail": "{\"action\":\"answer\",\"id\":\"call-1\",\"value\":\"文献综述：优先梳理已有研究\"}"
+    },
+    {
+      "name": "the answer still uses the real office:pending payload shape",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "when projections are unavailable it FALLS BACK to free text",
+      "ok": true,
+      "detail": "{\"hasOptions\":false,\"hasInput\":true,\"hasPrimaryBtn\":true}"
+    },
+    {
+      "name": "the fallback keeps a primary \"回答\" button",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "screenshots captured for both themes",
+      "ok": true,
+      "detail": "dark + light"
+    },
+    {
+      "name": "the renderer had no fatal errors",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}
