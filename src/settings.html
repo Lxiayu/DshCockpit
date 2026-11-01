@@ -988,6 +988,22 @@
             </div>
           </div>
           <div class="status" id="office-status"></div>
+
+          <!-- Issue #24：角色包管理。
+               放在 office 设置区内，因为它属于"办公室外观"而非独立功能。 -->
+          <div class="section-title" style="margin-top:22px" data-i18n="packs_title">角色包</div>
+          <div class="setting" style="flex-direction:column;align-items:stretch;gap:8px">
+            <div class="setting-info">
+              <label data-i18n="packs_desc">安装自定义角色外观。包可以是一个文件夹或 .zip。</label>
+            </div>
+            <div id="packs-list" style="display:flex;flex-direction:column;gap:6px"></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+              <button id="packs-import-folder" class="btn" data-i18n="packs_importFolder">从文件夹导入…</button>
+              <button id="packs-import-zip" class="btn" data-i18n="packs_importZip">从 .zip 导入…</button>
+              <button id="packs-refresh" class="btn" data-i18n="packs_refresh">刷新</button>
+            </div>
+            <div class="status" id="packs-status"></div>
+          </div>
         </div>
       </div>
 
@@ -1789,6 +1805,28 @@
       nav_general: '通用', nav_cost: '用量与成本', nav_runtime: '运行时', nav_plugins: '插件',
 nav_office: '虚拟办公室',
       office_desc: '办公室运行时的行为与隐私设置（默认关闭；独立于 settings.json，保存到 office-state.v1.json）',
+      'packs_pickFolderTitle': '选择角色包文件夹',
+      'packs_pickZipTitle': '选择角色包 .zip',
+      'packs_zipTooLarge': '文件过大（上限 128MB）。',
+      'packs_importFailed': '导入失败',
+      'packs_title': '角色包',
+      'packs_desc': '安装自定义角色外观。包可以是一个文件夹或 .zip。',
+      'packs_importFolder': '从文件夹导入…',
+      'packs_importZip': '从 .zip 导入…',
+      'packs_refresh': '刷新',
+      'packs_empty': '还没有安装自定义角色包。',
+      'packs_active': '使用中',
+      'packs_builtin': '内置',
+      'packs_select': '切换',
+      'packs_uninstall': '卸载',
+      'packs_importing': '正在导入并校验…',
+      'packs_installed': '已安装，正在切换…',
+      'packs_imported': '导入成功，已切换。',
+      'packs_selected': '已切换。',
+      'packs_uninstalled': '已卸载。',
+      'packs_fellBack': '已卸载并回落到内置角色。',
+      'packs_detail': '技术详情',
+      'packs_builtinProtected': '内置角色包不可卸载（它是回退目标）。',
       office_sleepAfter: '闲置后进入睡眠（毫秒，60 秒 – 24 小时）',
       office_resultPresentation: '结果展示时长（毫秒，1 – 30 秒）',
       office_speed: '移动速度（场景最小边/秒）',
@@ -2276,6 +2314,28 @@ nav_office: '虚拟办公室',
       nav_general: 'General', nav_cost: 'Usage & Cost', nav_runtime: 'Runtime', nav_plugins: 'Plugins',
 nav_office: 'Virtual Office',
       office_desc: 'Behavior and privacy settings for the office runtime (off by default; stored separately in office-state.v1.json, never in settings.json)',
+      'packs_pickFolderTitle': 'Select a character pack folder',
+      'packs_pickZipTitle': 'Select a character pack .zip',
+      'packs_zipTooLarge': 'File too large (128MB limit).',
+      'packs_importFailed': 'Import failed',
+      'packs_title': 'Character packs',
+      'packs_desc': 'Install a custom character appearance. A pack can be a folder or a .zip.',
+      'packs_importFolder': 'Import from folder…',
+      'packs_importZip': 'Import .zip…',
+      'packs_refresh': 'Refresh',
+      'packs_empty': 'No custom character packs installed yet.',
+      'packs_active': 'In use',
+      'packs_builtin': 'Built-in',
+      'packs_select': 'Use',
+      'packs_uninstall': 'Uninstall',
+      'packs_importing': 'Importing and validating…',
+      'packs_installed': 'Installed, switching…',
+      'packs_imported': 'Imported and switched.',
+      'packs_selected': 'Switched.',
+      'packs_uninstalled': 'Uninstalled.',
+      'packs_fellBack': 'Uninstalled and fell back to the built-in character.',
+      'packs_detail': 'Technical detail',
+      'packs_builtinProtected': 'The built-in pack cannot be uninstalled (it is the fallback).',
       office_sleepAfter: 'Sleep after idle (ms, 60s – 24h)',
       office_resultPresentation: 'Result presentation duration (ms, 1 – 30s)',
       office_speed: 'Movement speed (scene min-dimension per second)',
@@ -4611,6 +4671,195 @@ nav_office: 'Virtual Office',
   $('officeReducedMotion').addEventListener('change', () => saveOfficeField({ reducedMotion: $('officeReducedMotion').checked }));
   $('officePrivacyMode').addEventListener('change', () => saveOfficeField({ privacyMode: $('officePrivacyMode').value }));
 
+  // ---- Issue #24：角色包管理 UI -------------------------------------------------
+  //
+  // 设计原则：**UI 只负责呈现，不承担正确性**。
+  // 安装/激活/卸载的不变量（失败保留原包、卸载回落内置、永不空场景）都在
+  // character-pack-manager 里并有测试。这里只做三件事：
+  //   1. 把 manager 返回的结构画出来
+  //   2. 把错误按 {title, hint, detail} 分层呈现（而不是透传 message）
+  //   3. 把"导入 → 校验 → 装"的两步流程串起来
+
+  function packStatus(text, isError) {
+    const el = $('packs-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.style.color = isError ? 'var(--bad, #ff9d9d)' : '';
+  }
+
+  /**
+   * 设置窗口通过 shell:packs-* 桥接访问角色包能力。
+   * （office:* 是办公室页面的冻结通道，设置窗口不可见也不该可见。）
+   */
+  async function packAction(payload) {
+    const shellApi = window.dshShell;
+    switch (payload.action) {
+      case 'packsList': return shellApi.packsList();
+      case 'packImportFolder': return shellApi.packsImport({ folderPath: payload.folderPath });
+      case 'packImportZip': return shellApi.packsImport({ zipBase64: payload.zipBase64 });
+      case 'packCommitImport': return shellApi.packsCommit(payload.importId);
+      case 'packSelect': return shellApi.packsSelect(payload.packId);
+      case 'packUninstall': return shellApi.packsUninstall(payload.packId);
+      default: return { ok: false, code: 'PAYLOAD_INVALID' };
+    }
+  }
+
+  /** 把 manager 的错误结构渲染成"标题 + 怎么办 + 可折叠技术详情"。 */
+  function renderPackError(err) {
+    const box = document.createElement('div');
+    box.style.cssText = 'border-left:3px solid var(--bad,#ff9d9d);padding:8px 10px;margin-top:6px';
+    const title = document.createElement('div');
+    title.style.fontWeight = '600';
+    title.textContent = (err && err.title) || tr('packs_importFailed');
+    box.appendChild(title);
+    if (err && err.hint) {
+      const hint = document.createElement('div');
+      hint.className = 'desc';
+      hint.textContent = err.hint;
+      box.appendChild(hint);
+    }
+    if (err && err.detail) {
+      // 技术详情默认折叠：普通用户不需要看，反馈问题时才展开。
+      const det = document.createElement('details');
+      const sum = document.createElement('summary');
+      sum.className = 'desc';
+      sum.textContent = tr('packs_detail');
+      const pre = document.createElement('pre');
+      pre.style.cssText = 'white-space:pre-wrap;font-size:11px;margin:6px 0 0';
+      pre.textContent = err.detail;
+      det.appendChild(sum);
+      det.appendChild(pre);
+      box.appendChild(det);
+    }
+    const host = $('packs-status');
+    if (host) {
+      host.textContent = '';
+      host.appendChild(box);
+    }
+  }
+
+  async function loadPacks() {
+    packStatus('');
+    const list = $('packs-list');
+    if (!list) return;
+    list.textContent = '';
+    let r;
+    try { r = await packAction({ action: 'packsList' }); }
+    catch (e) { packStatus(e.message, true); return; }
+    if (!r || !r.ok) {
+      if (r && r.error) renderPackError(r.error);
+      else packStatus((r && r.code) || tr('office_invalid'), true);
+      return;
+    }
+    const packs = r.packs || [];
+    if (packs.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'desc';
+      empty.textContent = tr('packs_empty');
+      list.appendChild(empty);
+      return;
+    }
+    for (const p of packs) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06)';
+      const name = document.createElement('div');
+      name.style.flex = '1';
+      name.textContent = p.packId + (p.version ? ' @' + p.version : '');
+      if (p.active) {
+        const badge = document.createElement('span');
+        badge.textContent = tr('packs_active');
+        badge.style.cssText = 'margin-left:8px;font-size:11px;padding:1px 6px;border-radius:4px;background:rgba(90,200,140,.18);color:#7ddca8';
+        name.appendChild(badge);
+      }
+      if (p.builtin) {
+        const badge = document.createElement('span');
+        badge.textContent = tr('packs_builtin');
+        badge.style.cssText = 'margin-left:8px;font-size:11px;opacity:.6';
+        name.appendChild(badge);
+      }
+      row.appendChild(name);
+
+      if (!p.active) {
+        const useBtn = document.createElement('button');
+        useBtn.className = 'btn';
+        useBtn.textContent = tr('packs_select');
+        useBtn.addEventListener('click', async () => {
+          const sel = await packAction({ action: 'packSelect', packId: p.packId });
+          if (sel && sel.ok) { packStatus(tr('packs_selected')); await loadPacks(); }
+          else if (sel && sel.error) renderPackError(sel.error);
+          else packStatus((sel && sel.code) || tr('office_invalid'), true);
+        });
+        row.appendChild(useBtn);
+      }
+      if (!p.builtin) {
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn';
+        delBtn.textContent = tr('packs_uninstall');
+        delBtn.addEventListener('click', async () => {
+          const del = await packAction({ action: 'packUninstall', packId: p.packId });
+          if (del && del.ok) {
+            // 卸载当前使用的包会自动回落内置——如实告诉用户，而不是让他猜
+            packStatus(del.fellBackToBuiltin ? tr('packs_fellBack') : tr('packs_uninstalled'));
+            await loadPacks();
+          } else if (del && del.error) renderPackError(del.error);
+          else packStatus((del && del.code) || tr('office_invalid'), true);
+        });
+        row.appendChild(delBtn);
+      }
+      list.appendChild(row);
+    }
+  }
+
+  /** 统一的"导入后提交"流程：beginImport → commitImport（两步，中间可显示进度）。 */
+  async function finishImport(beginResult) {
+    if (!beginResult || !beginResult.ok) {
+      if (beginResult && beginResult.error) renderPackError(beginResult.error);
+      else packStatus((beginResult && beginResult.code) || tr('office_invalid'), true);
+      return;
+    }
+    packStatus(tr('packs_installed'));
+    const done = await packAction({ action: 'packCommitImport', importId: beginResult.importId });
+    if (done && done.ok) { packStatus(tr('packs_imported')); await loadPacks(); }
+    else if (done && done.error) renderPackError(done.error);
+    else packStatus((done && done.code) || tr('office_invalid'), true);
+  }
+
+  const packsImportFolderBtn = $('packs-import-folder');
+  if (packsImportFolderBtn) {
+    packsImportFolderBtn.addEventListener('click', async () => {
+      // 文件夹选择必须走主进程对话框（渲染进程拿不到真实路径）
+      let picked;
+      try { picked = await window.dshShell.pickCharacterPackFolder(); }
+      catch (e) { packStatus(e.message, true); return; }
+      if (!picked || !picked.ok || !picked.path) return; // 用户取消：安静退出
+      packStatus(tr('packs_importing'));
+      let began;
+      try { began = await packAction({ action: 'packImportFolder', folderPath: picked.path }); }
+      catch (e) { packStatus(e.message, true); return; }
+      await finishImport(began);
+    });
+  }
+
+  const packsImportZipBtn = $('packs-import-zip');
+  if (packsImportZipBtn) {
+    packsImportZipBtn.addEventListener('click', async () => {
+      let picked;
+      try { picked = await window.dshShell.pickCharacterPackZip(); }
+      catch (e) { packStatus(e.message, true); return; }
+      if (!picked || !picked.ok) return;
+      if (picked.tooLarge) { packStatus(tr('packs_zipTooLarge'), true); return; }
+      packStatus(tr('packs_importing'));
+      let began;
+      try { began = await packAction({ action: 'packImportZip', zipBase64: picked.base64 }); }
+      catch (e) { packStatus(e.message, true); return; }
+      await finishImport(began);
+    });
+  }
+
+  const packsRefreshBtn = $('packs-refresh');
+  if (packsRefreshBtn) packsRefreshBtn.addEventListener('click', () => loadPacks());
+
+
   async function loadPlugins(force = false) {
     if (plug.acting) { plug.pendingReload = true; return; } // never re-render buttons mid-op
     const seq = ++plug.seq;
@@ -4740,6 +4989,7 @@ nav_office: 'Virtual Office',
       if (wantSearch) $('plugin-search').focus(); // the empty state points here
       loadPlugins();
     loadOffice(); // additive: office state store (SPEC-08), not settings.json // different data source — refetch
+    loadPacks(); // Issue #24: character packs ride the same office page
       return;
     }
     renderPlugins();

@@ -9,6 +9,14 @@ contextBridge.exposeInMainWorld('dshShell', {
   // only; never touches the legacy settings.json).
   getOfficeSettings: () => ipcRenderer.invoke('shell:office-settings-get'),
   saveOfficeSettings: (partial) => ipcRenderer.invoke('shell:office-settings-set', partial),
+  // Issue #24：角色包（设置窗口走 shell:* 桥接；office:* 是办公室页面的通道）
+  packsList: () => ipcRenderer.invoke('shell:packs-list'),
+  packsImport: (payload) => ipcRenderer.invoke('shell:packs-import', payload),
+  packsCommit: (importId) => ipcRenderer.invoke('shell:packs-commit', importId),
+  packsSelect: (packId) => ipcRenderer.invoke('shell:packs-select', packId),
+  packsUninstall: (packId) => ipcRenderer.invoke('shell:packs-uninstall', packId),
+  pickCharacterPackFolder: () => ipcRenderer.invoke('shell:packs-pick-folder'),
+  pickCharacterPackZip: () => ipcRenderer.invoke('shell:packs-pick-zip'),
   saveSettings: (partial) => ipcRenderer.invoke('shell:save-settings', partial),
   getQuickAskShortcut: () => ipcRenderer.invoke('shell:quickask-shortcut-get'),
   setQuickAskShortcut: (value) => ipcRenderer.invoke('shell:quickask-shortcut-set', value),

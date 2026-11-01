@@ -452,6 +452,8 @@ let workStore = null;
 let workWorkspace = null;
 let workWorkspaceError = null;
 let workController = null;
+// Issue #24：角色包管理器（office 组装时赋值；设置窗口的 shell:* 桥接读它）。
+let officeCharacterPackManagerRef = null;
 
 function workStoreInstance() {
   if (!workStore) {
@@ -1117,6 +1119,9 @@ function ensureOfficeModule() {
       updateSettings: (partial) => persistOfficeSettings(officeModuleInstance, ensureOfficeStateStore(), partial),
     };
     registerOfficeIpc({ ipcMain, module: officeFacade, log, enabled: true, packManager: characterPackManager });
+    // Issue #24：设置窗口走 shell:*（办公室页面的 office:* 通道对它不可见），
+    // 所以这里保存一份引用供 shell:packs-* 桥接；桥接本身在 registerIpc 里注册。
+    officeCharacterPackManagerRef = characterPackManager;
     officeModuleInstance.subscribe((snapshot) => {
       try { getWindowManager().broadcastToOfficeViews('office:state', snapshot); } catch { /* no views yet */ }
     });
@@ -2536,6 +2541,73 @@ function registerIpc() {
   // Task 8 / SPEC-08: additive Office settings IPC. Reads/writes go to the
   // independent office-state.v1.json store ONLY; the legacy settings.json
   // schema is unchanged. Flags are reported but never settable from here.
+  // ---- Issue #24：角色包（设置窗口的 shell:* 桥接）---------------------------
+  //
+  // 为什么需要桥接而不是让设置页直接调 office:settings：
+  // office:* 是办公室页面的**冻结通道集合**，只有 office 视图的 webContents
+  // 持有它。设置窗口走 shell:*。两套通道各有明确归属，不混用——
+  // 混用会让 office:* 的信任边界失效（任何窗口都能驱动办公室）。
+  //
+  // 桥接只做三件事：转发 pack action、提供两个文件选择、把结果原样返回。
+  // 业务逻辑仍在 character-pack-manager 里。
+  const packBridge = (fn) => async (_e, ...args) => {
+    const mgr = officeCharacterPackManagerRef;
+    if (!mgr) return { ok: false, code: 'OFFICE_PACKS_UNAVAILABLE' };
+    try { return await fn(mgr, ...args); }
+    catch (error) {
+      log(`[pack] bridge failed: ${error && error.message}`);
+      return { ok: false, code: 'OFFICE_INTERNAL', message: error && error.message };
+    }
+  };
+  ipcMain.handle('shell:packs-list', packBridge((mgr) => ({ ok: true, packs: mgr.listPacks() })));
+  ipcMain.handle('shell:packs-import', packBridge(async (mgr, payload) => {
+    // payload: {folderPath} 或 {zipBase64}
+    if (payload && typeof payload.folderPath === 'string') {
+      return mgr.beginImport({ folderPath: payload.folderPath });
+    }
+    if (payload && typeof payload.zipBase64 === 'string') {
+      return mgr.beginImport({ zipBuffer: Buffer.from(payload.zipBase64, 'base64') });
+    }
+    return { ok: false, error: { code: 'NO_SOURCE', title: '没有选择来源', hint: '请选择文件夹或 .zip 文件。', detail: '' } };
+  }));
+  ipcMain.handle('shell:packs-commit', packBridge((mgr, importId) => mgr.commitImport({ importId })));
+  ipcMain.handle('shell:packs-select', packBridge((mgr, packId) => mgr.selectPack(packId)));
+  ipcMain.handle('shell:packs-uninstall', packBridge((mgr, packId) => mgr.uninstallPack(packId)));
+
+  // 文件夹选择：渲染进程拿不到真实路径，必须由主进程对话框返回。
+  ipcMain.handle('shell:packs-pick-folder', async () => {
+    try {
+      // 复用既有的对话框父窗口解析（设置窗口可能未打开，需回退主窗口）
+      const picked = await dialog.showOpenDialog(pickDialogParent(), {
+        title: t(lang(), 'packs.pickFolderTitle'),
+        properties: ['openDirectory'],
+      });
+      if (picked.canceled || !picked.filePaths || picked.filePaths.length === 0) return { ok: false, cancelled: true };
+      return { ok: true, path: picked.filePaths[0] };
+    } catch (error) {
+      return { ok: false, code: 'DIALOG_FAILED', message: error && error.message };
+    }
+  });
+
+  // .zip 选择：读盘 + base64。大小上限在**读取前**检查，避免把 300MB 读进内存。
+  ipcMain.handle('shell:packs-pick-zip', async () => {
+    try {
+      // 复用既有的对话框父窗口解析（设置窗口可能未打开，需回退主窗口）
+      const picked = await dialog.showOpenDialog(pickDialogParent(), {
+        title: t(lang(), 'packs.pickZipTitle'),
+        properties: ['openFile'],
+        filters: [{ name: 'Character pack', extensions: ['zip'] }],
+      });
+      if (picked.canceled || !picked.filePaths || picked.filePaths.length === 0) return { ok: false, cancelled: true };
+      const file = picked.filePaths[0];
+      const stat = fs.statSync(file);
+      if (stat.size > 128 * 1024 * 1024) return { ok: false, tooLarge: true };
+      return { ok: true, base64: fs.readFileSync(file).toString('base64'), fileName: path.basename(file) };
+    } catch (error) {
+      return { ok: false, code: 'DIALOG_FAILED', message: error && error.message };
+    }
+  });
+
   ipcMain.handle('shell:office-settings-get', () => {
     try {
       const state = ensureOfficeStateStore().get();

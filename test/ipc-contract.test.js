@@ -110,7 +110,15 @@ test('ipc-contract: the registered channel set is stable (snapshot)', () => {
   // 快照的含义是"接口没变"。Issue #22 Phase 1 把 MCP 的 11 个 handler
   // 从 main.js 搬到 ipc-mcp.js —— 通道总数**不变**（还是 124），
   // 这正是"提取"与"接口变更"的区别：前者只搬位置，后者才动集合。
-  const EXPECTED_COUNT = 125;
+  // 2026-11-01（Issue #24）：125 → 132，**有意的接口变更**。
+  // 新增的 7 个通道是角色包导入的用户入口：
+  //   shell:packs-list / -import / -commit / -select / -uninstall
+  //   shell:packs-pick-folder / -pick-zip
+  //
+  // 为什么用 shell:* 而不是 office:*：office:* 是办公室页面的**冻结通道集合**
+  // （见 office-runtime-boundary），只有 office 视图持有它。设置窗口走 shell:*。
+  // 混用会让 office:* 的信任边界失效——任何窗口都能驱动办公室。
+  const EXPECTED_COUNT = 132;
   assert.strictEqual(
     channels.size,
     EXPECTED_COUNT,
