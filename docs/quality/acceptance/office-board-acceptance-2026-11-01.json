@@ -1,0 +1,51 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "the office page boots (__office.ready)",
+      "ok": true,
+      "detail": "{\"ready\":true}"
+    },
+    {
+      "name": "the board renders the mission row",
+      "ok": true,
+      "detail": "rows=1"
+    },
+    {
+      "name": "the mission label is shown",
+      "ok": true,
+      "detail": "重构认证模块2/3 条工作线 · 5 条决策 · 2 个待回答"
+    },
+    {
+      "name": "counting is rendered (workstreams + decisions)",
+      "ok": true,
+      "detail": "重构认证模块2/3 条工作线 · 5 条决策 · 2 个待回答"
+    },
+    {
+      "name": "\"awaiting you\" is surfaced",
+      "ok": true,
+      "detail": "重构认证模块2/3 条工作线 · 5 条决策 · 2 个待回答"
+    },
+    {
+      "name": "empty/unavailable hints stay hidden when data is ok",
+      "ok": true,
+      "detail": "{\"rows\":1,\"text\":\"重构认证模块2/3 条工作线 · 5 条决策 · 2 个待回答\",\"unavailHidden\":true,\"emptyHidden\":true,\"staleHidden\":true,\"moreHidden\":false,\"moreText\":\"还有 1 个 Mission 在 Mission Desk 中\",\"title\":\"项目白板\",\"needsYou\":true,\"needsYouColor\":\"rgb(255, 207, 122)\"}"
+    },
+    {
+      "name": "missions needing the user are visually highlighted",
+      "ok": true,
+      "detail": "color=rgb(255, 207, 122)"
+    },
+    {
+      "name": "the \"more missions\" hint appears",
+      "ok": true,
+      "detail": "还有 1 个 Mission 在 Mission Desk 中"
+    },
+    {
+      "name": "i18n resolves the board copy",
+      "ok": true,
+      "detail": "title=项目白板"
+    }
+  ]
+}
