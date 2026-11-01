@@ -32,7 +32,30 @@ const ENTITY_TYPES = Object.freeze([
   'openQuestion',
   'deliverable',
   'taskRef',
+  // Shared Context 的另外三块（2026-11-01）：
+  //   finding    = 我们发现的事实（"X 在 Y 条件下会崩"）
+  //   assumption = 暂时采用的判断（"我们假设用户会先登录"）
+  //   evidence   = 凭什么相信（"依据是 commit abc"）
+  //
+  // 为什么这三个必须存在：Decision 只记"决定了什么"，
+  // 没有 finding 就没有积累，没有 assumption 就没有地雷标记，
+  // 没有 evidence 就无法回答"凭什么相信"。
+  'finding',
+  'assumption',
+  'evidence',
 ]);
+
+/** Finding 状态：发现的验证程度。 */
+const FINDING_STATUSES = Object.freeze(['unverified', 'verified', 'refuted']);
+
+/** Assumption 状态：假设的处境。expired 是**显式**状态，不靠时间推算。 */
+const ASSUMPTION_STATUSES = Object.freeze(['unverified', 'holding', 'violated', 'expired']);
+
+/** 置信度三档。**不允许 0-100 的小数**——那是虚假精确。 */
+const CONFIDENCES = Object.freeze(['low', 'medium', 'high']);
+
+/** Evidence 的种类（决定 UI 怎么展示引用）。 */
+const EVIDENCE_KINDS = Object.freeze(['file', 'commit', 'url', 'command', 'observation']);
 
 /** Mission 状态。**注意：这里没有 'focused'——那是 UI 概念，不是 Mission 状态。** */
 const MISSION_STATUSES = Object.freeze(['active', 'paused', 'completed', 'abandoned']);
@@ -257,6 +280,118 @@ function validateOpenQuestion(q) {
   return { ok: errors.length === 0, errors };
 }
 
+/**
+ * 校验一个 Finding（我们发现了什么）。
+ *
+ * 与 Decision 的区别：Decision 是"我们选择了 A"，
+ * Finding 是"我们发现 X 成立"。前者是意志，后者是事实。
+ */
+function validateFinding(f) {
+  const errors = [];
+  if (!isPlainObject(f)) return { ok: false, errors: ['finding must be an object'] };
+
+  if (!isNonEmptyString(f.findingId)) errors.push('findingId is required');
+  if (!isNonEmptyString(f.missionId)) errors.push('missionId is required');
+  if (!isNonEmptyString(f.text)) errors.push('text is required (what was found)');
+  if (!FINDING_STATUSES.includes(f.status)) {
+    errors.push(`status must be one of ${FINDING_STATUSES.join('|')}`);
+  }
+  if (!CONFIDENCES.includes(f.confidence)) {
+    errors.push(`confidence must be one of ${CONFIDENCES.join('|')} — no fake precision like 73%`);
+  }
+  if (!isFiniteNonNegative(f.foundAtMs)) errors.push('foundAtMs must be a non-negative finite number');
+  if (f.foundBy !== 'user' && f.foundBy !== 'model') {
+    errors.push('foundBy must be "user" or "model"');
+  }
+  // 证据引用：允许空（早期发现可能还没有证据），但必须是有序的 id 数组
+  if (f.evidenceIds !== undefined && !Array.isArray(f.evidenceIds)) errors.push('evidenceIds must be an array');
+  if (f.workstreamId !== undefined && f.workstreamId !== null && !isNonEmptyString(f.workstreamId)) {
+    errors.push('workstreamId must be a workstream id or null');
+  }
+  const forbidden = collectForbidden(f);
+  if (forbidden.length) errors.push(`derived fields must not be persisted: ${forbidden.join(', ')}`);
+  return { ok: errors.length === 0, errors };
+}
+
+/**
+ * 校验一个 Assumption（我们暂时假设什么）。
+ *
+ * **为什么这个实体最重要**：假设是未来的地雷。
+ * 没有它，团队会在三天后基于一个早已不成立的前提继续工作，
+ * 而且没人知道当初假设了什么。
+ *
+ * 所以它必须有 `expiresAtMs` 与显式的 `status`——
+ * 而不是靠"时间过了就自动过期"（那是**推断**，不是事实）。
+ */
+function validateAssumption(a) {
+  const errors = [];
+  if (!isPlainObject(a)) return { ok: false, errors: ['assumption must be an object'] };
+
+  if (!isNonEmptyString(a.assumptionId)) errors.push('assumptionId is required');
+  if (!isNonEmptyString(a.missionId)) errors.push('missionId is required');
+  if (!isNonEmptyString(a.text)) errors.push('text is required (what is being assumed)');
+  if (!ASSUMPTION_STATUSES.includes(a.status)) {
+    errors.push(`status must be one of ${ASSUMPTION_STATUSES.join('|')}`);
+  }
+  if (!isFiniteNonNegative(a.assumedAtMs)) errors.push('assumedAtMs must be a non-negative finite number');
+  if (a.assumedBy !== 'user' && a.assumedBy !== 'model') {
+    errors.push('assumedBy must be "user" or "model"');
+  }
+  // 验证方法：怎么确认这个假设还成立
+  if (a.verifyBy !== undefined && a.verifyBy !== null && !isNonEmptyString(a.verifyBy)) {
+    errors.push('verifyBy must be a non-empty string (how to check it) or null');
+  }
+  // 过期时间：可选，但给了就必须是有限数且不早于 assumedAtMs
+  if (a.expiresAtMs !== undefined && a.expiresAtMs !== null) {
+    if (!isFiniteNonNegative(a.expiresAtMs)) {
+      errors.push('expiresAtMs must be a non-negative finite number or null');
+    } else if (isFiniteNonNegative(a.assumedAtMs) && a.expiresAtMs < a.assumedAtMs) {
+      errors.push('expiresAtMs must not be before assumedAtMs');
+    }
+  }
+  // "被推翻"时必须说清楚为什么——否则是一条无法追溯的记录
+  if (a.status === 'violated' && !isNonEmptyString(a.violatedReason)) {
+    errors.push('a violated assumption must say why (violatedReason) — otherwise it is untraceable');
+  }
+  const forbidden = collectForbidden(a);
+  if (forbidden.length) errors.push(`derived fields must not be persisted: ${forbidden.join(', ')}`);
+  return { ok: errors.length === 0, errors };
+}
+
+/**
+ * 校验一条 Evidence（凭什么相信）。
+ *
+ * 关键约束：**只存引用，不存内容**。
+ * `ref` 是相对路径 / commit sha / URL / 命令 / 观察描述，
+ * 绝不存文件内容本身（那是隐私边界，也会让事件日志爆炸）。
+ */
+function validateEvidence(e) {
+  const errors = [];
+  if (!isPlainObject(e)) return { ok: false, errors: ['evidence must be an object'] };
+
+  if (!isNonEmptyString(e.evidenceId)) errors.push('evidenceId is required');
+  if (!isNonEmptyString(e.missionId)) errors.push('missionId is required');
+  if (!EVIDENCE_KINDS.includes(e.kind)) {
+    errors.push(`kind must be one of ${EVIDENCE_KINDS.join('|')}`);
+  }
+  if (!isNonEmptyString(e.ref)) errors.push('ref is required (what to look at)');
+  if (!isNonEmptyString(e.claim)) {
+    errors.push('claim is required — evidence without a claim is just a link, it does not support anything');
+  }
+  if (!isFiniteNonNegative(e.recordedAtMs)) errors.push('recordedAtMs must be a non-negative finite number');
+  if (e.recordedBy !== 'user' && e.recordedBy !== 'model') {
+    errors.push('recordedBy must be "user" or "model"');
+  }
+  // ref 不能是绝对路径（隐私边界）
+  // schema.js 刻意零依赖（连 node:path 都不 require），所以绝对路径用字符串判断。
+  if (isNonEmptyString(e.ref) && (e.ref.startsWith('/') || /^[A-Za-z]:\\/.test(e.ref))) {
+    errors.push('ref must be relative (absolute paths are a privacy boundary)');
+  }
+  const forbidden = collectForbidden(e);
+  if (forbidden.length) errors.push(`derived fields must not be persisted: ${forbidden.join(', ')}`);
+  return { ok: errors.length === 0, errors };
+}
+
 /** 校验一个 Deliverable（产物登记）。 */
 function validateDeliverable(d) {
   const errors = [];
@@ -316,6 +451,9 @@ function validateEntity(type, entity) {
     case 'openQuestion': return validateOpenQuestion(entity);
     case 'deliverable': return validateDeliverable(entity);
     case 'taskRef': return validateTaskRef(entity);
+    case 'finding': return validateFinding(entity);
+    case 'assumption': return validateAssumption(entity);
+    case 'evidence': return validateEvidence(entity);
     default:
       return { ok: false, errors: [`unknown entity type: ${type}`] };
   }
@@ -341,5 +479,12 @@ module.exports = {
   validateOpenQuestion,
   validateDeliverable,
   validateTaskRef,
+  validateFinding,
+  validateAssumption,
+  validateEvidence,
   validateEntity,
+  FINDING_STATUSES,
+  ASSUMPTION_STATUSES,
+  CONFIDENCES,
+  EVIDENCE_KINDS,
 };

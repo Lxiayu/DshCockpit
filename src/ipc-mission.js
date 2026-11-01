@@ -67,6 +67,12 @@ const ACTIONS = Object.freeze([
   'attention',            // 只读：需要用户处理的待办（从 office 快照聚合，不复制状态）
   'sinceLastSeen',        // 只读：上次查看该 Mission 之后发生的变化
   'markSeen',             // 只写 UI 偏好：记录"我刚刚看过这个 Mission"
+  // Shared Context 三实体（2026-11-01）
+  'recordFinding',
+  'updateFindingStatus',
+  'recordAssumption',
+  'updateAssumptionStatus',
+  'recordEvidence',
 ]);
 
 function nowMs() { return Date.now(); }
@@ -431,6 +437,128 @@ function registerMissionIpc(ipcMain, ctx) {
       if (!missionId) return fail('missionId is required', 'MISSION_ID_REQUIRED');
       const view = r.store.missionView(missionId);
       return { ok: true, taskRefs: view.taskRefs || [] };
+    },
+
+    /** 记录一条 Finding（我们发现了什么）。 */
+    recordFinding(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = argString(payload.missionId);
+      if (!missionId) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const entity = {
+        findingId: argString(payload.findingId) || `fnd-${randomId()}`,
+        missionId,
+        text: argString(payload.text),
+        status: payload.status || 'unverified',
+        // 置信度只允许三档。不允许 73% 这种虚假精确。
+        confidence: payload.confidence || 'medium',
+        foundAtMs: Number.isFinite(payload.foundAtMs) ? payload.foundAtMs : clock(),
+        // 与 decision 同规则：来源未声明时按"模型发现"，不冒充用户结论
+        foundBy: payload.foundBy === 'user' ? 'user' : 'model',
+        evidenceIds: [],
+      };
+      if (argString(payload.workstreamId)) entity.workstreamId = argString(payload.workstreamId);
+      const v = schema.validateFinding(entity);
+      if (!v.ok) return fail(v.errors.join('; '), 'FINDING_INVALID');
+      const w = r.store.append('finding.recorded', entity, { atMs: entity.foundAtMs });
+      if (!w.ok) return fail(w.reason || 'append failed', 'MISSION_APPEND_FAILED');
+      return { ok: true, findingId: entity.findingId };
+    },
+
+    /** 改 Finding 状态。refuted 必须给理由。 */
+    updateFindingStatus(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const findingId = argString(payload.findingId);
+      if (!findingId) return fail('findingId is required', 'FINDING_ID_REQUIRED');
+      const to = argString(payload.to);
+      if (!schema.FINDING_STATUSES.includes(to)) {
+        return fail(`status must be one of ${schema.FINDING_STATUSES.join('|')}`, 'STATUS_INVALID');
+      }
+      if (to === 'refuted' && !argString(payload.reason)) {
+        return fail('refuting a finding requires a reason', 'REFUTED_REASON_REQUIRED');
+      }
+      const w = r.store.append('finding.statusChanged', {
+        findingId, to, reason: argString(payload.reason) || null, atMs: clock(),
+      }, { atMs: clock() });
+      if (!w.ok) return fail(w.reason || 'append failed', 'MISSION_APPEND_FAILED');
+      return { ok: true };
+    },
+
+    /** 记录一个 Assumption（我们暂时假设什么）。 */
+    recordAssumption(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = argString(payload.missionId);
+      if (!missionId) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const entity = {
+        assumptionId: argString(payload.assumptionId) || `asm-${randomId()}`,
+        missionId,
+        text: argString(payload.text),
+        status: payload.status || 'unverified',
+        assumedAtMs: Number.isFinite(payload.assumedAtMs) ? payload.assumedAtMs : clock(),
+        assumedBy: payload.assumedBy === 'user' ? 'user' : 'model',
+        // 怎么验证还成立——这是假设该有的伴随信息
+        verifyBy: argString(payload.verifyBy) || null,
+        // 过期时间：可选。给了就会被 UI 标成"快过期"
+        expiresAtMs: Number.isFinite(payload.expiresAtMs) ? payload.expiresAtMs : null,
+      };
+      const v = schema.validateAssumption(entity);
+      if (!v.ok) return fail(v.errors.join('; '), 'ASSUMPTION_INVALID');
+      const w = r.store.append('assumption.recorded', entity, { atMs: entity.assumedAtMs });
+      if (!w.ok) return fail(w.reason || 'append failed', 'MISSION_APPEND_FAILED');
+      return { ok: true, assumptionId: entity.assumptionId };
+    },
+
+    /** 改 Assumption 状态。violated 必须给理由。 */
+    updateAssumptionStatus(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const assumptionId = argString(payload.assumptionId);
+      if (!assumptionId) return fail('assumptionId is required', 'ASSUMPTION_ID_REQUIRED');
+      const to = argString(payload.to);
+      if (!schema.ASSUMPTION_STATUSES.includes(to)) {
+        return fail(`status must be one of ${schema.ASSUMPTION_STATUSES.join('|')}`, 'STATUS_INVALID');
+      }
+      if (to === 'violated' && !argString(payload.reason)) {
+        return fail('violating an assumption requires a reason', 'VIOLATED_REASON_REQUIRED');
+      }
+      const w = r.store.append('assumption.statusChanged', {
+        assumptionId, to, reason: argString(payload.reason) || null, atMs: clock(),
+      }, { atMs: clock() });
+      if (!w.ok) return fail(w.reason || 'append failed', 'MISSION_APPEND_FAILED');
+      return { ok: true };
+    },
+
+    /**
+     * 记录一条 Evidence（凭什么相信）。
+     *
+     * 关键约束：**只存引用不存内容**。ref 是相对路径 / commit / URL / 命令，
+     * 绝不是文件内容本身（隐私边界 + 事件日志会爆炸）。
+     * targetKind/targetId 让它挂到某个 decision/finding/assumption 上。
+     */
+    recordEvidence(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = argString(payload.missionId);
+      if (!missionId) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const entity = {
+        evidenceId: argString(payload.evidenceId) || `evd-${randomId()}`,
+        missionId,
+        kind: argString(payload.kind) || 'observation',
+        ref: argString(payload.ref),
+        // claim 必填：没有 claim 的证据只是一个链接，不支持任何结论
+        claim: argString(payload.claim),
+        recordedAtMs: Number.isFinite(payload.recordedAtMs) ? payload.recordedAtMs : clock(),
+        recordedBy: payload.recordedBy === 'user' ? 'user' : 'model',
+        targetKind: argString(payload.targetKind) || null,
+        targetId: argString(payload.targetId) || null,
+      };
+      const v = schema.validateEvidence(entity);
+      if (!v.ok) return fail(v.errors.join('; '), 'EVIDENCE_INVALID');
+      const w = r.store.append('evidence.recorded', entity, { atMs: entity.recordedAtMs });
+      if (!w.ok) return fail(w.reason || 'append failed', 'MISSION_APPEND_FAILED');
+      return { ok: true, evidenceId: entity.evidenceId };
     },
 
     registerDeliverable(payload) {

@@ -1,0 +1,91 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "in dock mode the list is fully hidden (no duplicate empty state)",
+      "ok": true,
+      "detail": "{\"listVisible\":false,\"listText\":\"\"}"
+    },
+    {
+      "name": "the findings section renders REAL data",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "the assumptions section renders REAL data",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "the evidence section renders REAL data",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "a refuted finding shows its label",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "a violated assumption shows WHY",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "evidence shows its claim (what it supports)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "status badges are present",
+      "ok": true,
+      "detail": "badges=6"
+    },
+    {
+      "name": "section labels use UPPERCASE + tracking (shape, not just colour)",
+      "ok": true,
+      "detail": "{\"size\":11,\"weight\":650,\"ls\":\"0.77px\",\"tt\":\"uppercase\"}"
+    },
+    {
+      "name": "body text is LARGER than metadata (scale carries hierarchy)",
+      "ok": true,
+      "detail": "text=12.5 meta=10.5"
+    },
+    {
+      "name": "section labels are heavier than body text (weight carries hierarchy)",
+      "ok": true,
+      "detail": "label=650 text=400"
+    },
+    {
+      "name": "sections are separated by WHITESPACE, not borders",
+      "ok": true,
+      "detail": "[]"
+    },
+    {
+      "name": "DARK: shared-context text contrast >= 4.5",
+      "ok": true,
+      "detail": "{\".sc-text\":18.17,\".sc-meta\":6.07,\"h2\":6.07}"
+    },
+    {
+      "name": "LIGHT: shared-context text contrast >= 4.5",
+      "ok": true,
+      "detail": "{\".sc-text\":16.43,\".sc-meta\":4.85,\"h2\":4.85}"
+    },
+    {
+      "name": "LIGHT: metadata contrast >= 4.5",
+      "ok": true,
+      "detail": "4.85"
+    },
+    {
+      "name": "screenshots captured for both themes",
+      "ok": true,
+      "detail": "dark + light"
+    },
+    {
+      "name": "the renderer had no fatal errors",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

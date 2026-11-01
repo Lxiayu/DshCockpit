@@ -36,6 +36,12 @@ const EVENT_TYPES = Object.freeze([
   'question.answered',
   'deliverable.registered',
   'taskRef.linked',
+  // Shared Context 三实体（2026-11-01）
+  'finding.recorded',
+  'finding.statusChanged',
+  'assumption.recorded',
+  'assumption.statusChanged',
+  'evidence.recorded',
 ]);
 
 function emptyProjection() {
@@ -46,6 +52,9 @@ function emptyProjection() {
     questions: {},       // questionId -> OpenQuestion
     deliverables: {},    // deliverableId -> Deliverable
     taskRefs: {},        // taskRefId -> TaskRef
+    findings: {},        // findingId -> Finding
+    assumptions: {},     // assumptionId -> Assumption
+    evidences: {},       // evidenceId -> Evidence
     // 索引：便于"这个 Mission 下有哪些 X"的查询，避免每次全表扫
     byMission: {},       // missionId -> { workstreamIds, decisionIds, questionIds, deliverableIds, taskRefIds }
     // 最后一个成功应用的事件序号（用于检测日志缺口）
@@ -58,6 +67,7 @@ function ensureMissionIndex(p, missionId) {
   if (!p.byMission[missionId]) {
     p.byMission[missionId] = {
       workstreamIds: [], decisionIds: [], questionIds: [], deliverableIds: [], taskRefIds: [],
+      findingIds: [], assumptionIds: [], evidenceIds: [],
     };
   }
   return p.byMission[missionId];
@@ -148,6 +158,69 @@ function applyEvent(projection, event) {
       next.workstreams[payload.workstreamId] = {
         ...cur, status: payload.to, updatedAtMs: at || cur.updatedAtMs,
       };
+      applied = true;
+      break;
+    }
+    case 'finding.recorded': {
+      if (!schema.validateFinding(payload).ok) break;
+      next.findings[payload.findingId] = { ...payload };
+      ensureMissionIndex(next, payload.missionId).findingIds.push(payload.findingId);
+      applied = true;
+      break;
+    }
+    case 'finding.statusChanged': {
+      const cur = next.findings[payload.findingId];
+      if (!cur) break;
+      const updated = { ...cur, status: payload.to, updatedAtMs: payload.atMs };
+      // refuted 是最强的语义反转，必须留下理由——否则这条记录无法追溯
+      if (payload.to === 'refuted') {
+        if (!schema.isNonEmptyString(payload.reason)) break;
+        updated.refutedReason = payload.reason;
+      }
+      if (!schema.validateFinding(updated).ok) break;
+      next.findings[payload.findingId] = updated;
+      applied = true;
+      break;
+    }
+    case 'assumption.recorded': {
+      if (!schema.validateAssumption(payload).ok) break;
+      next.assumptions[payload.assumptionId] = { ...payload };
+      ensureMissionIndex(next, payload.missionId).assumptionIds.push(payload.assumptionId);
+      applied = true;
+      break;
+    }
+    case 'assumption.statusChanged': {
+      const cur = next.assumptions[payload.assumptionId];
+      if (!cur) break;
+      const updated = { ...cur, status: payload.to, updatedAtMs: payload.atMs };
+      // "被推翻"必须说清楚为什么——这是假设最重要的时刻
+      if (payload.to === 'violated') {
+        if (!schema.isNonEmptyString(payload.reason)) break;
+        updated.violatedReason = payload.reason;
+      }
+      if (!schema.validateAssumption(updated).ok) break;
+      next.assumptions[payload.assumptionId] = updated;
+      applied = true;
+      break;
+    }
+    case 'evidence.recorded': {
+      if (!schema.validateEvidence(payload).ok) break;
+      next.evidences[payload.evidenceId] = { ...payload };
+      ensureMissionIndex(next, payload.missionId).evidenceIds.push(payload.evidenceId);
+      // 反向关联：证据可以挂在 decision / finding / assumption 上。
+      // 用 targetKind + targetId 表达"这条证据支持什么"。
+      if (payload.targetKind && payload.targetId) {
+        const bucket = payload.targetKind === 'decision' ? next.decisions
+          : payload.targetKind === 'finding' ? next.findings
+            : payload.targetKind === 'assumption' ? next.assumptions : null;
+        const target = bucket && bucket[payload.targetId];
+        if (target) {
+          const ids = Array.isArray(target.evidenceIds) ? target.evidenceIds : [];
+          if (!ids.includes(payload.evidenceId)) {
+            target.evidenceIds = [...ids, payload.evidenceId];
+          }
+        }
+      }
       applied = true;
       break;
     }
@@ -249,6 +322,9 @@ function missionView(projection, missionId) {
     questions: (idx.questionIds || []).map((id) => projection.questions[id]).filter(Boolean),
     deliverables: (idx.deliverableIds || []).map((id) => projection.deliverables[id]).filter(Boolean),
     taskRefs: (idx.taskRefIds || []).map((id) => projection.taskRefs[id]).filter(Boolean),
+    findings: (idx.findingIds || []).map((id) => projection.findings[id]).filter(Boolean),
+    assumptions: (idx.assumptionIds || []).map((id) => projection.assumptions[id]).filter(Boolean),
+    evidences: (idx.evidenceIds || []).map((id) => projection.evidences[id]).filter(Boolean),
   };
 }
 

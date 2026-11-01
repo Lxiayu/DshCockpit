@@ -27,7 +27,7 @@
    */
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg-app); color: var(--text-1); font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
-  body { display: flex; flex-direction: column; }
+  body { display: flex; flex-direction: column; font-size: 13px; line-height: 1.55; }
 
   header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border-1); flex: 0 0 auto; }
   header h1 { font-size: 15px; margin: 0; flex: 1; }
@@ -49,12 +49,14 @@
      切到单列：顶部一个 Mission 选择器，下面全是详情。
      同一个文件两种布局，避免维护两份 UI（那必然漂移）。 */
   body.dock main { flex-direction: column; overflow: auto; }
-  body.dock #list { flex: 0 0 auto; border-right: 0; overflow: visible; padding: 0; }
   /* dock 里列表卡片整个隐藏：顶部下拉已经承担了选择职责。
      之前只隐藏 .row 不隐藏 .card，于是选中项会以一张带边框的卡片
      在详情上方重复出现一次（真机截图抓到的）。 */
-  body.dock #list .card { display: none; }
-  body.dock #list .empty { display: none; }
+  /* dock 里 #list 整个让位给 detail：
+     顶部下拉已经承担选择职责，列表区的任何内容（卡片/空状态引导）
+     都与 detail 的对应内容重复。真机截图抓到过"从这里开始"和
+     "还没有选中任何 Mission"同时出现两遍的情况。 */
+  body.dock #list { display: none; }
   body.dock #detail { flex: 1 1 auto; padding: 12px 14px; overflow: visible; }
   body.dock h2 { margin-top: 12px; }
   /* dock 里 header 的 h1 与选择器的 "MISSION DESK" 标签重复。
@@ -128,8 +130,9 @@
   /* 待办卡片：风险用左侧竖条表达，不用整块染色（整块会抢走全部注意力） */
   .att-item {
     display: flex; flex-direction: column; gap: 4px;
-    padding: 8px 11px 9px 13px; border-top: 1px solid var(--border-1);
+    padding: 9px 11px 10px 13px;
     position: relative;
+    transition: background .12s var(--ease);
   }
   .att-item::before {
     content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
@@ -138,6 +141,9 @@
   .att-item[data-risk="high"]::before { background: var(--bad); }
   .att-item[data-risk="medium"]::before { background: var(--warn); }
   .att-item[data-risk="low"]::before { background: var(--att-idle-fg); }
+  /* 项之间靠极淡的分隔线（比区块间的线更淡），因为它们是同一张卡内的条目 */
+  .att-item + .att-item { box-shadow: inset 0 1px 0 var(--border-1); }
+  .att-item:hover { background: var(--bg-hover); }
   .att-item-line { display: flex; align-items: baseline; gap: 6px; }
   .att-item-kind {
     font-size: 9.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
@@ -178,7 +184,30 @@
   .tl-more { font-size: 10.5px; color: var(--text-4); padding: 5px 0 0 11px; }
 
   /* --- L3: 参考区块（可折叠）---------------------------------------- */
-  .sec { border-top: 1px solid var(--border-1); }
+  /* --- Shared Context 条目（发现/假设/证据）--------------------------
+     与"待办"的区别：待办是需要行动，这些是**参考资料**。
+     所以视觉更轻：无边框、无底色，只有状态徽标 + 文字。
+     第三层（参考）就该是这个重量。 */
+  .sc-list { list-style: none; margin: 0; padding: 0; }
+  .sc-item { padding: 7px 0; }
+  .sc-line { display: flex; align-items: baseline; gap: 7px; }
+  .sc-text { font-size: 12.5px; color: var(--text-1); line-height: 1.5; overflow-wrap: anywhere; }
+  .sc-mono { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); }
+  .sc-badge {
+    font-size: 9.5px; font-weight: 700; letter-spacing: .05em;
+    padding: 1.5px 6px; border-radius: 4px; flex: 0 0 auto;
+  }
+  .sc-badge-kind { background: var(--acc-soft); color: var(--acc); }
+  .sc-meta { font-size: 10.5px; color: var(--text-3); margin-top: 3px; padding-left: 2px; }
+  /* 状态色只上徽标，不染整行——整行染色会抢走"待办"的注意力 */
+  .st-finding-unverified, .st-assumption-unverified { background: var(--att-idle-bg); color: var(--att-idle-fg); }
+  .st-finding-verified, .st-assumption-holding { background: var(--att-ok-bg); color: var(--att-ok-fg); }
+  .st-finding-refuted, .st-assumption-violated, .st-assumption-expired { background: var(--att-bad-bg); color: var(--att-bad-fg); }
+
+  /* Linear 原则：「no separators — only background hover state」。
+     区块之间靠**留白**分组，不靠横线。留 14px 的呼吸。
+     原来每个 .sec 都有 border-top，结果整页像一张表单。 */
+  .sec { margin-top: 14px; }
   .sec > summary {
     display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none;
     padding: 9px 2px; font-size: 12px; font-weight: 620; color: var(--text-2);
@@ -208,8 +237,28 @@
   .empty button.primary:hover { background: var(--acc-hover); }
   .soft-hint { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--att-warn-bg); color: var(--att-warn-fg); font-size: 11px; }
 
-  h2 { font-size: 13px; margin: 18px 0 8px; color: var(--text-2); letter-spacing: .04em; text-transform: uppercase; }
-  h3 { font-size: 12px; margin: 14px 0 6px; color: var(--text-3); }
+  /* ==================================================================
+     排版层级（P4 UI 打磨）
+     ------------------------------------------------------------------
+     第一性原理（来自 Linear 设计系统）：
+       「Hierarchy is enforced through scale and weight, never color.」
+
+     之前的问题：标题/正文/元信息全靠 --text-1/2/3/4 四级颜色区分，
+     字号只差 0.5-1px。结果看起来"全是白字"，单调。
+
+     改法：
+       · 标签（h2）= 11px / 650 / UPPERCASE / tracking .07em —— 形状上有识别度
+       · 内容        = 13px / 450 / --text-1
+       · 元信息      = 11px / 400 / --text-3
+       · 数字用 tabular-nums，等宽对齐不跳动
+     ================================================================== */
+  h2 {
+    font-size: 11px; font-weight: 650; margin: 20px 0 9px;
+    color: var(--text-3); letter-spacing: .07em; text-transform: uppercase;
+  }
+  h3 { font-size: 12px; font-weight: 600; margin: 14px 0 6px; color: var(--text-2); }
+  /* 数字等宽：计数变化时不左右跳 */
+  .num, .att-count, .sec-n { font-variant-numeric: tabular-nums; }
   ul { margin: 0; padding-left: 18px; }
   li { margin: 3px 0; overflow-wrap: anywhere; }
 
@@ -479,6 +528,10 @@ function renderList() {
 //     · 每张卡必须能直接处理（只显示不能点 = 用户还得去别处找）
 
 const RISK_LABEL = { high: '高', medium: '中', low: '低' };
+const FINDING_LABEL = { unverified: '待验证', verified: '已验证', refuted: '已推翻' };
+const ASSUMPTION_LABEL = { unverified: '未验证', holding: '仍成立', violated: '已推翻', expired: '已过期' };
+const CONF_LABEL = { low: '低', medium: '中', high: '高' };
+const EVIDENCE_LABEL = { file: '文件', commit: '提交', url: '链接', command: '命令', observation: '观察' };
 const KIND_LABEL = { approval: '审批', question: '提问' };
 
 function renderAttention() {
@@ -825,6 +878,235 @@ function renderDetail() {
       else { msg.textContent = explainFailure(r); }
     });
     wrap.append(txt, why, btn, msg);
+    box.append(wrap);
+  }
+
+  // ================================================================
+  // Shared Context：发现 / 假设 / 证据（2026-11-01）
+  //
+  // 为什么这三块比"决策"更重要：
+  //   决策只记"决定了什么"，记不住"为什么这么决定"。
+  //     · Finding    = 我们发现的事实  → 团队积累的实体
+  //     · Assumption = 暂时采用的判断  → 未来会爆的地雷
+  //     · Evidence   = 凭什么相信      → 可信度的来源
+  // ================================================================
+
+  // --- 发现 ---
+  const findings = v.findings || [];
+  box.append(el('h2', { text: '发现' }));
+  if (findings.length === 0) {
+    box.append(el('div', { class: 'muted tiny',
+      text: '还没有记录发现。发现是"我们确认了 X 成立"，与决策（我们选择了 A）不同。' }));
+  } else {
+    const ul = el('ul', { class: 'sc-list' });
+    for (const f of findings) {
+      const li = el('li', { class: 'sc-item' });
+      const line = el('div', { class: 'sc-line' });
+      line.append(el('span', { class: 'sc-badge st-finding-' + f.status,
+        text: FINDING_LABEL[f.status] || f.status }));
+      line.append(el('span', { class: 'sc-text', text: f.text }));
+      li.append(line);
+      const meta = [];
+      meta.push('置信 ' + CONF_LABEL[f.confidence] || f.confidence);
+      if (Number.isFinite(f.foundAtMs)) meta.push(relativeTime(f.foundAtMs));
+      if ((f.evidenceIds || []).length) meta.push(f.evidenceIds.length + ' 条证据');
+      li.append(el('div', { class: 'sc-meta', text: meta.join(' · ') }));
+      // 状态推进入口：发现必须能被"确认"或"推翻"，否则它永远停在待验证
+      if (f.status !== 'refuted') {
+        const acts = el('div', { class: 'row', style: 'margin-top:5px;gap:6px' });
+        if (f.status !== 'verified') {
+          const okBtn = el('button', { class: 'att-btn', text: '已验证' });
+          okBtn.addEventListener('click', async () => {
+            const r = await api('updateFindingStatus', { findingId: f.findingId, to: 'verified' });
+            if (!r.ok) { alert(explainFailure(r)); return; }
+            await refresh();
+          });
+          acts.append(okBtn);
+        }
+        const noBtn = el('button', { class: 'att-btn danger', text: '推翻' });
+        noBtn.addEventListener('click', async () => {
+          // refuted 必须给理由——它是语义反转，没有理由就无法追溯
+          const why = prompt('为什么推翻这个发现？（必填）');
+          if (!why || !why.trim()) return;
+          const r = await api('updateFindingStatus', { findingId: f.findingId, to: 'refuted', reason: why.trim() });
+          if (!r.ok) { alert(explainFailure(r)); return; }
+          await refresh();
+        });
+        acts.append(noBtn);
+        li.append(acts);
+      }
+      ul.append(li);
+    }
+    box.append(ul);
+  }
+  {
+    // 记录一条发现（就地表单）。
+    // 第一性原理：只有展示没有入口 = 这块内容永远只能来自别处。
+    const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
+    const txt = el('input', { placeholder: '发现了什么事实…', style: 'flex:1;min-width:160px' });
+    const conf = el('select', {});
+    for (const [val, label] of [['high', '高置信'], ['medium', '中置信'], ['low', '低置信']]) {
+      conf.append(el('option', { value: val, text: label }));
+    }
+    conf.value = 'medium';
+    const btn = el('button', { text: '记录发现' });
+    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
+    btn.addEventListener('click', async () => {
+      msg.textContent = '';
+      if (!txt.value.trim()) { msg.textContent = '请填写发现内容'; return; }
+      btn.disabled = true;
+      let r;
+      try {
+        r = await api('recordFinding', {
+          missionId: m.missionId,
+          text: txt.value.trim(),
+          confidence: conf.value,
+          // 用户在 UI 里录入 = 用户自己的发现
+          foundBy: 'user',
+        });
+      } catch (e) { r = { ok: false, reason: e.message }; }
+      btn.disabled = false;
+      if (r && r.ok) { txt.value = ''; await refresh(); }
+      else { msg.textContent = explainFailure(r); }
+    });
+    wrap.append(txt, conf, btn, msg);
+    box.append(wrap);
+  }
+
+  // --- 假设 ---
+  const assumptions = v.assumptions || [];
+  box.append(el('h2', { text: '假设' }));
+  if (assumptions.length === 0) {
+    box.append(el('div', { class: 'muted tiny',
+      text: '还没有记录假设。假设是"我们暂时这么认为，但还没验证"——它是最容易在三天后爆炸的东西。' }));
+  } else {
+    const ul = el('ul', { class: 'sc-list' });
+    const now = Date.now();
+    for (const a of assumptions) {
+      const li = el('li', { class: 'sc-item' });
+      const line = el('div', { class: 'sc-line' });
+      line.append(el('span', { class: 'sc-badge st-assumption-' + a.status,
+        text: ASSUMPTION_LABEL[a.status] || a.status }));
+      line.append(el('span', { class: 'sc-text', text: a.text }));
+      li.append(line);
+      const meta = [];
+      if (a.verifyBy) meta.push('验证方式：' + a.verifyBy);
+      if (Number.isFinite(a.expiresAtMs)) {
+        const left = a.expiresAtMs - now;
+        // 过期是**显式**状态；这里只提示"快过期"，不自己改状态
+        meta.push(left < 0 ? '已过期' : `还有 ${Math.ceil(left / 3600e3)}h 过期`);
+      }
+      if (a.violatedReason) meta.push('被推翻：' + a.violatedReason);
+      if (meta.length) li.append(el('div', { class: 'sc-meta', text: meta.join(' · ') }));
+      // 假设必须能被确认或推翻。它是最容易在三天后爆炸的东西，
+      // 没有这两个按钮，用户只能看着它过期。
+      if (a.status !== 'violated' && a.status !== 'expired') {
+        const acts = el('div', { class: 'row', style: 'margin-top:5px;gap:6px' });
+        if (a.status !== 'holding') {
+          const okBtn = el('button', { class: 'att-btn', text: '仍成立' });
+          okBtn.addEventListener('click', async () => {
+            const r = await api('updateAssumptionStatus', { assumptionId: a.assumptionId, to: 'holding' });
+            if (!r.ok) { alert(explainFailure(r)); return; }
+            await refresh();
+          });
+          acts.append(okBtn);
+        }
+        const noBtn = el('button', { class: 'att-btn danger', text: '已推翻' });
+        noBtn.addEventListener('click', async () => {
+          const why = prompt('为什么它不再成立？（必填）');
+          if (!why || !why.trim()) return;
+          const r = await api('updateAssumptionStatus', { assumptionId: a.assumptionId, to: 'violated', reason: why.trim() });
+          if (!r.ok) { alert(explainFailure(r)); return; }
+          await refresh();
+        });
+        acts.append(noBtn);
+        li.append(acts);
+      }
+      ul.append(li);
+    }
+    box.append(ul);
+  }
+  {
+    // 记录一个假设（就地表单）。
+    // verifyBy 是这个表单最重要的字段：假设之所以危险，是因为没人记得怎么验证它。
+    const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
+    const txt = el('input', { placeholder: '我们暂时假设…', style: 'flex:1;min-width:160px' });
+    const verify = el('input', { placeholder: '怎么验证它仍成立（可留空）…', style: 'flex:1;min-width:160px' });
+    const btn = el('button', { text: '记录假设' });
+    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
+    btn.addEventListener('click', async () => {
+      msg.textContent = '';
+      if (!txt.value.trim()) { msg.textContent = '请填写假设内容'; return; }
+      btn.disabled = true;
+      let r;
+      try {
+        r = await api('recordAssumption', {
+          missionId: m.missionId,
+          text: txt.value.trim(),
+          verifyBy: verify.value.trim() || null,
+          assumedBy: 'user',
+        });
+      } catch (e) { r = { ok: false, reason: e.message }; }
+      btn.disabled = false;
+      if (r && r.ok) { txt.value = ''; verify.value = ''; await refresh(); }
+      else { msg.textContent = explainFailure(r); }
+    });
+    wrap.append(txt, verify, btn, msg);
+    box.append(wrap);
+  }
+
+  // --- 证据 ---
+  const evidences = v.evidences || [];
+  box.append(el('h2', { text: '证据' }));
+  if (evidences.length === 0) {
+    box.append(el('div', { class: 'muted tiny',
+      text: '还没有证据。证据是"凭什么相信这个结论"——只存引用，不存内容。' }));
+  } else {
+    const ul = el('ul', { class: 'sc-list' });
+    for (const e of evidences) {
+      const li = el('li', { class: 'sc-item' });
+      const line = el('div', { class: 'sc-line' });
+      line.append(el('span', { class: 'sc-badge sc-badge-kind', text: EVIDENCE_LABEL[e.kind] || e.kind }));
+      line.append(el('span', { class: 'sc-text sc-mono', text: e.ref }));
+      li.append(line);
+      li.append(el('div', { class: 'sc-meta', text: '支持：' + e.claim }));
+      ul.append(li);
+    }
+    box.append(ul);
+  }
+  {
+    // 记录一条证据（就地表单）。
+    // ref 是引用不是内容：commit / 相对路径 / URL / 命令。
+    // claim 必填——没有 claim 的证据只是一个链接。
+    const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
+    const kind = el('select', {});
+    for (const [val, label] of [['commit', '提交'], ['file', '文件'], ['url', '链接'], ['command', '命令'], ['observation', '观察']]) {
+      kind.append(el('option', { value: val, text: label }));
+    }
+    const ref = el('input', { placeholder: '引用（相对路径/commit/URL）…', style: 'flex:1;min-width:160px' });
+    const claim = el('input', { placeholder: '它支持什么结论（必填）…', style: 'flex:1;min-width:160px' });
+    const btn = el('button', { text: '记录证据' });
+    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
+    btn.addEventListener('click', async () => {
+      msg.textContent = '';
+      if (!ref.value.trim()) { msg.textContent = '请填写引用'; return; }
+      if (!claim.value.trim()) { msg.textContent = '请填写它支持什么 —— 没有 claim 的证据只是链接'; return; }
+      btn.disabled = true;
+      let r;
+      try {
+        r = await api('recordEvidence', {
+          missionId: m.missionId,
+          kind: kind.value,
+          ref: ref.value.trim(),
+          claim: claim.value.trim(),
+          recordedBy: 'user',
+        });
+      } catch (e) { r = { ok: false, reason: e.message }; }
+      btn.disabled = false;
+      if (r && r.ok) { ref.value = ''; claim.value = ''; await refresh(); }
+      else { msg.textContent = explainFailure(r); }
+    });
+    wrap.append(kind, ref, claim, btn, msg);
     box.append(wrap);
   }
 

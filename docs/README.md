@@ -112,6 +112,7 @@
 | `docs/plans/active/P4-EXPERIENCE-POLISH-2026-11-01.md` | **P4 体验打磨计划** | 先砍掉与设计文档冲突的"更多物件"；空状态 > 错误粒度 |
 | `docs/plans/active/P4-COMPANION-INFORMATION-2026-11-01.md` | **Companion 信息增强计划** | 小窗该回答"要不要现在看"；紧急度必须真实派生 |
 | `docs/plans/active/P4-ATTENTION-AND-ABSENCE-2026-11-01.md` | **待办+离开期间+前端打磨计划** | 待办是排序机制；lastSeenAtMs 属 UI 偏好；37 处硬编码色须 token 化 |
+| `docs/plans/active/P4-UI-POLISH-AND-ENTITIES-2026-11-01.md` | **UI 打磨 + 三实体计划** | 层级靠 scale/weight 不靠颜色；先修引导重复 bug |
 | `docs/plans/completed/HARNESS-V0.6-PLAN-2026-10-25.md` | 已完成 | v0.6 五工作包计划（续跑/过程可见/首帧/推送/归档） |
 | `docs/plans/completed/HARNESS-V0.6-REPORT-2026-10-26.md` | 已完成 | v0.6 完成报告：变异矩阵、真机脚本、遗留 |
 | `docs/plans/completed/2026-08-30-virtual-office-runtime-implementation.md` | 已完成 | 办公室运行时 Task 0–9（历史记录；路径按当时结构） |
@@ -138,6 +139,7 @@
 | `docs/design/mission-desk-ux.md` | **Mission Desk 右栏设计（Phase 1）** | 信息架构/数据映射/状态矩阵/MVP 范围 |
 | `docs/quality/mission-desk-dock-acceptance-2026-11-01.md` | **右栏改造验收（2026-11-01）** | 14/14；右栏从任务面板变成 Mission Desk |
 | `docs/quality/mission-desk-attention-acceptance-2026-11-01.md` | **待办+离开期间+双主题验收** | 19/19；两主题对比度全部 ≥AA |
+| `docs/quality/mission-desk-shared-context-acceptance-2026-11-01.md` | **三实体+UI层级验收** | 17/17；层级靠 scale/weight 不靠颜色 |
 | `docs/quality/testing-strategy.md` | 审计报告（2026-11-01） | 测试体系盘点：137 个套件真实构成、门禁类型、变异纪律、缺口与改进建议 |
 | `docs/quality/quality-gates.md` | **现行（2026-11-01）** | 质量门禁与 CI 策略："什么算通过"的定义 |
 | `docs/quality/compatibility-ledger-spec.md` | **规范草案（2026-11-01，待拍板）** | 兼容性账本 v2：Installed/Healthy/Compatible/Supported 四级分离、通道策略、回写机制（修复 Issue #21 根因） |
