@@ -133,6 +133,12 @@ jobs:
       - name: Gate — capability packs
         run: node scripts/verify-capability-packs.js
 
+      # G5: 性能基线（P4）——不是"跑得快"，是"没有明显退化"。
+      # 预算按 macOS 基准给；Windows + 杀毒实时扫描通常是 2–5 倍，
+      # 所以这里只挡 macOS 上就明显变慢的情况。
+      - name: Gate — performance baseline
+        run: npm run perf:baseline
+
   # --------------------------------------------------------------- 语法/构建
   syntax:
     name: syntax & entry point
