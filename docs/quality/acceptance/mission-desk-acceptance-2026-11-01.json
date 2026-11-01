@@ -1,0 +1,56 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "window renders the Mission Desk header",
+      "ok": true,
+      "detail": "Mission Desk"
+    },
+    {
+      "name": "preload bridge `dshShell.mission` is exposed",
+      "ok": true,
+      "detail": "function"
+    },
+    {
+      "name": "the mission list renders at least one card",
+      "ok": true,
+      "detail": "cards=1"
+    },
+    {
+      "name": "Mission status and Harness state are SEPARATE elements",
+      "ok": true,
+      "detail": "badge=\"active\" live=\"实时状态不可用\" sameNode=false"
+    },
+    {
+      "name": "unavailable live state is stated in words",
+      "ok": true,
+      "detail": "实时状态不可用"
+    },
+    {
+      "name": "unavailable state does NOT claim \"no agent running\"",
+      "ok": true,
+      "detail": "实时状态不可用"
+    },
+    {
+      "name": "no \"focused\" badge exists (it is a UI concept, not a Mission status)",
+      "ok": true,
+      "detail": "count=0"
+    },
+    {
+      "name": "renderer has NO node globals (sandbox + contextIsolation)",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "name": "navigation away from the page is blocked",
+      "ok": true,
+      "detail": "blocked=1 protocol=file:"
+    },
+    {
+      "name": "screenshot captured for visual review",
+      "ok": true,
+      "detail": "2080x1384"
+    }
+  ]
+}
