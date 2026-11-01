@@ -84,6 +84,17 @@ const PRESETS = [
     baseURL: 'https://openrouter.ai/api/v1', keyEnv: 'OPENROUTER_API_KEY',
     portalUrl: 'https://openrouter.ai/settings/keys', docsUrl: 'https://openrouter.ai/docs',
   },
+  {
+    // StepFun Step Plan（2026-11-01 加）。
+    //
+    // 为什么 baseURL 是 /step_plan/v1 而不是 /v1：Step Plan 是订阅套餐，
+    // 请求走专属路径前缀（官方文档：所有请求统一使用 /step_plan/v1/...）。
+    // 用普通 /v1 会 404。
+    id: 'stepfun', nameKey: 'models_preset_stepfun',
+    baseURL: 'https://api.stepfun.com/step_plan/v1', keyEnv: 'STEP_API_KEY',
+    portalUrl: 'https://platform.stepfun.com/', docsUrl: 'https://platform.stepfun.com/docs/zh/step-plan/integrations/reasoning-api',
+    noteKey: 'models_note_stepfun',
+  },
   { id: 'custom', nameKey: 'models_preset_custom', baseURL: '', keyEnv: '' },
 ];
 
@@ -291,12 +302,47 @@ function readCredential(text, ref) {
 /** Upsert one `REF: value` line; every other line (keys, comments, blanks)
  * keeps its exact position. */
 function upsertCredential(text, ref, value) {
-  const line = `${ref}: ${value}`;
-  const re = new RegExp(`^\\s*${ref}\\s*:.*$`, 'm');
-  if (re.test(text)) return text.replace(re, line);
+  // 凭据文件有两种合法形态，必须都支持：
+  //
+  //   (a) **分段式**（runtime 的当前格式）：key 缩进在 `refs:` 段下。
+  //   (b) **扁平式**（更早的格式 / 用户手写）：key 在顶层，各占一行。
+  //
+  // 第一版对 (a) 也直接追加到末尾 —— 于是新 key 落到**顶层**，
+  // runtime 只从 refs 段读，永远读不到；而本应用自己的 vault 里有值，
+  // 所以"测试连接"是绿的，只有真正跑 Agent 时才会发现没 key。
+  //
+  // 修正原则：**尊重文件已有形态**。有 refs 段就插进去，没有就保持扁平，
+  // 绝不为了"统一格式"去改造用户已有的文件（那会破坏注释与顺序）。
   const t = text || '';
-  if (!t) return `${line}\n`;
-  return t.endsWith('\n') ? `${t}${line}\n` : `${t}\n${line}\n`;
+  const lines = t.split('\n');
+  const refsAt = lines.findIndex((l) => /^refs:\s*$/.test(l));
+
+  // ---- 已存在同 ref：原地替换（保留它原本的缩进）----
+  const existing = new RegExp(`^(\\s*)${ref}\\s*:.*$`, 'm');
+  if (existing.test(t)) {
+    return t.replace(existing, (_m, ws) => `${ws}${ref}: ${value}`);
+  }
+
+  const indented = refsAt !== -1;
+  const line = indented ? `  ${ref}: ${value}` : `${ref}: ${value}`;
+
+  // ---- 扁平式：追加到末尾（保持原有行为）----
+  if (!indented) {
+    if (!t) return `${line}\n`;
+    return t.endsWith('\n') ? `${t}${line}\n` : `${t}\n${line}\n`;
+  }
+
+  // ---- 分段式：插到 refs 段的最后一个子行之后 ----
+  // 不能插到末尾：refs 段后面可能还有 records: 段，插错位置会破坏它。
+  let insertAt = refsAt + 1;
+  for (let i = refsAt + 1; i < lines.length; i += 1) {
+    const l = lines[i];
+    if (l.trim() === '') continue;              // 空行不算段的结束
+    if (/^\s+/.test(l)) { insertAt = i + 1; continue; } // 仍是 refs 的子行
+    break;                                       // 遇到下一个顶层 key
+  }
+  lines.splice(insertAt, 0, line);
+  return lines.join('\n');
 }
 
 /** Drop one `REF:` line (noop when absent). */
