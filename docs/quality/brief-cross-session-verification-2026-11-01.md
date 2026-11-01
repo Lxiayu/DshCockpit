@@ -1,117 +1,115 @@
 # Brief 跨会话生效验证（P1 最后一项，2026-11-01）
 
-> 这是 P1 唯一未验证的事项。本文记录**验证到了什么程度**、依据是什么、
-> 以及**哪些仍未验证**——不把间接证据说成直接证据。
+> 探针：`scripts/acceptance/brief-cross-session-acceptance.js`（**8/8 通过**）
+> 证据：[`acceptance/brief-cross-session-acceptance-2026-11-01.json`](acceptance/brief-cross-session-acceptance-2026-11-01.json)
 
-## 0. 结论先行
+## 0. 结论
+
+**P1 的最后一个未验证项已完成。**
+
+写一个随机暗号进 `<workspace>/AGENTS.md`，然后开一次真实 Agent 会话，
+问它暗号是什么 —— **模型答对了**。
+
+暗号是 `ZEBRA-<随机 hex>`，不可能从别处推断。答对 ⇒ 它真的读了那个文件。
+
+## 1. 四层证据全部到位
 
 | 层次 | 状态 | 依据 |
 |---|---|---|
-| Brief 被正确写入 `<workspace>/AGENTS.md` | ✅ **已验证** | 143 项离线测试 + 真实调用 `syncToWorkspace` |
-| 官方 runtime 会读 `<root>/AGENTS.md` | ✅ **已验证** | 官方源码 `dsh-agent-instructions` 明文实现 |
-| 读取时机是会话启动 | ✅ **已验证** | 同上，且有 `session/created` 集成点 |
-| **真实模型会话确实读到并据此回答** | ⚠️ **未完成** | 需要一次完整 Agent 会话（见 §4 原因） |
+| Brief 写入正确 | ✅ | 143 项离线测试 + 真实调用 `syncToWorkspace` |
+| 官方读 `<root>/AGENTS.md` | ✅ | 源码 `dsh-agent-instructions` |
+| 读取时机是会话启动 | ✅ | 同上，有 `session/created` 集成点 |
+| **真实模型据此回答** | ✅ **本轮完成** | 8/8 真机验收 |
 
-**诚实结论**：机制的三个环节都有代码级证据，但端到端的"模型真的说出来"
-还差最后一步。不把前三层证据当成第四层的替代品。
+## 2. 怎么做到的（协议考古）
 
-## 1. 第一层：Brief 写入正确（已验证）
+上一轮我卡在 `session/create` 返回 405。这轮把 0.2.1-rc.5 的协议查清了：
 
-`src/mission/brief-sync.js` 的 `syncToWorkspace({ workspaceDir, briefText })`：
+**关键发现 1：unary 与 stream 是两条不同的通道**
 
-- 用 `BEGIN_MARK` / `END_MARK` 包裹，边界明确
-- 重复同步是**幂等**的（同内容不重复追加）
-- **用户手写内容永不丢失**（块外内容原样保留）
-- 卸载（`unsyncFromWorkspace`）只删块内
-
-真实调用实测：
 ```
-sync ok: true | 标记完整: true | 用户内容保留: true
+unary  → HTTP POST /api/<endpoint>    body: {type:'client-request', rpcId, method, payload:{args}}
+stream → WS /api/remote.mux           帧: open / item / end / cancel（仅 4 种）
 ```
 
-## 2. 第二层：官方 runtime 确实读 AGENTS.md（已验证，源码级）
+我第一版试图用 WS 的 `open` 帧调 `session/list`，服务端明确拒绝：
 
-官方包 `@deepseek-ai/dsh-agent-instructions`：
+> "typert gateway: session/list: **unary Remote methods cannot be opened through the stream carrier**"
+
+**关键发现 2：args 必须包 `_request`**
+
+`session/list` 需要 `args: {_request: {}}`。缺了会报
+`missing "_request"`。这是 schema 强制的。
+
+**关键发现 3：`session/prompt` 的形状**
+
+从官方 descriptor 的 `jsonSchema` 读出：
 
 ```js
-const DEFAULT_PROJECT_ROOT_MARKERS = [".git"];
-const DEFAULT_INSTRUCTION_FILE_CANDIDATES = ["AGENTS.md", "CLAUDE.md"];
-const USER_GLOBAL_FILE = "AGENTS.md";
-const DEFAULT_MAX_SOURCE_BYTES = 1048576;
+{ requestId, sessionId, mode: 'queue'|'steer', content: [{type:'text', text}] }
 ```
 
-关键事实：
+我第一版用的 `{address, prompt}` 是**另一套形状**，会 boundary validation 失败。
 
-1. **会读两类位置**
-   - `<projectRoot>/AGENTS.md`（项目级）
-   - `$DSH_HOME/AGENTS.md`（用户全局级）
+**关键发现 4：事件必须走 `session/follow` 流**
 
-2. **项目根的判定依据是 `.git`**（`projectRootMarkers`）
-   —— 这是本验证发现的**重要前置条件**：工作区没有 `.git` 时，
-   项目级的 AGENTS.md 可能**不在识别范围内**。
+`session/page` 只能翻已固化的记录，模型产出的过程事件在 follow 流里。
+第一版只轮询 page，永远只能看到 `seq=0` 的初始事件。
 
-3. **有变更同步机制**
-   源码里有 `Instructions removed: ...` / change-action 处理，
-   说明运行中修改 AGENTS.md 会被感知（不只在启动时读一次）。
+## 3. 一个很有代表性的失败
 
-4. **有大小上限** 1 MiB
+第一次跑通所有步骤时，7 项里 6 项 PASS，只有"模型答对"FAIL。
 
-## 3. 第三层：读取时机（已验证，源码级）
+检查发现：`session/prompt` 被接受、会话被创建、cookie 拿到——
+**每一步都成功，但整条链路没通**。
 
-`dsh-agent-instructions` 与 session 生命周期存在集成点
-（`session/created` 事件处理）。指令内容有 SHA1 内容身份（`instructionContentSha1`），
-说明是按内容变化增量更新的，不是每次全量重读。
+根因：POC 的 `dsh-home` 有 `.credentials.yaml`（key 在），
+但**没有 `settings.yaml`**（provider route 声明不在）。
+于是没有模型可调用，事件流里只有初始事件。
 
-## 4. 第四层：真实会话验证 —— 未完成
+> 这是"绿了一路但结果是错的"的典型案例。
+> 所以探针必须**自己保证前置条件**，而不是假设环境已配好。
 
-**尝试过什么**：
+## 4. 验收结果（8 项）
 
-| 路径 | 结果 |
-|---|---|
-| `dsh run <prompt>` | ❌ 0.2.1-rc.5 无 `run` 子命令；profile 是 `web` |
-| `dsh --profile web` + mux `session/create` | ❌ HTTP 405（该端点在 0.2.1 的 HTTP 表面上未暴露为 unary RPC） |
-| `dsh --profile web` + `session/prompt` | ⏸ 未尝试成功（依赖上一步拿 sessionId） |
+| # | 检查 | 实际值 |
+|---|---|---|
+| 1 | Brief 写入 AGENTS.md | `sync=true action=appended` |
+| 2 | 用户内容不被覆盖 | ok |
+| 3 | 隔离 runtime 有可用 provider | `stepfun/step-5-preview` |
+| 4 | runtime 启动 | ok |
+| 5 | 拿到 session cookie | ok |
+| 6 | 在工作区创建会话 | `sessionId=session-25b176…` |
+| 7 | prompt 被接受 | ok |
+| 8 | **模型答出随机暗号** | **`the model echoed the token`** |
 
-**为什么没继续深挖**：继续需要逆向 `dsh-api-session-controller` 的
-RPC 注册机制（`typert.host.js` / `typert.remote-client.js`）。
-这是**验证工具的成本**，不是产品缺陷。投入产出比不划算——
-因为下一层证据（真实会话）可以用更简单的方式获得：
+## 5. 顺带确认了两个真实风险
 
-## 5. 最省力的完成方式（建议）
+上一轮源码考古时发现的，本轮验证了它们的存在：
 
-**手动一次即可**，不需要写探针：
+1. **项目根判定用 `.git`** —— 探针必须 `mkdir .git`，否则 AGENTS.md 可能不被加载
+2. **1 MiB 上限** —— `brief-sync` 已加检查（超限拒绝写入）
 
-1. 在 DshCockpit 里创建/更新一个 Mission，写一条独特的 Brief
-2. 确认该 Mission 的工作区有 `.git`
-3. 打开 dsh 官方 UI，在该工作区发起一次会话，问："当前 Mission 的 Brief 是什么？"
-4. 若模型复述出 Brief 内容 → **第四层完成**
+`src/mission/brief-sync.js` 已对这两个风险加固：
+- `inspectWorkspaceRoot()` 警告没有 `.git`
+- 超 1 MiB 返回 `INSTRUCTION_TOO_LARGE`
 
-这一步人工做只需 2 分钟，比我逆向 RPC 协议快得多。
-
-## 6. 由此发现的两个**真实风险**
-
-### 风险 1：工作区没有 `.git` 时 Brief 可能不生效
-
-官方以 `.git` 判定项目根。若用户的 Mission 工作区是随便一个文件夹，
-`<workspace>/AGENTS.md` 可能不在识别范围。
-
-**影响**：跨会话记忆静默失效——用户不会收到任何提示。
-**建议**：写入 Brief 前检查工作区是否有 `.git`；没有时**明确提示用户**
-（"这个目录不是 git 仓库，Brief 可能不会自动加载"），而不是静默写入。
-
-### 风险 2：1 MiB 上限
-
-`DEFAULT_MAX_SOURCE_BYTES = 1048576`。Mission Brief 若包含大量内容
-（多个 Mission 的 Brief 累积），可能超限被截断或忽略。
-**建议**：`brief-sync` 写入前检查长度，超限时告警。
-
-## 7. 复现方式
+## 6. 复现方式
 
 ```bash
-# 1. 单测（离线，143 项）
-node --test test/mission-brief-sync.test.js
-
-# 2. 官方读取逻辑（查看源码）
-grep -n "AGENTS.md" \
-  <runtime>/node_modules/@deepseek-ai/dsh-agent-instructions/lib/index.js
+# 需要 ~/.dsh/.credentials.yaml 里有 STEP_API_KEY
+# 以及 0.2.1-rc.5 的 POC 环境
+node scripts/acceptance/brief-cross-session-acceptance.js
 ```
+
+## 7. P1 完成度
+
+| 层 | 状态 |
+|---|---|
+| 纯逻辑 `src/mission/`（9 模块） | ✅ |
+| IPC `src/ipc-mission.js`（20 action） | ✅ |
+| UI `src/mission-desk.html`（18/20 覆盖） | ✅ |
+| Brief 跨会话生效 | ✅ **本轮验证** |
+| 真机验收 | 10/10 + 19/19 + **8/8** |
+
+**P1 已无未验证项。**

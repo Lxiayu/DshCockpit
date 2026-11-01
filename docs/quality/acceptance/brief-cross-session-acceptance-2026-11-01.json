@@ -1,0 +1,46 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "the brief is written into <workspace>/AGENTS.md",
+      "ok": true,
+      "detail": "sync=true action=appended"
+    },
+    {
+      "name": "the user's own content survives the brief write",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "the isolated runtime has a usable model provider configured",
+      "ok": true,
+      "detail": "stepfun/step-5-preview"
+    },
+    {
+      "name": "the isolated dsh runtime boots",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "the runtime hands out a session cookie",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "a session can be created in the workspace",
+      "ok": true,
+      "detail": "sessionId=session-25b176…"
+    },
+    {
+      "name": "the prompt is accepted by the runtime",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "the real model read the brief and answered with the secret token",
+      "ok": true,
+      "detail": "the model echoed the token — cross-session memory works"
+    }
+  ]
+}
