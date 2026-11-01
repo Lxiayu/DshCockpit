@@ -32,7 +32,9 @@ Harness owns execution.  DshCockpit owns experience, continuity, capability orch
 ## 3. 目录地图
 
 ```
-src/main.js                   壳组合根（IPC、runtime 监督）——6385 行，已知过载（TD-01）
+src/main.js                   壳组合根（IPC、runtime 监督）——6297 行，过载中（TD-01/#22）
+src/runtime-capability.js     能力矩阵：判定 runtime 是否可用（S1，替代版本号门禁）
+src/ipc-*.js                  已提取的 IPC 域（mcp / remote / misc-domains / features）
 src/window-manager.js         窗口/视图/快照广播
 src/runtime-mux.js            /api/remote.mux 多路复用客户端（$events / session/follow）
 src/harness-rpc.js            Harness RPC 表面
@@ -43,7 +45,7 @@ src/office/office-module.js   办公室组合根——4726 行，上限 4800（�
 src/work/                     单次工作项 MVP（⚠ 非 Mission Core 雏形，见 TD-15）
 src/mission/                  【待建】Mission Core（P1）
 src/workbench/                工作台（内容/引擎分离；⚠ 已从 asar 排除，见 TD-26）
-test/                         离线测试（node:test，cwd 必须是仓库根；143 套件 / 2044 项）
+test/                         离线测试（node:test，cwd 必须是仓库根；150 套件 / 2120 项）
 docs/                         文档，唯一索引 docs/README.md
 archive/ + docs/archive/      本地保险箱（git 忽略）
 ```
@@ -60,13 +62,13 @@ archive/ + docs/archive/      本地保险箱（git 忽略）
 ## 5. 命令与坑
 
 ```bash
-npm test                                   # 全量（约 2 分钟，2044 项）
+npm test                                   # 全量（约 2 分钟，2120 项）
 node --test test/docs-index.test.js        # 文档索引（毫秒级，改文档后必跑）
 node --check <file>                        # 语法检查
 ```
 
 - **cwd 坑**：Bash 默认 cwd 可能是仓库父目录。一律用绝对路径或 `zsh -c 'cd <repo> && ...'`。
-- **基线**：`CI=1 npm test` → **2043 passed / 0 failed / 1 skipped**（唯一有效基线）。
+- **基线**：`CI=1 npm test` → **2120 passed / 0 failed / 1 skipped**（唯一有效基线）。
   唯一 skip 是 E5a-R1 真机探针（需图形会话）——**Skip 不计作 Pass**，
   由 `scripts/ci-gate.js` 四态报告保证，见 `docs/quality/test-tiers-and-baseline.md`。
 - **pure Node 门禁**：`src/team/runtime/**` 与 `src/office/runtime/**` 禁止 Electron/DOM/fs/网络；
@@ -88,13 +90,17 @@ node --check <file>                        # 语法检查
 - **本轮计划**：`docs/plans/active/P0-AUDIT-AND-P1-MISSION-KICKOFF-2026-11-01.md`
 - **P0 完成（2026-11-01）**：#21 账本 / #10 CI 门禁 / #14 许可证 / #9 POC / #19 Settings / #22 IPC 安全网。
   8 项完成条件中 **7 项达成**；唯一未达成：`agentTeam` 字段形状需真实模型调用验证（ADR-0002 R0）。
-- **下一步（S1）**：runtime 兼容层 —— 0.2.x 协议已由 POC 运行级验证（16/16 pass），
-  但 `src/runtime-manager.js:39` 的 `SUPPORTED_RUNTIME_RANGE = '<0.2.0-0'` 仍需改为能力探测（TD-29）。
+- **S1 完成（2026-11-01）**：runtime 兼容层改为**能力探测**（TD-29 已解决）。
+  `src/runtime-capability.js` 用能力声明 + 已知矩阵 + 四态判定替代版本比较：
+  `0.2.1-rc.5` / `0.2.2-alpha.2` 判 **supported**（POC 实测 16/16），`0.1.5-rc.2` 判 degraded
+  （无 agent-team），未测过的版本判 **unverified 但放行**（"没测过 ≠ 不能用"）。
+- **下一步（P1）**：Mission Core（Issue #12）。前置：`agentTeam` 字段形状验证（Issue #23）。
 - **ADR-0001..0006 全部已接受**（2026-11-01）。ADR-0002 附退役硬约束 R0–R5（禁止直接删旧 Team Runtime）。
-- **已消除的债**：TD-02/03/05（#19 Settings 保护）、TD-10（#10 CI 门禁）、TD-22 部分（#22 契约快照）。
+- **已消除的债**：TD-02/03/05（#19 Settings 保护）、TD-10（#10 CI 门禁）、
+  TD-17（#17 符号引用）、TD-22 部分（#22）、**TD-29（S1 能力探测）**。
 - **仍存在的债**（详见 `docs/quality/tech-debt-inventory.md`）：
-  TD-01 main.js 过载（#22 Phase 0 已建安全网，Phase 1 未开始）· TD-04 索引覆盖写 ·
-  TD-06/07 IPC 无冻结 · TD-15 src/work 语义冲突 · TD-29 runtime 版本锁死。
+  TD-01 main.js 过载（#22：契约快照已建，Phase 1 已提取 3 批共 18 个 handler）· TD-04 索引覆盖写 ·
+  TD-06/07 IPC 无冻结 · TD-15 src/work 语义冲突。
 
 ## 8. 文档入口（按目的）
 

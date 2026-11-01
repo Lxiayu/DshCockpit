@@ -48,7 +48,7 @@
 | TD-26 | 已被 `electron-builder` 排除但仍被维护的代码 19,845 行（workbench + behavior-graph + layout-editor） | 死重量 | P2 | ⬜ 否 |
 | TD-27 | 8 个模块无任何引用方（entry-only 或孤儿） | 死代码 | P3 | ⬜ 否 |
 | TD-28 | `src/workbench/test/*.test.js` 56 个测试不在 `npm test` 的 glob 内 | 测试 | P2 | ⬜ 否 |
-| TD-29 | `runtimeVersion` 锁 0.1.5-rc.2，兼容矩阵 `<0.2.0-0` 显式排除官方 0.2.x | 依赖 | P0 | ✅ 是 |
+| ~~TD-29~~ | ~~`runtimeVersion` 锁 0.1.5-rc.2，兼容矩阵 `<0.2.0-0` 显式排除官方 0.2.x~~ | ~~依赖~~ | ~~P0~~ | ✅ **已解决 2026-11-01** |
 | TD-30 | `before-quit` 同步执行备份，无超时保护，退出可能变慢 | 健壮性 | P2 | ⬜ 否 |
 | TD-31 | `settings.html` 5895 行（4409 行内联 `<script>`），17 个页面挤一个文件 | 结构 | P2 | ⬜ 否 |
 | TD-32 | IM 通道 `allowFrom: ['*']` 是一等选项（全开放模式），且 `pbbp2` 私有协议实现无外部校验 | 安全 | P2 | ⬜ 否 |
@@ -751,6 +751,37 @@ item-props, pipeline-panel
 ---
 
 ### TD-29 · `runtimeVersion` 锁 0.1.5，兼容矩阵显式排除 0.2.x
+
+> ✅ **已解决（2026-11-01，S1）**：**版本号不再是兼容性判据。**
+>
+> 问题本质：`semver.satisfies(v, '<0.2.0-0')` 给 0.2.1-rc.5 判"不支持"，
+> 而 POC 已实测它 16/16 通过。这个常量的语义早已从"兼容性门禁"退化为
+> "上次更新时的版本快照"。
+>
+> 修复：新增 `src/runtime-capability.js`，用**能力声明 + 已知矩阵 + 四态判定**
+> 替代版本比较：
+>
+> | 判定 | 含义 | 实例 |
+> |---|---|---|
+> | supported | required + optional 全在 | `0.2.1-rc.5`、`0.2.2-alpha.2` |
+> | degraded | required 在，optional 缺 | `0.1.5-rc.2`（无 agent-team） |
+> | unsupported | required 缺失 | （真实矩阵中暂无） |
+> | **unverified** | **没测过 ≠ 不能用** | `0.2.0`、`0.9.9`、dev build |
+>
+> 关键语义：**未验证版本一律放行**。若判成不支持，每次上游发版都会禁用壳层。
+>
+> 矩阵范围**只列实测过的具体版本**（`'0.2.1-rc.5 || 0.2.2-alpha.2'`），
+> 不用 `>=0.2.0-0 <0.3.0-0` 这种宽范围——那会把从未测过的 0.2.99 也说成
+> supported，等于撒谎。新增版本需手动追加，这是刻意成本：**兼容性结论必须有人负责。**
+>
+> `SUPPORTED_RUNTIME_RANGE` 保留为展示字符串；新增 `canRunRuntime()` 作真正判定。
+> 更新提示按三态分派：unsupported 告警、degraded 提示、**unverified 只记日志
+> 不发通知**（否则每次发版都弹窗，会训练用户忽略告警）。
+>
+> 测试：`test/runtime-capability.test.js` 14 项 + `test/runtime-compat-notify.test.js` 7 项。
+>
+> **仍未解决**：`agentTeam` 的实际字段形状（Issue #23）；在线能力探测（需 3 分钟，
+> 不适合放进每次更新检查，当前用声明式矩阵）。
 
 **位置**：`package.json:6`、`src/runtime-manager.js:39`
 
