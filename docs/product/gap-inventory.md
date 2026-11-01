@@ -119,6 +119,31 @@
 
 ---
 
+## 5.5 一次独立盘点审计的发现（2026-11-01，已修 2 项）
+
+一次独立只读审计发现了**比"未做"更严重的一类问题：做了但接不上**。
+
+### 已修复（本轮）
+
+| # | 断线 | 后果 | 修法 |
+|---|---|---|---|
+| 1 | 白板点击调 `window.dshShell.openMissionDesk()`，但 office 视图只 expose `officeBridge`，且处理器全仓不存在 | 点白板 = **TypeError**；连带 P1 的 Mission Desk 在成品里**没有任何可用入口** | 新增 `office:open-desk`（纯导航，不写状态）+ 抽 `office-desk-nav.js` |
+| 2 | `installer.install()` 调 `runVerify` 不传 `cwd`/`DSH_PACK_DIR` | `research-report` 永远安装失败；`workspace-verification` 把文件写进用户 cwd | verify 跑在临时目录 + 注入包目录 |
+
+**共同根因**：验收探针把核心环节 **stub 掉了**——白板验收 11 项没有一项点击，
+能力包验收把 install 通道整个替换成计数器。**验收 stub 掉被测对象 = 没验收。**
+
+### 仍未修（按审计结论排序）
+
+| 优先级 | 项 | 说明 |
+|---|---|---|
+| 高 | Mission Desk 的 7 个 action 无 UI | `recordDecision` / `registerDeliverable` / `addWorkstream` / `updateWorkstreamStatus` / `update` / `openQuestion` / `openDesk`。**V2「跨会话不丢决策」与 V3「产物是真实文件」目前没有可用通道** |
+| 高 | TD-03 / TD-05 标记"已修复"但代码没修 | 修复只落在 `settings-store.js`；`work/workspace-store.js` 与 `backup.js` 没接。按"存储已安全"做迁移会丢数据 |
+| 中 | TaskRef 无生产者 | schema/store/projection 都写好了，但 18 个 action 里没有对应项 → 永远为空 |
+| 中 | Brief 跨会话的两处风险 | 已加固（`.git` 检测 + 1 MiB 上限），但端到端仍未验证 |
+| 中 | 本轮的 `official-teams-shape.js` 是零调用方 | 形状验证有价值，但**没有消费者**。接线上要保证只有一条 Team facts 路径进 Office（否则两个事实作者） |
+| 低 | `VerificationProvider` / `RenderBackend` 两个"只做接口"承诺未做 | 都是零成本预留，被跳过后将来换实现要重做架构 |
+
 ## 6. 优先级建议
 
 | 优先级 | 事项 | 理由 |
