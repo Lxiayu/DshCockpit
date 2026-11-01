@@ -34,7 +34,7 @@
 | TD-12 | safeStorage 加密仓 3 套重复实现（KeyVault / TokenStore / ChannelSecrets） | 重复 | P2 | ⬜ 否 |
 | TD-13 | 两套互不重叠的 i18n 字典（`i18n.js` 638 keys + `workbench/i18n.js` 1008 keys） | 重复 | P2 | ⬜ 否 |
 | TD-14 | `.dsh/` 不写 `.gitignore`，污染用户工作区仓库 | 数据 | P1 | ✅ 是 |
-| TD-15 | `src/work` 的单活动项约束（`currentId` 单值 + `WORK_BUSY`）与 Mission 多并行语义对立 | 架构 | P0 | ✅ 是 |
+| TD-15 | ~~`src/work` 单活动项约束与 Mission 多并行语义对立~~ | 架构 | — | ⬜ 否（2026-11-01 复核：**已不成立**，两者是不同层级并发） |
 | TD-16 | `work-controller.templateId` 是死字段：main.js 从不传入，无模板注册表 | 假接口 | P1 | ✅ 是 |
 | TD-17 | `workStatusPayload()` 无异常保护，索引损坏会导致工作台空白且无错误出口 | 健壮性 | P1 | ✅ 是 |
 | TD-18 | `scanManifest` 在主进程同步递归遍历最多 5000 个文件 | 性能 | P2 | ✅ 是 |
@@ -461,7 +461,7 @@ workbench/i18n.js 键正则匹配 → 1008 keys
 
 ---
 
-### TD-15 · `src/work` 的单活动项约束与 Mission 多并行语义对立
+### TD-15 · ~~`src/work` 的单活动项约束与 Mission 多并行语义对立~~（2026-11-01 复核：不成立）
 
 **位置**：`src/work/work-controller.js:55, 92-95`
 
@@ -484,7 +484,42 @@ if (active && ACTIVE_STATUS.includes(active.status)) {
 
 **建议**：Mission Core 另起 `src/mission/**`，`src/work` 保留为"单次 Team 执行"的执行面（它对 Team 的接线是真实验收过的资产）。Mission 与 WorkItem 是 `1—N` 引用关系，不是替换。
 
-**优先级**：P0 · **阻塞新方向 = 是**
+**优先级**：~~P0 · 阻塞新方向 = 是~~ → **2026-11-01 复核：不成立，已解除**
+
+> ### ✅ 复核结论（2026-11-01）
+>
+> 本条的担忧是「Mission 的多并行语义会撞上 work 的单活动项约束」。
+> 核实后发现**两者是不同层级的并发，不冲突**：
+>
+> | 层级 | 是什么 | 并发语义 |
+> |---|---|---|
+> | Mission / Workstream | **项目规划层**（"这个项目有几条线在推进"） | 多并行，无约束（domain-model §2.1.1） |
+> | work 的 `currentId` | **执行层**（"此刻哪个 Team 执行在跑"） | 单实例（真实约束） |
+>
+> `WORK_BUSY` 的真实含义是「**一次只跑一个 Team 执行**」，不是
+> 「一次只能有一个项目」。前者是对的：Team 是重型资源（一个真实
+> Harness 会话 + 一个 agent 团队），并发跑多个会在共享工作区里互相踩。
+>
+> **本条的「建议」早已被采纳并执行**：建议写的是「Mission Core 另起
+> `src/mission/**`，`src/work` 保留为单次 Team 执行的执行面」——
+> 这正是 2026-11-01 P1 做的事。两者现在是 `1—N` 引用关系，且存储完全隔离：
+>
+> ```
+> work:    <ws>/.dsh/index.json + archives/
+> mission: <ws>/.dsh/mission/events.jsonl
+> ```
+>
+> 实测：一个 Mission 下可以创建多个 Workstream（无约束），
+> 它们不占用 work 的 `currentId`。
+>
+> **这个纠正的性质**：原判断假设「Mission 会建在 work 之上」，
+> 于是把执行层的单实例约束误读成规划层的限制。实际实现走了独立路径。
+> 与 TD-04 是同一类错误——**风险判断基于未发生的假设，会过期**。
+>
+> **仍然成立的部分**（转为新的契约要求，不再是"债"）：
+> `src/work` 的定位必须被明确固定为"单次 Team 执行的执行面"，
+> 不得演进为 Mission 的存储或调度层。这条已写入
+> `docs/architecture/domain-model.md` 的边界说明。
 
 ---
 

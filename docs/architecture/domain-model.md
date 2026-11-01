@@ -516,6 +516,62 @@ Mission Desk 打开
 
 **待 POC 验证**：写入性能、索引重建时间、并发（多窗口）。若 JSONL 在同 Workspace 多 Mission 场景下性能不达标 → 回退到 B（SQLite），但**必须先有基准数据**，不凭直觉换。
 
+### 5.2 `src/work` 的定位契约（2026-11-01 明确，原 TD-15）
+
+> **背景**：TD-15 曾把 `src/work` 的单活动项约束（`currentId` + `WORK_BUSY`）
+> 判为"与 Mission 多并行语义对立的架构债"。2026-11-01 复核确认**该判断不成立**，
+> 但它暴露了一个需要被明文固定的边界，所以在这里写成契约而非"债"。
+
+#### 两层并发必须分开理解
+
+| 层级 | 语义 | 并发 | 归属 |
+|---|---|---|---|
+| **Mission / Workstream** | 项目规划："这个项目有几条线在推进" | **多并行**，无上限（建议 ≤10，仅 UI 提示） | `src/mission/**` |
+| **`src/work` 的执行项** | 执行："此刻哪个 Team 执行在跑" | **单实例**（真实物理约束） | `src/work/**` |
+
+`WORK_BUSY` 的含义是「**一次只跑一个 Team 执行**」，不是「一次只能有一个项目」。
+前者是正确且必要的：一个 Team 执行是重型资源（真实 Harness 会话 + agent 团队），
+并发跑多个会在**共享工作区**里互相踩（文件冲突、git 状态混乱、产物归属不明）。
+
+#### 硬契约（不得违反）
+
+1. **`src/work` 是"单次 Team 执行的执行面"，不是 Mission 的存储层或调度层。**
+   它不持有 Mission 数据，不参与跨 Session 连续性，不做规划。
+2. **Mission 不调用 `src/work` 的存储。**
+   Mission 有自己的 `src/mission/store.js`（append-only JSONL）。
+   两者存储完全隔离：
+   ```
+   work:    <ws>/.dsh/index.json + .dsh/archives/
+   mission: <ws>/.dsh/mission/events.jsonl
+   ```
+3. **关系是 `1—N` 引用，不是替换。**
+   一个 Mission 下可以有多个 Workstream；一个 Workstream 可以关联多次
+   `src/work` 执行（通过 `TaskRef.harnessRef` 派生句柄）。
+4. **`src/work` 不得为"支持多并行"而改动它的单实例约束。**
+   如果将来真的需要并行执行，正确做法是**多个 workspace**（官方
+   worktree 隔离原语），而不是把 `currentId` 改成多值——后者会让
+   基线与 diff 的归属失去唯一性。
+
+#### 反面例子（为什么不能在 work 上做多并行）
+
+`work-controller.js` 的 `baseline` / `baselineItemId` / `diffCaptured`
+是**单份内存状态**。若允许多个活动项：
+- 两个执行同时改工作区 → `captureDiff()` 分不清哪些改动属于哪个 item
+- `runVerification()` 的成败归属不明
+- 产物 `key = ${jobId}:${kind}` 的索引会跨 item 串味
+
+这不是"实现难度"问题，而是**语义上无法定义**。所以单实例是正确设计。
+
+#### 与 Mission 的接线方式
+
+Mission 需要知道"某个 Workstream 执行过几次、结果如何"时：
+1. 通过 `TaskRef` 引用 `src/work` 产出的派生句柄（`exec-run:*`）
+2. **不**直接读 `index.json`（那会让 Mission 依赖 work 的存储格式）
+3. **不**把 work 的 item 状态复制进 Mission（两个事实作者）
+
+> 这条与 §5.0「Mission Store ≠ Settings Store」是同一个原则的一致应用：
+> **每个状态只有一个作者，跨层只传派生引用。**
+
 
 ## 6. 开放问题（必须被回答，不能默认）
 
