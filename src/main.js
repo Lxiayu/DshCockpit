@@ -4851,7 +4851,14 @@ function registerBundledRuntime() {
 }
 
 async function ensureRuntimeWithGuide() {
-  if (await ensureRuntimeRegistered()) return true;
+  if (await ensureRuntimeRegistered()) {
+    // 首次引导建的 splash 只在"需要安装 runtime"那条路径里被关。
+    // runtime 已注册时这里**直接 return**，于是 splash 永远留在屏幕上——
+    // 表现为一个只有 "DshCockpit" 字样的白色空窗口（真机截图抓到）。
+    // 正常启动路径也必须关掉它。
+    try { closeLoading(); } catch { /* not created */ }
+    return true;
+  }
   // brand-new machine with NO dsh and NO usable bundle: registry install (rare)
   log('[shell] guided first-run: no usable runtime found, installing from the registry');
   try {

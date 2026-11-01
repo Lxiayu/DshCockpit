@@ -72,3 +72,32 @@ test('startup integrity: the permission hardening is installed before any window
       'the permission handlers must be installed BEFORE the first window is created');
   }
 });
+
+// ============================================ splash 泄漏
+
+test('startup integrity: the splash is closed on EVERY runtime-ready path', () => {
+  // 真机截图抓到的 bug：splash 窗口只在"需要安装 runtime"那条路径里被关。
+  // runtime 已注册时 `ensureRuntimeWithGuide` 直接 return，于是白色空窗口
+  // （只有 "DshCockpit" 字样）永远留在屏幕上。
+  const fn = code.slice(
+    code.indexOf('async function ensureRuntimeWithGuide'),
+    code.indexOf('async function ensureRuntimeWithGuide') + 1200,
+  );
+  // 第一条 return true（already-registered 分支）之前必须有 closeLoading
+  const firstReturn = fn.indexOf('return true');
+  assert.ok(firstReturn !== -1, 'the fast path must exist');
+  const head = fn.slice(0, firstReturn);
+  assert.match(head, /closeLoading\(\)/,
+    'the already-registered path must close the splash — otherwise it leaks a blank window');
+});
+
+test('startup integrity: no other early return leaves the splash up', () => {
+  // 粗粒度检查：函数体内每个 `return true` 之前都要么有 closeLoading，
+  // 要么它就在 install 路径之后（那里已经有 setTimeout(closeLoading)）。
+  const fn = code.slice(
+    code.indexOf('async function ensureRuntimeWithGuide'),
+    code.indexOf('async function ensureRuntimeWithGuide') + 3000,
+  );
+  const hasClosing = /closeLoading\(\)/.test(fn);
+  assert.ok(hasClosing, 'the guide must close the splash somewhere in its body');
+});
