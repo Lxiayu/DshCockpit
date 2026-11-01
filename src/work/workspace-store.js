@@ -28,6 +28,19 @@ const MAX_ARTIFACT_READ_BYTES = 256 * 1024;
 const MANIFEST_MAX_FILES = 5000;
 const MANIFEST_MAX_HASH_BYTES = 2 * 1024 * 1024;
 const MANIFEST_MAX_HASHED_FILES = 200;
+// TD-04（2026-11-01）：索引条目上限与归档。
+//
+// 为什么必须有上限：index.json 每次变更都要**全量重新序列化并写盘**
+// （saveIndex → writeJsonAtomic），所以写入量与历史长度成正比，
+// 累计呈 O(n²)。没有任何上限时，长期使用会让它无限增长。
+//
+// 为什么是"归档"而不是"截断"：WorkItem 与 artifact 是用户的**工作历史**。
+// 直接丢弃等于销毁数据——那比 O(n²) 严重得多。
+// 所以超限条目被移入 archives/ 下的独立 JSON 文件，索引只保留最近的，
+// 旧数据仍可按 id 找回（findArchived*）。
+const MAX_INDEX_ITEMS = 2000;
+const MAX_INDEX_ARTIFACTS = 5000;
+const ARCHIVES_DIR = 'archives';
 const MANIFEST_EXCLUDED_DIRS = new Set([
   '.dsh', '.git', 'node_modules', 'dist', 'out', 'build', '.cache', 'coverage',
   '.next', 'target', '.venv', 'venv', '.idea', '.vscode',
@@ -70,6 +83,103 @@ function resolveInside(rootPath, relPath) {
 
 function emptyIndex(workspaceId) {
   return { schemaVersion: WORK_SCHEMA_VERSION, workspaceId, items: [], artifacts: [] };
+}
+
+/** 归档目录（<workspace>/.dsh/archives/）。 */
+function archivesDirOf(rootPath) {
+  return pathDefault.join(rootPath, WORK_DIR, ARCHIVES_DIR);
+}
+
+/**
+ * 把超出上限的条目归档到 archives/<kind>-<ts>.json，并从索引里移除。
+ *
+ * 设计约束（TD-04）：
+ *   · **绝不静默丢弃** —— 被移除的条目必须真的写进归档文件后才从索引删除
+ *   · 归档写失败时**保持索引不变**（宁可继续大，也不能丢数据）
+ *   · 保留最近的 N 条（索引是"热数据"，归档是"冷数据"）
+ *
+ * @returns {{index:object, archivedItems:number, archivedArtifacts:number, archiveFile:string|null}}
+ */
+function enforceBounds(rootPath, index) {
+  const overItems = index.items.length - MAX_INDEX_ITEMS;
+  const overArtifacts = index.artifacts.length - MAX_INDEX_ARTIFACTS;
+  if (overItems <= 0 && overArtifacts <= 0) {
+    return { index, archivedItems: 0, archivedArtifacts: 0, archiveFile: null };
+  }
+
+  // 保留"最近的"——items 按追加顺序，取尾部 N 条；artifacts 同理
+  const keptItems = overItems > 0 ? index.items.slice(overItems) : index.items.slice();
+  const keptArtifacts = overArtifacts > 0 ? index.artifacts.slice(overArtifacts) : index.artifacts.slice();
+  const archivedItems = overItems > 0 ? index.items.slice(0, overItems) : [];
+  const archivedArtifacts = overArtifacts > 0 ? index.artifacts.slice(0, overArtifacts) : [];
+
+  const archiveFile = pathDefault.join(archivesDirOf(rootPath), `index-${Date.now()}.json`);
+  const payload = {
+    schemaVersion: WORK_SCHEMA_VERSION,
+    archivedAtMs: Date.now(),
+    workspaceId: index.workspaceId,
+    // 记录上限，便于将来审计"为什么这些被归档了"
+    reason: `index exceeded MAX_INDEX_ITEMS=${MAX_INDEX_ITEMS} / MAX_INDEX_ARTIFACTS=${MAX_INDEX_ARTIFACTS}`,
+    items: archivedItems,
+    artifacts: archivedArtifacts,
+  };
+
+  try {
+    fsDefault.mkdirSync(pathDefault.dirname(archiveFile), { recursive: true });
+    // 归档用独立临时名 + rename，避免并发写互踩
+    const tmp = `${archiveFile}.${process.pid}.tmp`;
+    fsDefault.writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8');
+    fsDefault.renameSync(tmp, archiveFile);
+  } catch (error) {
+    // 归档失败 → **不改索引**。宁可继续大，也不能丢数据。
+    return {
+      index,
+      archivedItems: 0,
+      archivedArtifacts: 0,
+      archiveFile: null,
+      archiveError: error && error.message ? error.message : String(error),
+    };
+  }
+
+  return {
+    index: { ...index, items: keptItems, artifacts: keptArtifacts },
+    archivedItems: archivedItems.length,
+    archivedArtifacts: archivedArtifacts.length,
+    archiveFile,
+  };
+}
+
+/** 列出全部归档文件（按时间倒序）。 */
+function listArchives(rootPath) {
+  try {
+    const dir = archivesDirOf(rootPath);
+    return fsDefault.readdirSync(dir)
+      .filter((n) => n.endsWith('.json'))
+      .sort()
+      .reverse()
+      .map((n) => ({ name: n, path: pathDefault.join(dir, n) }));
+  } catch {
+    return [];
+  }
+}
+
+/** 在一个 workspace 的全部归档里按条件查找（找回被归档的旧数据）。 */
+function findArchived(rootPath, predicate) {
+  for (const archive of listArchives(rootPath)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(fsDefault.readFileSync(archive.path, 'utf8'));
+    } catch {
+      continue; // 单个归档损坏不影响其它
+    }
+    for (const item of parsed.items || []) {
+      if (predicate(item)) return { kind: 'item', value: item, archive: archive.name };
+    }
+    for (const artifact of parsed.artifacts || []) {
+      if (predicate(artifact)) return { kind: 'artifact', value: artifact, archive: archive.name };
+    }
+  }
+  return null;
 }
 
 /** 索引形状校验（fail-closed）。未知版本/缺数组 → WORK_INDEX_INVALID。 */
@@ -220,9 +330,18 @@ function createWorkspaceStore({
   }
 
   function saveIndex(absPath, index) {
-    writeJsonAtomic(indexPathOf(absPath), index);
-    openIndexes.set(absPath, index);
-    return index;
+    // TD-04：所有写入都经过这里，所以上限检查也只在这里做一次——
+    // 分散到 7 个调用点必然漏一个，而漏掉的那个就是无限增长的入口。
+    const bounded = enforceBounds(absPath, index);
+    if (bounded.archiveFile) {
+      log(`[work] archived ${bounded.archivedItems} item(s) / ${bounded.archivedArtifacts} artifact(s) → ${pathDefault.basename(bounded.archiveFile)}`);
+    } else if (bounded.archiveError) {
+      // 归档失败时索引保持原样（宁可不裁剪，也不能丢数据），但要让运维看见
+      log(`[work] index archive FAILED (${bounded.archiveError}); index kept unbounded to avoid data loss`);
+    }
+    writeJsonAtomic(indexPathOf(absPath), bounded.index);
+    openIndexes.set(absPath, bounded.index);
+    return bounded.index;
   }
 
   /** 显式写盘（调用方已在缓存索引上做过就地修改）。 */
@@ -505,6 +624,11 @@ function createWorkspaceStore({
 }
 
 module.exports = {
+  MAX_INDEX_ITEMS,
+  MAX_INDEX_ARTIFACTS,
+  enforceBounds,
+  listArchives,
+  findArchived,
   createWorkspaceStore,
   WORK_SCHEMA_VERSION,
   MAX_ARTIFACT_READ_BYTES,

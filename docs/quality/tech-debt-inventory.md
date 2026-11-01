@@ -23,7 +23,7 @@
 | TD-01 | `main.js` 6385 行 / 107 个 IPC handler / 196 个顶层函数，且无任何测试加载 | 结构 | P0 | ✅ 是 |
 | TD-02 | `settings.json` 无 schemaVersion、无迁移框架，损坏时静默丢全部设置 | 存储 | P0 | ✅ 是 |
 | TD-03 | `.dsh/index.json` fail-closed 且无 `.bak`，Mission 候选底座安全等级低于 office | 存储 | P0 | ✅ 是 |
-| TD-04 | 工作产物索引是全量覆盖写而非 append-only，且无条目上限 | 存储 | P0 | ✅ 是 |
+| TD-04 | 工作产物索引是全量覆盖写而非 append-only，且无条目上限 | 存储 | P1 | ✅ **上限+归档已修**（2026-11-01）；append-only 未做（不阻塞） |
 | TD-05 | 备份只覆盖 2 个 key，壳层全部状态无备份 | 存储 | P0 | ✅ 是 |
 | TD-06 | `shell:*` 75 个通道完全无冻结机制、无集合测试 | IPC | P0 | ✅ 是 |
 | TD-07 | 128 个 handler 中只有 1 个（`shell:work`）做发送方信任校验 | IPC/安全 | P1 | ✅ 是 |
@@ -193,12 +193,45 @@ function saveIndex(absPath, index) {
 
 **影响**：
 1. 每次状态变化（`updateItem` 逐字段 patch、`attachArtifactToItem`）都序列化并重写**全部历史** → 随使用时间呈 **O(n²)** 写入量。
-2. 长期 Mission（Vision V2："关闭应用一周后重开，Mission 的状态/决策/产物仍完整可用"）会让 `index.json` 无限增大，而它每次都要被完整读入内存 + JSON.stringify。
+2. ~~长期 Mission 会让 `index.json` 无限增大~~ —— **2026-11-01 复核纠正**：
+   Mission Core **不使用** `src/work/workspace-store.js`，它有独立的
+   `src/mission/store.js`（append-only JSONL + 内存投影 + 归档阈值）。
+   本条原先的"阻塞新方向"结论已不成立。剩余影响仅限 WorkItem 自身。
 3. 与 `docs/architecture/domain-model.md` §5 选择的方案 C「append-only JSONL + 内存索引」**方向相反**。
 
 **建议**：改事件 append（JSONL）+ 定期快照压缩；或至少加 `MAX_ITEMS` + 归档目录。
 
-**优先级**：P0 · **阻塞新方向 = 是**（Mission 数据量级远大于当前 WorkItem）
+> ✅ **已修（2026-11-01）：上限 + 归档**（选择了建议里的后者）
+>
+> 在 `saveIndex` 这**唯一写入出口**加 `enforceBounds()`：
+>   · `MAX_INDEX_ITEMS = 2000` / `MAX_INDEX_ARTIFACTS = 5000`
+>   · 超限时把**最旧的**移到 `<ws>/.dsh/archives/index-<ts>.json`，索引保留最新的
+>   · 归档文件记录 `reason`（哪个上限被触发）与 workspaceId，可审计
+>   · `findArchived()` 可按 id 找回旧数据 —— **归档不是删除的委婉说法**
+>
+> 三条硬约束（都有测试）：
+>   1. 保留**最新**的、归档**最旧**的（写反就是丢掉最有用的）
+>   2. **归档写失败时索引保持原样** —— 宁可继续大，也不能用数据换体积
+>   3. 归档失败要**报出来**（`archiveError`），不能静默
+>
+> **仍未做**：改成 append-only JSONL。理由：Mission Core 已经用独立实现
+> 证明了那条路可行（`src/mission/event-log.js`），但把 work 也迁过去属于
+> 重写而非修复，收益（O(n²)→O(n)）只在单 workspace 累积数万条时才显现。
+> 上限+归档已经把"无限增长"这个真实风险挡住，append-only 留作后续优化。
+>
+> **同时纠正了一个过期判断**：原判"阻塞新方向=是"基于"Mission 会建在 work 之上"
+> 的假设，实际 Mission 走了独立存储。风险判断会过期，不核对就照着旧优先级排期
+> 会做无用功。
+
+**优先级**：P0（数据完整性仍是 P0，但**不再阻塞新方向**）· **阻塞新方向 = 否**
+
+> **2026-11-01 复核**：原判"阻塞新方向=是"的理由是"Mission 数据量级远大于 WorkItem"。
+> 但 Mission Core 落地时选了独立存储（`src/mission/store.js`，append-only JSONL
+> + 投影 + 20MB/50 万行归档阈值），**不复用** `src/work/workspace-store.js`。
+> 两个模块现在各管各的，work 的索引问题只影响 work 自身。
+>
+> 这个纠正重要在于：**风险判断会过期**。当初的结论基于"Mission 会建在 work 之上"
+> 的假设，实际实现走的是另一条路。不核对就照着旧优先级排期，会做无用功。
 
 ---
 
