@@ -18,11 +18,47 @@ permissions:
   contents: write
 
 jobs:
-  # 2026-09-26: 发布流水线不再用单元测试门禁 —— 见 CHANGELOG/提交说明：
-  # 像素/抠像类用例依赖 Pillow 等 runner 侧工具链，Windows runner 上还出现过
-  # 挂死（>30min）。测试改由 upstream-compat 工作流定时跑并邮件汇报结果；
-  # 发布只保留构建 + 产物闸门（verify-dist / e2e-smoke）。
+
+  # Issue #10：发布前必须有测试门禁。
+  # 2026-09-26 曾以"像素类用例在 Windows runner 上挂死"为由移除测试门禁，
+  # 那条理由真实，但结论错了——正确做法是分层：E 类（需图形会话）在 CI 下
+  # 显式 skip，核心契约仍然拦截。这里跑 ubuntu 全量（约 2 分钟），
+  # 四态由 scripts/ci-gate.js 诚实报告（Skipped 不计入 Passed）。
+  gate:
+    name: test gate before release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install
+      - name: Python deps for asset tests
+        shell: bash
+        timeout-minutes: 8
+        run: python -m pip install --quiet --no-input pillow numpy
+      - name: Run unit tests (TAP)
+        run: |
+          set +e
+          CI=1 node --test --test-reporter=tap "test/*.test.js" > "$RUNNER_TEMP/unit.tap" 2> "$RUNNER_TEMP/unit.stderr"
+          tail -40 "$RUNNER_TEMP/unit.stderr" || true
+      - name: Gate - four-state test report
+        run: node scripts/ci-gate.js --tap-file "$RUNNER_TEMP/unit.tap" --label "release unit tests"
+
+  # Issue #10（2026-11-01）：发布前恢复测试门禁，但**不是**2026-09-26 那种跑法。
+  # 当年移除它的理由（像素类用例在 Windows runner 上挂死 >30min）是真实的，
+  # 但结论错了：正确解法是分层，而不是不跑。现在：
+  #   - 测试在 ubuntu 上跑（gate job），不进 Windows build；
+  #   - 需要图形会话的 E 类测试显式 t.skip()，四态由 scripts/ci-gate.js 报告；
+  #   - build 依赖 gate：门禁不过就不构建、不发版。
   build:
+    needs: gate
     name: build x64 win
     runs-on: windows-latest
     steps:

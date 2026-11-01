@@ -1,0 +1,168 @@
+# CI 门禁（Issue #10）：在 PR 与 push 上真正拦截，而不是每日事后发现。
+#
+# 第一性原理：为什么这个文件必须存在
+#
+#   本仓库有 1959 项测试和三套机械门禁（文档索引、账本自洽性、许可证），
+#   但 2026-11-01 之前**没有任何 PR/push 触发的 workflow**：
+#     - release-win/mac  ：注释明写"发布流水线不再用单元测试门禁"
+#     - upstream-compat  ：每日定时，且测试 job 是 continue-on-error
+#     - mirror-downloads ：只同步安装包
+#   结果是测试的保护价值退化为"事后发现"——破坏性提交可以一路合进 develop
+#   并打出 tag，没有任何红灯。
+#
+#   注意这里**没有**恢复"发布前跑全量测试"那条老路：
+#   2026-09-26 移除它的理由（像素类用例在 Windows runner 上挂死 >30min）
+#   是真实的。正确解法不是"不跑"，而是**分层**：
+#     - 这里的门禁在 ubuntu 上跑全量（约 2 分钟），E 类测试显式 skip；
+#     - 平台相关的东西留给 release workflow 的 verify-dist / e2e-smoke。
+#
+#   四态诚实报告由 scripts/ci-gate.js 保证：Skipped 单独计数，不计入 Passed。
+name: ci
+
+on:
+  pull_request:
+    branches: [develop, master]
+  push:
+    branches: [develop, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # 同一分支的新 push 取消旧的运行，避免排队
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------- 核心测试
+  tests:
+    name: tests (ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 资产复现链/台账类测试要读 git 历史，浅克隆会全红
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm install
+
+      # 像素/抠像类用例要 Pillow/numpy；缺了会红，不是环境噪音
+      - name: Python deps for asset tests
+        shell: bash
+        timeout-minutes: 8
+        run: python -m pip install --quiet --no-input pillow numpy
+
+      # CI=1 让需要真实图形会话的 E 类测试显式 skip（见 test/office-ui.test.js）。
+      # 输出 TAP 而不是默认 reporter，因为要区分 pass/skip/todo 四态。
+      - name: Run unit tests (TAP)
+        id: unit
+        run: |
+          set +e
+          CI=1 node --test --test-reporter=tap "test/*.test.js" > "$RUNNER_TEMP/unit.tap" 2> "$RUNNER_TEMP/unit.stderr"
+          echo "exit=$?" > "$RUNNER_TEMP/unit.exit"
+          tail -40 "$RUNNER_TEMP/unit.stderr" || true
+
+      # 四态门禁：fail>0 才失败；skip 单独列出，绝不并入 passed
+      - name: Gate — four-state test report
+        run: |
+          node scripts/ci-gate.js \
+            --tap-file "$RUNNER_TEMP/unit.tap" \
+            --label "unit tests" \
+            --out "$RUNNER_TEMP/gate-unit.json"
+
+      - name: Show raw test exit code (diagnostics)
+        if: always()
+        run: cat "$RUNNER_TEMP/unit.exit" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-unit-tap
+          path: |
+            ${{ runner.temp }}/unit.tap
+            ${{ runner.temp }}/gate-unit.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  # -------------------------------------------------- 机械门禁（快速，并行）
+  gates:
+    name: mechanical gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm install
+
+      # G1: 文档索引必须覆盖 docs/ 下每个文件（test/docs-index.test.js 的 CLI 等价物
+      #     由测试本身承担，这里只跑那一个套件，让失败信息更聚焦）
+      - name: Gate — docs index
+        run: |
+          set +e
+          node --test --test-reporter=tap test/docs-index.test.js > "$RUNNER_TEMP/docs.tap" 2>&1
+          node scripts/ci-gate.js --tap-file "$RUNNER_TEMP/docs.tap" --label "docs index"
+
+      # G2: 兼容性账本自洽（Issue #21）—— latestVerified 与 recommended 必须一致，
+      #     badge 必须由账本派生。这条挡住"账本又悄悄陈旧/漂移"。
+      - name: Gate — compat ledger consistency
+        run: npm run check:compat-ledger
+
+      # G3: 许可证合规（Issue #14）。脚本尚未落地时跳过并明确提示，
+      #     而不是静默通过——等 #14 完成后自动开始生效。
+      - name: Gate — license compliance
+        run: |
+          if [ -f scripts/check-licenses.js ]; then
+            node scripts/check-licenses.js
+          else
+            echo "::notice::scripts/check-licenses.js 尚未落地（Issue #14），本门禁暂跳过——这不是通过"
+          fi
+
+  # --------------------------------------------------------------- 语法/构建
+  syntax:
+    name: syntax & entry point
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm install
+
+      # 纯语法检查：能抓住"合并冲突残留/漏括号"这类 CI 之外最常漏的问题
+      - name: Gate — node --check every source file
+        run: |
+          set -e
+          fail=0
+          while IFS= read -r f; do
+            if ! node --check "$f" 2>"$RUNNER_TEMP/check.err"; then
+              echo "::error file=$f::node --check failed"
+              cat "$RUNNER_TEMP/check.err" || true
+              fail=1
+            fi
+          done < <(git ls-files 'src/*.js' 'scripts/*.js')
+          exit $fail
+
+      # 主进程入口必须能在无 Electron 的环境下被 require 到（至少解析成功）。
+      # 这不是"跑起来"，只是"没有拼错 require 路径"，成本极低而价值明确。
+      - name: Gate — package.json entry resolves
+        run: node -e "const p=require('./package.json'); require('fs').accessSync(p.main); console.log('[ci] main entry ok:', p.main)"
