@@ -67,6 +67,7 @@ const { createRuntimeAdapter } = require('./runtime/runtime-adapter.js');
 const { CLASSIFIED_SEATS: CLASSIFIED_SUBAGENT_SEATS } = require('./runtime/subagent-classifier.js');
 const snapshotModule = require('./runtime/runtime-snapshot.js');
 const { createPrivacyRedactor } = require('./runtime/privacy-redactor.js');
+const { safeMissionBoard } = require('./office-mission-board.js');
 const { createOfficeLayout } = require('./runtime/office-layout.js');
 const { resolveRuntimeLayout } = require('./runtime/office-layout-compiler.js');
 const { LAYOUT_ASSETS, DRAFT_WIDTHS, CHARACTER_FOOT_RATIO } = require('./layout-assets.js');
@@ -480,6 +481,10 @@ function createOfficeModule(options = {}) {
     // (documented fallback: a session-window record, never labelled "today").
     realClock = null,
     // P1 运行时体检：诊断环退避窗口（见 DIAGNOSTICS_DEDUP_WINDOW_MS 上的注释）。
+    // P2.3 S2：项目白板数据源（由 main.js 注入）。
+    // office-module 禁 fs，而 mission store 需要 fs —— 所以数据由主进程读好、
+    // 派生好再注入。这个 provider 是**纯读取**：办公室永不写 Mission。
+    missionBoardProvider = null,
     // Issue #24：角色包管理（由 main.js 注入）。
     // office-module 是**纯 Node 内核，禁止 fs/网络**，所以"读磁盘上的包目录"
     // 这件事必须由注入的管理器完成。这里只做 action 校验与转发，
@@ -3292,7 +3297,7 @@ function createOfficeModule(options = {}) {
     // The P1 usage block rides the redactor itself (extended coarse enums +
     // the calendar-day shape keep its numbers and markers); pending items are
     // projected through the allowlist above.
-    const { employees, activityLog, diagnostics, usage, pending, ...rest } = snapshot;
+    const { employees, activityLog, diagnostics, usage, pending, missionBoard, ...rest } = snapshot;
     return {
       ...redactor.redactValue(rest),
       employees: safeEmployees,
@@ -3300,7 +3305,38 @@ function createOfficeModule(options = {}) {
       diagnostics: snapshot.diagnostics,
       usage: usage ? redactor.redactValue(usage) : null,
       pending: Array.isArray(pending) ? pending.map(safePendingItem) : [],
+      // P2.3：白板走**显式字段白名单**，与 pending 同一模式。
+      //
+      // 为什么不直接吃 rest 里的脱敏结果：privacy-redactor 的 TEXT_KEY_RE
+      // 会把任何叫 title/summary/description/text 的字段当正文脱敏——
+      // 那是正确的安全默认，但白板需要显示用户自己的 Mission 短标签。
+      // 白名单让"能进快照的字段"变成一个显式的、可审查的集合，
+      // 而不是"脱敏器恰好放过了什么"。
+      missionBoard: safeMissionBoard(missionBoard),
     };
+  }
+
+  /**
+   * 项目白板快照（P2.3）。
+   *
+   * 为什么包一层 try/catch：provider 是外部注入的，它抛错不能拖垮
+   * 整个办公室渲染。失败时返回"不可用"，与 pending 的处理方式一致。
+   */
+  function missionBoardSnapshot() {
+    if (typeof missionBoardProvider !== 'function') {
+      return { available: false, reason: 'not-wired', observedAtMs: null, stale: true, missions: [],
+        totals: { activeMissions: 0, openQuestions: 0, decisions: 0 } };
+    }
+    try {
+      const value = missionBoardProvider();
+      if (value && typeof value === 'object') return value;
+      return { available: false, reason: 'bad-provider', observedAtMs: null, stale: true, missions: [],
+        totals: { activeMissions: 0, openQuestions: 0, decisions: 0 } };
+    } catch (error) {
+      log(`[office] missionBoard provider threw: ${error && error.message}`);
+      return { available: false, reason: 'provider-error', observedAtMs: null, stale: true, missions: [],
+        totals: { activeMissions: 0, openQuestions: 0, decisions: 0 } };
+    }
   }
 
   function state() {
@@ -3325,6 +3361,10 @@ function createOfficeModule(options = {}) {
       pendingInvalid: pendingInvalid,
       pendingInvalidAtMs: pendingInvalidAtMs,
       pendingInvalidRealMs: pendingInvalidRealMs,
+      // P2.3：项目白板。派生数据（counts + 短标题），不含正文。
+      // 读不到时是 {available:false, reason, stale:true, missions:[]}，
+      // 渲染层据此显示"不可用"而不是空白。
+      missionBoard: missionBoardSnapshot(),
     };
     for (const rec of employees.values()) {
       const binding = registry.getBindingForSession(activeSessionIdFor(rec.employeeId));

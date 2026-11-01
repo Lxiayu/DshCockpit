@@ -67,6 +67,7 @@ const { registerMcpIpc } = require('./ipc-mcp');
 const { registerRemoteIpc } = require('./ipc-remote');
 const { registerMiscDomainsIpc } = require('./ipc-misc-domains');
 const { registerMissionIpc } = require('./ipc-mission');
+const { buildMissionBoard } = require('./office/mission-board');
 const { installPermissionHandlers } = require('./window-hardening');
 const { registerSkillsIpc } = require('./ipc-skills');
 const { registerModelsIpc } = require('./ipc-models');
@@ -169,6 +170,57 @@ let officeStateStore = null;
  * 每次调用都新建实例：导入是短生命周期操作，没有必要缓存。
  * 但 settings 读写指向同一份 SettingsStore，所以"意图"是持久的。
  */
+/**
+ * P2.3 S2：项目白板的数据源（主进程侧）。
+ *
+ * 第一性原理：为什么要节流
+ *
+ *   office 快照是高频推送的（每帧/每次状态变化）。如果每次都读 mission store
+ *   （append-only JSONL + 投影重建），会在渲染循环里做磁盘 IO —— 直接卡顿。
+ *
+ *   但也不能"只读一次"：用户改了 Mission，白板必须跟着变。
+ *
+ *   所以是**带 TTL 的缓存**：30 秒内复用上次结果（与 STALE_AFTER_MS 对齐），
+ *   超过才重读。这样既不在热路径做 IO，又不会长期显示旧数据。
+ *
+ * 第二性原理：为什么读失败要返回 available:false 而不是抛错
+ *
+ *   办公室渲染不能因为 Mission 读不出来就整个挂掉。读失败 → 白板显示"不可用"，
+ *   其他一切照常。这与 pending 的处理方式一致。
+ */
+let missionBoardCache = null;      // { data, readAtMs }
+const MISSION_BOARD_TTL_MS = 30_000; // 与 mission-board.STALE_AFTER_MS 对齐
+
+function currentMissionBoard() {
+  const now = Date.now();
+  // 缓存命中：直接返回（并重算 stale，因为"现在几点"变了）
+  if (missionBoardCache && (now - missionBoardCache.readAtMs) < MISSION_BOARD_TTL_MS) {
+    return { ...missionBoardCache.data, stale: (now - missionBoardCache.readAtMs) > MISSION_BOARD_TTL_MS };
+  }
+  try {
+    const workspaceDir = settings.effective().workspace || os.homedir();
+    const { createMissionStore } = require('./mission/store.js');
+    const store = createMissionStore({ workspaceDir, log });
+    // store.snapshot() 就是当前 projection（load() 已在内部完成）。
+    // 这里不用 fold 重算：store 已经维护了内存投影，重算等于读两遍日志。
+    const projection = store.snapshot();
+    const data = buildMissionBoard({ projection, observedAtMs: now, nowMs: now });
+    missionBoardCache = { data, readAtMs: now };
+    return data;
+  } catch (error) {
+    log(`[office] mission board read failed: ${error && error.message}`);
+    // 读失败：不缓存（下次立刻重试），并如实报不可用
+    return {
+      available: false,
+      reason: 'read-failed',
+      observedAtMs: null,
+      stale: true,
+      missions: [],
+      totals: { activeMissions: 0, openQuestions: 0, decisions: 0 },
+    };
+  }
+}
+
 function createOfficeCharacterPackManager() {
   const { createCharacterPackInstaller } = require('./office/runtime/character-pack-installer.js');
   const { createCharacterPackManager } = require('./office/character-pack-manager.js');
@@ -1047,6 +1099,11 @@ function ensureOfficeModule() {
     // the rendered scene can never diverge. Never throws.
     const runtimeLayout = loadRuntimeLayoutFixture({ userDataDir: app.getPath('userData'), log });
     officeModuleInstance = createOfficeModule({
+      // P2.3 S2：项目白板的数据源。
+      // office-module 受 pure-Node 门禁保护（禁 fs），而 mission store 需要 fs，
+      // 所以这里注入一个**纯读取**的 provider：它只返回已派生好的数据。
+      // 写入方向是反的——办公室永不写 Mission（domain-model 铁律：单一作者）。
+      missionBoardProvider: () => currentMissionBoard(),
       pack: loadProductionCharacterPack(),
       layout: runtimeLayout ? runtimeLayout.fixture : undefined,
       dialogue: loadOfficeDialogueCorpus() || undefined,

@@ -490,6 +490,10 @@ test('boundary: the composition root require set is frozen (new logic must not m
     // 门禁原话是「超限 = 需要拆分而不是继续堆」。这个依赖是拆分的结果，
     // 而不是把新逻辑塞进组合根。它不碰 fs（磁盘操作在注入的 packManager 里）。
     './office-pack-actions.js',
+    // 2026-11-01（P2.3 S3）：白板快照的白名单投影。
+    // 同样是为了**避免**组合根膨胀（4800 行硬上限）；拆出的是隐私边界，
+    // 它值得被单独审查与测试，而不是埋在一个 4800 行的文件里。
+    './office-mission-board.js',
     './layout-assets.js',
     './runtime/animation-controller.js',
     './runtime/approval-risk.js',
