@@ -126,6 +126,7 @@
 | `docs/quality/test-tiers-and-baseline.md` | **现行（2026-11-01）** | 测试三级分类（C 核心 / I 集成 / E 环境专项）与正式基线：`CI=1 npm test` → 1935/1935/0 fail |
 | `docs/quality/mission-desk-acceptance-2026-11-01.md` | **真机验收（2026-11-01）** | Mission Desk 10/10 通过；三轴分开、诚实降级、窗口加固的运行时证据 |
 | `docs/quality/character-pack-acceptance-2026-11-01.md` | **角色包验收（2026-11-01）** | 7/7 通过；抓到两个离线全绿的缺陷（office 页不可达 + flex-basis 泄漏） |
+| `docs/quality/office-board-acceptance-2026-11-01.md` | **项目白板验收（2026-11-01）** | 10/10 通过；含一次错误诊断的纠正与 4 层探针缺件记录 |
 
 ## 6. 脚本产物（由脚本生成/更新，不要手改）
 
