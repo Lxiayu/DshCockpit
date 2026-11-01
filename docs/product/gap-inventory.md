@@ -119,7 +119,7 @@
 
 ---
 
-## 5.5 一次独立盘点审计的发现（2026-11-01，已修 2 项）
+## 5.5 一次独立盘点审计的发现（2026-11-01，已修 5 项）
 
 一次独立只读审计发现了**比"未做"更严重的一类问题：做了但接不上**。
 
@@ -139,9 +139,9 @@
 |---|---|---|
 | 高 | Mission Desk 的 7 个 action 无 UI | `recordDecision` / `registerDeliverable` / `addWorkstream` / `updateWorkstreamStatus` / `update` / `openQuestion` / `openDesk`。**V2「跨会话不丢决策」与 V3「产物是真实文件」目前没有可用通道** |
 | 高 | TD-03 / TD-05 标记"已修复"但代码没修 | 修复只落在 `settings-store.js`；`work/workspace-store.js` 与 `backup.js` 没接。按"存储已安全"做迁移会丢数据 |
-| 中 | TaskRef 无生产者 | schema/store/projection 都写好了，但 18 个 action 里没有对应项 → 永远为空 |
+| ~~中~~ | ~~TaskRef 无生产者~~ | ✅ **已修 2026-11-01**：新增 `linkTaskRef`/`listTaskRefs` + Desk UI；`harnessRef` 走隐私派生（不存 sessionId） |
 | 中 | Brief 跨会话的两处风险 | 已加固（`.git` 检测 + 1 MiB 上限），但端到端仍未验证 |
-| 中 | 本轮的 `official-teams-shape.js` 是零调用方 | 形状验证有价值，但**没有消费者**。接线上要保证只有一条 Team facts 路径进 Office（否则两个事实作者） |
+| — | `official-teams-shape.js` 零调用方 | ✅ **已判定为「刻意不接线」**（2026-11-01）：Office 已有 `team-office-adapter`+`team-office-bridge` 一条事实路径，再接一套就是双写（违反铁律 1）。已在模块头声明定位，并加机械门禁防止擅自 require。接线的正确时机是 ADR-0002 R2 等价性验证通过、旧 `team/runtime` 开始退役时**替换**而非并存 |
 | 低 | `VerificationProvider` / `RenderBackend` 两个"只做接口"承诺未做 | 都是零成本预留，被跳过后将来换实现要重做架构 |
 
 ## 6. 优先级建议

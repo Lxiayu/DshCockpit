@@ -13,6 +13,10 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const ROOT = path.join(__dirname, '..');
 
 const shape = require('../src/official-teams-shape.js');
 const {
@@ -141,4 +145,34 @@ test('teams shape: an empty team is valid and yields zero counts', () => {
   assert.strictEqual(r.ok, true);
   assert.strictEqual(r.facts.memberCount, 0);
   assert.strictEqual(r.facts.hasFailure, false);
+});
+
+// ============================================ 刻意不接线（防双写）
+
+test('teams shape: this module is deliberately NOT wired to any production path', () => {
+  // 审计把这里标为"零调用方"，判断没错。但**不该接**：
+  // Office 已有 team-office-adapter + team-office-bridge 一条事实路径，
+  // 再接一套就有两条 → 违反铁律 1（同一状态不许两个写入者）。
+  //
+  // 这条断言把这个"刻意"钉死：如果哪天有人把它接进生产，
+  // 必须先读模块头的说明并处理退役计划，而不是顺手 require 一下。
+  const src = fs.readFileSync(path.join(ROOT, 'src', 'official-teams-shape.js'), 'utf8');
+  assert.match(src, /当前没有任何生产者接线/, 'the module must declare its own status');
+  assert.match(src, /铁律 1/, 'and explain the two-writers risk');
+
+  // 生产代码（非 test / 非 scripts）不得 require 它
+  const walk = (d) => {
+    const out = [];
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) out.push(...walk(p));
+      else if (e.name.endsWith('.js')) out.push(p);
+    }
+    return out;
+  };
+  const offenders = walk(path.join(ROOT, 'src'))
+    .filter((f) => !f.endsWith('official-teams-shape.js'))
+    .filter((f) => /require\([^)]*official-teams-shape/.test(fs.readFileSync(f, 'utf8')));
+  assert.deepEqual(offenders.map((f) => path.relative(ROOT, f)), [],
+    'wiring this into production would create a second Team facts path (see ADR-0002 R0-R5)');
 });
