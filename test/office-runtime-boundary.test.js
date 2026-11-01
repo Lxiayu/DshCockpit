@@ -485,6 +485,11 @@ test('boundary: the composition root require set is frozen (new logic must not m
   // （a）先更新这里的冻结清单并说明理由，或（b）放到独立的 port/模块里。
   // 这不是禁止演进，而是让"往组合根里塞东西"变成一个显式决定。
   const FROZEN_REQUIRES = [
+    // 2026-11-01（Issue #24）：角色包 action 的校验与分派。
+    // 加它是为了**避免** office-module 继续膨胀（4800 行硬上限）——
+    // 门禁原话是「超限 = 需要拆分而不是继续堆」。这个依赖是拆分的结果，
+    // 而不是把新逻辑塞进组合根。它不碰 fs（磁盘操作在注入的 packManager 里）。
+    './office-pack-actions.js',
     './layout-assets.js',
     './runtime/animation-controller.js',
     './runtime/approval-risk.js',

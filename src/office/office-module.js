@@ -47,6 +47,7 @@
 // (dayKey null) and the panel never labels it 今日.
 
 const fs = require('node:fs');
+const { validatePackAction, isPackAction, runPackAction } = require('./office-pack-actions.js');
 const path = require('node:path');
 // P1 运行时体检（2026-09-26）：仿真时钟节流归因。monitorEventLoopDelay / ELU /
 // GC 记录都是主进程级观测（不是仿真状态），只服务 start() 驱动器的诊断块；
@@ -479,6 +480,11 @@ function createOfficeModule(options = {}) {
     // (documented fallback: a session-window record, never labelled "today").
     realClock = null,
     // P1 运行时体检：诊断环退避窗口（见 DIAGNOSTICS_DEDUP_WINDOW_MS 上的注释）。
+    // Issue #24：角色包管理（由 main.js 注入）。
+    // office-module 是**纯 Node 内核，禁止 fs/网络**，所以"读磁盘上的包目录"
+    // 这件事必须由注入的管理器完成。这里只做 action 校验与转发，
+    // 不碰文件系统——保持 pure-Node 门禁成立。
+    packManager = null,
     diagnosticsDedupWindowMs = DIAGNOSTICS_DEDUP_WINDOW_MS,
     // P1 运行时体检：墙钟驱动器补步上限（见 CLOCK_MAX_CATCH_UP_TICKS 注释）。
     clockMaxCatchUpTicks = CLOCK_MAX_CATCH_UP_TICKS,
@@ -4490,6 +4496,20 @@ function normalizeRendererReport(renderer) {
   return normalized;
 }
 
+/**
+ * office:settings 的 action 分派。
+ *
+ * pack 相关 action 委托给 office-pack-actions.js：本文件只负责
+ * "get/set 的原有语义" + "把 pack 转手"，不承担包的业务逻辑。
+ */
+function dispatchOfficeSettings(value, ctx) {
+  const { module, packManager } = ctx;
+  if (value.action === 'get') return { ok: true, settings: module.getSettings() };
+  if (value.action === 'set') return module.updateSettings(value.settings);
+  if (isPackAction(value.action)) return runPackAction(value, packManager);
+  return { ok: false, code: 'PAYLOAD_INVALID' };
+}
+
 function validateOfficeIpcPayload(channel, payload) {
   if (!OFFICE_IPC_CHANNELS.includes(channel)) return { ok: false, code: 'CHANNEL_UNKNOWN' };
   if (payload === undefined) return { ok: true, value: {} };
@@ -4551,6 +4571,12 @@ function validateOfficeIpcPayload(channel, payload) {
         if (!settingsCheck.ok) return { ok: false, code: 'PAYLOAD_INVALID' };
         return { ok: true, value: { action: 'set', settings: payload.settings } };
       }
+      // ---- Issue #24：角色包 actions（同一通道的 action 判别式，不新增裸通道）
+      // 校验与分派在 office-pack-actions.js —— 本文件有 4800 行硬上限，
+      // 而门禁原话是「超限 = 需要拆分而不是继续堆」。
+      if (isPackAction(payload.action)) {
+        return validatePackAction(payload, keys, MAX_IPC_PAYLOAD_BYTES);
+      }
       return { ok: false, code: 'PAYLOAD_INVALID' };
     }
     // P3 待你处理 actions: answering a pending request (inline approve/reject +
@@ -4584,7 +4610,7 @@ function validateOfficeIpcPayload(channel, payload) {
 
 // Registers the office:* handlers on the injected ipcMain. Dependency
 // injection keeps this module free of any Electron import (pure Node tests).
-function registerOfficeIpc({ ipcMain, module, log = () => {}, enabled = true }) {
+function registerOfficeIpc({ ipcMain, module, log = () => {}, enabled = true, packManager = null }) {
   if (!ipcMain || typeof ipcMain.handle !== 'function') throw new TypeError('registerOfficeIpc requires ipcMain');
   if (!module) throw new TypeError('registerOfficeIpc requires an office module');
   for (const channel of OFFICE_IPC_CHANNELS) {
@@ -4605,9 +4631,7 @@ function registerOfficeIpc({ ipcMain, module, log = () => {}, enabled = true }) 
           case 'office:interrupt':
             return module.interrupt(validation.value);
           case 'office:settings':
-            return validation.value.action === 'get'
-              ? { ok: true, settings: module.getSettings() }
-              : module.updateSettings(validation.value.settings);
+            return dispatchOfficeSettings(validation.value, { module, packManager });
           case 'office:diagnostics':
             return { ok: true, diagnostics: module.diagnostics() };
           case 'office:visibility':

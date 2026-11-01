@@ -155,6 +155,82 @@ let officeStateStore = null;
 // Task 4: production character pack resolution — the user's selected
 // installed pack wins, the built-in deepseek-default pack is the fallback,
 // and the test fixture pack is never a production candidate.
+/**
+ * Issue #24：组装角色包管理器（主进程侧的唯一组装点）。
+ *
+ * 三个注入各自对应一个"作者"：
+ *   · installer        → 磁盘事实（active.json + 版本目录）
+ *   · read/writeSelected → 用户意图（settings.characterPackId）
+ *   · onActivated      → 让渲染层重载（否则装了也不生效）
+ *
+ * packsRoot 放在 userData 下（可写），而内置包仍在 resources（只读）——
+ * 两个根目录必须分开，否则打包后写入会失败且升级会丢包。
+ *
+ * 每次调用都新建实例：导入是短生命周期操作，没有必要缓存。
+ * 但 settings 读写指向同一份 SettingsStore，所以"意图"是持久的。
+ */
+function createOfficeCharacterPackManager() {
+  const { createCharacterPackInstaller } = require('./office/runtime/character-pack-installer.js');
+  const { createCharacterPackManager } = require('./office/character-pack-manager.js');
+
+  // 打包与开发环境都用 userData：安装的包属于**用户数据**，
+  // 不能放在 resources（只读）里，否则升级应用会连带丢包。
+  const packsRoot = path.join(app.getPath('userData'), 'characters');
+  const builtinPackPath = path.join(officeCharactersRoot(), 'deepseek-default');
+
+  let installer;
+  try {
+    installer = createCharacterPackInstaller({ packsRoot, builtinPackPath });
+  } catch (error) {
+    // 装不了（磁盘只读/权限）时**不拖垮整个应用**：返回一个诚实降级的
+    // 管理器，所有操作都报"不可用"。办公室仍能用内置包。
+    log(`[pack] installer unavailable: ${error && error.message}`);
+    const unavailable = {
+      listPacks: () => [{ packId: 'deepseek-default', version: null, builtin: true, installPath: builtinPackPath, active: true }],
+      beginImport: () => ({ ok: false, error: { code: 'PACK_LOAD_FAILED', title: '角色包目录不可用', hint: '无法写入应用数据目录，请检查磁盘权限。', detail: String(error && error.message) } }),
+      commitImport: () => ({ ok: false, error: { code: 'PACK_LOAD_FAILED', title: '角色包目录不可用', hint: '无法写入应用数据目录。', detail: '' } }),
+      cancelImport: () => ({ ok: true, cancelled: false }),
+      selectPack: () => ({ ok: false, error: { code: 'PACK_LOAD_FAILED', title: '角色包目录不可用', hint: '无法写入应用数据目录。', detail: '' } }),
+      uninstallPack: () => ({ ok: false, error: { code: 'PACK_LOAD_FAILED', title: '角色包目录不可用', hint: '无法写入应用数据目录。', detail: '' } }),
+      resolveActive: () => ({ kind: 'builtin', packId: 'deepseek-default', version: null, installPath: builtinPackPath }),
+      BUILTIN_PACK_ID: 'deepseek-default',
+    };
+    return unavailable;
+  }
+
+  return createCharacterPackManager({
+    installer,
+    builtinPackPath,
+    // 用户意图：settings.characterPackId（P1 那次修复让它能存能读）
+    readSelected: () => selectedOfficeCharacterPackId(),
+    writeSelected: (packId) => {
+      try {
+        // 注意：persistOfficeSettings 是 1032 行块作用域里的局部 require，
+        // 本工厂在 172 行（模块顶层），取不到它 —— 必须自己 require。
+        // 这类 TDZ/作用域错误在纯语法检查下看不出来，只有真跑才炸。
+        const { persistOfficeSettings } = require('./office/office-module.js');
+        const store = ensureOfficeStateStore();
+        persistOfficeSettings(officeModuleInstance || null, store, { characterPackId: packId });
+      } catch (error) {
+        log(`[pack] failed to persist selection: ${error && error.message}`);
+      }
+    },
+    // 激活后让渲染层真正换包：清缓存 + 重建 pack + 通知视图。
+    // 不清 productionPackCache 的话，装完看起来"没生效"——用户会以为坏了。
+    onActivated: ({ packId, version }) => {
+      log(`[pack] activated ${packId}${version ? `@${version}` : ''}`);
+      productionPackCache = null;
+      try {
+        const wm = getWindowManager();
+        if (wm && typeof wm.broadcastToOfficeViews === 'function' && officeModuleInstance) {
+          wm.broadcastToOfficeViews('office:state', officeModuleInstance.state());
+        }
+      } catch { /* no views yet: the next open re-reads the pack */ }
+    },
+    log,
+  });
+}
+
 function selectedOfficeCharacterPackId() {
   try {
     const settings = ensureOfficeStateStore().get().settings;
@@ -958,6 +1034,11 @@ function loadOfficeDialogueCorpus() {
 function ensureOfficeModule() {
   if (!officeModuleInstance) {
     const { createOfficeModule, registerOfficeIpc, persistOfficeSettings, loadRuntimeLayoutFixture } = require('./office/office-module.js');
+    // Issue #24：角色包管理。两个根目录是**故意分开**的：
+    //   · packsRoot = userData/characters（可写，安装器装到这里）
+    //   · builtinPackPath = resources/characters/deepseek-default（随包分发，只读）
+    // 这是本 Issue 的核心架构不匹配（见 character-pack-manager.js 头部说明）。
+    const characterPackManager = createOfficeCharacterPackManager();
     // Task E4: the simulation resolves its layout through the SAME source
     // chain as the office view (saved flat draft, compiled → bundled flat
     // fixture → isometric fallback), so the walk graph, the furniture and
@@ -1035,7 +1116,7 @@ function ensureOfficeModule() {
       ...officeModuleInstance,
       updateSettings: (partial) => persistOfficeSettings(officeModuleInstance, ensureOfficeStateStore(), partial),
     };
-    registerOfficeIpc({ ipcMain, module: officeFacade, log, enabled: true });
+    registerOfficeIpc({ ipcMain, module: officeFacade, log, enabled: true, packManager: characterPackManager });
     officeModuleInstance.subscribe((snapshot) => {
       try { getWindowManager().broadcastToOfficeViews('office:state', snapshot); } catch { /* no views yet */ }
     });
