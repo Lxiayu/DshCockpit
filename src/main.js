@@ -71,6 +71,7 @@ const { registerSkillsIpc } = require('./ipc-skills');
 const { registerModelsIpc } = require('./ipc-models');
 const { registerScheduledIpc } = require('./ipc-scheduled');
 const { registerMemoryCompactIpc } = require('./ipc-memory-compact');
+const { registerChannelsIpc } = require('./ipc-channels');
 const { createMcpConnect } = require('./mcp-connect');
 const { createMcpImport } = require('./mcp-import');
 const compact = require('./compact');
@@ -2664,23 +2665,8 @@ function registerIpc() {
   ipcMain.handle('shell:tunnel-start', () => startQuickTunnel());
   ipcMain.handle('shell:tunnel-stop', () => stopQuickTunnel());
 
-  // IM channels (C5): settings-window surface. All channel state mutations run
-  // in the main process; the renderer only renders statusAll() snapshots.
-  ipcMain.handle('shell:channels-list', () => (channelsMgr ? { channels: channelsMgr.statusAll() } : { channels: [] }));
-  ipcMain.handle('shell:channels-toggle', (_e, id, enabled) => (
-    channelsMgr ? channelsMgr.toggle(String(id || ''), !!enabled) : { ok: false, reason: 'not ready' }
-  ));
-  ipcMain.handle('shell:channels-allowfrom', (_e, id, allowFrom) => (
-    channelsMgr ? channelsMgr.setAllowFrom(String(id || ''), allowFrom) : { ok: false, reason: 'not ready' }
-  ));
-  // C6: credentials live in the main-process safeStorage vault; the renderer
-  // sends field values, gets back booleans/result shapes only (never secrets)
-  ipcMain.handle('shell:channels-configure', (_e, id, values) => (
-    channelsMgr ? channelsMgr.configureSecrets(String(id || ''), values) : { ok: false, reason: 'not ready' }
-  ));
-  ipcMain.handle('shell:channels-test', (_e, id, values) => (
-    channelsMgr ? channelsMgr.testChannel(String(id || ''), values) : { ok: false, reason: 'not ready' }
-  ));
+  // IM channels (C5/C6) —— Issue #22 Phase 1 已提取到 src/ipc-channels.js
+  registerChannelsIpc(ipcMain, { channelsMgr });
 
   // model provider panel (C2): test/fetch run in the main process so the API
   // key never crosses into the renderer — only result shapes go back

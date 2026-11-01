@@ -86,6 +86,7 @@ const IPC_SOURCE_FILES = [
   path.join(ROOT, 'src', 'ipc-models.js'),
   path.join(ROOT, 'src', 'ipc-scheduled.js'),
   path.join(ROOT, 'src', 'ipc-memory-compact.js'),
+  path.join(ROOT, 'src', 'ipc-channels.js'),
   path.join(ROOT, 'src', 'work', 'work-ipc.js'),
 ];
 
