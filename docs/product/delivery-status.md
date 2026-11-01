@@ -167,7 +167,7 @@ TD-32（IM 准入）
 ## 9. 当前基线
 
 ```
-CI=1 npm test  →  2719 passed / 0 failed / 1 skipped
+CI=1 npm test  →  2721 passed / 0 failed / 1 skipped
 ```
 唯一 skip 是 E5a-R1 真机探针（需图形会话）——**Skip 不计作 Pass**。
 

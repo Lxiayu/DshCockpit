@@ -47,7 +47,7 @@ src/work/                     单次 Team 执行面（⚠ 不是 Mission 存储�
 src/mission/                  Mission Core 纯逻辑层（P1，8 模块 + IPC + UI 已完成）
 src/ipc-mission.js             Mission IPC（单通道 mission:invoke + 18 action）
 src/mission-desk.html          Mission Desk 窗口（P1 首个用户可见界面）
-test/                         离线测试（node:test，cwd 必须是仓库根；199 套件 / 2719 项）
+test/                         离线测试（node:test，cwd 必须是仓库根；199 套件 / 2721 项）
 scripts/acceptance/           真机验收探针（需图形会话，不在 CI 跑）
 docs/                         文档，唯一索引 docs/README.md
 archive/ + docs/archive/      本地保险箱（git 忽略）
@@ -61,17 +61,21 @@ archive/ + docs/archive/      本地保险箱（git 忽略）
 4. **真机分层**：headless 离线测试 ≠ 真机验收。真机脚本写进报告，由用户执行回填。
 5. **文档同步**：新增/移动/删除任何文档必须同步 `docs/README.md`（`test/docs-index.test.js` 机械校验）。
 6. **规则强制化优先**：能变成测试的架构规则就写成测试，不要只写在文档里（见 `docs/quality/quality-gates.md`）。
+7. **删冗余行可以，压事实行不行**：触到篇幅上限时先问"这件事该归哪个文件承载"，
+   而不是"哪一行还能再塞点"。压行会让文档看起来合规，同时悄悄降低可读性与信息完整性。
+   正确做法是按职责拆分（例：阶段历史 → `docs/product/delivery-status.md`），
+   并由 `test/docs-index.test.js` 的内聚门禁保证不再退化。
 
 ## 5. 命令与坑
 
 ```bash
-npm test                                   # 全量（约 2 分钟，2719 项）
+npm test                                   # 全量（约 2 分钟，2721 项）
 node --test test/docs-index.test.js        # 文档索引（毫秒级，改文档后必跑）
 node --check <file>                        # 语法检查
 ```
 
 - **cwd 坑**：Bash 默认 cwd 可能是仓库父目录。一律用绝对路径或 `zsh -c 'cd <repo> && ...'`。
-- **基线**：`CI=1 npm test` → **2719 passed / 0 failed / 1 skipped**（唯一有效基线）。
+- **基线**：`CI=1 npm test` → **2721 passed / 0 failed / 1 skipped**（唯一有效基线）。
   唯一 skip 是 E5a-R1 真机探针（需图形会话）——**Skip 不计作 Pass**，
   由 `scripts/ci-gate.js` 四态报告保证，见 `docs/quality/test-tiers-and-baseline.md`。
 - **pure Node 门禁**：`src/team/runtime/**` 与 `src/office/runtime/**` 禁止 Electron/DOM/fs/网络；
