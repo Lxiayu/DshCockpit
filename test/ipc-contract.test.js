@@ -73,6 +73,8 @@ function listFiles(dir, filter) {
 const IPC_SOURCE_FILES = [
   path.join(ROOT, 'src', 'main.js'),
   path.join(ROOT, 'src', 'ipc-features.js'),
+  // Issue #22 Phase 1：MCP 域已提取（第一个批次）
+  path.join(ROOT, 'src', 'ipc-mcp.js'),
   path.join(ROOT, 'src', 'work', 'work-ipc.js'),
 ];
 
@@ -93,6 +95,9 @@ test('ipc-contract: the registered channel set is stable (snapshot)', () => {
   // 快照：变更这个清单必须是**有意识的**决定，而不是重构的副作用。
   // 若某次提取让这里变红，说明接口变了 —— 要么改回去，要么同步更新快照并在
   // commit 里说明为什么这是有意的接口变更。
+  // 快照的含义是"接口没变"。Issue #22 Phase 1 把 MCP 的 11 个 handler
+  // 从 main.js 搬到 ipc-mcp.js —— 通道总数**不变**（还是 124），
+  // 这正是"提取"与"接口变更"的区别：前者只搬位置，后者才动集合。
   const EXPECTED_COUNT = 124;
   assert.strictEqual(
     channels.size,

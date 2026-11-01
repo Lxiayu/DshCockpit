@@ -63,6 +63,7 @@ const { createPublicRemote, buildPairUrl } = require('./public-remote');
 const { createModelsManager, PRESETS: MODELS_PRESETS, OLLAMA_PRESET: MODELS_OLLAMA_PRESET } = require('./models-manager');
 const { createMcpManager, wrapForWindows } = require('./mcp-manager');
 const { createMcpRegistry } = require('./mcp-registry');
+const { registerMcpIpc } = require('./ipc-mcp');
 const { createMcpConnect } = require('./mcp-connect');
 const { createMcpImport } = require('./mcp-import');
 const compact = require('./compact');
@@ -2826,93 +2827,15 @@ function registerIpc() {
   });
 
   // ------------------------------ MCP manager (v0.3.1 T1) ----------------
-  // Secret values cross renderer→main exactly once (mcp:save) and are stored
-  // in the safeStorage vault; list/get responses carry configured-flags only,
-  // never values (same discipline as the models panel above).
-  const mcpReady = () => (mcpMgr ? null : { ok: false, reason: 'not ready' });
-  ipcMain.handle('mcp:list', () => (mcpMgr ? mcpMgr.listServers() : { ok: true, servers: [], patchBlockIds: [], patchFile: '' }));
-  ipcMain.handle('mcp:get', (_e, id) => (mcpMgr ? mcpMgr.getServer(String(id || '')) : mcpReady()));
-  ipcMain.handle('mcp:save', async (_e, input, secrets) => {
-    const notReady = mcpReady();
-    if (notReady) return notReady;
-    try { return await mcpMgr.save(input || {}, secrets || {}); } catch (e) {
-      log(`[mcp] save failed: ${e.message}`);
-      return { ok: false, reason: e.message };
-    }
+  // Issue #22 Phase 1：本域的 11 个 handler 已提取到 src/ipc-mcp.js
+  // （与 ipc-features.js 同一 DI 模式）。逐字搬运，不改任何分支逻辑。
+  // 选择 MCP 作为第一个提取批次：依赖集合已知且小（5 个注入点）、
+  // 不触碰窗口/生命周期/广播、四个子模块早已独立、通道集合冻结。
+  registerMcpIpc(ipcMain, {
+    mcpMgr, mcpConn, mcpReg, mcpImp, sessionWorkerClient,
+    dshHomeOf, wrapForWindows, log,
   });
-  ipcMain.handle('mcp:remove', async (_e, id) => {
-    const notReady = mcpReady();
-    if (notReady) return notReady;
-    try { return await mcpMgr.remove(String(id || '')); } catch (e) {
-      log(`[mcp] remove failed: ${e.message}`);
-      return { ok: false, reason: e.message };
-    }
-  });
-  ipcMain.handle('mcp:toggle', async (_e, id, enabled) => {
-    const notReady = mcpReady();
-    if (notReady) return notReady;
-    try { return await mcpMgr.toggle(String(id || ''), !!enabled); } catch (e) {
-      log(`[mcp] toggle failed: ${e.message}`);
-      return { ok: false, reason: e.message };
-    }
-  });
-  ipcMain.handle('mcp:test', async (_e, target) => {
-    if (!mcpConn || !mcpMgr) return { ok: false, reason: 'not ready' };
-    try {
-      const t = target || {};
-      const stored = t.id ? mcpMgr.getServer(String(t.id)) : null;
-      const server = t.transport ? t : (stored && stored.ok ? stored.server : null);
-      if (!server) return { ok: false, reason: 'unknown server' };
-      // the probe uses the WRAPPED command, exactly what the patch file runs
-      const wrapped = server.transport === 'stdio' ? wrapForWindows(server.command, server.args) : server;
-      return await mcpConn.tier2({ ...server, command: wrapped.command, args: wrapped.args || server.args }, (id, key) => mcpMgr.resolveSecret(id, key));
-    } catch (e) {
-      log(`[mcp] test failed: ${e.message}`);
-      return { ok: false, reason: e.message };
-    }
-  });
-  ipcMain.handle('mcp:tier1', async (_e, id) => {
-    if (!mcpConn || !mcpMgr) return { ok: false, status: 'error', reason: 'not ready' };
-    const stored = mcpMgr.getServer(String(id || ''));
-    return stored && stored.ok ? mcpConn.tier1(stored.server) : { ok: false, status: 'error', reason: 'unknown server' };
-  });
-  ipcMain.handle('mcp:registry', async (_e, query, category) => {
-    if (!mcpReg) return { ok: true, items: [] };
-    try { return { ok: true, items: await mcpReg.list(String(query || ''), String(category || 'all')) }; } catch (e) {
-      return { ok: true, items: mcpReg.BUILTIN };
-    }
-  });
-  ipcMain.handle('mcp:import-scan', () => (mcpImp ? { ok: true, sources: mcpImp.scanSources() } : { ok: true, sources: [] }));
-  ipcMain.handle('mcp:import-run', async (_e, sourceKey, selectedNames, clipboardText) => {
-    if (!mcpImp || !mcpMgr) return { ok: false, reason: 'not ready' };
-    try {
-      const existing = mcpMgr.listServers().servers.map((s) => s.id);
-      const prep = mcpImp.prepare(String(sourceKey || ''), Array.isArray(selectedNames) ? selectedNames : null, clipboardText, existing);
-      if (!prep.ok) return prep;
-      const imported = [];
-      const failed = [];
-      for (const item of prep.items) {
-        if (item.error) { failed.push({ name: item.name, reason: item.error }); continue; }
-        const r = await mcpMgr.save(item.server, item.secrets || {});
-        if (r.ok) imported.push(r.server.id);
-        else failed.push({ name: item.name, reason: r.reason });
-      }
-      return { ok: true, imported, failed };
-    } catch (e) {
-      log(`[mcp] import failed: ${e.message}`);
-      return { ok: false, reason: e.message };
-    }
-  });
-  ipcMain.handle('mcp:usage', async (_e, days) => {
-    // rides the session worker: zstd + log parsing never touch the main thread
-    if (!sessionWorkerClient) return { ok: true, usage: { servers: {} } };
-    try {
-      const usage = await sessionWorkerClient.mcpUsage(dshHomeOf(), { maxFiles: 400 });
-      return { ok: true, usage };
-    } catch (e) {
-      return { ok: true, usage: { servers: {} }, reason: e.message };
-    }
-  });
+
   ipcMain.on('search:close', () => auxWindows.closeSearchWindow());
 
   ipcMain.handle('cockpit:get-snapshot', () => buildCockpitSnapshot());
