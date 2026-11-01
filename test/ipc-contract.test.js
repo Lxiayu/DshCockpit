@@ -77,6 +77,8 @@ const IPC_SOURCE_FILES = [
   path.join(ROOT, 'src', 'ipc-mcp.js'),
   // Issue #22 Phase 1：手机遥控网关（第二个批次）
   path.join(ROOT, 'src', 'ipc-remote.js'),
+  // Issue #22 Phase 1：plugins / search / quickask（第三批次）
+  path.join(ROOT, 'src', 'ipc-misc-domains.js'),
   path.join(ROOT, 'src', 'work', 'work-ipc.js'),
 ];
 

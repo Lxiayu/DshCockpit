@@ -65,6 +65,7 @@ const { createMcpManager, wrapForWindows } = require('./mcp-manager');
 const { createMcpRegistry } = require('./mcp-registry');
 const { registerMcpIpc } = require('./ipc-mcp');
 const { registerRemoteIpc } = require('./ipc-remote');
+const { registerMiscDomainsIpc } = require('./ipc-misc-domains');
 const { createMcpConnect } = require('./mcp-connect');
 const { createMcpImport } = require('./mcp-import');
 const compact = require('./compact');
@@ -2464,24 +2465,8 @@ function registerIpc() {
     try { return { ok: true, plugins: await fetchPlugins() }; }
     catch (e) { return { ok: false, reason: e.message }; }
   });
-  ipcMain.handle('plugins:search', async (_e, keyword) => {
-    try { return { ok: true, plugins: await fetchPlugins(keyword) }; }
-    catch (e) { return { ok: false, reason: e.message }; }
-  });
-  // curated market from awesome-dsh-plugin (CC0); last-resort fallback to the
-  // legacy topic search so the market never renders empty due to one outage
-  ipcMain.handle('plugins:market', async (_e, force) => {
-    try {
-      return await marketPayload(Boolean(force));
-    } catch (e) {
-      log(`[shell] curated market unavailable (${e.message}); falling back to topic search`);
-      try {
-        return { ok: true, source: 'fallback', fetchedAt: 0, categories: [], plugins: await fetchPlugins('') };
-      } catch (e2) {
-        return { ok: false, reason: e2.message };
-      }
-    }
-  });
+  // plugins:search / plugins:market — Issue #22 Phase 1 已提取到
+  // src/ipc-misc-domains.js（与 search/quickask 合并为一个批次）
   ipcMain.handle('shell:plugin-action', (_e, action, fullName) => pluginAction(action, fullName));
   // skills center (C4): market + installed in one payload; actions below
   ipcMain.handle('shell:skills-list', async (_e, force) => {
@@ -2579,8 +2564,7 @@ function registerIpc() {
   // P2 运维能力: 一键导出诊断包（设置 → 关于）。结果 {ok, path, bytes, ...} /
   // {ok:false, canceled:true} / {ok:false, code, error}。
   ipcMain.handle('shell:export-diagnostics', () => exportDiagnosticsBundleInteractive());
-  ipcMain.handle('quickask:submit', (_e, prompt) => handleQuickAskSubmit(prompt));
-  ipcMain.on('quickask:close', () => auxWindows.closeQuickAsk());
+  // quickask:submit / quickask:close — 已提取到 src/ipc-misc-domains.js
   ipcMain.handle('shell:scheduled-list', () => ({
     tasks: settings.get().scheduledTasks || [],
     running: [...scheduledRunning],
@@ -2663,11 +2647,20 @@ function registerIpc() {
     if (title) notify(String(title), String(body || ''));
     return { ok: true };
   });
-  ipcMain.handle('search:query', async (_e, q) => searchSessions(dshHomeOf(), q, 20));
+  // search:query — 已提取到 src/ipc-misc-domains.js
 
   // phone remote-control gateway (settings window)
   // Issue #22 Phase 1：3 个 handler 已提取到 src/ipc-remote.js。
   registerRemoteIpc(ipcMain, { remote });
+
+  // plugins / search / quickask —— 三个正交小域合并为一批
+  registerMiscDomainsIpc(ipcMain, {
+    fetchPlugins, marketPayload, pluginAction,
+    searchSessions, dshHomeOf,
+    handleQuickAskSubmit,
+    closeQuickAsk: () => auxWindows.closeQuickAsk(),
+    log,
+  });
 
   // public remote access (C7): Tailscale detection + cloudflared quick tunnel.
   // Enabling demands the renderer's explicit second confirmation (public
