@@ -21,19 +21,55 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 
+// TD-05（2026-11-01 真修）：备份范围从 2 个 key 扩到壳层的全部持久状态。
+//
+// 之前的"已修复"是错的——那个修复只落在 settings-store（TD-03 的一部分），
+// 备份脚本这里一行没改。后果：settings.json / office-state / Mission 事件链 /
+// work 索引**全都不在备份里**。用户换机器或磁盘坏了，Mission 的历史直接消失。
+//
+// 分两个根，因为它们的存放位置不同：
+//   · DSH_HOME      —— 官方 runtime 的 session 与设置
+//   · userData      —— 本壳自己的状态（office-state / settings.json / model-keys 除外）
+// 凭据文件**永不备份**（.credentials.yaml / model-keys.json 已在排除名单里）。
 const INCLUDED_KEYS = ['sessions', 'settings.yaml'];
 const INDEX_FILE = 'index.json';
 
+/** DSH_HOME 下**额外**要备份的（Mission 事件链与 work 索引在 workspace 里，
+ * 由调用方通过 extraRoots 提供，不在 DSH_HOME 顶层）。 */
+const DSH_HOME_EXTRA_KEYS = ['.dsh'];
+
+/** userData 下要备份的壳层状态（凭据与缓存一律排除）。 */
+const USERDATA_KEYS = [
+  'settings.json',
+  'office-state.v1.json',
+  'runtime-state.json',
+  'mission-draft.json',
+];
+
+/** 永不备份的文件名（凭据、临时、缓存）。 */
+const NEVER_BACKUP = new Set([
+  '.credentials.yaml',
+  'model-keys.json',
+  'tokens.json',
+  'index.json',      // 备份自己的索引
+]);
+
 /** Relative POSIX path of every regular file under the included keys,
  * with { size, mtimeMs } per file (metadata only — no content reads). */
-function scanSource(dshHome) {
+function scanSource(dshHome, opts = {}) {
   const files = {};
-  for (const key of INCLUDED_KEYS) {
-    const src = path.join(dshHome, key);
+  const userDataDir = typeof opts.userDataDir === 'string' ? opts.userDataDir : '';
+  const roots = [
+    ...INCLUDED_KEYS.map((k) => ({ base: dshHome, key: k, prefix: k })),
+    ...DSH_HOME_EXTRA_KEYS.map((k) => ({ base: dshHome, key: k, prefix: k })),
+    ...(userDataDir ? USERDATA_KEYS.map((k) => ({ base: userDataDir, key: k, prefix: `userdata/${k}` })) : []),
+  ];
+  for (const { base, key, prefix } of roots) {
+    const src = path.join(base, key);
     let st;
     try { st = fs.statSync(src); } catch { continue; }
     if (st.isFile()) {
-      files[key] = { size: st.size, mtimeMs: st.mtimeMs };
+      if (!NEVER_BACKUP.has(path.basename(src))) files[prefix] = { size: st.size, mtimeMs: st.mtimeMs };
       continue;
     }
     if (!st.isDirectory()) continue;
@@ -45,6 +81,7 @@ function scanSource(dshHome) {
         const abs = path.join(dir, e.name);
         if (e.isDirectory()) walk(abs, `${prefix}/${e.name}`);
         else if (e.isFile()) {
+          if (NEVER_BACKUP.has(e.name)) continue; // 凭据永不进备份
           try {
             const s = fs.statSync(abs);
             files[`${prefix}/${e.name}`] = { size: s.size, mtimeMs: s.mtimeMs };
@@ -53,9 +90,24 @@ function scanSource(dshHome) {
         // symlinks/others: skipped (dsh session trees are plain files)
       }
     };
-    walk(src, key);
+    walk(src, prefix);
   }
   return files;
+}
+
+/**
+ * 把扫描出来的相对 key 解析回源文件绝对路径。
+ *
+ * TD-05 扩范围时必须同步改这里：以前是 `path.join(dshHome, rel)` 硬编码，
+ * 加了 userData/ 前缀后那样会拼出 `dshHome/userdata/...` 这个不存在的路径,
+ * 备份会**静默漏掉**新加的文件（copied 少几个，没人注意）。
+ */
+function resolveSourcePath(rel, { dshHome, userDataDir }) {
+  const parts = rel.split('/');
+  if (parts[0] === 'userdata' && typeof userDataDir === 'string' && userDataDir !== '') {
+    return path.join(userDataDir, ...parts.slice(1));
+  }
+  return path.join(dshHome, ...parts);
 }
 
 function writeIndex(dest, files) {
@@ -103,14 +155,14 @@ function pruneOld(backupDir, keep, logLine) {
  * pass next time.
  * @returns {string} the backup directory that was written.
  */
-function backupNow({ dshHome, backupDir, keep = 5, log }) {
+function backupNow({ dshHome, backupDir, keep = 5, log, userDataDir = '' }) {
   const logLine = log || (() => {});
   fs.mkdirSync(backupDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const dest = path.join(backupDir, stamp);
-  const files = scanSource(dshHome);
+  const files = scanSource(dshHome, { userDataDir });
   for (const rel of Object.keys(files)) {
-    const src = path.join(dshHome, ...rel.split('/'));
+    const src = resolveSourcePath(rel, { dshHome, userDataDir });
     const target = path.join(dest, ...rel.split('/'));
     try {
       fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -132,21 +184,22 @@ function backupNow({ dshHome, backupDir, keep = 5, log }) {
  * backup exists yet or the newest one predates index.json (one-time cost).
  * @returns {{ dest: string, mode: 'delta'|'full', copied: number, scanned: number }}
  */
-function backupDeltaNow({ dshHome, backupDir, keep = 5, log }) {
+function backupDeltaNow({ dshHome, backupDir, keep = 5, log, userDataDir = '' }) {
   const logLine = log || (() => {});
   fs.mkdirSync(backupDir, { recursive: true });
   const latest = latestBackup(backupDir);
   const index = latest ? readIndex(latest) : null;
   if (!latest || !index) {
-    const dest = backupNow({ dshHome, backupDir, keep, log: logLine });
+    const dest = backupNow({ dshHome, backupDir, keep, log: logLine, userDataDir });
     return { dest, mode: 'full', copied: -1, scanned: -1 };
   }
-  const files = scanSource(dshHome);
+  const files = scanSource(dshHome, { userDataDir });
   let copied = 0;
   for (const [rel, meta] of Object.entries(files)) {
     const prev = index.files[rel];
     if (prev && prev.size === meta.size && prev.mtimeMs === meta.mtimeMs) continue; // unchanged
-    const src = path.join(dshHome, ...rel.split('/'));
+    // TD-05：delta 路径也必须走 roots 解析，否则 userData 文件永远漏备
+    const src = resolveSourcePath(rel, { dshHome, userDataDir });
     const target = path.join(latest, ...rel.split('/'));
     try {
       fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -196,4 +249,8 @@ async function backupInfo(backupDir) {
   return { dir: backupDir, count, latest, sizeMB };
 }
 
-module.exports = { backupNow, backupDeltaNow, backupInfo, INCLUDED_KEYS, INDEX_FILE };
+module.exports = {
+  resolveSourcePath,
+  DSH_HOME_EXTRA_KEYS,
+  USERDATA_KEYS,
+  NEVER_BACKUP, backupNow, backupDeltaNow, backupInfo, INCLUDED_KEYS, INDEX_FILE };

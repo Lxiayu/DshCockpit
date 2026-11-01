@@ -293,9 +293,27 @@ function createWorkspaceStore({
     return dir;
   }
 
+  // TD-03（2026-11-01 真修）：写入时保留上一版为 `.bak`。
+  //
+  // 之前的"已修复"是错的——那个修复只落在 settings-store，
+  // work 索引这里从来没有 .bak。后果：index.json 一旦损坏（磁盘半写、
+  // 用户手改、杀毒软件截断），数据就**永久丢了**，只有 fail-closed 报错。
+  //
+  // fail-closed 是对的（不静默重建），但**没有回退出口**等于数据丢失。
+  // 所以每次写盘前把旧文件改名成 .bak，读的时候损坏则回退到 .bak。
   function writeJsonAtomic(file, value) {
     const tmp = `${file}.tmp-${process.pid}-${nowMs()}-${randomId()}`;
     fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    // 先把现有文件挪成 .bak（不存在则跳过），再 rename 新文件
+    try {
+      if (fs.existsSync(file)) {
+        const bak = `${file}.bak`;
+        // 反复覆盖同一个 .bak：只保留上一版，避免无限增长
+        fs.renameSync(file, bak);
+      }
+    } catch (error) {
+      log(`[work] could not rotate .bak (${error && error.message}); continuing`);
+    }
     fs.renameSync(tmp, file);
   }
 
@@ -321,7 +339,23 @@ function createWorkspaceStore({
       try {
         parsed = JSON.parse(raw);
       } catch {
-        throw codeError('WORK_INDEX_INVALID', 'index.json is not valid JSON (kept untouched)');
+        // TD-03：损坏时先尝试 .bak 回退，而不是直接让用户的数据消失。
+        // 回退成功要把现场说清楚（loadedFrom），让调用方能告知用户
+        // "我们用的是上一版"——不能假装无事发生。
+        const bakFile = `${file}.bak`;
+        let recovered = null;
+        try {
+          if (fs.existsSync(bakFile)) recovered = JSON.parse(fs.readFileSync(bakFile, 'utf8'));
+        } catch { recovered = null; }
+        if (recovered !== null) {
+          log(`[work] index.json was corrupt — recovered from ${pathDefault.basename(bakFile)}`);
+          index = validateIndex(recovered, workspaceId);
+          index.loadedFrom = 'backup';
+          openIndexes.set(absPath, index);
+          return index;
+        }
+        // 连 .bak 都没有/也坏了 → fail-closed（保持原行为，不静默重建）
+        throw codeError('WORK_INDEX_INVALID', 'index.json is not valid JSON and no usable .bak exists (kept untouched)');
       }
       index = validateIndex(parsed, workspaceId);
     }

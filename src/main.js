@@ -2865,6 +2865,9 @@ function registerIpc() {
       dshHome: dshHomeOf(),
       backupDir: backupDir(),
       keep: settings.get().backupKeep,
+      // TD-05：userData 里的壳层状态（office-state / settings.json 等）
+      // 也要进备份，否则换机器就丢。
+      userDataDir: app.getPath('userData'),
       log,
     });
     notify(t(lang(), 'notify.backupDone'), t(lang(), 'notify.backupDoneBody', { dir: dest }));
@@ -6487,7 +6490,7 @@ if (!gotLock) {
     // so the quit is bounded by the delta and the backup stays complete.
     if (settings.get().backupOnQuit) {
       try {
-        backupDeltaNow({ dshHome: dshHomeOf(), backupDir: backupDir(), keep: settings.get().backupKeep, log });
+        backupDeltaNow({ dshHome: dshHomeOf(), backupDir: backupDir(), keep: settings.get().backupKeep, userDataDir: app.getPath('userData'), log });
       } catch (err) {
         log(`[shell] quit backup failed: ${err.message}`);
       }

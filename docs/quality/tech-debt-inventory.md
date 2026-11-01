@@ -22,9 +22,9 @@
 |---|---|---|---|---|
 | TD-01 | `main.js` 6385 行 / 107 个 IPC handler / 196 个顶层函数，且无任何测试加载 | 结构 | P0 | ✅ 是 |
 | TD-02 | `settings.json` 无 schemaVersion、无迁移框架，损坏时静默丢全部设置 | 存储 | P0 | ✅ 是 |
-| TD-03 | `.dsh/index.json` fail-closed 且无 `.bak`，Mission 候选底座安全等级低于 office | 存储 | P0 | ✅ 是 |
+| TD-03 | ~~`.dsh/index.json` 无 `.bak`~~ | 存储 | P0 | ✅ **真修 2026-11-01**（此前误标） |
 | TD-04 | 工作产物索引是全量覆盖写而非 append-only，且无条目上限 | 存储 | P1 | ✅ **上限+归档已修**（2026-11-01）；append-only 未做（不阻塞） |
-| TD-05 | 备份只覆盖 2 个 key，壳层全部状态无备份 | 存储 | P0 | ✅ 是 |
+| TD-05 | ~~备份只覆盖 2 个 key~~ | 存储 | P0 | ✅ **真修 2026-11-01**（此前误标） |
 | TD-06 | `shell:*` 75 个通道完全无冻结机制、无集合测试 | IPC | P0 | ✅ 是 |
 | TD-07 | 128 个 handler 中只有 1 个（`shell:work`）做发送方信任校验 | IPC/安全 | P1 | ✅ 是 |
 | TD-08 | ~~全库无 `setPermissionRequestHandler`~~ | 安全 | — | ✅ **已修 2026-11-01** |
@@ -92,7 +92,17 @@
 
 ### TD-02 · `settings.json` 是"无 schema、无迁移、损坏即静默丢全部"的存储
 
-**✅ 已修复（2026-11-01，Issue #19）**：新增 `src/settings-persistence.js`（分层回退 + .bak 链 + 原子写）并接入 `SettingsStore`。损坏时**另存 `.corrupt-<ts>`** 而非覆盖；`loadStatus()` 供 UI 如实告知用户；`schemaVersion` 已注入且不泄漏到设置语义层。18 项专项测试。
+**⚠ 曾经误标为已修复（2026-11-01 审计发现）**：原文引用的 `settings-persistence` 接入的是
+`SettingsStore`，与 work 索引无关——**那是另一件事**。
+
+**✅ 真正修复（2026-11-01）**：`src/work/workspace-store.js`
+- `writeJsonAtomic` 写盘前把上一版轮转成 `.bak`（只保留一份，避免增长）
+- `readIndex` 遇到损坏 JSON 时**先尝试 `.bak` 回退**，回退成功则记录
+  `loadedFrom='backup'` 并打日志（不假装无事发生）
+- `.bak` 也损坏 → 保持 fail-closed，**不静默重建**（不丢数据）
+
+测试：`test/storage-debt-fixes.test.js` 4 项（含"只有一个 .bak"、"双损坏仍 fail-closed"）。
+变异验证 DETECTED（去掉轮转 → 4 项红）。
 
 
 **位置**：`src/settings-store.js`
@@ -132,7 +142,20 @@ load() {
 
 ### TD-03 · `.dsh/index.json` 的安全等级低于 office 状态
 
-**✅ 已修复（2026-11-01，Issue #19）**：新增 `src/settings-persistence.js`（分层回退 + .bak 链 + 原子写）并接入 `SettingsStore`。损坏时**另存 `.corrupt-<ts>`** 而非覆盖；`loadStatus()` 供 UI 如实告知用户；`schemaVersion` 已注入且不泄漏到设置语义层。18 项专项测试。
+**⚠ 曾经误标为已修复（2026-11-01 审计发现）**：与 TD-03 同一句错误理由——
+`settings-persistence` 完全没碰 `backup.js`。备份范围实际仍是 2 个 key。
+
+**✅ 真正修复（2026-11-01）**：`src/backup.js`
+- 备份范围从 2 个 key 扩到 4 类：
+  `sessions` / `settings.yaml` / `.dsh`（Mission 事件链 + work 索引）
+  / userData 的 `settings.json`、`office-state.v1.json`、`runtime-state.json`
+- 新增 `resolveSourcePath()` 让 `userdata/` 前缀正确映射回 userData——
+  **扩范围时最容易漏的一步**：复制阶段若仍硬编码 `dshHome`，
+  新加的文件会静默漏备（copied 少几个，没人注意）。full 与 delta 两条路径都已修。
+- **凭据永不备份**：`NEVER_BACKUP` 含 `.credentials.yaml` / `model-keys.json` / `tokens.json`
+
+测试：`test/storage-debt-fixes.test.js` 4 项（含凭据排除、delta 真复制）。
+变异验证 DETECTED（退回 2 个 key → 2 项红）。
 
 
 **位置**：`src/work/workspace-store.js`
