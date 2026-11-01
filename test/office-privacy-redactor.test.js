@@ -219,3 +219,76 @@ test('boundary: redaction is an INPUT to eventId, so changing it changes fingerp
   assert.equal(withRealId.payload.id, '[REDACTED:session-id]');
   assert.equal(JSON.stringify(withRealId.payload).includes('sess-child-y'), false);
 });
+
+// ---------------------------------------------------------------------------
+// Issue #18（2026-11-01）：诊断码被当成正文脱敏
+//
+// 症状：PACK_MISSING / AGENT_STATUS_UNKNOWN / ANIMATION_NOT_FOUND 这类
+// SCREAMING_SNAKE 诊断码全部被脱敏成 "[REDACTED:text]"，而小写的同义标签
+// （working / tool/call）却能通过。本仓库 184 个诊断码无一幸免。
+//
+// 后果：诊断信息在最有用的地方消失——出问题时用户只看到一段红字，
+// 无法据此定位。这不是隐私问题（诊断码里没有身份信息），而是可观测性问题。
+//
+// 根因有两层：
+//   1. SHORT_ENUM_TOKEN_RE 只接受小写开头（^[a-z]）
+//   2. SESSION_VALUE_RE 的启发式把 AGENT_STATUS_UNKNOWN 当成 agent-xxxxx 句柄
+// ---------------------------------------------------------------------------
+
+test('issue-18: SCREAMING_SNAKE diagnostic codes survive redaction', () => {
+  const redactor = createPrivacyRedactor({ mode: 'redacted' });
+  const codes = [
+    'PACK_MISSING',
+    'AGENT_STATUS_UNKNOWN',
+    'ANIMATION_NOT_FOUND',
+    'BAD_POSITION',
+    'CHAT_SEAT_OCCUPIED',
+    'ACTIVITY_NOT_DIRECTED',
+    // 长诊断码：它们天然超过 32 字符，必须有独立的长度规则
+    'OFFICE_COMPILE_WORKSTATION_MEMBER_DUPLICATE',
+    'OFFICE_COMPILE_WORKSTATION_MEMBER_MISSING',
+    'OFFICE_COMPILE_WORKSTATION_OVERLAP',
+  ];
+  for (const c of codes) {
+    assert.equal(redactor.redactValue({ c })[ 'c'], c,
+      `diagnostic code ${c} must stay readable (it carries no identity)`);
+  }
+});
+
+test('issue-18: the fix does NOT weaken the privacy boundary', () => {
+  const redactor = createPrivacyRedactor({ mode: 'redacted' });
+  // 真实的句柄/路径/密钥必须仍然被脱敏——放宽枚举识别不等于放宽身份防护。
+  assert.equal(redactor.redactValue({ x: 'agent-3f2a9c9' }).x, REDACTED.SESSION);
+  assert.equal(redactor.redactValue({ x: 'session:session-60x' }).x, REDACTED.SESSION);
+  assert.equal(redactor.redactValue({ x: 'exec-run:abc123' }).x, REDACTED.SESSION);
+  assert.equal(redactor.redactValue({ x: '/Users/xia/program/dsh' }).x, REDACTED.PATH);
+  assert.equal(redactor.redactValue({ x: 'sk-abcdef123456' }).x, REDACTED.SECRET);
+  // 正文仍然被脱敏（含空格/标点，不匹配任何枚举形状）
+  assert.equal(redactor.redactValue({ x: '请帮我改一下这个文件' }).x, REDACTED.TEXT);
+});
+
+test('issue-18: the 32-char enum bound is still enforced for non-diagnostic tokens', () => {
+  const redactor = createPrivacyRedactor({ mode: 'redacted' });
+  const at32 = 'abcdefghijklmnopqrstuvwxyzabcdef';
+  assert.equal(redactor.redactValue({ id: at32 }).id, at32, '32 chars is the enum bound');
+  assert.equal(redactor.redactValue({ id: `${at32}g` }).id, REDACTED.TEXT,
+    '33 chars of lowercase is not an enum — the diagnostic-code rule must not leak here');
+});
+
+test('issue-18: every diagnostic code in the office runtime survives redaction (no allowlist)', () => {
+  // 不是逐个列白名单，而是扫源码里所有 SCREAMING_SNAKE 字面量——
+  // 这样将来新增诊断码自动被覆盖，不需要维护第二份清单。
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const dir = path.join(__dirname, '..', 'src', 'office', 'runtime');
+  const codes = new Set();
+  for (const file of fs.readdirSync(dir).filter((n) => n.endsWith('.js'))) {
+    const src = fs.readFileSync(path.join(dir, file), 'utf8');
+    for (const m of src.matchAll(/'([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)'/g)) codes.add(m[1]);
+  }
+  assert.ok(codes.size > 100, `expected the office runtime to define many codes, found ${codes.size}`);
+  const redactor = createPrivacyRedactor({ mode: 'redacted' });
+  const broken = [...codes].filter((c) => redactor.redactValue({ c }).c !== c);
+  assert.deepEqual(broken, [],
+    'every diagnostic code must stay readable; a redacted code is a lost diagnosis');
+});
