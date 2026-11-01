@@ -16,7 +16,8 @@
     "publish:mac": "node scripts/build.js --mac --publish always",
     "test": "node --test \"test/*.test.js\"",
     "check:compat-ledger": "node scripts/check-compat-ledger.js",
-    "ci:gate": "node scripts/ci-gate.js"
+    "ci:gate": "node scripts/ci-gate.js",
+    "check:licenses": "node scripts/check-licenses.js"
   },
   "author": "Lxiayu",
   "license": "MIT",

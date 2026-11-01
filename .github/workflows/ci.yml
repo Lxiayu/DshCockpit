@@ -121,15 +121,11 @@ jobs:
       - name: Gate — compat ledger consistency
         run: npm run check:compat-ledger
 
-      # G3: 许可证合规（Issue #14）。脚本尚未落地时跳过并明确提示，
-      #     而不是静默通过——等 #14 完成后自动开始生效。
+      # G3: 许可证合规（Issue #14）——直接依赖 + 传递依赖 + 分发内容一致性。
+      # 三类检查缺一不可：只看直接依赖会漏掉"MIT 的直接依赖拖进 AGPL 传递依赖"
+      # 这类真实风险；devDependencies 不进分发包，因此只报 note 不阻塞。
       - name: Gate — license compliance
-        run: |
-          if [ -f scripts/check-licenses.js ]; then
-            node scripts/check-licenses.js
-          else
-            echo "::notice::scripts/check-licenses.js 尚未落地（Issue #14），本门禁暂跳过——这不是通过"
-          fi
+        run: node scripts/check-licenses.js
 
   # --------------------------------------------------------------- 语法/构建
   syntax:

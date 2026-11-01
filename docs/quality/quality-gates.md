@@ -98,18 +98,31 @@
 
 ## 3. 待建立的门禁（按优先级）
 
-### G15：依赖许可证白名单（P0）
+### G15：依赖许可证检查（P0）✅ 已实现（2026-11-01，Issue #14）
 
-**问题**：MIT 项目不能打包 AGPL 依赖。当前无任何检查。
+**问题**：MIT 项目不能打包 AGPL 依赖。此前无任何检查。
 
-**方案**：
-```js
-// scripts/check-licenses.js（待建）
-// 遍历 package.json + node_modules，提取 license 字段
-// 白名单：MIT, Apache-2.0, BSD-*, ISC, 0BSD, Unlicense
-// 拒绝：AGPL-*, GPL-*, SSPL, NOASSERTION（需人工确认）, 自定义商业许可
-// 排除 devDependencies
-```
+**实现**：`scripts/check-licenses.js`，三层检查（用户明确要求三者都查）：
+
+| Gate | 检查对象 | 为什么单独一层 |
+|---|---|---|
+| 1 直接依赖 | `package.json` 的 dependencies | 我们主动选的；devDependencies 单列为 note（不进分发包） |
+| 2 **传递依赖** | lockfile 中非 dev 的 167 个包 | **只看直接依赖会 100% 漏掉"MIT 的依赖拖进 AGPL 传递依赖"** |
+| 3 分发一致性 | 生产依赖是否真的在 lockfile 非 dev 集合中 | 声明与实际不符是真实风险 |
+
+**判定**：
+- allowed：MIT / Apache-2.0 / BSD-* / ISC / 0BSD / Unlicense / CC0 等
+- denied：AGPL-* / GPL-* / SSPL / BUSL / CC-BY-NC-SA（**直接失败**）
+- review：NOASSERTION / 缺失 / 自定义（**也失败**——用户要求"不允许静默放过"）
+- SPDX 表达式：`OR` 任一边允许即可；`AND` 取最严
+
+**例外机制**：`LICENSE_EXCEPTIONS` 必须含 `reason` + `approvedBy` + `since`，
+不允许无声加白名单。测试强制校验这个结构。
+
+**验收证据**：
+- `test/check-licenses.test.js` 15 项，含"传递 AGPL 必须拦下""dev-only copyleft 不阻塞"
+  "未知许可证不得静默通过""缺 lockfile 是硬错误"
+- 变异验证：注入 AGPL 传递依赖 → exit 1；把 ws 改成 NOASSERTION → exit 1
 
 **为什么必须先建**：ADR-0005 / ADR-0006 的决策依赖"许可证是硬门槛"。没有机械检查，这个门槛就是纸的。
 
