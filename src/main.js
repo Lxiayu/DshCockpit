@@ -67,6 +67,7 @@ const { registerMcpIpc } = require('./ipc-mcp');
 const { registerRemoteIpc } = require('./ipc-remote');
 const { registerMiscDomainsIpc } = require('./ipc-misc-domains');
 const { registerMissionIpc } = require('./ipc-mission');
+const { registerSkillsIpc } = require('./ipc-skills');
 const { createMcpConnect } = require('./mcp-connect');
 const { createMcpImport } = require('./mcp-import');
 const compact = require('./compact');
@@ -1858,17 +1859,6 @@ function startDeferredServices() {
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
 /** Keep restored bounds at least partially visible on some display. */
 
 
@@ -1969,7 +1959,6 @@ function updateTray() {
 function createTray() {
   trayMenu.createTray();
 }
-
 
 
 /**
@@ -2535,22 +2524,13 @@ function registerIpc() {
   // src/ipc-misc-domains.js（与 search/quickask 合并为一个批次）
   ipcMain.handle('shell:plugin-action', (_e, action, fullName) => pluginAction(action, fullName));
   // skills center (C4): market + installed in one payload; actions below
-  ipcMain.handle('shell:skills-list', async (_e, force) => {
-    try {
-      const installed = skillsMgr.listInstalled();
-      const { source, entries, fetchedAt } = await fetchMarketData(Boolean(force));
-      const starMap = await fetchStarMap();
-      const repos = new Set(installed.filter((s) => s.repo).map((s) => s.repo));
-      return { ok: true, source, fetchedAt, installed, ...buildSkillsMarketPayload(entries, starMap, repos) };
-    } catch (e) {
-      return { ok: false, reason: e.message };
-    }
+  // shell:skills-* 的 6 个 handler —— Issue #22 Phase 1 已提取到 src/ipc-skills.js
+  // （连同 skillsAction 与两个结果码/i18n 辅助函数，见那边的说明）
+  registerSkillsIpc(ipcMain, {
+    skillsMgr, skillsGuard,
+    fetchMarketData, fetchStarMap, buildSkillsMarketPayload,
+    pluginAction, notify, t, lang, log,
   });
-  ipcMain.handle('shell:skills-preview', (_e, fullName) => skillsAction('preview', fullName));
-  ipcMain.handle('shell:skills-install', (_e, fullName, pick) => skillsAction('install', fullName, pick));
-  ipcMain.handle('shell:skills-remove', (_e, name) => skillsAction('remove', name));
-  ipcMain.handle('shell:skills-upgrade', (_e, name) => skillsAction('upgrade', name));
-  ipcMain.handle('shell:skills-import', (_e, dir, pick) => skillsAction('import', dir, pick));
   ipcMain.handle('shell:profile-snapshots', () => {
     try {
       const base = profileSnapshotDir();
@@ -3433,71 +3413,6 @@ function sendSkillsProgress(info) {
 }
 
 /** Map validation errors [{code, params}] to readable localized lines. */
-function skillsErrorReason(errors) {
-  return (Array.isArray(errors) ? errors : [])
-    .map((e) => t(lang(), `skills.${e.code}`, e.params || {}))
-    .join('；');
-}
-
-/** skills.js result codes are kebab-case ('plugin-form', 'no-source', …)
- * while the i18n keys are camelCase (skills.pluginForm) — bridge them. */
-function skillsCodeKey(code) {
-  return String(code || '').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-}
-
-/**
- * Serialized skill operations (install/upgrade/remove/import/preview).
- * Skills are pure files — no runtime restart here; dsh picks them up via its
- * skills watcher and they apply to new sessions. Bundle-plugin-form skill
- * packs (package.json + dsh bundle) are delegated to the plugin pipeline.
- */
-async function skillsAction(op, arg, pick) {
-  if (!skillsGuard.tryBegin(op, String(arg || ''))) {
-    return { ok: false, code: 'busy', reason: t(lang(), 'skills.busy') };
-  }
-  try {
-    let r;
-    if (op === 'preview') r = await skillsMgr.preview(String(arg || ''));
-    else if (op === 'install') r = await skillsMgr.install(String(arg || ''), pick === undefined ? null : pick);
-    else if (op === 'remove') r = skillsMgr.remove(String(arg || ''));
-    else if (op === 'upgrade') r = await skillsMgr.upgrade(String(arg || ''));
-    else if (op === 'import') r = await skillsMgr.importLocal(String(arg || ''));
-    else r = { ok: false, code: 'invalid', reason: 'unknown op' };
-
-    // bundle-plugin skill packs live in the plugin pipeline (restart applies)
-    if (!r.ok && r.code === 'plugin-form' && op === 'install') {
-      log(`[skills] ${arg} is a bundle-plugin skill pack; delegating to plugin install`);
-      const pr = await pluginAction('add', String(arg));
-      return { ...pr, delegated: 'plugin' };
-    }
-
-    if (!r.ok && Array.isArray(r.errors) && !r.reason) {
-      r.reason = skillsErrorReason(r.errors) || t(lang(), `skills.${skillsCodeKey(r.code) || 'e1'}`);
-    } else if (!r.ok && !r.reason && r.code) {
-      const key = `skills.${skillsCodeKey(r.code)}`;
-      const text = t(lang(), key);
-      r.reason = text !== key ? text : r.code;
-    }
-
-    if (r.ok && op === 'remove') {
-      notify(t(lang(), 'skills.removed'), t(lang(), 'skills.removedBody', { name: String(arg) }));
-      log(`[skills] removed ${arg}`);
-    } else if (r.ok && op !== 'preview') {
-      const names = (r.installed || []).map((i) => i.name).join(', ') || String(arg);
-      const warnings = (r.installed || []).flatMap((i) => i.warnings || []);
-      const body = t(lang(), 'skills.installedBody', { name: names })
-        + (warnings.length ? `\n${warnings.map((w) => t(lang(), `skills.${w.code}`, w.params || {})).join('\n')}` : '');
-      notify(t(lang(), 'skills.installed'), body);
-      log(`[skills] ${op} ok: ${names}`);
-    } else if (!r.ok && r.code !== 'multi' && r.code !== 'busy' && op !== 'preview') {
-      notify(t(lang(), 'skills.failed'), t(lang(), 'skills.failedBody', { name: String(arg), reason: r.reason || r.code }));
-      log(`[skills] ${op} ${arg} failed (${r.code}): ${r.reason || ''}`);
-    }
-    return r;
-  } finally {
-    skillsGuard.release();
-  }
-}
 
 /** Profile paths for the web runtime. */
 function profileDirOf() { return path.join(dshHomeOf(), 'profiles', 'web'); }
@@ -4659,14 +4574,9 @@ async function exportDiagnosticsBundleInteractive() {
 // ---------------------------------------------------------------------------
 
 
-
-
-
-
 // ---------------------------------------------------------------------------
 // guided first run (no runtime anywhere: install from the registry)
 // ---------------------------------------------------------------------------
-
 
 
 /**
