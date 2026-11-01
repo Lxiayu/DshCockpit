@@ -124,7 +124,9 @@ contextBridge.exposeInMainWorld('dshShell', {
   // persist or render in the settings window
   channelsList: () => ipcRenderer.invoke('shell:channels-list'),
   channelsToggle: (id, enabled) => ipcRenderer.invoke('shell:channels-toggle', id, enabled),
-  channelsAllowFrom: (id, allowFrom) => ipcRenderer.invoke('shell:channels-allowfrom', id, allowFrom),
+  // TD-32：第四参数 confirmOpen —— 扩展到全开放（`*`）需要显式二次确认
+  channelsAllowFrom: (id, allowFrom, confirmOpen) =>
+    ipcRenderer.invoke('shell:channels-allowfrom', id, allowFrom, confirmOpen === true),
   channelsConfigure: (id, values) => ipcRenderer.invoke('shell:channels-configure', id, values),
   channelsTest: (id, values) => ipcRenderer.invoke('shell:channels-test', id, values),
   onChannelsChanged: (cb) => ipcRenderer.on('channels:changed', () => cb()),

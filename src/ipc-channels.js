@@ -38,8 +38,12 @@ function registerChannelsIpc(ipcMain, ctx) {
   ipcMain.handle('shell:channels-toggle', (_e, id, enabled) => (
     channelsMgr ? channelsMgr.toggle(String(id || ''), !!enabled) : { ok: false, reason: 'not ready' }
   ));
-  ipcMain.handle('shell:channels-allowfrom', (_e, id, allowFrom) => (
-    channelsMgr ? channelsMgr.setAllowFrom(String(id || ''), allowFrom) : { ok: false, reason: 'not ready' }
+  // TD-32：allowFrom 的第四参数是 confirmOpen。
+  // 只有"从非开放变成全开放"才需要它——见 channel-manager.setAllowFrom 的说明。
+  ipcMain.handle('shell:channels-allowfrom', (_e, id, allowFrom, confirmOpen) => (
+    channelsMgr
+      ? channelsMgr.setAllowFrom(String(id || ''), allowFrom, { confirmOpen: confirmOpen === true })
+      : { ok: false, reason: 'not ready' }
   ));
   // C6: credentials live in the main-process safeStorage vault; the renderer
   // sends field values, gets back booleans/result shapes only (never secrets)

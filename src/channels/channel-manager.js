@@ -31,7 +31,7 @@ const { OutboundQueue } = require('./outbound-queue');
 const { ChannelSecrets } = require('./credentials');
 const { createSender } = require('./senders/base');
 const { SessionBindings, createCommandDispatcher } = require('./receivers/base');
-const { isAllowed, parseAllowFrom } = require('./allowlist');
+const { isAllowed, parseAllowFrom, describeRisk, widensToOpen } = require('./allowlist');
 const { t } = require('../i18n');
 
 /** Registered placeholder slots until C6 ships the protocol implementations. */
@@ -397,11 +397,20 @@ function createChannelManager(deps) {
   function statusAll() {
     return BUILTIN_SLOTS.filter((type) => registry.has(type)).map((type) => {
       const cfg = configOf(type);
+      const allowFrom = Array.isArray(cfg.allowFrom) ? cfg.allowFrom : [];
+      // TD-32：把准入模式一起报给 UI。
+      // 渲染进程据此显示"全开放"的醒目警告——这不是可有可无的装饰：
+      // `*` 意味着任何能给这个 bot 发消息的人都能在用户工作区跑任意 prompt。
+      const risk = describeRisk(allowFrom);
       return {
         id: type,
         type,
         enabled: !!cfg.enabled,
-        allowFrom: Array.isArray(cfg.allowFrom) ? cfg.allowFrom : [],
+        allowFrom,
+        /** 'pairing' | 'allowlist' | 'open' —— 准入模式 */
+        admissionMode: risk.mode,
+        /** true = 全开放（任何陌生人可驱动 prompt），UI 必须醒目提示 */
+        admissionOpen: risk.open,
         installed: !!registry.get(type),
         credentialsConfigured: hasSecrets(type),
         status: stateOf(type).snapshot(),
@@ -485,12 +494,44 @@ function createChannelManager(deps) {
     return { ok: true, channels: statusAll() };
   }
 
-  function setAllowFrom(id, input) {
+  /**
+   * 更新渠道白名单。
+   *
+   * TD-32（2026-11-01）：改为**两阶段写入**——把准入扩大到全开放（`*`）
+   * 需要显式二次确认。
+   *
+   * 为什么需要：`*` 的后果不是"方便一点"，而是任何能给这个 bot 发消息的人
+   * 都能通过 runPrompt 在**用户工作区**里跑任意 prompt。
+   * 原实现里它和白名单条目一样直接保存，用户在一次误输入后就永久开放了。
+   *
+   * 为什么只对 `*` 要确认：其他改动（加 id、清空回配对模式）都是收敛或持平，
+   * 频繁打扰会让用户养成"闭眼确认"的习惯——那样真正的危险提示也会失效。
+   *
+   * @param {string} id
+   * @param {string|string[]} input
+   * @param {object} [opts]
+   * @param {boolean} [opts.confirmOpen] 用户已确认要开启全开放
+   */
+  function setAllowFrom(id, input, opts = {}) {
     const type = String(id || '');
     if (!registry.has(type)) return { ok: false, reason: 'unknown-channel' };
-    saveConfig(type, { allowFrom: parseAllowFrom(input) });
+
+    const next = parseAllowFrom(input);
+    const prev = (configOf(type).allowFrom) || [];
+    if (widensToOpen(prev, next) && opts.confirmOpen !== true) {
+      // 不写入、不改状态——把决策交回给用户
+      return {
+        ok: false,
+        code: 'OPEN_MODE_CONFIRM_REQUIRED',
+        reason: 'opening a channel to `*` lets ANY sender drive prompts in your workspace; '
+          + 'resend with confirmOpen=true if that is really intended',
+        pending: { allowFrom: next, mode: 'open' },
+      };
+    }
+
+    saveConfig(type, { allowFrom: next });
     emitState();
-    return { ok: true, channels: statusAll() };
+    return { ok: true, channels: statusAll(), admissionMode: describeRisk(next).mode };
   }
 
   /** Start every channel the user previously enabled (app boot). */

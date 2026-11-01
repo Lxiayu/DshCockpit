@@ -1704,6 +1704,10 @@
       channels_notInstalled: '协议实现将于渠道接入后提供',
       channels_allowFrom: '白名单（allowFrom）',
       channels_allowFromHint: '允许使用本渠道的用户/群 ID，逗号分隔；支持前缀通配（如 user_*）。留空 = 配对模式（默认拒绝所有，接入后可配对放行）。',
+      channels_admissionPairing: '当前：配对模式（拒绝所有陌生人，需先从桌面端配对放行）',
+      channels_admissionAllowlist: '当前：白名单模式（只有列表中的 ID 可用）',
+      channels_admissionOpen: '⚠ 当前：全开放模式 —— 任何能给这个机器人发消息的人都可以在你的工作区里执行任意提示词',
+      channels_confirmOpen: '⚠ 危险操作\n\n填入 * 会让这个渠道对所有人开放：任何能给这个机器人发消息的人，都可以在你的工作区里执行任意提示词。\n\n确定要开启全开放模式吗？',
       channels_credentials: '凭据配置',
       channels_credentialsHint: '凭据经系统加密存储，不进入设置与备份；保存后启用渠道即自动连接。',
       channels_credentialsConfigured: '已配置',
@@ -2187,6 +2191,10 @@ nav_office: '虚拟办公室',
       channels_notInstalled: 'The protocol implementation arrives with the channel integration',
       channels_allowFrom: 'Allowlist (allowFrom)',
       channels_allowFromHint: 'User/chat ids allowed to use this channel, comma separated; prefix wildcards supported (e.g. user_*). Empty = pairing mode (reject all by default until paired).',
+      channels_admissionPairing: 'Current: pairing mode (strangers rejected until paired from the desktop)',
+      channels_admissionAllowlist: 'Current: allowlist only (just the listed ids)',
+      channels_admissionOpen: '⚠ Current: OPEN — anyone who can message this bot can run any prompt in your workspace',
+      channels_confirmOpen: '⚠ Dangerous change\n\nWriting * opens this channel to everyone: anyone who can message this bot can run any prompt in your workspace.\n\nEnable open mode anyway?',
       channels_credentials: 'Credentials',
       channels_credentialsHint: 'Secrets are OS-encrypted and never enter settings or backups; after saving, enabling the channel connects automatically.',
       channels_credentialsConfigured: 'Configured',
@@ -3748,16 +3756,55 @@ nav_office: 'Virtual Office',
       afInput.placeholder = 'user_123, chat_456';
       afInput.value = (ch.allowFrom || []).join(', ');
       afInput.style.width = '100%';
+
+      // TD-32：全开放模式必须有醒目提示。
+      // 这不是装饰——`*` 意味着任何能给这个 bot 发消息的人都能在用户
+      // 工作区里跑任意 prompt。用户必须能一眼看出自己现在处于哪种模式。
+      const afRisk = document.createElement('span');
+      afRisk.className = 'desc';
+      const renderRisk = (ch2) => {
+        const mode = (ch2 && ch2.admissionMode) || 'pairing';
+        if (mode === 'open') {
+          afRisk.textContent = tr('channels_admissionOpen');
+          afRisk.style.color = 'var(--bad, #ff9d9d)';
+          afRisk.style.fontWeight = '600';
+        } else if (mode === 'allowlist') {
+          afRisk.textContent = tr('channels_admissionAllowlist');
+          afRisk.style.color = '';
+          afRisk.style.fontWeight = '';
+        } else {
+          afRisk.textContent = tr('channels_admissionPairing');
+          afRisk.style.color = '';
+          afRisk.style.fontWeight = '';
+        }
+      };
+      renderRisk(ch);
+
       afInput.addEventListener('change', async () => {
         try {
-          const r = await window.dshShell.channelsAllowFrom(ch.id, afInput.value);
-          if (r && r.ok) flash(tr('channels_savedOk'));
-          else flash(tr('channels_saveFailed', { reason: (r && r.reason) || '' }));
+          let r = await window.dshShell.channelsAllowFrom(ch.id, afInput.value);
+          // 二次确认：只有"扩大到全开放"会返回这个 code。
+          // 用原生 confirm 而不是自绘弹窗——这个场景需要的是**阻断**，
+          // 原生模态框不能被误点关闭，正好。
+          if (r && !r.ok && r.code === 'OPEN_MODE_CONFIRM_REQUIRED') {
+            const proceed = window.confirm(tr('channels_confirmOpen'));
+            if (!proceed) { afInput.value = (ch.allowFrom || []).join(', '); return; }
+            r = await window.dshShell.channelsAllowFrom(ch.id, afInput.value, true);
+          }
+          if (r && r.ok) {
+            flash(tr('channels_savedOk'));
+            const saved = (r.channels || []).find((c) => c.id === ch.id);
+            if (saved) renderRisk(saved);
+          } else {
+            flash(tr('channels_saveFailed', { reason: (r && r.reason) || '' }));
+            afInput.value = (ch.allowFrom || []).join(', ');
+          }
         } catch (e) {
           flash(tr('channels_saveFailed', { reason: e.message }));
         }
       });
       af.appendChild(afLabel);
+      af.appendChild(afRisk);
       af.appendChild(afHint);
       af.appendChild(afInput);
       card.appendChild(af);

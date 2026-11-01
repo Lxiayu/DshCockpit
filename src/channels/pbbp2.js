@@ -133,6 +133,16 @@ function decodeHeader(buf) {
     const fieldNo = Math.floor(tag / 8);
     if (tag % 8 !== 2) { readVarint(buf, pos); continue; }
     const len = readVarint(buf, pos).value;
+    // TD-32（2026-11-01）：长度边界检查。
+    //
+    // 之前这里直接 `buf.subarray(pos.i, pos.i + len)`：
+    // 恶意/损坏帧声明 len=50 但实际只剩 0 字节时，subarray **静默截断**
+    // 成空串，pos.i 越过 buf.length，循环退出，返回 {key:'',value:''}。
+    // 不崩溃，但**静默产错数据**——对协议解析这比崩溃更危险：
+    // 上层会拿一个空 header 继续处理，而真实情况是帧已损坏。
+    if (pos.i + len > buf.length) {
+      throw new Error('pbbp2: truncated header field');
+    }
     const slice = buf.subarray(pos.i, pos.i + len);
     pos.i += len;
     if (fieldNo === 1) header.key = slice.toString('utf8');
