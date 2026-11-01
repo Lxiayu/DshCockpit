@@ -15,7 +15,7 @@
 //   DSH_DESKTOP_USER_DATA
 'use strict';
 
-const { app, BrowserWindow, WebContentsView, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut, safeStorage, nativeTheme, clipboard, protocol, powerMonitor } = require('electron');
+const { app, BrowserWindow, WebContentsView, Tray, Menu, dialog, ipcMain, Notification, shell, screen, globalShortcut, safeStorage, nativeTheme, clipboard, protocol, powerMonitor, session } = require('electron');
 
 // H-test: DSH_DESKTOP_NO_KEYCHAIN=1 keeps unattended runs unattended. Ad-hoc
 // rebuilds change the code signature on every build, and macOS Keychain ACLs
@@ -6075,9 +6075,12 @@ function checkShellUpdate(notifyUser) {
 // Unhandled rejections must be VISIBLE: a rejected whenReady chain used to
 // fail silently (no window, no logs) during the A1 extraction.
 process.on('unhandledRejection', (reason) => {
+  // 必须带上 stack：只记 message 会在排查时完全失去线索
+  // （实际踩过：日志只有 "session is not defined"，栈被丢了）。
   const msg = reason && reason.message ? reason.message : String(reason);
-  try { log('[shell] unhandled rejection: ' + msg); }
-  catch { console.error('[shell] unhandled rejection:', msg); }
+  const stack = reason && reason.stack ? '\n' + reason.stack : '';
+  try { log('[shell] unhandled rejection: ' + msg + stack); }
+  catch { console.error('[shell] unhandled rejection:', msg, stack); }
 });
 // Same visibility for synchronous throws (Electron's default dialog is easy
 // to miss and writes nothing to the log).
