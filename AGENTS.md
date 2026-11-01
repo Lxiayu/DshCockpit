@@ -47,7 +47,7 @@ src/work/                     单次 Team 执行面（⚠ 不是 Mission 存储�
 src/mission/                  Mission Core 纯逻辑层（P1，8 模块 + IPC + UI 已完成）
 src/ipc-mission.js             Mission IPC（单通道 mission:invoke + 18 action）
 src/mission-desk.html          Mission Desk 窗口（P1 首个用户可见界面）
-test/                         离线测试（node:test，cwd 必须是仓库根；196 套件 / 2651 项）
+test/                         离线测试（node:test，cwd 必须是仓库根；198 套件 / 2703 项）
 scripts/acceptance/           真机验收探针（需图形会话，不在 CI 跑）
 docs/                         文档，唯一索引 docs/README.md
 archive/ + docs/archive/      本地保险箱（git 忽略）
@@ -65,13 +65,13 @@ archive/ + docs/archive/      本地保险箱（git 忽略）
 ## 5. 命令与坑
 
 ```bash
-npm test                                   # 全量（约 2 分钟，2651 项）
+npm test                                   # 全量（约 2 分钟，2703 项）
 node --test test/docs-index.test.js        # 文档索引（毫秒级，改文档后必跑）
 node --check <file>                        # 语法检查
 ```
 
 - **cwd 坑**：Bash 默认 cwd 可能是仓库父目录。一律用绝对路径或 `zsh -c 'cd <repo> && ...'`。
-- **基线**：`CI=1 npm test` → **2651 passed / 0 failed / 1 skipped**（唯一有效基线）。
+- **基线**：`CI=1 npm test` → **2703 passed / 0 failed / 1 skipped**（唯一有效基线）。
   唯一 skip 是 E5a-R1 真机探针（需图形会话）——**Skip 不计作 Pass**，
   由 `scripts/ci-gate.js` 四态报告保证，见 `docs/quality/test-tiers-and-baseline.md`。
 - **pure Node 门禁**：`src/team/runtime/**` 与 `src/office/runtime/**` 禁止 Electron/DOM/fs/网络；
@@ -102,12 +102,12 @@ node --check <file>                        # 语法检查
   + `src/mission-desk.html`（UI）+ **Brief 同步进 `<workspace>/AGENTS.md`**。
   最后一步是关键：dsh 每次 Session 启动都读 AGENTS.md，所以 Brief 写进去
   就会在下次会话自动被 Agent 读到——**跨会话记忆真正生效**。
-  共 192 项 Mission 测试，含端到端（重启后 Brief 字节相同、用户手写内容永不丢失）。
-  真机验收 10/10；唯一未验证：Brief 是否真被下次会话读到（需 #23）。
-- **P2 阶段全部完成（2026-11-01）**，5 个工作包都有真机证据：Mission Desk 10/10 ·
-  Human Inbox 18/18 · 白板 10/10 · 收件箱 18/18 · **Companion 11/11**
-  （`docs/quality/*-acceptance-2026-11-01.md`）。Companion 是独立常驻小窗
-  （220×44、frameless、alwaysOnTop），只显示两个数字、**不加载 PixiJS**。
+  192 项测试含端到端；真机 10/10；唯一未验证：Brief 真被下次会话读到（需 #23）。
+- **P2 全部完成（2026-11-01）**，5 个工作包都有真机证据（10/10 · 18/18 · 10/10 · 18/18 · 11/11）。
+  Companion 是独立常驻小窗（220×44、frameless、alwaysOnTop），**不加载 PixiJS**。
+- **P3 进行中（2026-11-01）**：`capability-packs/` 2 个真实 Pack（`workspace-verification`
+  + `research-report` Starter Kit）。核心判断：**verify 是核心不是附属**；四态结果，
+  skipped 不计作 passed、**全部 skipped 也算失败**。CI 门禁已接入。
 - **ADR-0001..0006 全部已接受**（2026-11-01）。ADR-0002 附退役硬约束 R0–R5（禁止直接删旧 Team Runtime）。
 - **债**：已消除 TD-02/03/05/04/08/09/10/15/17/29/32；仍存 TD-01（main.js，#22 已提取 29 handler）· TD-06/07（IPC 冻结）。
 
