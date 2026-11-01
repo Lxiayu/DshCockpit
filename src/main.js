@@ -64,6 +64,7 @@ const { createModelsManager, PRESETS: MODELS_PRESETS, OLLAMA_PRESET: MODELS_OLLA
 const { createMcpManager, wrapForWindows } = require('./mcp-manager');
 const { createMcpRegistry } = require('./mcp-registry');
 const { registerMcpIpc } = require('./ipc-mcp');
+const { registerRemoteIpc } = require('./ipc-remote');
 const { createMcpConnect } = require('./mcp-connect');
 const { createMcpImport } = require('./mcp-import');
 const compact = require('./compact');
@@ -2665,13 +2666,8 @@ function registerIpc() {
   ipcMain.handle('search:query', async (_e, q) => searchSessions(dshHomeOf(), q, 20));
 
   // phone remote-control gateway (settings window)
-  ipcMain.handle('remote:status', () => (remote ? remote.status() : { running: false, disabled: true }));
-  ipcMain.handle('remote:pairing', () => {
-    if (!remote) return null;
-    remote.refreshPairingCode();
-    return remote.status();
-  });
-  ipcMain.handle('remote:revoke', () => (remote ? remote.revokeToken() : null));
+  // Issue #22 Phase 1：3 个 handler 已提取到 src/ipc-remote.js。
+  registerRemoteIpc(ipcMain, { remote });
 
   // public remote access (C7): Tailscale detection + cloudflared quick tunnel.
   // Enabling demands the renderer's explicit second confirmation (public
