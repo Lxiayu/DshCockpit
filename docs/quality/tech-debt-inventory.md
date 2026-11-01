@@ -92,6 +92,9 @@
 
 ### TD-02 · `settings.json` 是"无 schema、无迁移、损坏即静默丢全部"的存储
 
+**✅ 已修复（2026-11-01，Issue #19）**：新增 `src/settings-persistence.js`（分层回退 + .bak 链 + 原子写）并接入 `SettingsStore`。损坏时**另存 `.corrupt-<ts>`** 而非覆盖；`loadStatus()` 供 UI 如实告知用户；`schemaVersion` 已注入且不泄漏到设置语义层。18 项专项测试。
+
+
 **位置**：`src/settings-store.js`
 
 **证据**：
@@ -128,6 +131,9 @@ load() {
 ---
 
 ### TD-03 · `.dsh/index.json` 的安全等级低于 office 状态
+
+**✅ 已修复（2026-11-01，Issue #19）**：新增 `src/settings-persistence.js`（分层回退 + .bak 链 + 原子写）并接入 `SettingsStore`。损坏时**另存 `.corrupt-<ts>`** 而非覆盖；`loadStatus()` 供 UI 如实告知用户；`schemaVersion` 已注入且不泄漏到设置语义层。18 项专项测试。
+
 
 **位置**：`src/work/workspace-store.js`
 
@@ -197,6 +203,9 @@ function saveIndex(absPath, index) {
 ---
 
 ### TD-05 · 备份只覆盖 2 个 key，壳层状态零备份
+
+**✅ 已修复（2026-11-01，Issue #19）**：新增 `src/settings-persistence.js`（分层回退 + .bak 链 + 原子写）并接入 `SettingsStore`。损坏时**另存 `.corrupt-<ts>`** 而非覆盖；`loadStatus()` 供 UI 如实告知用户；`schemaVersion` 已注入且不泄漏到设置语义层。18 项专项测试。
+
 
 **位置**：`src/backup.js:24`
 

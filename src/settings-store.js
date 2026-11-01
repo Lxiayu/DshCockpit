@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { normalizeQuickAskShortcut } = require('./quickask-shortcut');
+const persistence = require('./settings-persistence');
 const LEGACY_TOKEN_WIDGET_KEY = ['token', 'Widget'].join('');
 
 // Pre-V4.1 defaults that are wrong for today's models: DeepSeek moved to
@@ -90,28 +91,52 @@ class SettingsStore {
   constructor(userDataDir) {
     this.file = path.join(userDataDir, 'settings.json');
     this.data = { ...DEFAULTS };
+    // Issue #19: `loadStatus` 记录这次加载到底发生了什么。主进程与设置页据此
+    // 如实告知用户（"从备份恢复""原文件损坏已另存"），而不是静默吞掉。
+    this.loadStatus = { source: 'none', recoveredFromBackup: false, warnings: [], corruptPath: null, migratedFrom: null };
     this.load();
   }
 
   load() {
-    try {
-      const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+    // Issue #19：读取走分层回退（主文件 → .bak 链），损坏文件被**另存**而非覆盖。
+    // 之前这里是 `catch { /* keep defaults */ }` —— 一次 JSON 解析失败就静默丢掉
+    // 全部 53 个设置，且下一次 save() 会把原文件覆盖掉，原数据永久消失。
+    const read = persistence.readSettings(this.file, { log: () => {} });
+    let raw = read.data;
+
+    // 迁移（纯函数；v0 旧文件无 schemaVersion）
+    if (raw) {
+      const mig = persistence.migrate(raw);
+      raw = mig.data;
+      if (mig.changed) this.loadStatus.migratedFrom = mig.from;
+    }
+
+    this.loadStatus = {
+      source: read.source,
+      recoveredFromBackup: read.source === 'backup',
+      warnings: read.warnings.slice(),
+      corruptPath: read.corruptPath,
+      migratedFrom: this.loadStatus.migratedFrom,
+    };
+
+    if (raw) {
       this.data = { ...DEFAULTS, ...raw };
       delete this.data[LEGACY_TOKEN_WIDGET_KEY];
+      delete this.data.schemaVersion; // 不进入设置语义层；写回时由持久化层注入
       for (const [key, from, to] of V41_MIGRATIONS) {
         if (this.data[key] === from) this.data[key] = to;
       }
-    } catch {
-      // first run or corrupt file: keep defaults
     }
+    // read.source === 'none' 时保持 DEFAULTS（首次运行或彻底损坏，已在 warnings 里说明）
   }
 
   save() {
     try {
-      fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      const tmp = `${this.file}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
-      fs.renameSync(tmp, this.file);
+      // Issue #19：写前轮转 .bak 链（保留 3 份），并用唯一临时名原子写，
+      // 避免两次并发写互踩（旧实现用固定 `${file}.tmp`）。
+      persistence.writeSettings(this.file, this.data, { log: () => {} });
+      // 成功写盘后，主文件就是权威来源了
+      this.loadStatus = { source: 'primary', recoveredFromBackup: false, warnings: [], corruptPath: null, migratedFrom: null };
     } catch (err) {
       // surfaced via the IPC rejection; also log for post-mortem from the shell log
       console.error(`[settings] save failed (${this.file}):`, err.message);
@@ -121,6 +146,11 @@ class SettingsStore {
 
   get() {
     return { ...this.data };
+  }
+
+  /** Issue #19：加载状态（UI 用它如实告知用户是否发生过恢复/迁移）。 */
+  status() {
+    return { ...this.loadStatus, warnings: (this.loadStatus.warnings || []).slice() };
   }
 
   patch(partial) {
