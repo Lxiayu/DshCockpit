@@ -98,6 +98,22 @@ function allRegisteredChannels() {
       all.set(ch, { ...meta, file: path.relative(ROOT, f) });
     }
   }
+  // office:* 不逐个 ipcMain.handle，而是由 OFFICE_IPC_CHANNELS 常量 +
+  // main.js 的分发器统一注册。静态扫描 handle('office:…') 抓不到它们，
+  // 所以这里补读那个常量——否则"preload 引用了未注册通道"的检查
+  // 会对所有 office:* 误报（2026-11-01 加 settings-preload 的
+  // office:pending 时踩到）。
+  try {
+    const modSrc = fs.readFileSync(path.join(ROOT, 'src', 'office', 'office-module.js'), 'utf8');
+    const m = modSrc.match(/const OFFICE_IPC_CHANNELS = Object\.freeze\(\[([\s\S]*?)\]\)/);
+    if (m) {
+      for (const x of m[1].matchAll(/'([^']+)'/g)) {
+        if (!all.has(x[1])) {
+          all.set(x[1], { file: 'src/office/office-module.js', how: 'OFFICE_IPC_CHANNELS' });
+        }
+      }
+    }
+  } catch { /* office module missing: the other suites will catch it */ }
   return all;
 }
 
@@ -127,6 +143,12 @@ test('ipc-contract: the registered channel set is stable (snapshot)', () => {
   // 为什么只有两个：Companion 是**常驻**窗口，每个通道都是长期攻击面。
   // 它拿不到 office:dispatch / office:pending / mission:* —— 常驻挂件不需要
   // 那些能力，给了就是多余的风险。
+  // 2026-11-01（P4 右栏）：138 → 148。**这不是接口变更，是修正了扫描盲区。**
+  // office:* 那 10 个通道一直存在，只是注册方式（OFFICE_IPC_CHANNELS 常量 +
+  // main.js 分发器）不是 `ipcMain.handle('office:…')`，静态扫描抓不到。
+  // 在 settings-preload 引用 office:pending 之后，"preload 引用了未注册通道"
+  // 的检查对所有 office:* 误报，才暴露了这个盲区。
+  //
   // 2026-11-01（P3.5）：134 → 138，**有意的接口变更**。
   // 新增 4 个通道给 Capability Pack 的用户入口：
   //   shell:capability-packs-list / -available / -install / -uninstall
@@ -134,7 +156,7 @@ test('ipc-contract: the registered channel set is stable (snapshot)', () => {
   // 为什么叫 capability-packs 而不是 packs：`shell:packs-*` 已被**角色包**
   // （character pack，Issue #24）占用。两者完全不同——角色包是办公室外观，
   // 能力包是能力声明。缩写 cpacks 虽然短，但下一个人看不懂。
-  const EXPECTED_COUNT = 138;
+  const EXPECTED_COUNT = 148;
   assert.strictEqual(
     channels.size,
     EXPECTED_COUNT,

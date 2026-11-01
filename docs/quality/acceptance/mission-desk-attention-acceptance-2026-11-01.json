@@ -1,0 +1,101 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "the attention block exists and is ABOVE the fold",
+      "ok": true,
+      "detail": "top=115"
+    },
+    {
+      "name": "it says \"需要你处理\" with a count",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "high risk is listed FIRST (order carries meaning)",
+      "ok": true,
+      "detail": "[\"high\",\"low\"]"
+    },
+    {
+      "name": "each todo card can be acted on (not display-only)",
+      "ok": true,
+      "detail": "[[\"拒绝\",\"允许\"],[\"回答\"]]"
+    },
+    {
+      "name": "the \"while you were away\" timeline exists",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "it lists the real events (decision/question/deliverable)",
+      "ok": true,
+      "detail": "count=3"
+    },
+    {
+      "name": "it shows when you last looked",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "entries carry tone (ok/warn/info) for visual scanning",
+      "ok": true,
+      "detail": "[\"ok\",\"warn\",\"ok\"]"
+    },
+    {
+      "name": "clicking \"允许\" sends a REAL answer to the Harness channel",
+      "ok": true,
+      "detail": "{\"action\":\"answer\",\"id\":\"p1\",\"value\":\"granted\"}"
+    },
+    {
+      "name": "the answer uses the REAL payload shape {action,id,value}",
+      "ok": true,
+      "detail": "{\"action\":\"answer\",\"id\":\"p1\",\"value\":\"granted\"}"
+    },
+    {
+      "name": "DARK theme: attention text contrast >= 4.5:1",
+      "ok": true,
+      "detail": "{\".att-item-text\":18.17,\".att-item-meta\":6.07,\".tl-list li\":11.99,\".att-head\":9.95}"
+    },
+    {
+      "name": "LIGHT theme: attention text contrast >= 4.5:1",
+      "ok": true,
+      "detail": "{\".att-item-text\":16.43,\".att-item-meta\":4.85,\".tl-list li\":8.06,\".att-head\":5.94}"
+    },
+    {
+      "name": "LIGHT theme: timeline text contrast >= 4.5:1",
+      "ok": true,
+      "detail": "8.06"
+    },
+    {
+      "name": "zero todos shows an EXPLICIT \"all clear\" message (not blank)",
+      "ok": true,
+      "detail": "✓ 团队运行正常\n没有需要你处理的事。有新情况时会出现在这里。"
+    },
+    {
+      "name": "zero todos is visually distinct from has-todos",
+      "ok": true,
+      "detail": "att att-clear"
+    },
+    {
+      "name": "never-seen means NO timeline (not an empty box)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "screenshots captured for both themes",
+      "ok": true,
+      "detail": "dark/light × clear/todo"
+    },
+    {
+      "name": "markSeen was called (so next open can compute \"since\")",
+      "ok": true,
+      "detail": "5"
+    },
+    {
+      "name": "the renderer had no fatal errors",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

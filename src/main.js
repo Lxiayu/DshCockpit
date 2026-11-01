@@ -2518,6 +2518,21 @@ function runtimeSnapshotForMission() {
       hasRunningAgent,
       pendingApprovals,
       pendingQuestions,
+      // 待办明细（只读投影）。右栏要的是"具体哪几件事"，
+      // 不只是"几件"——否则用户还得去办公室面板找。
+      // 这里只透传 office 已经脱敏过的字段（PENDING_ALLOWLIST）。
+      pendingItems: pending
+        .filter((p) => p && typeof p === 'object' && (p.kind === 'approval' || p.kind === 'question'))
+        .map((p) => ({
+          id: p.id || null,
+          kind: p.kind,
+          risk: p.risk || 'medium',
+          summary: p.summary || null,
+          summaryKey: p.summaryKey || null,
+          toolName: p.toolName || null,
+          employeeId: p.employeeId || null,
+          createdAtMs: Number.isFinite(p.createdAtMs) ? p.createdAtMs : null,
+        })),
     };
   } catch {
     // 派生失败时返回 null —— Mission 会显示"实时状态不可用"，

@@ -157,4 +157,8 @@ contextBridge.exposeInMainWorld('dshShell', {
   // 为什么不在 preload 里逐个列出 14 个方法：那会让每次新增 action 都要改
   // preload（三处同步），而这层本来就没有语义。
   mission: (action, payload) => ipcRenderer.invoke('mission:invoke', action, payload),
+  // Mission Desk 右栏要能把用户的审批/回答送回 Harness。
+  // 只开这一条通道（office:pending），不整体暴露 office:*——
+  // 右栏只需要"回答待办"，不需要 dispatch/interrupt/place 那些写操作。
+  answerPending: (payload) => ipcRenderer.invoke('office:pending', payload),
 });

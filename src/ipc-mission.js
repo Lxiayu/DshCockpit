@@ -28,6 +28,7 @@
 //   折中：按 resolved 绝对路径做一级缓存，路径变化时自动失效。
 'use strict';
 
+const fs = require('node:fs');
 const path = require('node:path');
 const { createMissionStore } = require('./mission/store');
 const brief = require('./mission/brief');
@@ -63,9 +64,69 @@ const ACTIONS = Object.freeze([
   'syncBrief',            // 把 Brief 写入 <workspace>/AGENTS.md（下次会话自动生效）
   'unsyncBrief',          // 移除 Brief 块（只删标记块，不删文件）
   'briefSyncState',       // 只读：当前 AGENTS.md 同步到了哪个 Mission
+  'attention',            // 只读：需要用户处理的待办（从 office 快照聚合，不复制状态）
+  'sinceLastSeen',        // 只读：上次查看该 Mission 之后发生的变化
+  'markSeen',             // 只写 UI 偏好：记录"我刚刚看过这个 Mission"
 ]);
 
 function nowMs() { return Date.now(); }
+
+/** Mission id 形状（与 schema 一致）：mis-<opaque>。 */
+function isId(v) { return typeof v === 'string' && /^mis-[A-Za-z0-9][A-Za-z0-9-]*$/.test(v); }
+
+// ---------------------------------------------------------------------------
+// lastSeenAtMs —— UI 偏好，不是项目事实
+//
+// 第一性原理：为什么它不能写进 Mission 实体
+//
+//   Mission 事件日志是**事实记录**：谁在什么时候决定了什么。
+//   "我上次看这个 Mission 是什么时候"不是事实，是**本机的浏览偏好**。
+//
+//   schema.js 的 FORBIDDEN_PERSISTED_FIELDS 已经把 focused 这类
+//   UI 偏好列进黑名单，理由相同：一旦写进项目数据，就会跟着 Mission
+//   同步给别的机器、别的用户，而它对别人毫无意义。
+//
+//   所以存 `<workspace>/.dsh/ui-seen.json`，与 office-state 同级。
+// ---------------------------------------------------------------------------
+
+const SEEN_FILE = 'ui-seen.json';
+
+function seenFilePath(workspaceDir) {
+  return path.join(workspaceDir, '.dsh', SEEN_FILE);
+}
+
+function readSeenMap(workspaceDir) {
+  try {
+    const raw = fs.readFileSync(seenFilePath(workspaceDir), 'utf8');
+    const parsed = JSON.parse(raw);
+    const map = parsed && typeof parsed.seen === 'object' && parsed.seen ? parsed.seen : {};
+    const out = {};
+    for (const [k, v] of Object.entries(map)) {
+      if (typeof k === 'string' && Number.isFinite(v)) out[k] = v;
+    }
+    return out;
+  } catch {
+    // 读不到 = 没看过。不猜、不报错（首次运行就是这种状态）。
+    return {};
+  }
+}
+
+function readSeenAt(workspaceDir, missionId) {
+  const v = readSeenMap(workspaceDir)[missionId];
+  return Number.isFinite(v) ? v : null;
+}
+
+function writeSeenAt(workspaceDir, missionId, atMs) {
+  const map = readSeenMap(workspaceDir);
+  map[missionId] = atMs;
+  const dir = path.join(workspaceDir, '.dsh');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = seenFilePath(workspaceDir);
+  const tmp = `${file}.tmp`;
+  // 原子写：先写临时文件再 rename，避免半截 JSON 让下次读失败
+  fs.writeFileSync(tmp, JSON.stringify({ version: 1, seen: map }, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+}
 
 function argString(v) { return typeof v === 'string' ? v.trim() : ''; }
 
@@ -477,6 +538,133 @@ function registerMissionIpc(ipcMain, ctx) {
       const out = briefSync.inspect({ workspaceDir: r.workspaceDir });
       if (!out.ok) return fail(out.reason, 'BRIEF_INSPECT_FAILED');
       return { ok: true, ...out };
+    },
+
+    /**
+     * 需要用户处理的待办。
+     *
+     * 数据来自 office 快照（Harness 的事实），**这里只读不复制**。
+     * 为什么不走 normalizeSnapshot：那是隐私白名单，会丢掉 pendingItems
+     * 明细；而待办明细正是这个 action 存在的理由（"哪几件事"而不只是"几件"）。
+     * 但透传的字段仍然受 office 的 PENDING_ALLOWLIST 约束，不会有原始 prompt。
+     */
+    attention() {
+      let raw = null;
+      try { raw = snapshotOf(); } catch { raw = null; }
+      if (!raw) {
+        return { ok: true, available: false, reason: 'no office snapshot', items: [], counts: { approval: 0, question: 0 } };
+      }
+      const items = Array.isArray(raw.pendingItems) ? raw.pendingItems : [];
+      // 排序：高风险优先，然后久的优先。与 office 的 pendingSnapshot 同规则。
+      const RISK_ORDER = { high: 0, medium: 1, low: 2 };
+      const sorted = [...items].sort((a, b) => {
+        const byRisk = (RISK_ORDER[a.risk] ?? 1) - (RISK_ORDER[b.risk] ?? 1);
+        if (byRisk !== 0) return byRisk;
+        const at = Number.isFinite(a.createdAtMs) ? a.createdAtMs : Infinity;
+        const bt = Number.isFinite(b.createdAtMs) ? b.createdAtMs : Infinity;
+        return at - bt;
+      });
+      const counts = { approval: 0, question: 0 };
+      for (const it of items) {
+        if (it.kind === 'approval') counts.approval += 1;
+        else if (it.kind === 'question') counts.question += 1;
+      }
+      return {
+        ok: true,
+        available: true,
+        observedAtMs: Number.isFinite(raw.observedAtMs) ? raw.observedAtMs : clock(),
+        items: sorted,
+        counts,
+        // 零待办本身是有价值的信号（"团队运行正常"），UI 据此显示空状态
+        total: items.length,
+      };
+    },
+
+    /**
+     * 上次查看这个 Mission 之后发生了什么。
+     *
+     * 第一性原理：先定义"离开"。
+     *   · 上次关闭应用 → 用户可能整天开着，不准
+     *   · 上次右栏可见 → 切视图就触发，噪音大
+     *   · **上次查看这个 Mission** → 语义准确（focus 概念已存在）
+     * 选第三个。
+     *
+     * 关键约束：**只从真实事件派生，不调用模型生成摘要。**
+     * 用户要的是"发生了什么"，不是"模型猜测发生了什么"。
+     */
+    sinceLastSeen(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = payload && payload.missionId;
+      if (!isId(missionId)) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const view = r.store.missionView(missionId);
+      if (!view) return fail('mission not found', 'MISSION_NOT_FOUND');
+
+      const seenAt = readSeenAt(r.workspaceDir, missionId);
+      if (!Number.isFinite(seenAt)) {
+        return { ok: true, available: false, reason: 'never-seen', entries: [], sinceMs: null };
+      }
+
+      const entries = [];
+      const push = (atMs, kind, text, tone) => {
+        if (Number.isFinite(atMs) && atMs > seenAt) entries.push({ atMs, kind, text, tone });
+      };
+
+      for (const d of view.decisions || []) {
+        push(d.decidedAtMs, 'decision', d.text, 'ok');
+      }
+      for (const q of view.questions || []) {
+        if (q.status === 'open') push(q.askedAtMs, 'question', q.text, 'warn');
+        else if (q.status === 'answered') push(q.answeredAtMs, 'answer', `${q.text} → ${q.answer || ''}`, 'ok');
+      }
+      for (const w of view.workstreams || []) {
+        push(w.createdAtMs, 'workstream', w.title, 'info');
+        if (w.updatedAtMs > (w.createdAtMs || 0) && w.status !== 'active') {
+          push(w.updatedAtMs, 'workstream-status', `${w.title} → ${w.status}`, 'info');
+        }
+      }
+      for (const d of view.deliverables || []) {
+        push(d.registeredAtMs, 'deliverable', d.label, 'ok');
+      }
+      if (view.mission && Number.isFinite(view.mission.updatedAtMs)) {
+        push(view.mission.updatedAtMs, 'mission', `Mission 更新（${view.mission.status}）`, 'info');
+      }
+
+      entries.sort((a, b) => a.atMs - b.atMs);
+      // 太多条会变成流水账——只给最近 N 条，并如实说明被截断
+      const LIMIT = 12;
+      const truncated = entries.length > LIMIT;
+      const shown = truncated ? entries.slice(-LIMIT) : entries;
+
+      return {
+        ok: true,
+        available: true,
+        sinceMs: seenAt,
+        entries: shown,
+        truncated,
+        dropped: truncated ? entries.length - LIMIT : 0,
+      };
+    },
+
+    /**
+     * 记录"我刚刚看过这个 Mission"。
+     *
+     * **存储位置：UI 偏好，不进 Mission 事件日志。**
+     * schema.js 的 FORBIDDEN_PERSISTED_FIELDS 明确禁止把 focused 这类
+     * UI 偏好写进项目数据，lastSeenAtMs 是同一类东西。
+     */
+    markSeen(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = payload && payload.missionId;
+      if (!isId(missionId)) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const at = Number.isFinite(payload.atMs) ? payload.atMs : clock();
+      try {
+        writeSeenAt(r.workspaceDir, missionId, at);
+      } catch (err) {
+        return fail(`cannot record last-seen: ${err.message}`, 'SEEN_WRITE_FAILED');
+      }
+      return { ok: true, atMs: at };
     },
 
     openDesk() {

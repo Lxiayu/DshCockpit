@@ -34,6 +34,27 @@
   --radius: 10px;
   --ease: cubic-bezier(0.2, 0, 0, 1);
   --mono: "SF Mono", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  /* ---- 语义色：待办等级 / 时间线 / 状态徽标 ----------------------------
+     为什么要有专门的 token 而不是在页面里写死颜色：
+     mission-desk 原来有 37 处硬编码色，浅色模式下浅蓝字配白底几乎不可见。
+     语义 token 一旦集中，改一次两套主题一起对。 */
+  --att-bad-bg: rgba(239,68,68,0.14);    --att-bad-fg: #FF9D9D;
+  --att-warn-bg: rgba(245,158,11,0.15);  --att-warn-fg: #FFCF7A;
+  --att-info-bg: rgba(59,130,246,0.15);  --att-info-fg: #8FC0FF;
+  --att-ok-bg: rgba(16,185,129,0.15);    --att-ok-fg: #7FE0AD;
+  --att-idle-bg: rgba(160,160,160,0.12); --att-idle-fg: #A9B0B8;
+  /* 时间线：离开期间的条目用中性色，不与"待办"抢注意力 */
+  --tl-line: rgba(255,255,255,0.10);
+  --tl-fg: #C9C9CE;
+  --tl-time: #6E6E76;
+  /* 强调软底（比 --acc-soft 再淡一档，用于大面积区块的左侧竖条） */
+  --acc-soft-2: rgba(99,102,241,0.18);
+  /* 强调色上的前景：深色主题下白字在 #6366F1 上对比 4.6:1 */
+  --on-acc: #FFFFFF;
+  /* 待办区的高风险边框（半透明红，与 --att-bad-bg 同源） */
+  --att-bad-line: rgba(239,68,68,0.32);
+  --att-bad-strong: rgba(239,68,68,0.20);
+
   /* legacy 别名（供 JS 内联样式引用，如 renderSched 用 var(--line)/var(--dim)） */
   --bg: #0A0A0C; --panel: #121216; --line: rgba(255,255,255,0.09);
   --text: #E6EDF3; --dim: #8E8E93;
@@ -62,6 +83,20 @@
   --acc-soft: rgba(99,102,241,0.10);
   /* 语义色（浅色底上可读） */
   --ok: #059669;  --warn: #D97706;  --bad: #DC2626;  --info: #2563EB;
+  /* 语义色（浅色底上重新选过，保证 ≥4.5:1） */
+  --att-bad-bg: rgba(220,38,38,0.10);    --att-bad-fg: #B91C1C;
+  --att-warn-bg: rgba(217,119,6,0.12);   --att-warn-fg: #92400E;
+  --att-info-bg: rgba(37,99,235,0.10);   --att-info-fg: #1D4ED8;
+  --att-ok-bg: rgba(5,150,105,0.10);     --att-ok-fg: #047857;
+  --att-idle-bg: rgba(0,0,0,0.05);       --att-idle-fg: #4B5563;
+  --tl-line: rgba(0,0,0,0.10);
+  --tl-fg: #4A4A52;
+  --tl-time: #8A8A92;
+  --acc-soft-2: rgba(99,102,241,0.14);
+  --on-acc: #FFFFFF;
+  --att-bad-line: rgba(220,38,38,0.30);
+  --att-bad-strong: rgba(220,38,38,0.16);
+
   /* legacy 别名（浅色） */
   --bg: #F5F5F7; --panel: #FFFFFF; --line: rgba(0,0,0,0.10);
   --text: #24242A; --dim: #6B6B73;

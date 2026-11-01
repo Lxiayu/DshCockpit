@@ -26,17 +26,17 @@
    *      用户应该能直接看到"我的项目记忆长什么样"。
    */
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg-app, #14161a); color: var(--text-1); font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  html, body { margin: 0; height: 100%; background: var(--bg-app); color: var(--text-1); font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
   body { display: flex; flex-direction: column; }
 
   header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border-1); flex: 0 0 auto; }
   header h1 { font-size: 15px; margin: 0; flex: 1; }
-  .muted { color: var(--text-3, #8a919b); }
+  .muted { color: var(--text-3); }
   .tiny { font-size: 11px; }
 
-  button { border: 0; color: inherit; font: inherit; cursor: pointer; border-radius: 7px; padding: 6px 12px; background: var(--bg-hover, #24282f); }
-  button:hover, button:focus-visible { background: var(--border-2, #333a44); outline: none; }
-  button.primary { background: var(--acc, #599dff); color: #06101f; font-weight: 600; }
+  button { border: 0; color: inherit; font: inherit; cursor: pointer; border-radius: 7px; padding: 6px 12px; background: var(--bg-hover); }
+  button:hover, button:focus-visible { background: var(--border-2); outline: none; }
+  button.primary { background: var(--acc); color: var(--on-acc); font-weight: 600; }
   button.primary:hover { filter: brightness(1.08); }
   button:disabled { opacity: .5; cursor: not-allowed; }
 
@@ -64,69 +64,174 @@
   #dockPicker { display: none; }
   body.dock #dockPicker { display: block; flex: 0 0 auto;
     border-bottom: 1px solid var(--border-1); padding: 8px 10px; }
-  #dockPicker select { width: 100%; background: var(--bg-2, #22252c); color: var(--text-1, #e6e8ee);
+  /* 注意：这里原来写的是 var(--bg-2) —— 但 --bg-2 在 theme.css 里
+     **根本不存在**，所以永远回退到深色 #22252c。浅色主题下变成深底深字，
+     几乎看不见（浅色截图抓到的）。所有 token 必须先在 theme.css 定义。 */
+  #dockPicker select { width: 100%; background: var(--bg-input); color: var(--text-1);
     border: 1px solid var(--border-1); border-radius: 8px; padding: 6px 8px; font-size: 12px; }
   #dockPicker .dock-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
   #dockPicker .dock-title { font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
-    color: var(--text-3, #8a919b); }
+    color: var(--text-3); }
 
   /* 卡片：status 与 running 分开呈现 */
-  .card { border: 1px solid var(--border-1); border-radius: 9px; padding: 10px 11px; margin-bottom: 8px; cursor: pointer; background: var(--bg-panel, #191c21); }
-  .card:hover { border-color: var(--border-2, #333a44); }
-  .card.sel { border-color: var(--acc, #599dff); }
+  .card { border: 1px solid var(--border-1); border-radius: 9px; padding: 10px 11px; margin-bottom: 8px; cursor: pointer; background: var(--bg-panel); }
+  .card:hover { border-color: var(--border-2); }
+  .card.sel { border-color: var(--acc); }
   .card .title { font-weight: 600; margin-bottom: 4px; overflow-wrap: anywhere; }
   .card .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
   /* Mission 自身状态（我们拥有的） */
-  .badge { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: var(--bg-hover, #24282f); color: var(--text-2); letter-spacing: .02em; }
-  .badge.active { background: rgba(89,157,255,.16); color: #8fc0ff; }
-  .badge.paused { background: rgba(255,196,89,.14); color: #ffcf7a; }
-  .badge.completed { background: rgba(92,214,150,.15); color: #7fe0ad; }
-  .badge.abandoned { background: rgba(160,160,160,.14); color: #a9b0b8; }
+  .badge { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: var(--bg-hover); color: var(--text-2); letter-spacing: .02em; }
+  .badge.active { background: var(--att-info-bg); color: var(--att-info-fg); }
+  .badge.paused { background: var(--att-warn-bg); color: var(--att-warn-fg); }
+  .badge.completed { background: var(--att-ok-bg); color: var(--att-ok-fg); }
+  .badge.abandoned { background: var(--att-idle-bg); color: var(--att-idle-fg); }
 
   /* Harness 的事实（只读，必须带时间） */
-  .live { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-3, #8a919b); }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: #555c66; flex: 0 0 7px; }
-  .dot.on { background: #5cd696; box-shadow: 0 0 0 3px rgba(92,214,150,.16); }
-  .dot.unknown { background: transparent; border: 1px solid #555c66; }
+  .live { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-3); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-4); flex: 0 0 7px; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 0 3px var(--att-ok-bg); }
+  .dot.unknown { background: transparent; border: 1px solid var(--text-4); }
 
-  .empty { color: var(--text-3, #8a919b); padding: 24px 8px; text-align: center; }
+  /* ==================================================================
+     视觉层级（P4 深度打磨）
+     ------------------------------------------------------------------
+     第一性原理：用户说"不要只是简单的几个框和按钮"——
+     要的不是花哨，是**视觉重量承载语义层级**。
+
+     三级重量：
+       L1 需要行动（待办）    最深底 + 左侧强调条 + 最高对比
+       L2 情境（快照/时间线）  中等，卡片底
+       L3 参考（决策/问题等）  最轻，仅分隔线
+
+     所有颜色一律走 token —— 这页原来有 37 处硬编码色，
+     浅色模式下浅蓝字配白底几乎不可见。
+     ================================================================== */
+
+  /* --- L1: 需要你处理 ------------------------------------------------ */
+  .att { border-radius: 10px; margin: 0 0 10px; overflow: hidden; border: 1px solid var(--border-1); }
+  .att.att-present { border-color: var(--att-bad-line); background: var(--att-bad-bg); }
+  .att.att-clear { background: var(--bg-panel); }
+  .att-head {
+    display: flex; align-items: center; gap: 7px;
+    padding: 9px 11px; font-size: 12px; font-weight: 650; letter-spacing: .01em;
+  }
+  .att.att-present .att-head { color: var(--att-bad-fg); }
+  .att.att-clear .att-head { color: var(--att-ok-fg); }
+  .att-count {
+    margin-left: auto; font-size: 10px; font-weight: 600; padding: 1px 7px;
+    border-radius: 999px; background: var(--att-idle-bg); color: var(--att-idle-fg);
+  }
+  .att.att-present .att-count { background: var(--att-bad-strong); color: var(--att-bad-fg); }
+  .att-clear-msg { padding: 0 11px 10px; font-size: 11.5px; color: var(--text-3); line-height: 1.55; }
+
+  /* 待办卡片：风险用左侧竖条表达，不用整块染色（整块会抢走全部注意力） */
+  .att-item {
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 8px 11px 9px 13px; border-top: 1px solid var(--border-1);
+    position: relative;
+  }
+  .att-item::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: var(--att-idle-fg);
+  }
+  .att-item[data-risk="high"]::before { background: var(--bad); }
+  .att-item[data-risk="medium"]::before { background: var(--warn); }
+  .att-item[data-risk="low"]::before { background: var(--att-idle-fg); }
+  .att-item-line { display: flex; align-items: baseline; gap: 6px; }
+  .att-item-kind {
+    font-size: 9.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 1px 5px; border-radius: 4px; flex: 0 0 auto;
+  }
+  .att-item[data-kind="approval"] .att-item-kind { background: var(--att-bad-bg); color: var(--att-bad-fg); }
+  .att-item[data-kind="question"] .att-item-kind { background: var(--att-info-bg); color: var(--att-info-fg); }
+  .att-item-text { font-size: 12px; color: var(--text-1); line-height: 1.45; overflow-wrap: anywhere; }
+  /* 元信息（工具名/风险/时间）是**要读的**，所以不能用 --text-4（最弱层）。
+     真机对比度实测：--text-4 在深色是 2.89:1、浅色 2.57:1，都低于 AA 4.5:1。
+     --text-3 达标（深 5.6 / 浅 4.9）。 */
+  .att-item-meta { font-size: 10.5px; color: var(--text-3); }
+  .att-item-actions { display: flex; gap: 6px; margin-top: 3px; }
+  .att-btn {
+    font-size: 11px; padding: 3px 10px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border-2); background: var(--bg-hover); color: var(--text-2);
+    transition: background .15s var(--ease), color .15s var(--ease);
+  }
+  .att-btn:hover { background: var(--bg-overlay); color: var(--text-1); }
+  .att-btn.danger { border-color: var(--att-bad-line); color: var(--att-bad-fg); }
+  .att-btn.primary { background: var(--acc); border-color: transparent; color: var(--on-acc); }
+  .att-btn.primary:hover { background: var(--acc-hover); }
+
+  /* --- L2: 离开期间发生了什么（时间线）------------------------------- */
+  .tl { margin: 0 0 10px; padding: 10px 11px; border-radius: 10px; background: var(--bg-panel); border: 1px solid var(--border-1); }
+  .tl-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; font-weight: 650; color: var(--text-1); margin-bottom: 7px; }
+  .tl-when { font-size: 10.5px; color: var(--text-4); font-weight: 400; margin-left: auto; }
+  .tl-list { list-style: none; margin: 0; padding: 0 0 0 11px; border-left: 1px solid var(--tl-line); }
+  .tl-list li { position: relative; padding: 3px 0 3px 9px; font-size: 11.5px; color: var(--tl-fg); line-height: 1.5; }
+  .tl-list li::before {
+    content: ''; position: absolute; left: -14px; top: 9px; width: 5px; height: 5px;
+    border-radius: 50%; background: var(--tl-line);
+  }
+  .tl-list li[data-tone="ok"]::before { background: var(--ok); }
+  .tl-list li[data-tone="warn"]::before { background: var(--warn); }
+  .tl-list li[data-tone="info"]::before { background: var(--info); }
+  .tl-tag { font-size: 9.5px; color: var(--tl-time); margin-right: 5px; }
+  .tl-more { font-size: 10.5px; color: var(--text-4); padding: 5px 0 0 11px; }
+
+  /* --- L3: 参考区块（可折叠）---------------------------------------- */
+  .sec { border-top: 1px solid var(--border-1); }
+  .sec > summary {
+    display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none;
+    padding: 9px 2px; font-size: 12px; font-weight: 620; color: var(--text-2);
+    user-select: none;
+  }
+  .sec > summary::-webkit-details-marker { display: none; }
+  .sec > summary::after {
+    content: '▸'; margin-left: auto; font-size: 10px; color: var(--text-4);
+    transition: transform .15s var(--ease);
+  }
+  .sec[open] > summary::after { transform: rotate(90deg); }
+  .sec > summary:hover { color: var(--text-1); }
+  .sec-n { font-size: 10px; font-weight: 600; padding: 0 6px; border-radius: 999px;
+    background: var(--att-idle-bg); color: var(--att-idle-fg); }
+  .sec-body { padding: 0 2px 10px; }
+
+  .empty { color: var(--text-3); padding: 24px 8px; text-align: center; }
   /* P4 空状态：不是"占位文案"，是**起点**。
      所以标题要突出（这是第一步），正文要有信息量（解释这是什么），
      按钮要唯一（不要给用户一堆选择）。 */
-  .empty-lead { color: var(--text-1, #e6e8ee); font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+  .empty-lead { color: var(--text-1); font-size: 14px; font-weight: 600; margin-bottom: 8px; }
   .empty-body { max-width: 420px; margin: 0 auto 14px; line-height: 1.6; font-size: 12px; }
   .empty button.primary {
-    background: #6b7cff; color: #fff; border: 0; border-radius: 8px;
+    background: var(--acc); color: var(--on-acc); border: 0; border-radius: 8px;
     padding: 8px 16px; font-size: 12px; cursor: pointer; font-weight: 600;
   }
-  .empty button.primary:hover { background: #7d8cff; }
-  .soft-hint { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: rgba(255,196,89,.1); color: #ffcf7a; font-size: 11px; }
+  .empty button.primary:hover { background: var(--acc-hover); }
+  .soft-hint { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--att-warn-bg); color: var(--att-warn-fg); font-size: 11px; }
 
   h2 { font-size: 13px; margin: 18px 0 8px; color: var(--text-2); letter-spacing: .04em; text-transform: uppercase; }
-  h3 { font-size: 12px; margin: 14px 0 6px; color: var(--text-3, #8a919b); }
+  h3 { font-size: 12px; margin: 14px 0 6px; color: var(--text-3); }
   ul { margin: 0; padding-left: 18px; }
   li { margin: 3px 0; overflow-wrap: anywhere; }
 
   .kv { display: grid; grid-template-columns: 120px 1fr; gap: 4px 12px; }
-  .kv dt { color: var(--text-3, #8a919b); }
+  .kv dt { color: var(--text-3); }
   .kv dd { margin: 0; overflow-wrap: anywhere; }
 
-  pre#briefText { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg-panel, #191c21); border: 1px solid var(--border-1); border-radius: 9px; padding: 12px; font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; line-height: 1.55; margin: 0; }
+  pre#briefText { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg-panel); border: 1px solid var(--border-1); border-radius: 9px; padding: 12px; font-family: var(--mono); font-size: 11.5px; line-height: 1.55; margin: 0; }
   .deliv { border: 1px solid var(--border-1); border-radius: 8px; padding: 7px 9px; margin-bottom: 6px; font-size: 12px; }
   .deliv .status { font-size: 10px; padding: 1px 7px; border-radius: 999px; }
-  .st-unchanged { background: rgba(92,214,150,.15); color: #7fe0ad; }
-  .st-modified { background: rgba(255,196,89,.16); color: #ffcf7a; }
-  .st-missing { background: rgba(255,120,120,.16); color: #ff9d9d; }
-  .st-invalid, .st-unreadable { background: rgba(160,160,160,.14); color: #a9b0b8; }
+  .st-unchanged { background: var(--att-ok-bg); color: var(--att-ok-fg); }
+  .st-modified { background: var(--att-warn-bg); color: var(--att-warn-fg); }
+  .st-missing { background: var(--att-bad-bg); color: var(--att-bad-fg); }
+  .st-invalid, .st-unreadable { background: var(--att-idle-bg); color: var(--att-idle-fg); }
 
-  dialog { border: 1px solid var(--border-2, #333a44); border-radius: 11px; background: var(--bg-panel, #191c21); color: var(--text-1); padding: 16px; width: min(460px, 92vw); }
+  dialog { border: 1px solid var(--border-2); border-radius: 11px; background: var(--bg-panel); color: var(--text-1); padding: 16px; width: min(460px, 92vw); }
   dialog::backdrop { background: rgba(0,0,0,.5); }
   dialog label { display: block; margin: 10px 0 4px; font-size: 12px; color: var(--text-2); }
-  dialog input, dialog textarea { width: 100%; background: var(--bg-input, #12141a); color: var(--text-1); border: 1px solid var(--border-1); border-radius: 7px; padding: 7px 9px; font: inherit; }
+  dialog input, dialog textarea { width: 100%; background: var(--bg-input); color: var(--text-1); border: 1px solid var(--border-1); border-radius: 7px; padding: 7px 9px; font: inherit; }
   dialog textarea { min-height: 64px; resize: vertical; }
   .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-  .err { color: #ff9d9d; font-size: 12px; margin-top: 8px; min-height: 16px; }
+  .err { color: var(--att-bad-fg); font-size: 12px; margin-top: 8px; min-height: 16px; }
 </style>
 </head>
 <body>
@@ -224,6 +329,8 @@ const state = {
   brief: null,
   verified: null,
   syncState: null,
+  attention: null,
+  since: null,
   liveAvailable: false,
 };
 
@@ -359,6 +466,173 @@ function renderList() {
   }
 }
 
+// ---------------------------------------------------------------- 待办区（L1）
+//
+// 第一性原理：待办不是"多一个区块"，是**排序机制**。
+//
+//   做成普通区块 = 又多了一个要用户自己找的地方。
+//   正确做法：有 todo 时它占最顶部并压缩其他区块的视觉重量；
+//   没有 todo 时那一行变成"团队运行正常"——**这句本身就是有价值的信号**。
+//
+//   两个硬约束：
+//     · 零待办时也要占位（否则用户不确定"是真的没有还是加载失败"）
+//     · 每张卡必须能直接处理（只显示不能点 = 用户还得去别处找）
+
+const RISK_LABEL = { high: '高', medium: '中', low: '低' };
+const KIND_LABEL = { approval: '审批', question: '提问' };
+
+function renderAttention() {
+  const a = state.attention;
+  const wrap = el('div', { class: 'att' });
+  if (!a) return wrap;
+
+  if (!a.available) {
+    wrap.className = 'att att-clear';
+    wrap.append(el('div', { class: 'att-head' }, [
+      el('span', { text: '○ 待办状态未知' }),
+    ]));
+    wrap.append(el('div', { class: 'att-clear-msg',
+      text: '运行时还没连上，所以现在无法确认有没有需要你处理的事。这不是"没有待办"。' }));
+    return wrap;
+  }
+
+  const total = a.total || 0;
+
+  // 一致性守卫：attention 说"没有待办"，但 live 说"有 1 个待审批"——
+  // 这时**不能**显示"团队运行正常"，那是在撒谎。
+  // 真机截图抓到过这种矛盾（测试 fixture 造出来的，但也可能真的发生：
+  // 两条数据路径一条读 pendingItems 一条读计数）。
+  const live = (state.detail && state.detail.live) || {};
+  const livePending = (Number(live.pendingApprovals) || 0) + (Number(live.pendingQuestions) || 0);
+  if (total === 0 && livePending > 0) {
+    wrap.className = 'att att-clear';
+    wrap.append(el('div', { class: 'att-head' }, [
+      el('span', { text: '○ 待办数据不一致' }),
+    ]));
+    wrap.append(el('div', { class: 'att-clear-msg',
+      text: '运行时报告有 ' + livePending + ' 件事等你处理，但明细还没拿到。'
+        + '这不是"没有待办"——请到办公室里查看收件箱。' }));
+    return wrap;
+  }
+
+  if (total === 0) {
+    // 零待办也要占位——这是"你可以放心离开"的信号
+    wrap.className = 'att att-clear';
+    wrap.append(el('div', { class: 'att-head' }, [
+      el('span', { text: '✓ 团队运行正常' }),
+    ]));
+    wrap.append(el('div', { class: 'att-clear-msg',
+      text: '没有需要你处理的事。有新情况时会出现在这里。' }));
+    return wrap;
+  }
+
+  wrap.className = 'att att-present';
+  wrap.append(el('div', { class: 'att-head' }, [
+    el('span', { text: '⚠ 需要你处理' }),
+    el('span', { class: 'att-count', text: String(total) }),
+  ]));
+
+  for (const item of a.items || []) {
+    const risk = item.risk || 'medium';
+    const kind = item.kind || 'question';
+    const row = el('div', { class: 'att-item', 'data-risk': risk, 'data-kind': kind });
+
+    const line = el('div', { class: 'att-item-line' });
+    line.append(el('span', { class: 'att-item-kind', text: KIND_LABEL[kind] || kind }));
+    line.append(el('span', { class: 'att-item-text', text: item.summary || '（没有摘要）' }));
+    row.append(line);
+
+    const meta = [];
+    if (item.toolName) meta.push(item.toolName);
+    meta.push('风险 ' + (RISK_LABEL[risk] || risk));
+    if (Number.isFinite(item.createdAtMs)) meta.push(relativeTime(item.createdAtMs));
+    row.append(el('div', { class: 'att-item-meta', text: meta.join(' · ') }));
+
+    // 操作：审批有两个选择，提问要输入答案
+    const actions = el('div', { class: 'att-item-actions' });
+    if (kind === 'approval') {
+      const deny = el('button', { class: 'att-btn danger', text: '拒绝' });
+      deny.addEventListener('click', () => answerPending(item, 'denied'));
+      const allow = el('button', { class: 'att-btn primary', text: '允许' });
+      allow.addEventListener('click', () => answerPending(item, 'granted'));
+      actions.append(deny, allow);
+    } else {
+      const input = el('input', { placeholder: '输入回答…', style: 'flex:1;min-width:0' });
+      const send = el('button', { class: 'att-btn primary', text: '回答' });
+      send.addEventListener('click', () => {
+        const v = input.value.trim();
+        if (v) answerPending(item, v);
+      });
+      actions.append(input, send);
+    }
+    row.append(actions);
+    wrap.append(row);
+  }
+  return wrap;
+}
+
+/**
+ * 把用户的选择送回 Harness。失败必须显示原因，不能假装成功。
+ *
+ * 真实 payload 形状（office-module.js 的 validateOfficeIpcPayload 严格校验键序）：
+ *   { action: 'answer', id, value }
+ * 我之前猜的 { pendingId, kind, answer } 会被判 PAYLOAD_INVALID。
+ */
+async function answerPending(item, answer) {
+  const r = await window.dshShell.answerPending({ action: 'answer', id: item.id, value: answer });
+  if (!r || !r.ok) {
+    alert(explainFailure(r || { code: 'UNKNOWN' }));
+    return;
+  }
+  await refresh();
+}
+
+// -------------------------------------------------- 离开期间（L2 时间线）
+//
+// 关键约束：**只从真实事件派生，不调用模型生成摘要。**
+// 用户要的是"发生了什么"，不是"模型猜测发生了什么"。
+
+const SINCE_TAG = {
+  decision: '决策', question: '提问', answer: '回答',
+  workstream: '工作流', 'workstream-status': '工作流', deliverable: '产物', mission: 'Mission',
+};
+
+function renderSince() {
+  const si = state.since;
+  if (!si) return null;
+
+  if (!si.available) {
+    // 第一次看这个 Mission → 没有"离开期间"。这是正常状态，不是错误。
+    if (si.reason === 'never-seen') return null;
+    return null;
+  }
+  if (!si.entries || si.entries.length === 0) return null;
+
+  const box = el('div', { class: 'tl' });
+  const head = el('div', { class: 'tl-head' }, [
+    el('span', { text: '你离开期间' }),
+  ]);
+  if (Number.isFinite(si.sinceMs)) {
+    // relativeTime 返回 "3 小时前"，而这里要说"上次看到是 3 小时前"。
+    // 直接拼 "之后" 会变成"3 小时前 之后"，语义别扭。
+    head.append(el('span', { class: 'tl-when', text: '上次查看：' + relativeTime(si.sinceMs) }));
+  }
+  box.append(head);
+
+  const ul = el('ul', { class: 'tl-list' });
+  for (const e of si.entries) {
+    const li = el('li', { 'data-tone': e.tone || 'info' });
+    li.append(el('span', { class: 'tl-tag', text: SINCE_TAG[e.kind] || e.kind }));
+    li.append(document.createTextNode(e.text || ''));
+    ul.append(li);
+  }
+  box.append(ul);
+  if (si.truncated) {
+    box.append(el('div', { class: 'tl-more', text: `另有 ${si.dropped} 条更早的变化未显示` }));
+  }
+  return box;
+}
+
 function renderDetail() {
   const box = $('detail');
   box.textContent = '';
@@ -380,6 +654,13 @@ function renderDetail() {
   }
   const v = state.detail;
   const m = v.mission;
+
+  // --- L1：需要你处理（最高优先级，永远置顶）---
+  box.append(renderAttention());
+
+  // --- L2：你离开期间发生了什么 ---
+  const sinceBlock = renderSince();
+  if (sinceBlock) box.append(sinceBlock);
 
   // --- 头部 ---
   const head = el('div', { class: 'row' });
@@ -506,8 +787,8 @@ function renderDetail() {
       const badge = el('span', {
         class: 'tiny',
         style: d.status === 'accepted'
-          ? 'margin-left:6px;color:#7ddca8'
-          : 'margin-left:6px;color:#ffcf7a',
+          ? 'margin-left:6px;color:var(--att-ok-fg)'
+          : 'margin-left:6px;color:var(--att-warn-fg)',
         text: d.status === 'accepted' ? '已接受' : (d.status === 'proposed' ? '提议中' : d.status),
       });
       li.firstChild.append(badge);
@@ -885,13 +1166,27 @@ async function loadDetail(missionId) {
     return;
   }
   state.detail = { ...r.view, live: r.live };
+
+  // 待办与"离开期间"并行取：它们互不依赖，串行会让右栏打开慢一拍。
+  const [att, since] = await Promise.all([
+    api('attention'),
+    api('sinceLastSeen', { missionId }),
+  ]);
+  state.attention = att.ok ? att : { ok: false, items: [], total: 0, available: false };
+  state.since = since.ok ? since : { ok: false, entries: [], available: false };
+
   renderDetail();
+
   // Brief 单独取（它可能较大，且失败不应影响主视图）
   const b = await api('getBrief', { missionId });
   state.brief = b.ok ? b.brief : { empty: true };
   const sync = await api('briefSyncState');
   state.syncState = sync.ok ? sync : { synced: false };
   renderDetail();
+
+  // 渲染完成后再记"看过"——记早了会把这次探索本身算进"离开期间"。
+  // 不 await：它只是 UI 偏好，失败也不该影响展示。
+  api('markSeen', { missionId });
 }
 
 // ------------------------------------------------------------------ 交互
