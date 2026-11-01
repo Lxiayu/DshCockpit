@@ -67,6 +67,7 @@ const { registerMcpIpc } = require('./ipc-mcp');
 const { registerRemoteIpc } = require('./ipc-remote');
 const { registerMiscDomainsIpc } = require('./ipc-misc-domains');
 const { registerMissionIpc } = require('./ipc-mission');
+const { installPermissionHandlers } = require('./window-hardening');
 const { registerSkillsIpc } = require('./ipc-skills');
 const { registerModelsIpc } = require('./ipc-models');
 const { registerScheduledIpc } = require('./ipc-scheduled');
@@ -5736,6 +5737,11 @@ if (!gotLock) {
   app.on('second-instance', () => showMain());
 
   app.whenReady().then(async () => {
+    // TD-08（2026-11-01）：全局权限处理器必须**最早**安装——
+    // 晚于任何窗口加载就来不及了（第一次请求会被 Electron 默认策略处理）。
+    // 默认全部 deny：桌面壳里静默授予摄像头/麦克风/剪贴板读取是错的。
+    const permInstall = installPermissionHandlers(session.defaultSession, { log });
+    if (!permInstall.installed) log('[hardening] WARNING: permission handlers not installed');
     registerOfficeRuntimeProtocolHandler();
     if (process.platform === 'win32') app.setAppUserModelId('com.dshcockpit.app');
     // No visible File/Edit menu bar (autoHideMenuBar hides it), but the menu

@@ -6,10 +6,14 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { hardenWebContents } = require('./window-hardening');
 
 function createWindowManager(deps) {
   const {
     BrowserWindow, WebContentsView, screen,
+    // TD-09: 外链交给系统浏览器。可选注入——没传时 harnessView 的外链
+    // 只被 deny 而不转发（比"强行 require electron"更可控，也便于单测）。
+    shell = null,
     appName, iconPath, themeBackground, resolvedTheme,
     windowState, windowStateFile, officeWindowStateFile,
     log, t, lang,
@@ -137,8 +141,7 @@ function createWindowManager(deps) {
           preload: path.join(__dirname, 'office', 'office-preload.js'),
         },
       });
-      officeShellView.webContents.on('will-navigate', (e) => e.preventDefault());
-      officeShellView.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      hardenWebContents(officeShellView.webContents, { label: 'office view', log });
       // The dock may be created before the office page finishes booting; re-send
       // the layout once it can actually receive pushes.
       officeShellView.webContents.on('did-finish-load', () => {
@@ -185,8 +188,7 @@ function createWindowManager(deps) {
           preload: path.join(__dirname, 'work', 'work-preload.js'),
         },
       });
-      workView.webContents.on('will-navigate', (e) => e.preventDefault());
-      workView.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      hardenWebContents(workView.webContents, { label: 'work view', log });
       workView.webContents.loadFile(path.join(__dirname, 'work', 'work.html'));
       log('[work] shell view created (main-area workbench)');
     }
@@ -214,8 +216,7 @@ function createWindowManager(deps) {
           preload: path.join(__dirname, 'work', 'work-preload.js'),
         },
       });
-      workDockView.webContents.on('will-navigate', (e) => e.preventDefault());
-      workDockView.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      hardenWebContents(workDockView.webContents, { label: 'work dock view', log });
       workDockView.webContents.loadFile(path.join(__dirname, 'work', 'work.html'), { query: { compact: '1' } });
       log('[work] dock view created (office right side)');
     }
@@ -279,8 +280,7 @@ function createWindowManager(deps) {
       },
     });
     railView.webContents.loadFile(path.join(__dirname, 'office-rail.html'));
-    railView.webContents.on('will-navigate', (e) => e.preventDefault());
-    railView.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    hardenWebContents(railView.webContents, { label: 'office rail', log });
     mainWindow.contentView.addChildView(railView);
     log('[office] left rail view created (in-window shell)');
     return railView;
@@ -400,6 +400,19 @@ function createWindowManager(deps) {
         preload: path.join(__dirname, 'preload.js'),
       },
     });
+    // TD-09：harnessView 是**唯一加载第三方代码**的视图（dsh 自己的 Web UI）。
+    // 它此前两个 handler 都没有——若 dsh UI 里有 window.open，
+    // Electron 会按默认 webPreferences 派生子窗口（安全项不由我们决定）。
+    hardenWebContents(harnessView.webContents, {
+      label: 'harness view (third-party UI)',
+      log,
+      // 外链走系统浏览器；只放行 http/https（file://、javascript: 不传）
+      onExternal: (href) => {
+        if (shell && typeof shell.openExternal === 'function') {
+          try { shell.openExternal(href); } catch { /* a failed external open must not break the view */ }
+        }
+      },
+    });
     mainWindow.contentView.addChildView(harnessView);
     createRailView();
     syncShellViews();
@@ -458,7 +471,7 @@ function createWindowManager(deps) {
       workView = null;
       workDockView = null;
     });
-    mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    hardenWebContents(mainWindow.webContents, { label: 'main window', log });
 
     // persist window bounds (debounced)
     const saveBounds = () => {
@@ -581,7 +594,7 @@ function createWindowManager(deps) {
       },
     });
     cockpitWindow.loadFile(path.join(__dirname, 'cockpit.html'));
-    cockpitWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+    hardenWebContents(cockpitWindow.webContents, { label: 'cockpit window', log });
     cockpitWindow.on('will-move', (_event, nextBounds) => {
       const display = cockpitDisplay();
       if (!display || !nextBounds) return;
@@ -688,7 +701,7 @@ function createWindowManager(deps) {
     });
     const query = route && route.mode ? `?mode=${encodeURIComponent(route.mode)}&page=${encodeURIComponent(route.page || '')}${route.intent === 'new-task' ? '&intent=new-task' : ''}` : '';
     settingsWindow.loadFile(path.join(__dirname, 'settings.html'), { search: query });
-    settingsWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+    hardenWebContents(settingsWindow.webContents, { label: 'settings window', log });
     settingsWindow.on('closed', () => {
       settingsWindow = null;
       const returnPanel = returnToCockpitPending;

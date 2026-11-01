@@ -6,6 +6,7 @@
 'use strict';
 
 const path = require('node:path');
+const { hardenWebContents } = require('./window-hardening');
 
 /**
  * @param {object} deps
@@ -59,7 +60,7 @@ function createAuxWindows(deps) {
       },
     });
     quickAskWindow.loadFile(path.join(__dirname, 'quickask.html'));
-    quickAskWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+    hardenWebContents(quickAskWindow.webContents, { label: 'quick ask' });
     quickAskWindow.once('ready-to-show', () => quickAskWindow.show());
     quickAskWindow.on('closed', () => {
       quickAskWindow = null;
@@ -99,7 +100,7 @@ function createAuxWindows(deps) {
       },
     });
     searchWindow.loadFile(path.join(__dirname, 'search.html'));
-    searchWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+    hardenWebContents(searchWindow.webContents, { label: 'search' });
     searchWindow.once('ready-to-show', () => searchWindow.show());
     searchWindow.on('closed', () => {
       searchWindow = null;
@@ -135,7 +136,7 @@ function createAuxWindows(deps) {
       },
     });
     loadingWindow.loadFile(path.join(__dirname, 'loading.html'));
-    loadingWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+    hardenWebContents(loadingWindow.webContents, { label: 'loading splash' });
     loadingWindow.once('ready-to-show', () => {
       if (loadingWindow && !loadingWindow.isDestroyed()) loadingWindow.show();
     });
@@ -205,7 +206,7 @@ function createAuxWindows(deps) {
       },
     });
     missionDeskWindow.loadFile(path.join(__dirname, 'mission-desk.html'));
-    missionDeskWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+    hardenWebContents(missionDeskWindow.webContents, { label: 'mission desk' });
     missionDeskWindow.once('ready-to-show', () => missionDeskWindow.show());
     missionDeskWindow.on('closed', () => { missionDeskWindow = null; });
     return missionDeskWindow;

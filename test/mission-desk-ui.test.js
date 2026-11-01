@@ -142,8 +142,12 @@ test('mission-desk: the window hardens the renderer (contextIsolation + sandbox,
   assert.match(block, /contextIsolation: true/);
   assert.match(block, /nodeIntegration: false/);
   assert.match(block, /sandbox: true/);
-  assert.match(block, /will-navigate', \(e\) => e\.preventDefault\(\)/,
-    'navigation must be blocked like every other aux window');
+  // 2026-11-01（TD-09）：单点加固后，窗口不再各自写 will-navigate，
+  // 而是统一调 hardenWebContents。断言改为「必须走统一加固」——
+  // 这不是放宽，而是更严：hardenWebContents 同时覆盖导航拦截、
+  // window.open deny、<webview> 拦截三类保护（见 window-hardening.js）。
+  assert.match(block, /hardenWebContents\(missionDeskWindow\.webContents/,
+    'navigation must be blocked via the shared hardening helper, like every other window');
 });
 
 test('mission-desk: has a strict CSP', () => {

@@ -44,7 +44,10 @@ test('work-view: the main process hosts it as a sandboxed third main-area view',
   assert.match(block, /preload: path\.join\(__dirname, 'work', 'work-preload\.js'\)/);
   assert.match(block, /loadFile\(path\.join\(__dirname, 'work', 'work\.html'\)\)/);
   assert.match(block, /activeMainView = 'work';/);
-  assert.match(block, /setWindowOpenHandler\(\(\) => \(\{ action: 'deny' \}\)\)/);
+  // 2026-11-01（TD-09）：统一加固后不再内联 setWindowOpenHandler。
+  // 断言改为「必须走 hardenWebContents」——它内部同时做 deny + 导航拦截 + webview 拦截。
+  assert.match(block, /hardenWebContents\(workView\.webContents/,
+    'the work view must be hardened via the shared helper (blocks navigation, popups and webviews)');
   // exported for the rail + the snapshot push
   assert.match(WM, /showWorkShellView, isWorkViewActive, sendToWorkView,/);
   // the view is torn down with the window (no zombie webContents)
