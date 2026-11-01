@@ -66,6 +66,7 @@ const { createMcpRegistry } = require('./mcp-registry');
 const { registerMcpIpc } = require('./ipc-mcp');
 const { registerRemoteIpc } = require('./ipc-remote');
 const { registerMiscDomainsIpc } = require('./ipc-misc-domains');
+const { registerMissionIpc } = require('./ipc-mission');
 const { createMcpConnect } = require('./mcp-connect');
 const { createMcpImport } = require('./mcp-import');
 const compact = require('./compact');
@@ -2241,6 +2242,54 @@ function broadcastRuntimeHealth(health) {
   }
 }
 
+/** P1：为 Mission Core 派生 Harness 快照（**只读**，且强制带时间戳）。
+ *
+ * 为什么必须带 observedAtMs：Mission 不拥有 running/awaitingUser，
+ * 没有时间戳的快照会被读成"当前状态"。harness-reader 会直接拒绝无时间戳的输入。
+ *
+ * 为什么只给这几个字段：harness-reader 有白名单，raw sessionId / prompt /
+ * 绝对路径一律丢弃。这里是第一道收窄，那边是第二道。 */
+function runtimeSnapshotForMission() {
+  try {
+    // office 投影是"Agent 是否在跑 / 有没有 pending"的唯一派生来源。
+    // 我们只读它的 state()，不自己从 mux 事件推断（那会是第二个事实作者）。
+    let office = null;
+    try {
+      const mod = officeModuleInstance;
+      if (mod && typeof mod.state === 'function') office = mod.state();
+    } catch { /* office 未就绪：下面全部保持缺省，不猜 */ }
+
+    let hasRunningAgent = false;
+    if (office && Array.isArray(office.employees)) {
+      // 员工有 binding 且状态是 running 才算"有 agent 在跑"。
+      // 注意这不是"为某个 Mission 而跑"——那个判断在 harness-reader 里
+      // 需要会话句柄匹配才成立。
+      hasRunningAgent = office.employees.some((e) => e && e.status === 'running');
+    }
+
+    // pending 列表就是待审批/待回答的混合队列；分开计数需要看 kind。
+    let pendingApprovals = 0;
+    let pendingQuestions = 0;
+    const pending = office && Array.isArray(office.pending) ? office.pending : [];
+    for (const p of pending) {
+      if (!p || typeof p !== 'object') continue;
+      if (p.kind === 'approval') pendingApprovals += 1;
+      else if (p.kind === 'question') pendingQuestions += 1;
+    }
+
+    return {
+      observedAtMs: Date.now(),
+      hasRunningAgent,
+      pendingApprovals,
+      pendingQuestions,
+    };
+  } catch {
+    // 派生失败时返回 null —— Mission 会显示"实时状态不可用"，
+    // 而不是谎报 running=false（那是最糟的：看起来确定，其实是错的）。
+    return null;
+  }
+}
+
 /** 5s 观察 tick：喂 mux 状态、比较降级集合，变化时刷新托盘/设置页/诊断。 */
 function runtimeHealthTick() {
   if (quitting) return;
@@ -2669,6 +2718,18 @@ function registerIpc() {
   // phone remote-control gateway (settings window)
   // Issue #22 Phase 1：3 个 handler 已提取到 src/ipc-remote.js。
   registerRemoteIpc(ipcMain, { remote });
+
+  // P1 Mission Core（Issue #12）：单通道 + action 判别式（沿用 office:settings 惯例）。
+  // 14 个 action 共用一个 `mission:invoke` 通道 —— 若每个操作开一个通道，
+  // 会立刻复制 shell:* 的过载问题（TD-01）。
+  registerMissionIpc(ipcMain, {
+    workspaceDirOf: () => settings.effective().workspace || os.homedir(),
+    // Harness 快照：只读，且必须带时间戳（harness-reader 会强制校验）。
+    // 这里从 runtimeMux/runtimeHealth 派生，缺失时返回 null（Mission 会显示"不可用"
+    // 而不是谎报 running=false）。
+    snapshotOf: () => runtimeSnapshotForMission(),
+    log,
+  });
 
   // plugins / search / quickask —— 三个正交小域合并为一批
   registerMiscDomainsIpc(ipcMain, {

@@ -79,6 +79,8 @@ const IPC_SOURCE_FILES = [
   path.join(ROOT, 'src', 'ipc-remote.js'),
   // Issue #22 Phase 1：plugins / search / quickask（第三批次）
   path.join(ROOT, 'src', 'ipc-misc-domains.js'),
+  // P1 Mission Core（Issue #12）：单通道 + action 判别式
+  path.join(ROOT, 'src', 'ipc-mission.js'),
   path.join(ROOT, 'src', 'work', 'work-ipc.js'),
 ];
 
@@ -102,7 +104,7 @@ test('ipc-contract: the registered channel set is stable (snapshot)', () => {
   // 快照的含义是"接口没变"。Issue #22 Phase 1 把 MCP 的 11 个 handler
   // 从 main.js 搬到 ipc-mcp.js —— 通道总数**不变**（还是 124），
   // 这正是"提取"与"接口变更"的区别：前者只搬位置，后者才动集合。
-  const EXPECTED_COUNT = 124;
+  const EXPECTED_COUNT = 125;
   assert.strictEqual(
     channels.size,
     EXPECTED_COUNT,
