@@ -133,3 +133,36 @@ test('TD-05: the delta pass copies userData files too (not just indexes them)', 
   assert.ok(fs.existsSync(copied), 'the file must exist in the backup, not just in the index');
   assert.match(fs.readFileSync(copied, 'utf8'), /999/);
 });
+
+// ============================================ 防"假 ✅"的门禁
+
+test('debt inventory: a "fixed" claim must name the file it actually changed', () => {
+  // 这次的假 ✅ 是这么产生的：只写"新增了 settings-persistence"，
+  // 没写"它接到了哪个文件"。下一个人无法核对，就默认它修好了。
+  //
+  // 规则：标 ✅ 的债条目必须在**同一条目内**点名被改的文件路径。
+  const doc = fs.readFileSync(path.join(ROOT, 'docs', 'quality', 'tech-debt-inventory.md'), 'utf8');
+  const sections = doc.split(/^### /m).slice(1);
+  const noFile = [];
+  for (const sec of sections) {
+    const title = sec.split('\n')[0];
+    if (!/✅/.test(sec)) continue;
+    // 只有"仍存在"的章节才需要这个保证；标题里带 TD- 编号的才是债条目
+    if (!/TD-\d+/.test(title)) continue;
+    // 必须在正文里出现一个 src/ 或 docs/ 路径
+    if (!/src\/[a-zA-Z0-9_\-/]+\.js|docs\/[a-zA-Z0-9_\-/]+\.md/.test(sec)) {
+      noFile.push(title.trim());
+    }
+  }
+  assert.deepEqual(noFile, [],
+    `a "fixed" debt entry must name the file it changed: ${noFile.join(' | ')}`);
+});
+
+test('debt inventory: TD-03 and TD-05 name their REAL files (not settings-persistence)', () => {
+  // 反向确认：两条都指向真正被改的文件。
+  const doc = fs.readFileSync(path.join(ROOT, 'docs', 'quality', 'tech-debt-inventory.md'), 'utf8');
+  const td03 = doc.slice(doc.indexOf('### TD-03'), doc.indexOf('### TD-04'));
+  const td05 = doc.slice(doc.indexOf('### TD-05'), doc.indexOf('### TD-06'));
+  assert.match(td03, /workspace-store\.js/, 'TD-03 must name the file it actually fixed');
+  assert.match(td05, /backup\.js/, 'TD-05 must name the file it actually fixed');
+});

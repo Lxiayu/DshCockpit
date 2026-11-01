@@ -427,6 +427,11 @@ mainWindow.contentView.addChildView(harnessView);
 
 **优先级**：P0 · **阻塞新方向 = 是**（Mission Core 是大重构，没有 CI 门禁等于裸奔）
 
+**✅ 已修复（2026-11-01，Issue #10）**：新增 `.github/workflows/ci.yml`，
+在 PR/push 上跑全量测试 + 机械门禁。四态报告由 `scripts/ci-gate.js` 产出
+（**Skip 不计作 Pass**，见 `docs/quality/test-tiers-and-baseline.md`）。
+`release-*` 的 build 现在依赖新增的 `gate` job。
+
 ---
 
 ### TD-11 · 原子写 15 份复制，3 处会并发互踩
