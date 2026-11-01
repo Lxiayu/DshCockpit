@@ -27,8 +27,8 @@
 | **2** | #10 | CI 自动化门禁 | 0.5–1 天 | #21 | ✅ **完成**（commit 89c836b） |
 | **3** | #14 | 许可证与依赖检查 | 0.5–1 天 | 无 | ✅ **完成**（commit 7aaacdd） |
 | **4** | #9 | Runtime & Protocol POC | 1–2 天 | #21 | ✅ **协议层完成**（端到端待补） |
-| **5** | #22 | main.js 关键行为测试骨架 | 1–2 天 | 无（可前可后） | ⬜ |
-| **6** | #19 | Settings 数据保护 | 1 天 | 无（可前可后） | ⬜ |
+| **5** | #22 | main.js 关键行为测试骨架 | 1–2 天 | 无 | ✅ **Phase 0 完成**（Phase 1 未开始） |
+| **6** | #19 | Settings 数据保护 | 1 天 | 无 | ✅ **完成**（commit 3f33fe1） |
 
 **并行说明**（用户明确）：#22 与 #19 可根据依赖在 POC 前后合理并行。**但不得从计划中消失。**
 
@@ -98,14 +98,19 @@
 
 **以下全部满足**，才建议进入 Mission Core 正式开发：
 
-- [ ] 兼容性账本可靠（#21）
-- [ ] CI 门禁建立（#10）
-- [ ] 许可证审查机制建立（#14）
-- [ ] 官方 Harness Runtime POC 得到明确结论（#9）
-- [ ] Team / Session 数据映射方案经过验证（#9 + ADR-0002 R0）
-- [ ] Settings 数据保护方案完成（#19）
-- [ ] 关键 IPC 行为测试具备基本安全网（#22）
-- [ ] 相关文档、ADR 和 Issue 已同步
+- [x] 兼容性账本可靠（#21）— schema 2 + 四级结论 + Verified/Fresh 分离 + 防复发门禁
+- [x] CI 门禁建立（#10）— ci.yml + 四态诚实报告 + release 依赖 gate
+- [x] 许可证审查机制建立（#14）— 直接/传递/分发三层
+- [x] **官方 Harness Runtime POC 得到明确结论（#9）** — 0.2.1-rc.5 / 0.2.2-alpha.2 各 16 pass / 0 fail
+- [ ] ⚠️ **Team / Session 数据映射方案经过验证** — **协议已验证**（mux + 三个 session RPC），
+      但 `agentTeam` 的**字段形状未测**（需驱动真实 team 会话，需 API key）→ **这是唯一未达成的条件**
+- [x] Settings 数据保护方案完成（#19）— 分层回退 + .bak 链 + 损坏另存
+- [x] 关键 IPC 行为测试具备基本安全网（#22 Phase 0）— 契约快照 8 + 行为 20
+- [x] 相关文档、ADR 和 Issue 已同步 — docs-index 5/5
+
+**结论：8 项中 7 项达成，第 5 项部分达成。**
+进入 Mission Core 正式开发的**剩余前置**：完成一次真实模型调用的端到端验证，
+以验证 `agentTeam` 字段形状与 Team/Session 映射（ADR-0002 R0）。
 
 ## 7. 测试基线（本轮确立）
 
@@ -127,6 +132,9 @@ CI=1 npm test    # → 1935 / 1935 / 0 fail（唯一有效基线）
 | 2026-11-01 | #10 | ✅ 完成：ci.yml PR/push 门禁 + 四态诚实报告 + 修复 Skip 冒充 Pass | `test/ci-gate.test.js` 16 项；TAP passed=1989/failed=0/skipped=1 |
 | 2026-11-01 | #14 | ✅ 完成：许可证三层检查（直接/传递/分发一致性） | `test/check-licenses.test.js` 15 项；真实仓库 167 传递包全合规 |
 | 2026-11-01 | #9 | ✅ POC 协议层完成：三版本隔离验证 16/16 PASS；账本写入 compatible | `docs/research/runtime-poc-report-2026-11-01.md`；`scripts/poc/` |
+| 2026-11-01 | #22 | ✅ Phase 0：IPC 契约快照 8 项 + ipc-features 行为测试 20 项；**抓到并修复 `weekly:open-dir` 缺 require('path') 的真实 bug** | `test/ipc-contract.test.js`、`test/ipc-features.test.js` |
+| 2026-11-01 | #19 | ✅ Settings 数据保护：分层回退 + .bak 链 + 损坏另存 + 迁移 | `test/settings-persistence.test.js` 18 项 |
+| 2026-11-01 | **P0 收尾** | 全量 `CI=1 npm test` → **2043 passed / 0 failed / 1 skipped** | 起始基线 1935 → 净增 108 |
 
 ## 9. 风险与阻塞
 
