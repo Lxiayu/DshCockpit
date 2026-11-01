@@ -82,6 +82,17 @@ async function main() {
           const r = store.append('deliverable.registered', reg.deliverable, { missionId });
           return r.ok ? { ok: true, deliverable: reg.deliverable } : { ok: false, reason: r.reason };
         }
+        case 'linkTaskRef': {
+          const taskRefMod = require(path.join(REPO, 'src', 'mission', 'task-ref.js'));
+          const built = taskRefMod.buildTaskRef({
+            missionId: payload.missionId, workstreamId: payload.workstreamId,
+            sessionId: payload.sessionId, summary: payload.summary,
+            observedAtMs: Date.now(),
+          });
+          if (!built.ok) return { ok: false, reason: built.reason, code: built.code };
+          const r = store.append('taskRef.linked', built.taskRef, { missionId });
+          return r.ok ? { ok: true, taskRef: built.taskRef } : { ok: false, reason: r.reason };
+        }
         case 'addWorkstream': {
           const ws = {
             workstreamId: `ws-${Date.now()}`, missionId: payload.missionId,
@@ -215,7 +226,61 @@ async function main() {
     statusBtnClicked === true && wsAfter && wsAfter.status === 'blocked',
     wsAfter ? `${wsAfter.status}` : 'none');
 
-  // ---- 6. 截图 + 错误 ----
+  // ---- 6. 关联执行（TaskRef）----
+  const linkClicked = await ev(`(() => {
+    const inputs = [...document.querySelectorAll('input')];
+    const summary = inputs.find((i) => (i.placeholder || '').includes('这次执行做了什么'));
+    const btn = [...document.querySelectorAll('button')].find((b) => b.textContent === '关联执行');
+    if (!summary || !btn) return false;
+    summary.value = '接入 StepFun 并跑通';
+    btn.click();
+    return true;
+  })()`).catch(() => false);
+  await new Promise((r) => setTimeout(r, 1200));
+  const refsNow = store.missionView(missionId).taskRefs || [];
+  record('an execution can be linked from the UI', linkClicked === true && refsNow.length === 1,
+    `refs=${refsNow.length}`);
+  record('the linked execution carries a DERIVED handle (not a raw session id)',
+    refsNow.length === 1 && /^sess-h-[0-9a-f]{12}/.test(refsNow[0].harnessRef),
+    refsNow.length ? refsNow[0].harnessRef : '-');
+
+  // 最强的一条：扫工作区所有文件，确认 sessionId 没有落盘
+  const walkAll = (d) => {
+    const out = [];
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const pp = path.join(d, e.name);
+      if (e.isDirectory()) out.push(...walkAll(pp));
+      else out.push(pp);
+    }
+    return out;
+  };
+  const leaked = walkAll(wsDir).filter((f) => {
+    try { return fs.readFileSync(f, 'utf8').includes('manual-link') && false; } catch { return false; }
+  });
+  void leaked;
+  const onDisk = walkAll(wsDir).some((f) => {
+    try { return fs.readFileSync(f, 'utf8').includes('manual-link'); } catch { return false; }
+  });
+  record('the raw session id never reaches disk (privacy invariant)', onDisk === false,
+    onDisk ? 'LEAKED to disk' : 'clean');
+
+  // ---- 7. 重启后仍在（持久化真的生效）----
+  // 复用文件顶部已解构的 createMissionStore（重复解构会 SyntaxError）
+  const reopened = createMissionStore({ workspaceDir: wsDir });
+  const afterRestart = reopened.missionView(missionId);
+  record('everything survives a restart (decisions/deliverables/workstreams/taskRefs)',
+    (afterRestart.decisions || []).length === 1
+    && (afterRestart.deliverables || []).length === 1
+    && (afterRestart.workstreams || []).length === 1
+    && (afterRestart.taskRefs || []).length === 1,
+    JSON.stringify({
+      d: (afterRestart.decisions || []).length,
+      dv: (afterRestart.deliverables || []).length,
+      ws: (afterRestart.workstreams || []).length,
+      tr: (afterRestart.taskRefs || []).length,
+    }));
+
+  // ---- 8. 截图 + 错误 ----
   try {
     fs.mkdirSync(EVIDENCE, { recursive: true });
     const img = await win.webContents.capturePage();

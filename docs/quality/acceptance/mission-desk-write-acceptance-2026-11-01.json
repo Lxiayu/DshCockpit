@@ -48,6 +48,26 @@
       "detail": "blocked"
     },
     {
+      "name": "an execution can be linked from the UI",
+      "ok": true,
+      "detail": "refs=1"
+    },
+    {
+      "name": "the linked execution carries a DERIVED handle (not a raw session id)",
+      "ok": true,
+      "detail": "sess-h-f7876edaae35"
+    },
+    {
+      "name": "the raw session id never reaches disk (privacy invariant)",
+      "ok": true,
+      "detail": "clean"
+    },
+    {
+      "name": "everything survives a restart (decisions/deliverables/workstreams/taskRefs)",
+      "ok": true,
+      "detail": "{\"d\":1,\"dv\":1,\"ws\":1,\"tr\":1}"
+    },
+    {
       "name": "screenshot captured",
       "ok": true,
       "detail": "2360x1630"

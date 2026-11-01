@@ -1,11 +1,11 @@
 # Mission Desk 写入路径真机验收（P4，2026-11-01）
 
-> 探针：`scripts/acceptance/mission-desk-write-acceptance.js`（11/11 通过）
+> 探针：`scripts/acceptance/mission-desk-write-acceptance.js`（15/15 通过）
 > 证据：[`acceptance/mission-desk-write-acceptance-2026-11-01.json`](acceptance/mission-desk-write-acceptance-2026-11-01.json)
 
 ## 0. 一句话结论
 
-**11/11 通过。** Mission Desk 从"只读报表"变成"编辑器"。
+**15/15 通过。** Mission Desk 从"只读报表"变成"编辑器"，并且打通了 Mission↔Harness 的连接点。
 
 ## 1. 起因：审计发现 Desk 是只读的
 
@@ -59,7 +59,7 @@ decidedBy: payload.decidedBy || 'user'       // 用户拍的板
 `div.card[role="button"]`，没有那个属性 → 全部 8 项失败。
 **这恰好证明了真机验收的价值**——离线测试永远发现不了选择器写错。
 
-## 5. 验收结果（11 项）
+## 5. 验收结果（15 项）
 
 | # | 检查 | 实际值 |
 |---|---|---|
@@ -74,6 +74,10 @@ decidedBy: payload.decidedBy || 'user'       // 用户拍的板
 | 9 | 工作流状态可就地切换 | `blocked` |
 | 10 | 截图 | 2360×1630 |
 | 11 | 无致命错误 | ✅ |
+| 12 | **可从 UI 关联一次执行（TaskRef）** |  |
+| 13 | **关联的是派生句柄不是 sessionId** |  |
+| 14 | **sessionId 全程未落盘** |  |
+| 15 | **重启后四类数据全部保留** |  |
 
 截图确认：决策区显示「用 SQLite 而不是 JSON **已接受**」+ 理由；
 工作流显示 `[blocked] 接入 StepFun` + 三个状态按钮；
