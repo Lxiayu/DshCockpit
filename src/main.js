@@ -39,7 +39,7 @@ const os = require('node:os');
 const http = require('node:http');
 
 const { SettingsStore } = require('./settings-store');
-const { RuntimeManager, isRuntimeSupported } = require('./runtime-manager');
+const { RuntimeManager, isRuntimeSupported, canRunRuntime } = require('./runtime-manager');
 const { createRuntimeStateController } = require('./runtime-state');
 const { t, resolveLanguage, STRINGS } = require('./i18n');
 const { backupNow, backupDeltaNow, backupInfo } = require('./backup');
@@ -2081,18 +2081,32 @@ async function runUpdateCheck(notifyUser, { install = notifyUser } = {}) {
       updateTray();
       return { ...report, deferred: true };
     }
-    // Compatibility matrix (DESIGN.md §6.4): a runtime outside the supported
-    // range loads and chats fine, but the operating layer's feed-derived
-    // features degrade — refuse to install it silently. v0.4.0 lifts this.
-    if (!isRuntimeSupported(report.target)) {
-      // 容器姿态（2026-09-22 用户拍板）：矩阵外版本**不再阻断安装**——壳会先记录
-      // knownIssue、提示"未在测试矩阵内，feed 派生的功能可能降级"，安装后由 watchdog
-      // 守护、异常时一键回滚。挡板只保留"把风险说清楚"的职责。
-      manager.state.knownIssues[report.target] = `outside the tested compat matrix (${SUPPORTED_RUNTIME_RANGE})`;
+    // Compatibility (DESIGN.md §6.4；S1/TD-29 起由能力判定，不再看版本号)。
+    //
+    // 三种情况分开提示，因为它们的风险和处置不同：
+    //   unsupported → required 能力缺失，**这是真问题**，明确告警
+    //   degraded    → 可跑但缺可选能力（如 0.1.x 无 agent-team），提示降级
+    //   unverified  → 没测过，**不等于不能用**，只记一条诊断，不打扰用户
+    //
+    // 容器姿态（2026-09-22 用户拍板）保持不变：任何情况都**不阻断安装**，
+    // 壳会记 knownIssue、提示风险，安装后由 watchdog 守护、异常时一键回滚。
+    const targetCompat = canRunRuntime(report.target);
+    if (targetCompat.verdict === 'unsupported') {
+      manager.state.knownIssues[report.target] = `missing required capabilities: ${targetCompat.judge.missing.join(', ')}`;
       manager.saveState();
-      log(`[update] ${report.target} is outside the tested compat matrix (${SUPPORTED_RUNTIME_RANGE}) — installing with degraded-feature warning`);
+      log(`[update] ${report.target} MISSING REQUIRED CAPABILITIES (${targetCompat.judge.missing.join(', ')}) — installing anyway, expect breakage`);
       notify(t(lang(), 'notify.updateGated'), t(lang(), 'notify.updateGatedBody', { v: report.target }));
       updateTray();
+    } else if (targetCompat.degraded) {
+      manager.state.knownIssues[report.target] = `degraded: missing optional capabilities (${targetCompat.judge.missing.join(', ')})`;
+      manager.saveState();
+      log(`[update] ${report.target} is degraded (missing optional: ${targetCompat.judge.missing.join(', ')}) — installing`);
+      notify(t(lang(), 'notify.updateGated'), t(lang(), 'notify.updateGatedBody', { v: report.target }));
+      updateTray();
+    } else if (targetCompat.unverified) {
+      // 未验证版本：**不**发通知。它很可能完全正常，打扰用户只会训练出"忽略提示"。
+      // 但要在日志里留痕，便于事后归因。
+      log(`[update] ${report.target} is unverified (no capability record) — installing, will observe at runtime`);
     }
     notify(t(lang(), 'notify.newVersion'), t(lang(), 'notify.downloading', { a: report.current, b: report.target }));
     // Live progress → every window's update console (a long rc install must
@@ -2135,9 +2149,12 @@ async function runUpdateCheck(notifyUser, { install = notifyUser } = {}) {
 async function applyPendingUpdate() {
   const pending = manager.state.pendingVersion;
   if (!pending) throw new Error(t(lang(), 'update.noPending'));
-  if (!isRuntimeSupported(pending)) {
-    // 矩阵外版本允许安装（容器姿态）；这里只留一条诊断，便于事后归因。
-    log(`[update] applying ${pending} outside the tested compat matrix (${SUPPORTED_RUNTIME_RANGE})`);
+  {
+    // 允许安装（容器姿态）；这里只留一条诊断，便于事后归因。
+    const compat = canRunRuntime(pending);
+    if (compat.verdict !== 'supported') {
+      log(`[update] applying ${pending} (compatibility: ${compat.verdict}${compat.degraded ? ` — ${compat.judge.missing.join(', ')}` : ''})`);
+    }
   }
   const { previous } = await manager.activate(pending);
   log(`[shell] applied update: ${previous} -> ${pending}`);
