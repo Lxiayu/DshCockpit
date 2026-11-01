@@ -129,6 +129,7 @@
 | `docs/quality/character-pack-acceptance-2026-11-01.md` | **角色包验收（2026-11-01）** | 7/7 通过；抓到两个离线全绿的缺陷（office 页不可达 + flex-basis 泄漏） |
 | `docs/quality/office-board-acceptance-2026-11-01.md` | **项目白板验收（2026-11-01）** | 10/10 通过；含一次错误诊断的纠正与 4 层探针缺件记录 |
 | `docs/quality/office-inbox-acceptance-2026-11-01.md` | **办公室收件箱验收（2026-11-01）** | 18/18 通过；补上纯逻辑测试测不到的视觉与交互证据 |
+| `docs/quality/companion-acceptance-2026-11-01.md` | **Companion 验收（2026-11-01）** | 11/11 通过；常驻小窗的四状态色彩与产品纪律实测 |
 
 ## 6. 脚本产物（由脚本生成/更新，不要手改）
 
