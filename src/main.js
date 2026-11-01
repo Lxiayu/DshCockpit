@@ -68,6 +68,7 @@ const { registerRemoteIpc } = require('./ipc-remote');
 const { registerMiscDomainsIpc } = require('./ipc-misc-domains');
 const { registerMissionIpc } = require('./ipc-mission');
 const { registerSkillsIpc } = require('./ipc-skills');
+const { registerModelsIpc } = require('./ipc-models');
 const { createMcpConnect } = require('./mcp-connect');
 const { createMcpImport } = require('./mcp-import');
 const compact = require('./compact');
@@ -2750,49 +2751,10 @@ function registerIpc() {
 
   // model provider panel (C2): test/fetch run in the main process so the API
   // key never crosses into the renderer — only result shapes go back
-  ipcMain.handle('shell:models-list', () => (modelsMgr ? modelsMgr.list() : {
-    presets: MODELS_PRESETS, ollamaPreset: MODELS_OLLAMA_PRESET, profiles: [], default: null,
-  }));
-  ipcMain.handle('shell:models-save', (_e, profile, apiKey) => {
-    if (!modelsMgr) return { ok: false, reason: 'not ready' };
-    try {
-      const r = modelsMgr.save(profile, apiKey);
-      return r;
-    } catch (e) {
-      log(`[models] save failed: ${e.message}`);
-      return { ok: false, reason: e.message };
-    }
-  });
-  ipcMain.handle('shell:models-remove', (_e, id) => {
-    if (!modelsMgr) return { ok: false, reason: 'not ready' };
-    try {
-      const r = modelsMgr.remove(String(id || ''));
-      if (r.ok) {
-        notify(t(lang(), 'notify.modelsRemoved'), t(lang(), 'notify.modelsRemovedBody', { id: String(id || '') }));
-      }
-      return r;
-    } catch (e) {
-      log(`[models] remove failed: ${e.message}`);
-      return { ok: false, reason: e.message };
-    }
-  });
-  ipcMain.handle('shell:models-test', async (_e, target) => {
-    if (!modelsMgr) return { ok: false, kind: 'other', reason: 'not ready' };
-    return modelsMgr.test(target || {});
-  });
-  ipcMain.handle('shell:ollama-status', async () => {
-    if (!modelsMgr) return { installed: false, version: null, models: [], registered: false, reason: 'not ready' };
-    return modelsMgr.ollamaStatus();
-  });
-  ipcMain.handle('shell:models-set-default', (_e, provider, model) => {
-    if (!modelsMgr) return { ok: false, reason: 'not ready' };
-    const r = modelsMgr.setDefault(provider, model);
-    if (r.ok) {
-      notify(t(lang(), 'notify.modelsDefaultSet'), t(lang(), 'notify.modelsDefaultSetBody', {
-        provider: String(provider || ''), model: String(model || ''),
-      }));
-    }
-    return r;
+  // shell:models-* / shell:ollama-status 的 6 个 handler —— Issue #22 Phase 1
+  // 已提取到 src/ipc-models.js（注意那边说明了四个不同的「未就绪」返回形状）
+  registerModelsIpc(ipcMain, {
+    modelsMgr, MODELS_PRESETS, MODELS_OLLAMA_PRESET, notify, t, lang, log,
   });
   // ---- left office rail (M4 直启动) --------------------------------------
   ipcMain.handle('office-rail:toggle-office', () => {

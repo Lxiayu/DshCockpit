@@ -83,6 +83,7 @@ const IPC_SOURCE_FILES = [
   path.join(ROOT, 'src', 'ipc-mission.js'),
   // Issue #22 Phase 1：skills 域（shell:* 的第一个批次）
   path.join(ROOT, 'src', 'ipc-skills.js'),
+  path.join(ROOT, 'src', 'ipc-models.js'),
   path.join(ROOT, 'src', 'work', 'work-ipc.js'),
 ];
 
