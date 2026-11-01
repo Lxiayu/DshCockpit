@@ -44,6 +44,32 @@
   #list { flex: 0 0 320px; border-right: 1px solid var(--border-1); overflow: auto; padding: 10px; }
   #detail { flex: 1 1 auto; overflow: auto; padding: 16px; min-width: 0; }
 
+  /* ---------------------------------------------------------------- dock 模式
+     右栏宽度只有 380px，不能沿用"左列表 + 右详情"的双栏。
+     切到单列：顶部一个 Mission 选择器，下面全是详情。
+     同一个文件两种布局，避免维护两份 UI（那必然漂移）。 */
+  body.dock main { flex-direction: column; overflow: auto; }
+  body.dock #list { flex: 0 0 auto; border-right: 0; overflow: visible; padding: 0; }
+  /* dock 里列表卡片整个隐藏：顶部下拉已经承担了选择职责。
+     之前只隐藏 .row 不隐藏 .card，于是选中项会以一张带边框的卡片
+     在详情上方重复出现一次（真机截图抓到的）。 */
+  body.dock #list .card { display: none; }
+  body.dock #list .empty { display: none; }
+  body.dock #detail { flex: 1 1 auto; padding: 12px 14px; overflow: visible; }
+  body.dock h2 { margin-top: 12px; }
+  /* dock 里 header 的 h1 与选择器的 "MISSION DESK" 标签重复。
+     保留 h1（它是页面标识），去掉选择器里那行小标题。 */
+  body.dock #dockPicker .dock-head { display: none; }
+  /* 顶部选择器：dock 模式下唯一需要的"列表" */
+  #dockPicker { display: none; }
+  body.dock #dockPicker { display: block; flex: 0 0 auto;
+    border-bottom: 1px solid var(--border-1); padding: 8px 10px; }
+  #dockPicker select { width: 100%; background: var(--bg-2, #22252c); color: var(--text-1, #e6e8ee);
+    border: 1px solid var(--border-1); border-radius: 8px; padding: 6px 8px; font-size: 12px; }
+  #dockPicker .dock-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  #dockPicker .dock-title { font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--text-3, #8a919b); }
+
   /* 卡片：status 与 running 分开呈现 */
   .card { border: 1px solid var(--border-1); border-radius: 9px; padding: 10px 11px; margin-bottom: 8px; cursor: pointer; background: var(--bg-panel, #191c21); }
   .card:hover { border-color: var(--border-2, #333a44); }
@@ -111,6 +137,15 @@
 </header>
 
 <main>
+  <!-- dock 模式的选择器：右栏没有空间放列表，用一个下拉替代。
+       必须放在 #list **外面** —— renderList() 会 `$('list').textContent = ''`
+       清空整个列表容器，放在里面会被一起清掉（真机验收抓到的）。 -->
+  <div id="dockPicker">
+    <div class="dock-head">
+      <span class="dock-title">Mission Desk</span>
+    </div>
+    <select id="dockSelect" aria-label="选择 Mission"></select>
+  </div>
   <aside id="list"></aside>
   <section id="detail" class="empty">选择一个 Mission 查看详情</section>
 </main>
@@ -133,6 +168,11 @@
 </dialog>
 
 <script>
+// dock 模式：右栏（380px）用单列布局。同一个文件两种布局，
+// 避免维护两份 UI（那必然漂移）。
+const DOCK_MODE = new URLSearchParams(location.search).get('dock') === '1';
+if (DOCK_MODE) document.body.classList.add('dock');
+
 'use strict';
 
 // 这个页面只做三件事：调 IPC、渲染、把"不确定"如实呈现。
@@ -218,10 +258,38 @@ function relativeTime(observedAtMs) {
 
 // ------------------------------------------------------------------ 渲染
 
+// dock 模式：下拉切换 Mission。复用与列表点击同一条路径。
+function bindDockPicker() {
+  const select = $('dockSelect');
+  if (!select) return;
+  select.addEventListener('change', async () => {
+    const id = select.value;
+    if (!id || id === state.selectedId) return;
+    state.selectedId = id;
+    renderList();
+    await loadDetail(id);
+  });
+}
+
 function renderList() {
   const box = $('list');
   box.textContent = '';
   const active = state.missions.filter((m) => m.status === 'active');
+
+  // dock 模式：用下拉替代列表
+  const select = $('dockSelect');
+  if (select) {
+    select.textContent = '';
+    if (state.missions.length === 0) {
+      select.append(el('option', { value: '', text: '（还没有 Mission）' }));
+    } else {
+      for (const m of state.missions) {
+        const opt = el('option', { value: m.missionId, text: m.title || m.missionId });
+        if (state.selectedId === m.missionId) opt.selected = true;
+        select.append(opt);
+      }
+    }
+  }
 
   if (state.missions.length === 0) {
     // 空状态不是"占位文案"。新用户看到的第一屏应该是**明确的第一步**，
@@ -789,10 +857,17 @@ async function refresh() {
   if (state.selectedId && !state.missions.some((m) => m.missionId === state.selectedId)) {
     state.selectedId = null;
   }
+  // dock 模式：没有选中时自动选第一个——右栏应该"打开就有内容"，
+  // 不该要求用户先点一下才看到东西。
+  if (DOCK_MODE && !state.selectedId && state.missions.length > 0) {
+    state.selectedId = state.missions[0].missionId;
+  }
   renderList();
   if (state.selectedId) await loadDetail(state.selectedId);
   else renderDetail();
 }
+
+bindDockPicker();
 
 async function selectMission(missionId) {
   state.selectedId = missionId;

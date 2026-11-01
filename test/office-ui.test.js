@@ -1002,8 +1002,11 @@ test('window manager: M4.2 shell — rail + harness views compose, the office sw
   assert.equal(office.opts.webPreferences.preload, path.join(ROOT, 'src', 'office', 'office-preload.js'));
   // v0.7 P1.5: the office view shrinks by the 380px work dock on its right.
   assert.deepEqual(office.bounds, { x: 44, y: 0, width: 856, height: 800 });
-  const dock = views.find((v) => v.opts.webPreferences.preload.endsWith('work-preload.js'));
-  assert.ok(dock, 'the work dock view exists');
+  // 2026-11-01：dock 换成 Mission Desk（mission-desk.html?dock=1 + settings-preload）。
+  // 它不再是 work.html 的 compact 模式——常驻右栏要回答"现在发生什么"，
+  // 而不是放一个工作区任务表单。
+  const dock = views.find((v) => v.opts.webPreferences.preload.endsWith('settings-preload.js'));
+  assert.ok(dock, 'the mission desk dock view exists');
   assert.deepEqual(dock.bounds, { x: 900, y: 0, width: 380, height: 800 });
   wm.broadcastToShellViews('shell:theme', 'dark');
   assert.deepEqual(office.sent.filter((entry) => entry[0] === 'shell:theme').at(-1), ['shell:theme', 'dark'], 'the office view receives the theme push too');

@@ -1,0 +1,76 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "dock mode is active (body.dock)",
+      "ok": true,
+      "detail": "{\"dockClass\":true,\"picker\":\"block\",\"listDisplay\":\"block\"}"
+    },
+    {
+      "name": "the Mission picker is visible in dock mode",
+      "ok": true,
+      "detail": "block"
+    },
+    {
+      "name": "the picker spans the full width (single column, not a squeezed双栏)",
+      "ok": true,
+      "detail": "list=380 doc=380"
+    },
+    {
+      "name": "the detail pane sits BELOW the picker (vertical stack)",
+      "ok": true,
+      "detail": "detailTop=103 listBottom=103"
+    },
+    {
+      "name": "there is no horizontal overflow at 380px",
+      "ok": true,
+      "detail": "false"
+    },
+    {
+      "name": "it shows the Mission title (in the dock picker)",
+      "ok": true,
+      "detail": "DshCockpit Runtime 集成"
+    },
+    {
+      "name": "it shows the Mission intent",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "it shows workstreams",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "it shows decisions",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "it no longer shows the old task panel (\"先选一个工作区\")",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "it no longer shows the old task form",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "a Mission is auto-selected so the dock opens with content",
+      "ok": true,
+      "detail": "{\"value\":\"mis-1\",\"count\":1}"
+    },
+    {
+      "name": "screenshot captured at 380px",
+      "ok": true,
+      "detail": "760x1584"
+    },
+    {
+      "name": "the renderer had no fatal errors",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

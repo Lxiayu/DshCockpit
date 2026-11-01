@@ -28,13 +28,20 @@ test('dock: a 380px shell view sits at the right edge of the office view', () =>
   assert.match(WM, /const WORK_DOCK_WIDTH = 380;/);
   assert.match(WM, /let workDockView = null;/);
   const block = WM.slice(WM.indexOf('function showWorkDock()'), WM.indexOf('function sendOfficeDockLayout('));
-  assert.match(block, /preload: path\.join\(__dirname, 'work', 'work-preload\.js'\)/);
-  assert.match(block, /loadFile\(path\.join\(__dirname, 'work', 'work\.html'\), \{ query: \{ compact: '1' \} \}\)/);
+  // 2026-11-01：dock 从「work.html 的 compact 模式」改成「Mission Desk」。
+  // 理由：work.html 是"工作区 + 单次任务"，不是 Mission Desk；常驻右栏
+  // 应该回答"现在发生什么、我该关注什么"，而不是再放一个任务表单。
+  assert.match(block, /preload: path\.join\(__dirname, 'settings-preload\.js'\)/);
+  assert.match(block, /loadFile\(path\.join\(__dirname, 'mission-desk\.html'\), \{ query: \{ dock: '1' \} \}\)/);
   // geometry: office shrinks by exactly the dock width
   assert.match(WM, /const officeWidth = dockActive \? Math\.max\(0, mainArea\.width - WORK_DOCK_WIDTH\) : mainArea\.width;/);
   assert.match(WM, /x: mainArea\.x \+ officeWidth,/);
-  // both work surfaces receive the same shell:work pushes
-  assert.match(WM, /function sendToWorkView\(channel, payload\) \{[\s\S]{0,200}for \(const view of \[workView, workDockView\]\)/);
+  // dock 不再消费 work:update（它是 Mission Desk，不是 work 页面）。
+  // 注意：broadcastToShellViews（主题/i18n 广播）**仍然**要发给两个视图——
+  // 那是跨页面的全局能力，和 work:update 是两回事。
+  const pushFn = WM.slice(WM.indexOf('function sendToWorkView('), WM.indexOf('function closeOfficeShellView('));
+  assert.doesNotMatch(pushFn, /workDockView/,
+    'sendToWorkView must not push work:update to the Mission Desk dock');
   // dock mode is announced to the office page and reverted when leaving
   assert.match(WM, /webContents\.send\('shell:office-layout', \{ dock: !!dock, width: WORK_DOCK_WIDTH \}\)/);
   assert.match(WM, /showWorkDock\(\);/);

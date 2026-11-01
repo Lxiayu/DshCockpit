@@ -213,12 +213,17 @@ function createWindowManager(deps) {
           nodeIntegration: false,
           sandbox: true,
           backgroundThrottling: false,
-          preload: path.join(__dirname, 'work', 'work-preload.js'),
+          // Mission Desk 需要 mission 桥 —— settings-preload 是唯一同时提供
+          // mission + shell 的那个（与独立 Mission Desk 窗口同源，见 aux-windows.js）。
+          preload: path.join(__dirname, 'settings-preload.js'),
         },
       });
-      hardenWebContents(workDockView.webContents, { label: 'work dock view', log });
-      workDockView.webContents.loadFile(path.join(__dirname, 'work', 'work.html'), { query: { compact: '1' } });
-      log('[work] dock view created (office right side)');
+      hardenWebContents(workDockView.webContents, { label: 'mission desk dock', log });
+      // 同一个 mission-desk.html，dock=1 切单列布局。
+      // 为什么复用而不是新写一页：两份 UI 必然漂移（todo 列表、状态色、
+      // 错误文案都要同步两处）。这里只让布局随尺寸变。
+      workDockView.webContents.loadFile(path.join(__dirname, 'mission-desk.html'), { query: { dock: '1' } });
+      log('[work] mission desk dock created (office right side)');
     }
     sendOfficeDockLayout(true);
     syncShellViews();
@@ -233,10 +238,10 @@ function createWindowManager(deps) {
   }
 
   function sendToWorkView(channel, payload) {
-    for (const view of [workView, workDockView]) {
-      if (!view) continue;
-      try { view.webContents.send(channel, payload); } catch { /* closing */ }
-    }
+    // dock 现在是 Mission Desk，不再消费 work:update —— 只推给 work 主视图。
+    // 继续广播会往一个不监听的页面发消息（无害但误导）。
+    if (!workView) return;
+    try { workView.webContents.send(channel, payload); } catch { /* closing */ }
   }
 
   function closeOfficeShellView() {
