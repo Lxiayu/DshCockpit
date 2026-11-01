@@ -32,9 +32,9 @@ Harness owns execution.  DshCockpit owns experience, continuity, capability orch
 ## 3. 目录地图
 
 ```
-src/main.js                   壳组合根（IPC、runtime 监督）——6134 行 / 71 handler（原 6385/107）
+src/main.js                   壳组合根（IPC、runtime 监督）——6041 行 / 60 handler（原 6385/107）
 src/runtime-capability.js     能力矩阵：判定 runtime 是否可用（S1，替代版本号门禁）
-src/ipc-*.js                  已提取的 IPC 域（features/mcp/remote/misc/mission/skills/models/scheduled）
+src/ipc-*.js                  已提取 IPC 域（features/mcp/remote/misc/mission/skills/models/scheduled/memory-compact/channels）
 src/window-manager.js         窗口/视图/快照广播
 src/runtime-mux.js            /api/remote.mux 多路复用客户端（$events / session/follow）
 src/harness-rpc.js            Harness RPC 表面
@@ -47,7 +47,7 @@ src/mission/                  Mission Core 纯逻辑层（P1，8 模块 + IPC + 
 src/ipc-mission.js             Mission IPC（单通道 mission:invoke + 18 action）
 src/mission-desk.html          Mission Desk 窗口（P1 首个用户可见界面）
 src/workbench/                工作台（内容/引擎分离；⚠ 已从 asar 排除，见 TD-26）
-test/                         离线测试（node:test，cwd 必须是仓库根；166 套件 / 2362 项）
+test/                         离线测试（node:test，cwd 必须是仓库根；169 套件 / 2388 项）
 docs/                         文档，唯一索引 docs/README.md
 archive/ + docs/archive/      本地保险箱（git 忽略）
 ```
@@ -64,13 +64,13 @@ archive/ + docs/archive/      本地保险箱（git 忽略）
 ## 5. 命令与坑
 
 ```bash
-npm test                                   # 全量（约 2 分钟，2362 项）
+npm test                                   # 全量（约 2 分钟，2388 项）
 node --test test/docs-index.test.js        # 文档索引（毫秒级，改文档后必跑）
 node --check <file>                        # 语法检查
 ```
 
 - **cwd 坑**：Bash 默认 cwd 可能是仓库父目录。一律用绝对路径或 `zsh -c 'cd <repo> && ...'`。
-- **基线**：`CI=1 npm test` → **2362 passed / 0 failed / 1 skipped**（唯一有效基线）。
+- **基线**：`CI=1 npm test` → **2388 passed / 0 failed / 1 skipped**（唯一有效基线）。
   唯一 skip 是 E5a-R1 真机探针（需图形会话）——**Skip 不计作 Pass**，
   由 `scripts/ci-gate.js` 四态报告保证，见 `docs/quality/test-tiers-and-baseline.md`。
 - **pure Node 门禁**：`src/team/runtime/**` 与 `src/office/runtime/**` 禁止 Electron/DOM/fs/网络；
@@ -107,7 +107,7 @@ node --check <file>                        # 语法检查
 - **已消除的债**：TD-02/03/05（#19 Settings 保护）、TD-10（#10 CI 门禁）、
   TD-17（#17 符号引用）、TD-22 部分（#22）、**TD-29（S1 能力探测）**。
 - **仍存在的债**（详见 `docs/quality/tech-debt-inventory.md`）：
-  TD-01 main.js 过载（#22 Phase 1 已提取 6 批共 30 个 handler：mcp/remote/misc/mission/skills/models/scheduled）· TD-04 索引覆盖写 ·
+  TD-01 main.js 过载（#22 Phase 1 已提取 5 批共 29 个 shell handler，107→60）· TD-04 索引覆盖写 ·
   TD-06/07 IPC 无冻结 · TD-15 src/work 语义冲突。
 
 ## 8. 文档入口（按目的）
