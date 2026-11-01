@@ -283,8 +283,53 @@ function renderDetail() {
   box.append(el('h3', { text: '实时状态（Harness 拥有，只读）' }), liveBlock);
 
   // --- 目标 ---
+  //
+  // 第一性原理：Desk 是编辑器，不是只读报表。
+  // 标题/目标写错了却改不了，用户唯一的办法是删掉重建——
+  // 而 Mission 的事实链是不可删的。所以"能改"不是锦上添花，是**纠错能力**。
+  //
+  // 边界：这里**不提供**改 status 的入口。状态变更是独立事实，
+  // 必须走 updateStatus（顶部选择器），不能混进 update 的 patch。
   box.append(el('h2', { text: '目标' }));
-  box.append(el('div', { text: m.intent }));
+  {
+    const wrap = el('div', { class: 'row', style: 'gap:6px;align-items:flex-start' });
+    const view = el('div', { text: m.intent || '（未填写）', style: 'flex:1' });
+    const editBtn = el('button', { text: '改', class: 'tiny' });
+    const editor = el('div', { style: 'flex-basis:100%;display:none;gap:6px;flex-wrap:wrap' });
+    const titleInput = el('input', { placeholder: 'Mission 标题', style: 'flex:1;min-width:160px', value: m.title || '' });
+    const intentInput = el('input', { placeholder: '目标（你的原话）', style: 'flex:2;min-width:200px', value: m.intent || '' });
+    const saveBtn = el('button', { text: '保存' });
+    const cancelBtn = el('button', { text: '取消' });
+    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
+
+    editBtn.addEventListener('click', () => {
+      editor.style.display = 'flex';
+      editBtn.style.display = 'none';
+    });
+    cancelBtn.addEventListener('click', () => {
+      editor.style.display = 'none';
+      editBtn.style.display = '';
+      msg.textContent = '';
+    });
+    saveBtn.addEventListener('click', async () => {
+      msg.textContent = '';
+      const patch = { missionId: m.missionId };
+      if (titleInput.value.trim() && titleInput.value.trim() !== (m.title || '')) patch.title = titleInput.value.trim();
+      if (intentInput.value.trim() !== (m.intent || '')) patch.intent = intentInput.value.trim();
+      if (Object.keys(patch).length === 1) { msg.textContent = '没有改动'; return; }
+      saveBtn.disabled = true;
+      let r;
+      try { r = await api('update', patch); }
+      catch (e) { r = { ok: false, reason: e.message }; }
+      saveBtn.disabled = false;
+      if (r && r.ok) { editor.style.display = 'none'; editBtn.style.display = ''; await refresh(); }
+      else { msg.textContent = '失败：' + ((r && (r.reason || r.code)) || '未知错误'); }
+    });
+
+    editor.append(titleInput, intentInput, saveBtn, cancelBtn, msg);
+    wrap.append(view, editBtn, editor);
+    box.append(wrap);
+  }
 
   // --- 边界 ---
   box.append(el('h2', { text: '边界' }));
@@ -384,6 +429,33 @@ function renderDetail() {
       ul.append(li);
     }
     box.append(ul);
+  }
+  {
+    // 提问。第一性原理：没有它，用户**不能把自己脑子里的疑问记进 Mission**。
+    //
+    // 「未决问题」这一节的存在意义就是"把悬而未决的事留下来"。只能答不能问，
+    // 等于这一节的内容全部来自外部（模型/他人），用户自己无法往里放东西。
+    //
+    // 它与 recordDecision 是配对的：
+    //   决策 = 已经想清楚的；未决问题 = 还没想清楚的。
+    // 两者都是 Shared Context 的入口，只做一半等于只记结论不记悬念。
+    const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
+    const qInput = el('input', { placeholder: '有什么还没想清楚的…', style: 'flex:1;min-width:180px' });
+    const askBtn = el('button', { text: '记下这个问题' });
+    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
+    askBtn.addEventListener('click', async () => {
+      msg.textContent = '';
+      if (!qInput.value.trim()) { msg.textContent = '请填写问题内容'; return; }
+      askBtn.disabled = true;
+      let r;
+      try { r = await api('openQuestion', { missionId: m.missionId, text: qInput.value.trim() }); }
+      catch (e) { r = { ok: false, reason: e.message }; }
+      askBtn.disabled = false;
+      if (r && r.ok) { qInput.value = ''; await refresh(); }
+      else { msg.textContent = '失败：' + ((r && (r.reason || r.code)) || '未知错误'); }
+    });
+    wrap.append(qInput, askBtn, msg);
+    box.append(wrap);
   }
 
   // --- Workstreams ---

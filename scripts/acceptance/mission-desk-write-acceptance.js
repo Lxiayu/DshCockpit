@@ -82,6 +82,22 @@ async function main() {
           const r = store.append('deliverable.registered', reg.deliverable, { missionId });
           return r.ok ? { ok: true, deliverable: reg.deliverable } : { ok: false, reason: r.reason };
         }
+        case 'update': {
+          const patch = {};
+          if (typeof payload.title === 'string') patch.title = payload.title;
+          if (typeof payload.intent === 'string') patch.intent = payload.intent;
+          if (Object.keys(patch).length === 0) return { ok: false, reason: 'nothing to update' };
+          const r = store.append('mission.updated', { missionId: payload.missionId, ...patch }, { missionId });
+          return r.ok ? { ok: true, patched: Object.keys(patch) } : { ok: false, reason: r.reason };
+        }
+        case 'openQuestion': {
+          const q = {
+            questionId: `q-acc-${Date.now()}`, missionId: payload.missionId,
+            text: payload.text, status: 'open', askedAtMs: Date.now(),
+          };
+          const r = store.append('question.opened', q, { missionId });
+          return r.ok ? { ok: true, questionId: q.questionId } : { ok: false, reason: r.reason };
+        }
         case 'linkTaskRef': {
           const taskRefMod = require(path.join(REPO, 'src', 'mission', 'task-ref.js'));
           const built = taskRefMod.buildTaskRef({
@@ -226,6 +242,55 @@ async function main() {
     statusBtnClicked === true && wsAfter && wsAfter.status === 'blocked',
     wsAfter ? `${wsAfter.status}` : 'none');
 
+  // ---- 5.5 标题/目标可就地编辑 ----
+  const editClicked = await ev(`(() => {
+    const btn = [...document.querySelectorAll('button')].find((b) => b.textContent === '改');
+    if (!btn) return false;
+    btn.click();
+    return true;
+  })()`).catch(() => false);
+  await new Promise((r) => setTimeout(r, 400));
+  const edited = await ev(`(() => {
+    const inputs = [...document.querySelectorAll('input')];
+    const title = inputs.find((i) => (i.placeholder || '') === 'Mission 标题');
+    const intent = inputs.find((i) => (i.placeholder || '').includes('目标（你的原话）'));
+    const save = [...document.querySelectorAll('button')].find((b) => b.textContent === '保存');
+    if (!title || !intent || !save) return { ok: false };
+    title.value = '改过的标题';
+    intent.value = '改过的目标';
+    save.click();
+    return { ok: true };
+  })()`).catch(() => ({ ok: false }));
+  await new Promise((r) => setTimeout(r, 1000));
+  const viewAfterEdit = store.missionView(missionId);
+  record('the title and intent can be edited in place',
+    editClicked === true && edited.ok === true
+    && viewAfterEdit.mission.title === '改过的标题'
+    && viewAfterEdit.mission.intent === '改过的目标',
+    JSON.stringify({ title: viewAfterEdit.mission.title, intent: viewAfterEdit.mission.intent }));
+
+  const redrawnTitle = await ev(`document.body.innerText.includes('改过的标题')`).catch(() => false);
+  record('the edited title is visible after saving', redrawnTitle === true, String(redrawnTitle));
+
+  // ---- 5.6 用户能自己提问 ----
+  const asked = await ev(`(() => {
+    const inputs = [...document.querySelectorAll('input')];
+    const q = inputs.find((i) => (i.placeholder || '').includes('还没想清楚'));
+    const btn = [...document.querySelectorAll('button')].find((b) => b.textContent === '记下这个问题');
+    if (!q || !btn) return false;
+    q.value = '要不要拆成两个包？';
+    btn.click();
+    return true;
+  })()`).catch(() => false);
+  await new Promise((r) => setTimeout(r, 1000));
+  const qs = store.missionView(missionId).questions || [];
+  record('the user can record their own open question',
+    asked === true && qs.length === 1 && qs[0].text === '要不要拆成两个包？',
+    qs.length ? JSON.stringify({ text: qs[0].text, status: qs[0].status }) : 'none');
+  record('a newly asked question is immediately answerable (same render path)',
+    qs.length === 1 && (await ev(`document.body.innerText.includes('要不要拆成两个包')`).catch(() => false)) === true,
+    'visible in list');
+
   // ---- 6. 关联执行（TaskRef）----
   const linkClicked = await ev(`(() => {
     const inputs = [...document.querySelectorAll('input')];
@@ -268,16 +333,20 @@ async function main() {
   // 复用文件顶部已解构的 createMissionStore（重复解构会 SyntaxError）
   const reopened = createMissionStore({ workspaceDir: wsDir });
   const afterRestart = reopened.missionView(missionId);
-  record('everything survives a restart (decisions/deliverables/workstreams/taskRefs)',
+  record('everything survives a restart (decisions/deliverables/workstreams/taskRefs/questions/title)',
     (afterRestart.decisions || []).length === 1
     && (afterRestart.deliverables || []).length === 1
     && (afterRestart.workstreams || []).length === 1
-    && (afterRestart.taskRefs || []).length === 1,
+    && (afterRestart.taskRefs || []).length === 1
+    && (afterRestart.questions || []).length === 1
+    && afterRestart.mission.title === '改过的标题',
     JSON.stringify({
       d: (afterRestart.decisions || []).length,
       dv: (afterRestart.deliverables || []).length,
       ws: (afterRestart.workstreams || []).length,
       tr: (afterRestart.taskRefs || []).length,
+      q: (afterRestart.questions || []).length,
+      title: afterRestart.mission.title,
     }));
 
   // ---- 8. 截图 + 错误 ----

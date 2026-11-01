@@ -48,6 +48,26 @@
       "detail": "blocked"
     },
     {
+      "name": "the title and intent can be edited in place",
+      "ok": true,
+      "detail": "{\"title\":\"改过的标题\",\"intent\":\"改过的目标\"}"
+    },
+    {
+      "name": "the edited title is visible after saving",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "name": "the user can record their own open question",
+      "ok": true,
+      "detail": "{\"text\":\"要不要拆成两个包？\",\"status\":\"open\"}"
+    },
+    {
+      "name": "a newly asked question is immediately answerable (same render path)",
+      "ok": true,
+      "detail": "visible in list"
+    },
+    {
       "name": "an execution can be linked from the UI",
       "ok": true,
       "detail": "refs=1"
@@ -63,9 +83,9 @@
       "detail": "clean"
     },
     {
-      "name": "everything survives a restart (decisions/deliverables/workstreams/taskRefs)",
+      "name": "everything survives a restart (decisions/deliverables/workstreams/taskRefs/questions/title)",
       "ok": true,
-      "detail": "{\"d\":1,\"dv\":1,\"ws\":1,\"tr\":1}"
+      "detail": "{\"d\":1,\"dv\":1,\"ws\":1,\"tr\":1,\"q\":1,\"title\":\"改过的标题\"}"
     },
     {
       "name": "screenshot captured",
