@@ -1,11 +1,11 @@
 # Mission Desk 写入路径真机验收（P4，2026-11-01）
 
-> 探针：`scripts/acceptance/mission-desk-write-acceptance.js`（15/15 通过）
+> 探针：`scripts/acceptance/mission-desk-write-acceptance.js`（19/19 通过）
 > 证据：[`acceptance/mission-desk-write-acceptance-2026-11-01.json`](acceptance/mission-desk-write-acceptance-2026-11-01.json)
 
 ## 0. 一句话结论
 
-**15/15 通过。** Mission Desk 从"只读报表"变成"编辑器"，并且打通了 Mission↔Harness 的连接点。
+**19/19 通过。** Mission Desk 从"只读报表"变成"编辑器"，并且打通了 Mission↔Harness 的连接点。
 
 ## 1. 起因：审计发现 Desk 是只读的
 
@@ -59,7 +59,7 @@ decidedBy: payload.decidedBy || 'user'       // 用户拍的板
 `div.card[role="button"]`，没有那个属性 → 全部 8 项失败。
 **这恰好证明了真机验收的价值**——离线测试永远发现不了选择器写错。
 
-## 5. 验收结果（15 项）
+## 5. 验收结果（19 项）
 
 | # | 检查 | 实际值 |
 |---|---|---|
@@ -77,7 +77,11 @@ decidedBy: payload.decidedBy || 'user'       // 用户拍的板
 | 12 | **可从 UI 关联一次执行（TaskRef）** |  |
 | 13 | **关联的是派生句柄不是 sessionId** |  |
 | 14 | **sessionId 全程未落盘** |  |
-| 15 | **重启后四类数据全部保留** |  |
+| 15 | **重启后四类数据全部保留** | `{d:1,dv:1,ws:1,tr:1}` |
+| 16 | **标题/目标可就地编辑** | `改过的标题 / 改过的目标` |
+| 17 | 编辑后可见 | `true` |
+| 18 | **用户能自己提问** | `要不要拆成两个包？` (open) |
+| 19 | 重启后 title + questions 也保留 | `{d:1,dv:1,ws:1,tr:1,q:1,title:"改过的标题"}` |
 
 截图确认：决策区显示「用 SQLite 而不是 JSON **已接受**」+ 理由；
 工作流显示 `[blocked] 接入 StepFun` + 三个状态按钮；
@@ -95,3 +99,19 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron \
 `update`（改标题/目标）和 `openQuestion`（主动提问）还没有 UI。
 优先级低于已做的三条——它们是"编辑已有内容"，
 而这三条是"产出新事实"。
+
+
+## 8. 终态：Desk 的 action 覆盖率
+
+20 个 action，UI 覆盖 **18 个**。剩下 2 个是**有理由的**：
+
+| action | 为什么不接 |
+|---|---|
+| `listTaskRefs` | UI 直接从 `missionView().taskRefs` 读，单独拉一次是冗余 |
+| `openDesk` | Desk 不需要"打开自己"（`office:open-desk` 覆盖了从办公室进来的路径） |
+
+`test/mission-desk-action-parity.test.js` 用一个白名单钉住这个结论：
+**未覆盖的 action 必须写理由**，否则测试红。
+
+这条断言的价值：一个"忘了做"的缺口和一个"刻意不做"的缺口在代码里长得
+一模一样，只有写下来才能区分。
