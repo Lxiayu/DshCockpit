@@ -69,6 +69,7 @@ const { registerMiscDomainsIpc } = require('./ipc-misc-domains');
 const { registerMissionIpc } = require('./ipc-mission');
 const { registerSkillsIpc } = require('./ipc-skills');
 const { registerModelsIpc } = require('./ipc-models');
+const { registerScheduledIpc } = require('./ipc-scheduled');
 const { createMcpConnect } = require('./mcp-connect');
 const { createMcpImport } = require('./mcp-import');
 const compact = require('./compact');
@@ -2612,81 +2613,12 @@ function registerIpc() {
   // {ok:false, canceled:true} / {ok:false, code, error}。
   ipcMain.handle('shell:export-diagnostics', () => exportDiagnosticsBundleInteractive());
   // quickask:submit / quickask:close — 已提取到 src/ipc-misc-domains.js
-  ipcMain.handle('shell:scheduled-list', () => ({
-    tasks: settings.get().scheduledTasks || [],
-    running: [...scheduledRunning],
-  }));
-  ipcMain.handle('shell:scheduled-upsert', (_e, task) => {
-    // sanitize: keep only known fields with sane types
-    const kind = ['every', 'daily', 'weekly'].includes(task.kind) ? task.kind : 'every';
-    const weeklyDay = Number(task.weeklyDay);
-    const clean = {
-      id: typeof task.id === 'string' && task.id ? task.id : undefined,
-      name: typeof task.name === 'string' ? task.name.slice(0, 100) : t(lang(), 'scheduled.defaultName'),
-      prompt: typeof task.prompt === 'string' ? task.prompt.slice(0, 4000) : '',
-      templateId: typeof task.templateId === 'string' ? task.templateId.slice(0, 64) : undefined,
-      kind,
-      everySeconds: Math.max(60, Number(task.everySeconds) || 3600),
-      dailyTime: /^\d{1,2}:\d{2}$/.test(task.dailyTime || '') ? task.dailyTime : '09:00',
-      weeklyDay: Number.isInteger(weeklyDay) && weeklyDay >= 0 && weeklyDay <= 6 ? weeklyDay : 1,
-      weeklyTime: /^\d{1,2}:\d{2}$/.test(task.weeklyTime || '') ? task.weeklyTime : '09:00',
-      enabled: task.enabled !== false,
-      nextRunAt: Number(task.nextRunAt) || undefined,
-      lastRunAt: typeof task.lastRunAt === 'string' ? task.lastRunAt : undefined,
-    };
-    const list = settings.get().scheduledTasks || [];
-    if (clean.id) {
-      const idx = list.findIndex((t) => t.id === clean.id);
-      if (idx !== -1) {
-        const old = list[idx];
-        // schedule semantics changed → drop the stale nextRunAt so the
-        // scheduler recomputes from the new plan instead of firing at the
-        // old (possibly already-due) moment
-        const samePlan = old.kind === clean.kind
-          && (clean.kind !== 'every' || old.everySeconds === clean.everySeconds)
-          && (clean.kind !== 'daily' || old.dailyTime === clean.dailyTime)
-          && (clean.kind !== 'weekly' || (old.weeklyDay === clean.weeklyDay && old.weeklyTime === clean.weeklyTime));
-        if (!samePlan) clean.nextRunAt = undefined;
-        list[idx] = { ...old, ...clean };
-      } else list.push(clean);
-    } else {
-      clean.id = `task-${Date.now()}`;
-      clean.nextRunAt = undefined; // fresh task: let the scheduler plan the first run
-      list.push(clean);
-    }
-    settings.patch({ scheduledTasks: list });
-    startScheduler();
-    broadcastScheduled();
-    return { ok: true, tasks: settings.get().scheduledTasks };
+  // shell:scheduled-* 的 6 个 handler —— Issue #22 Phase 1 已提取到 src/ipc-scheduled.js
+  // （连同"计划语义变更时丢弃 nextRunAt"与"run 的并发去重"两段域逻辑）
+  registerScheduledIpc(ipcMain, {
+    settings, scheduledRunning, startScheduler, broadcastScheduled, runScheduledTask, notify, t, lang,
   });
-  ipcMain.handle('shell:scheduled-remove', (_e, id) => {
-    const list = (settings.get().scheduledTasks || []).filter((t) => t && t.id !== id);
-    settings.patch({ scheduledTasks: list });
-    startScheduler();
-    broadcastScheduled();
-    return { ok: true };
-  });
-  ipcMain.handle('shell:scheduled-history', () => settings.get().scheduledHistory || []);
-  ipcMain.handle('shell:scheduled-clear-history', () => {
-    settings.patch({ scheduledHistory: [] });
-    broadcastScheduled();
-    return { ok: true };
-  });
-  ipcMain.handle('shell:scheduled-run', async (_e, id) => {
-    const task = (settings.get().scheduledTasks || []).find((tk) => tk && tk.id === id);
-    if (!task) return { ok: false, reason: 'task not found' };
-    if (scheduledRunning.has(id)) return { ok: false, reason: 'already running' };
-    scheduledRunning.add(id);
-    broadcastScheduled();
-    try {
-      const r = await runScheduledTask(task);
-      return { ok: !!r.ok };
-    } finally {
-      scheduledRunning.delete(id);
-      settings.save(); // persist any nextRunAt/lastRunAt mutation
-      broadcastScheduled();
-    }
-  });
+
   // "create in chat": copy a guiding prompt, surface the main window, notify
   ipcMain.handle('shell:copy-and-show', (_e, text, title, body) => {
     clipboard.writeText(String(text || ''));
