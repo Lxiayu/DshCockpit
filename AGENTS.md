@@ -15,7 +15,7 @@ Harness owns execution.  DshCockpit owns experience, continuity, capability orch
 **不做什么**（硬边界，见 `docs/adr/ADR-0001-repositioning-ai-team-workspace.md`）：
 不自研 Agent Loop / 通用 Harness；不做第二个 Harness 桌面壳；不做多 Runtime；不做通用聊天客户端。
 
-**当前阶段**：P0 地基校准（审计 + 战略 + POC）。路线图见 `docs/product/product-roadmap.md`。
+**当前阶段**：P3 已完成（见 §7）。路线图见 `docs/product/product-roadmap.md`。
 
 ## 2. 架构铁律（任何改动不得违反）
 
@@ -89,27 +89,15 @@ node --check <file>                        # 语法检查
 
 ## 7. 当前状态与下一步
 
-- **2026-11-01 完成**：战略重定位（ADR-0001）、四路审计、领域模型、6 份 ADR、第三方评估。
-- **本轮计划**：`docs/plans/active/P0-AUDIT-AND-P1-MISSION-KICKOFF-2026-11-01.md`
-- **P0 完成（2026-11-01）**：#21 账本 / #10 CI 门禁 / #14 许可证 / #9 POC / #19 Settings / #22 IPC 安全网。
-  8 项完成条件中 **7 项达成**；唯一未达成：`agentTeam` 字段形状需真实模型调用验证（ADR-0002 R0）。
-- **S1 完成（2026-11-01）**：runtime 兼容层改为**能力探测**（TD-29 已解决）。
-  `src/runtime-capability.js` 用能力声明 + 已知矩阵 + 四态判定替代版本比较：
-  `0.2.1-rc.5` / `0.2.2-alpha.2` 判 **supported**（POC 实测 16/16），`0.1.5-rc.2` 判 degraded
-  （无 agent-team），未测过的版本判 **unverified 但放行**（"没测过 ≠ 不能用"）。
-- **P1 完成（2026-11-01）**：Mission Core 四层全部落地——
-  `src/mission/`（9 模块纯逻辑）+ `src/ipc-mission.js`（18 action）
-  + `src/mission-desk.html`（UI）+ **Brief 同步进 `<workspace>/AGENTS.md`**。
-  关键：dsh 每次 Session 启动都读 AGENTS.md → Brief 写进去就会在下次会话被读到。
-  192 项测试含端到端；真机 10/10；唯一未验证：Brief 真被下次会话读到（需 #23）。
-- **P2 全部完成（2026-11-01）**，5 个工作包均有真机证据（10/10·18/18·10/10·18/18·11/11）。
-  Companion = 独立常驻小窗（220×44、alwaysOnTop），**不加载 PixiJS**。
-- **P3 完成（2026-11-01）**：2 个真实 Pack（`workspace-verification` + `research-report`
-  Starter Kit）+ 设置页「能力包」入口（真机 13/13）。**verify 是核心不是附属**：
-  四态结果，skipped 不计作 passed、全部 skipped 也算失败。CI 门禁已接入。
-  ⚠ 已知偶发：`runtime-mux.test.js` 的 reconnect 用例。
-- **ADR-0001..0006 全部已接受**（2026-11-01）。ADR-0002 附退役硬约束 R0–R5（禁止直接删旧 Team Runtime）。
-- **债**：已消除 TD-02/03/05/04/08/09/10/15/17/29/32；仍存 TD-01（main.js，#22 已提取 29 handler）· TD-06/07（IPC 冻结）。
+**P0（地基）7/8 · P1（Mission Core）✅ · P2（Office 落地）✅ · P3（Capability Pack）✅ · P4 未排期**
+
+阶段交付明细、证据位置、已知问题见 `docs/product/delivery-status.md`（唯一来源，本文件不重复）。
+
+- **唯一未达成的 P0 条件**：`agentTeam` 字段形状需真实模型调用验证（#23，需 API key）。
+- **唯一未验证的 P1 项**：Brief 是否真被下次会话读到（同需 #23）。
+- **已知偶发**：`test/runtime-mux.test.js` 的 reconnect 用例（并发时序，单独重跑通过）。
+- **仍存的债**：TD-01（main.js 过载）· TD-06/07（IPC payload 未冻结）。
+- **ADR-0001..0006 全部已接受**；ADR-0002 附退役硬约束 R0–R5（禁止直接删旧 Team Runtime）。
 
 ## 8. 文档入口（按目的）
 
@@ -118,6 +106,7 @@ node --check <file>                        # 语法检查
 | 了解产品定位与边界 | `docs/product/product-vision.md` |
 | 知道什么允许/禁止 | `docs/product/product-principles.md` |
 | 知道下一步做什么 | `docs/product/product-roadmap.md` |
+| 知道各阶段交付了什么 | `docs/product/delivery-status.md` |
 | 理解领域模型 | `docs/architecture/domain-model.md` |
 | 理解运行时桥接 | `docs/architecture/runtime-bridge.md` |
 | 理解办公室 | `docs/architecture/office-runtime.md` |

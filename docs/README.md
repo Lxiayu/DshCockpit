@@ -18,6 +18,7 @@
 | `docs/product/product-vision.md` | **现行权威** | 定位、战略边界、单一事实源矩阵、90 天判据 |
 | `docs/product/product-principles.md` | **现行权威** | 第一性原理八问 + Harness Engineering 本地化 + 强制化清单 |
 | `docs/product/product-roadmap.md` | **草案（待拍板）** | P0–P4 分期、每阶段退出条件、Deferred 清单 |
+| `docs/product/delivery-status.md` | **交付状态** | 各阶段交付了什么、证据在哪、还剩什么（P0-P3 历史 + 已知问题） |
 | `docs/product/user-journeys.md` | **草案（待拍板）** | 新手初始化/Mission/Desk/办公室物件/Companion 的交互设计 |
 | `docs/architecture/domain-model.md` | **设计阶段** | Mission/Workstream/SharedContext/TaskRef/Deliverable 领域模型 |
 | `docs/architecture/mission-core.md` | **设计阶段** | Mission Core 实现设计（存储/事件/恢复/边界铁律） |

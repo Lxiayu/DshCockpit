@@ -81,6 +81,46 @@ test('docs-index: AGENTS.md stays a map, not a manual (<= 130 lines)', () => {
   assert.ok(lines <= 130, `AGENTS.md is ${lines} lines — split details into docs/ and keep the map lean`);
 });
 
+// ---------------------------------------------------------------------------
+// 内聚门禁（2026-11-01 加）
+//
+// 起因：AGENTS.md 触到 130 行上限时，我的做法是**把多条事实压进一行**
+// 来凑数——"P3 完成 + 2 个 Pack + 真机 13/13 + 四态结论"挤在同一行。
+//
+// 这是拿耦合伪装成合规：行数达标了，但 AGENTS.md 悄悄变成了
+// "阶段交付历史 + 开发规则"两件事的混合体，职责不再单一。
+//
+// 行数门禁只能限制**体积**，管不了**分布**。所以补这一条：
+//   AGENTS.md 是地图 → 只留当前状态 + 指针
+//   delivery-status.md 是台账 → 承载各阶段交付明细
+//
+// 若有人再往 AGENTS.md 里塞阶段完成记录，这里会失败并告诉他该放哪。
+// ---------------------------------------------------------------------------
+
+test('docs-index: AGENTS.md delegates phase history to delivery-status.md (cohesion)', () => {
+  const text = fs.readFileSync(AGENTS, 'utf8');
+  const statusPath = path.join(ROOT, 'docs', 'product', 'delivery-status.md');
+  assert.ok(fs.existsSync(statusPath), 'docs/product/delivery-status.md must exist — it is the phase ledger');
+
+  // 阶段完成记录的形态：`**P1 完成（2026-...` / `**P2 全部完成...`
+  const phaseRecord = /\*\*P\d[^*]*完成/;
+  assert.ok(!phaseRecord.test(text),
+    'AGENTS.md must not record per-phase delivery history — put it in docs/product/delivery-status.md');
+
+  // 但必须**指向**台账，否则读者找不到
+  assert.match(text, /docs\/product\/delivery-status\.md/,
+    'AGENTS.md section 7 must link to delivery-status.md');
+});
+
+test('docs-index: AGENTS.md keeps a pointer, delivery-status.md keeps the evidence', () => {
+  const status = fs.readFileSync(path.join(ROOT, 'docs', 'product', 'delivery-status.md'), 'utf8');
+  // 台账必须真的承载证据索引，而不是一句"见别处"
+  for (const marker of ['P0', 'P1', 'P2', 'P3']) {
+    assert.ok(status.includes(marker), `delivery-status.md must cover ${marker}`);
+  }
+  assert.match(status, /docs\/quality\//, 'the ledger must point at the acceptance reports');
+});
+
 test('docs-index: no duplicated single-source docs at the repo root', () => {
   // 根目录只允许产品入口文档 + AGENTS.md；契约/计划/研究一律在 docs/。
   const allowed = new Set(['AGENTS.md', 'README.md', 'README.en.md', 'DESIGN.md', 'FEATURES.md', 'RELEASE.md']);
