@@ -133,6 +133,7 @@
 | `docs/quality/tech-debt-inventory.md` | 审计报告（2026-11-01） | 壳层技术债清单（编号/位置/证据/影响/优先级/是否阻塞新方向） |
 | `docs/quality/prompt-gap-analysis-2026-11-01.md` | **原始需求书差距分析** | 九大交付物逐条核对；最大缺口是 Shared Context 只做了 1/3 |
 | `docs/quality/mission-desk-ux-audit-2026-11-01.md` | **Mission Desk UX 审计（Phase 0）** | 三个关键事实 + 对提示词的修正 + MVP 建议 |
+| `docs/quality/mission-desk-mvp-analysis-2026-11-01.md` | **Mission Desk MVP 深度分析** | 按"能否闭合"分类；纠正我上一轮的错误判断 |
 | `docs/quality/testing-strategy.md` | 审计报告（2026-11-01） | 测试体系盘点：137 个套件真实构成、门禁类型、变异纪律、缺口与改进建议 |
 | `docs/quality/quality-gates.md` | **现行（2026-11-01）** | 质量门禁与 CI 策略："什么算通过"的定义 |
 | `docs/quality/compatibility-ledger-spec.md` | **规范草案（2026-11-01，待拍板）** | 兼容性账本 v2：Installed/Healthy/Compatible/Supported 四级分离、通道策略、回写机制（修复 Issue #21 根因） |
