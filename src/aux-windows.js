@@ -28,11 +28,16 @@ function createAuxWindows(deps) {
     appVersion = () => '',
     onLoadingError = () => {},
     log = () => {},
+    // P2.4：定位常驻小窗到工作区右下角。可选注入——
+    // 单元测试拿不到 Electron 的 screen，缺省时跳过低定位（用默认位置）。
+    screen = null,
   } = deps;
 
   let quickAskWindow = null;
   let searchWindow = null;
   let missionDeskWindow = null;
+  // P2.4：常驻小窗（独立窗口，不随主窗口销毁）
+  let companionWindow = null;
   let loadingWindow = null;
   let pendingLoadingText = null;
 
@@ -215,10 +220,87 @@ function createAuxWindows(deps) {
   function openMissionDesk() { return createMissionDesk(); }
   function hasMissionDesk() { return !!missionDeskWindow && !missionDeskWindow.isDestroyed(); }
 
+  // ---------------------------------------------------------------- P2.4 Companion
+  //
+  // 第一性原理：为什么是独立 BrowserWindow，不是主窗口的子视图
+  //
+  //   验收标准要求「把办公室收成常驻小窗」，且主窗口收起后它仍在。
+  //   子视图（WebContentsView）随主窗口销毁 —— 做不到。
+  //
+  //   代价是多一个渲染进程，但它加载的是**极简页面**（一个点 + 一行字），
+  //   不加载 PixiJS。常驻成本可控。
+  //
+  // 窗口特性（每一条都有理由）：
+  //   · frameless      —— 常驻小窗不该有标题栏
+  //   · alwaysOnTop    —— 否则切到别的应用就看不见了，"常驻"失去意义
+  //   · skipTaskbar    —— 它是一个挂件，不是主任务
+  //   · resizable:false—— 内容只有一行字，改大小没有意义
+  function createCompanion() {
+    if (companionWindow && !companionWindow.isDestroyed()) {
+      companionWindow.show();
+      return companionWindow;
+    }
+    companionWindow = new BrowserWindow({
+      width: 220,
+      height: 44,
+      show: false,
+      frame: false,
+      resizable: false,
+      maximizable: false,
+      minimizable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      backgroundColor: '#181a20',
+      // 贴右下角：最不挡事的位置
+      x: undefined,
+      y: undefined,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        preload: path.join(__dirname, 'companion-preload.js'),
+      },
+    });
+    companionWindow.loadFile(path.join(__dirname, 'companion.html'));
+    hardenWebContents(companionWindow.webContents, { label: 'companion' });
+    // 定位到工作区右下角（用 screen 的 workArea，避开任务栏/Dock）
+    if (screen && typeof screen.getPrimaryDisplay === 'function') {
+      try {
+        const { workArea } = screen.getPrimaryDisplay();
+        companionWindow.setPosition(
+          workArea.x + workArea.width - 220 - 24,
+          workArea.y + workArea.height - 44 - 24,
+        );
+      } catch { /* 定位失败不阻塞创建，Electron 会给默认位置 */ }
+    }
+    companionWindow.once('ready-to-show', () => companionWindow.show());
+    companionWindow.on('closed', () => { companionWindow = null; });
+    return companionWindow;
+  }
+
+  /** 推状态给小窗（主进程调用；派生在 companion-state.js 里已做完）。 */
+  function pushCompanionState(state) {
+    if (!companionWindow || companionWindow.isDestroyed()) return false;
+    try { companionWindow.webContents.send('companion:state', state); return true; }
+    catch { return false; }
+  }
+
+  function closeCompanion() {
+    if (companionWindow && !companionWindow.isDestroyed()) companionWindow.close();
+    companionWindow = null;
+  }
+
+  function hasCompanion() { return !!companionWindow && !companionWindow.isDestroyed(); }
+  function setCompanionVisible(visible) {
+    if (!companionWindow || companionWindow.isDestroyed()) return;
+    if (visible) companionWindow.show(); else companionWindow.hide();
+  }
+
   return {
     createQuickAsk, openQuickAsk, closeQuickAsk, hasQuickAsk,
     openSearchWindow, closeSearchWindow, hasSearch,
     openMissionDesk, hasMissionDesk,
+    createCompanion, pushCompanionState, closeCompanion, hasCompanion, setCompanionVisible,
     createLoadingWindow, setLoading, closeLoading, showLoadingOnError,
   };
 }

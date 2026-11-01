@@ -68,6 +68,7 @@ const { registerRemoteIpc } = require('./ipc-remote');
 const { registerMiscDomainsIpc } = require('./ipc-misc-domains');
 const { registerMissionIpc } = require('./ipc-mission');
 const { buildMissionBoard } = require('./office/mission-board');
+const { deriveCompanionState, companionSummary } = require('./companion-state');
 const { installPermissionHandlers } = require('./window-hardening');
 const { registerSkillsIpc } = require('./ipc-skills');
 const { registerModelsIpc } = require('./ipc-models');
@@ -218,6 +219,32 @@ function currentMissionBoard() {
       missions: [],
       totals: { activeMissions: 0, openQuestions: 0, decisions: 0 },
     };
+  }
+}
+
+/**
+ * P2.4：Companion 小窗的当前状态。
+ *
+ * 第一性原理：为什么复用 office 快照而不新建数据源
+ *
+ *   Companion 需要的两个数字（待办数、运行数）都已经在 office:state 里。
+ *   新建一条数据通道会造成"两个地方各自算"——迟早不一致。
+ *   所以这里读的是**同一份快照**，派生在 companion-state.js 里做（纯函数）。
+ *
+ * 快照拿不到时如实返回 disconnected，不返回 0 待办（那会让用户以为一切正常）。
+ */
+function currentCompanionState() {
+  try {
+    const snapshot = officeModuleInstance ? officeModuleInstance.state() : null;
+    if (!snapshot) {
+      return { kind: 'disconnected', pendingCount: 0, runningCount: 0 };
+    }
+    const derived = deriveCompanionState(snapshot);
+    const summary = companionSummary(derived);
+    return summary;
+  } catch (error) {
+    log(`[companion] state failed: ${error && error.message}`);
+    return { kind: 'disconnected', pendingCount: 0, runningCount: 0 };
   }
 }
 
@@ -1181,6 +1208,13 @@ function ensureOfficeModule() {
     officeCharacterPackManagerRef = characterPackManager;
     officeModuleInstance.subscribe((snapshot) => {
       try { getWindowManager().broadcastToOfficeViews('office:state', snapshot); } catch { /* no views yet */ }
+      // P2.4：Companion 与办公室消费**同一份快照**，派生是纯函数。
+      // 这样小窗和面板永远不会说不同的话——单一数据源。
+      try {
+        if (auxWindows.hasCompanion()) {
+          auxWindows.pushCompanionState(companionSummary(deriveCompanionState(snapshot)));
+        }
+      } catch { /* 小窗推送失败不能影响办公室渲染 */ }
     });
     // Harness v0.4（阶段1）：真实 dsh 执行链路（默认关闭；env 入口与 UI 入口共享）。
     officeTeamRealInstance = attachOfficeTeamReal(officeModuleInstance, log);
@@ -1546,6 +1580,8 @@ const auxWindows = createAuxWindows({
   prepareCockpitForAuxWindow: () => prepareCockpitForAuxWindow(),
   restoreCockpitRail: () => restoreCockpitRail(),
   appVersion: () => app.getVersion(),
+  // P2.4：Companion 小窗需要 screen 定位到工作区右下角
+  screen,
   onLoadingError: (code, description) => {
     setLoading(t(lang(), 'loading.failed', { msg: description || code }));
   },
@@ -2663,6 +2699,40 @@ function registerIpc() {
     } catch (error) {
       return { ok: false, code: 'DIALOG_FAILED', message: error && error.message };
     }
+  });
+
+  // ---------------------------------------------------------------- P2.4 Companion
+  //
+  // 第一性原理：为什么这里只有两个通道
+  //
+  //   Companion 是**常驻**窗口，它暴露的每个通道都是长期攻击面。
+  //   所以只给两件事：
+  //     · companion:expand —— 展开完整办公室（语义是"开窗口"，不改状态）
+  //     · companion:get-state —— 首次渲染时拉一次（之后靠推送）
+  //
+  //   它拿不到 office:dispatch / office:pending / mission:* —— 那是完整
+  //   办公室和 Mission Desk 的能力，常驻小窗不该有。
+
+  ipcMain.handle('companion:expand', () => {
+    try {
+      // 展开 = 显示并聚焦主窗口。若主窗口已被关闭，则重建它。
+      // 主窗口重建后 Companion 仍在（它是独立窗口）——这是验收标准的必然结果。
+      const wm = getWindowManager();
+      if (wm && wm.hasVisibleMainWindow && wm.hasVisibleMainWindow()) {
+        wm.showMain();
+      } else if (wm && typeof wm.createWindow === 'function') {
+        wm.createWindow(undefined);
+      }
+      return { ok: true };
+    } catch (error) {
+      log(`[companion] expand failed: ${error && error.message}`);
+      return { ok: false, code: 'EXPAND_FAILED' };
+    }
+  });
+
+  ipcMain.handle('companion:get-state', () => {
+    try { return { ok: true, state: currentCompanionState() }; }
+    catch (error) { return { ok: false, code: 'STATE_FAILED' }; }
   });
 
   ipcMain.handle('shell:office-settings-get', () => {

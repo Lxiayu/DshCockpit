@@ -1,0 +1,61 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "the companion page loads with its bridge",
+      "ok": true,
+      "detail": "{\"ready\":\"complete\",\"hasBridge\":\"object\"}"
+    },
+    {
+      "name": "before any push the widget says disconnected (not \"0 items\")",
+      "ok": true,
+      "detail": "{\"kind\":\"disconnected\",\"label\":\"未连接\",\"dotColor\":\"rgb(107, 114, 128)\",\"size\":{\"w\":220,\"h\":44}}"
+    },
+    {
+      "name": "the widget stays small (a persistent widget must not get in the way)",
+      "ok": true,
+      "detail": "{\"w\":220,\"h\":44}"
+    },
+    {
+      "name": "a needs-you state renders the count",
+      "ok": true,
+      "detail": "{\"kind\":\"needs-you\",\"label\":\"3 件待你处理\",\"count\":\"3\",\"dotColor\":\"rgb(255, 92, 92)\"}"
+    },
+    {
+      "name": "a needs-you state turns the dot RED (measured, not just a class)",
+      "ok": true,
+      "detail": "color=rgb(255, 92, 92)"
+    },
+    {
+      "name": "zero pending NEVER shows the alarm red (otherwise users learn to ignore it)",
+      "ok": true,
+      "detail": "color=rgb(74, 222, 128)"
+    },
+    {
+      "name": "an idle widget hides the number entirely",
+      "ok": true,
+      "detail": "{\"kind\":\"idle\",\"label\":\"空闲中\",\"count\":\"\",\"dotColor\":\"rgb(74, 222, 128)\"}"
+    },
+    {
+      "name": "a working state is amber, not alarm red",
+      "ok": true,
+      "detail": "color=rgb(255, 207, 122)"
+    },
+    {
+      "name": "clicking the widget requests the full office",
+      "ok": true,
+      "detail": "calls=1"
+    },
+    {
+      "name": "screenshot captured for visual review",
+      "ok": true,
+      "detail": "needs-you=440x88"
+    },
+    {
+      "name": "the renderer had no fatal errors",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

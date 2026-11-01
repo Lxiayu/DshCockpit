@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>DshCockpit Companion</title>
+  <style>
+    /* P2.4 Companion Mode：常驻小窗。
+       设计约束：只显示**数字**，不加载 PixiJS（常驻成本必须可控）。
+       视觉上要小到不挡事，但数字要能一眼读。 */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+      background: rgba(24, 26, 32, 0.92);
+      color: #e6e8ee;
+      display: flex; align-items: center; justify-content: center;
+      user-select: none; cursor: pointer;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.10);
+      /* 可拖动：常驻窗必须能挪位置 */
+      -webkit-app-region: drag;
+    }
+    #pip {
+      display: flex; align-items: center; gap: 8px;
+      padding: 0 10px; width: 100%;
+    }
+    #dot {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: #6b7280; flex: 0 0 auto;
+      transition: background 160ms ease;
+    }
+    /* 只有真实待办才亮红——0 待办时不亮，否则用户会学会无视它 */
+    body[data-kind="needs-you"] #dot { background: #ff5c5c; }
+    body[data-kind="working"] #dot { background: #ffcf7a; }
+    body[data-kind="idle"] #dot { background: #4ade80; }
+    body[data-kind="disconnected"] #dot { background: #6b7280; }
+    #label {
+      flex: 1 1 auto; font-size: 12px; font-weight: 600;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    body[data-kind="needs-you"] #label { color: #ffb4b4; }
+    #count {
+      flex: 0 0 auto; font-size: 13px; font-variant-numeric: tabular-nums;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body data-kind="disconnected">
+  <div id="pip">
+    <span id="dot" aria-hidden="true"></span>
+    <span id="label">连接中…</span>
+    <span id="count"></span>
+  </div>
+  <script src="./companion.js"></script>
+</body>
+</html>

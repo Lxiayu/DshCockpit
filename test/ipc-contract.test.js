@@ -118,7 +118,15 @@ test('ipc-contract: the registered channel set is stable (snapshot)', () => {
   // 为什么用 shell:* 而不是 office:*：office:* 是办公室页面的**冻结通道集合**
   // （见 office-runtime-boundary），只有 office 视图持有它。设置窗口走 shell:*。
   // 混用会让 office:* 的信任边界失效——任何窗口都能驱动办公室。
-  const EXPECTED_COUNT = 132;
+  // 2026-11-01（P2.4）：132 → 134，**有意的接口变更**。
+  // 新增 2 个通道给 Companion 常驻小窗：
+  //   companion:expand    —— 展开完整办公室（语义是"开窗口"，不改状态）
+  //   companion:get-state —— 首次渲染拉一次（之后靠 companion:state 推送）
+  //
+  // 为什么只有两个：Companion 是**常驻**窗口，每个通道都是长期攻击面。
+  // 它拿不到 office:dispatch / office:pending / mission:* —— 常驻挂件不需要
+  // 那些能力，给了就是多余的风险。
+  const EXPECTED_COUNT = 134;
   assert.strictEqual(
     channels.size,
     EXPECTED_COUNT,
