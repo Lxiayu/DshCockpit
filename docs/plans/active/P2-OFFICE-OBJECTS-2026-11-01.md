@@ -107,7 +107,53 @@ stale = (now - observedAtMs) > staleAfterMs
 理由：S1-S3 的错误是"数据不对"，S4 的错误是"看起来不对"。
 前者能用断言钉死，后者需要真机截图。分开做能确保"数据对"再谈"好看"。
 
-## 5. 验收标准（来自路线图 + 本项目追加）
+## 5. 执行结果（2026-11-01）
+
+| 步 | 状态 | 证据 |
+|---|---|---|
+| S1 派生层 | ✅ 完成 | `src/office/mission-board.js`，26 项测试 |
+| S2 主进程读取 | ✅ 完成 | `currentMissionBoard()`（30s TTL 缓存），全量回归通过 |
+| S3 快照白名单 | ✅ 完成 | `src/office/office-mission-board.js`，13 项测试 |
+| S3 端到端链路 | ✅ 完成 | `test/mission-board-chain.test.js`，8 项（真实 store） |
+| S4 渲染层 | ⚠️ **部分完成** | 代码 + 14 项静态测试；**真机验收未完成** |
+
+### S4 的真机验收为什么没做成
+
+探针（`scripts/acceptance/office-mission-board-acceptance.js`）在 office 页的
+**启动链**上反复失败，已删除。逐层排查消耗了大量轮次，卡点依次是：
+
+1. `protocol.registerSchemesAsPrivileged` 缺失 → CSP 拒绝 CSS/JS
+2. office 页启动需要 `office:state` / `office:visibility` → 缺则 `__office.ready=false`
+3. `renderMissionBoard` 依赖 `page.missionBoardView()`，而 page 内部有**自己的
+   snapshot 副本**；`page.applySnapshot()` 的回调绑在构造闭包里，
+   更新的是**另一个作用域的 `latestSnapshot`**（实测 `snapAvail` 始终 false）
+
+第 3 点是一个真实的架构耦合：`latestSnapshot`（页面作用域）、page 内部
+`snapshot`、以及 `__office.api.snapshot()` 读的那个变量，是**三份不同的副本**。
+要可靠地做渲染验收，需要先理清这个数据流——那是独立的一块工作，
+不该塞在 P2.3 的收尾里做。
+
+### 已经守住的（静态可测）
+
+- `renderMissionBoard` 定义 + **在 onSnapshot 真实数据流路径中被调用**
+  （只接 renderAll 会导致白板只在打开页面那一刻刷新）
+- 四种状态分支齐全（ok / empty / unavailable / not-wired）
+- stale 标记、moreCount 披露
+- 点击 → `openMissionDesk`，且有键盘可达性
+- `needs-you` 高亮（待答问题是白板的核心信号）
+- 9 个 i18n key 双语齐全
+- 渲染层不读 intent/rationale/prompt/sessionId（隐私）
+- 渲染层不写 Mission 状态（单一作者）
+
+### 未完成的（如实记录）
+
+- 白板在真机上的**视觉呈现**（布局、颜色、是否真的可见）
+- 点击打开 Mission Desk 的**实际 IPC 往返**
+
+这两项需要先解决 `latestSnapshot` 三副本问题，属独立任务。
+**不宣称 S4 完成**——没有截图证据就没有视觉验收。
+
+## 6. 验收标准（来自路线图 + 本项目追加）
 
 - [ ] 白板显示当前 Mission 的真实状态（workstream / 决策数 / 未答问题）
 - [ ] 点击能进入 Mission Desk

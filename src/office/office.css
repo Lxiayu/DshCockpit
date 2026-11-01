@@ -1069,3 +1069,13 @@ body.docked #office-panel > #pending-block { display: block; }
   * { transition: none !important; animation: none !important; }
 }
 
+
+/* P2.3 项目白板 */
+#board-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.board-item { padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,.03);
+  border-left: 3px solid rgba(255,255,255,.10); cursor: pointer; }
+.board-item:hover, .board-item:focus-visible { background: rgba(255,255,255,.06); outline: none; }
+.board-item-label { font-size: 13px; font-weight: 600; }
+.board-item-meta { font-size: 11px; opacity: .7; margin-top: 3px; }
+/* 待答问题 > 0 时高亮：这是"需要你"的信号，不该被忽略 */
+.board-item-meta.needs-you { opacity: 1; color: #ffcf7a; }

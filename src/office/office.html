@@ -21,6 +21,20 @@
     <!-- ① 今日用量（spec §3 block 1）：token 与金额双显示、节省拆分（缓存/本地模型·云端等价）、
          预算进度、数据延迟标记。只读；数值来自壳侧缓存（usage 块，P1 数据管道）。
          P1 英文化：静态文案全部走 data-i18n 键（applyI18n 按当前语言填充），页面不再内嵌中文。 -->
+    <!-- P2.3 项目白板：Mission 概览（workstream / 决策 / 待答）。
+         数据来自 mission-board.js 的派生结果，经 office-mission-board.js 的
+         白名单进入快照。只读——点击进入 Mission Desk 处理，不在此处改状态。 -->
+    <section id="mission-board" data-i18n-aria="office.board.aria">
+      <div class="block-head">
+        <h2 data-i18n="office.board.title"></h2>
+        <span id="board-stale" class="usage-stale" data-i18n="office.board.stale" hidden></span>
+      </div>
+      <p id="board-empty" class="hint" data-i18n="office.board.empty" hidden></p>
+      <p id="board-unavailable" class="hint" data-i18n="office.board.unavailable" hidden></p>
+      <ul id="board-list" aria-live="polite"></ul>
+      <p id="board-more" class="hint" hidden></p>
+    </section>
+
     <section id="usage-block" data-i18n-aria="office.panel.usageAria">
       <div class="block-head">
         <h2 data-i18n="office.panel.usageAria"></h2>
@@ -696,7 +710,8 @@
             renderEmployeeList(snapshot);
             renderDetails();
             renderActivity(snapshot);
-            // P2 blocks (① usage, ③ pending inbox) ride the same ~10Hz cadence.
+            // P2 blocks (① usage, ② mission board, ③ pending inbox) ride the same ~10Hz cadence.
+            renderMissionBoard(snapshot);
             renderUsageBlock(snapshot);
             renderPendingBlock(snapshot);
             // v0.5：团队卡的控制面状态随同节奏刷新（本地 IPC；无活动时为一次空查询）。
@@ -1020,6 +1035,76 @@
         timelineExpanded = true;
         renderActivity(latestSnapshot);
       });
+
+      // P2.3 项目白板。
+      //
+      // 设计约束：**渲染层不做判断**。
+      // stale / available / 排序 / 截断都在派生层做完了（mission-board.js）。
+      // 这里只做三件事：选空态文案、画行、绑点击。
+      //
+      // 四种状态必须显示不同的话：
+      //   ok          → 列出 Mission
+      //   empty       → "还没有进行中的 Mission"（正常）
+      //   unavailable → "Mission 数据不可用"（故障）
+      //   not-wired   → 开发期未接通
+      function renderMissionBoard(snapshot) {
+        const view = page.missionBoardView();
+        const list = document.getElementById('board-list');
+        const emptyEl = document.getElementById('board-empty');
+        const unavailEl = document.getElementById('board-unavailable');
+        const staleEl = document.getElementById('board-stale');
+        const moreEl = document.getElementById('board-more');
+        if (!list) return;
+
+        list.textContent = '';
+        emptyEl.hidden = true;
+        unavailEl.hidden = true;
+        moreEl.hidden = true;
+
+        if (view.kind === 'ok') {
+          staleEl.hidden = !view.stale;
+          for (const m of view.missions) {
+            const li = document.createElement('li');
+            li.className = 'board-item';
+            li.tabIndex = 0;
+            li.setAttribute('role', 'button');
+            li.title = tr('office.board.openDesk');
+            const head = document.createElement('div');
+            head.className = 'board-item-label';
+            head.textContent = m.label || tr('office.board.untitled');
+            li.appendChild(head);
+
+            const meta = document.createElement('div');
+            meta.className = 'board-item-meta';
+            const bits = [
+              tr('office.board.workstreams', { n: m.workstreams, a: m.activeWorkstreams }),
+              tr('office.board.decisions', { n: m.decisions }),
+            ];
+            // 待答问题数是白板最该突出的信息——它代表"需要你"。
+            if (m.openQuestions > 0) bits.push(tr('office.board.questions', { n: m.openQuestions }));
+            meta.textContent = bits.join(' · ');
+            if (m.openQuestions > 0) meta.classList.add('needs-you');
+            li.appendChild(meta);
+
+            const open = () => { window.dshShell.openMissionDesk(); };
+            li.addEventListener('click', open);
+            li.addEventListener('keydown', (e) => {
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+            });
+            list.appendChild(li);
+          }
+          if (view.moreCount > 0) {
+            moreEl.hidden = false;
+            moreEl.textContent = tr('office.board.more', { n: view.moreCount });
+          }
+        } else if (view.kind === 'empty') {
+          staleEl.hidden = true;
+          emptyEl.hidden = false;
+        } else {
+          staleEl.hidden = true;
+          unavailEl.hidden = false;
+        }
+      }
 
       // ① today's usage (spec §3 block 1): tokens + money dual display, the
       // savings split (cache hits / local model at the cloud-equivalent
@@ -1907,6 +1992,7 @@
         renderEmployeeList(snapshot);
         renderDetails();
         renderActivity(snapshot);
+        renderMissionBoard(snapshot);
         renderUsageBlock(snapshot);
         renderPendingBlock(snapshot);
       }
@@ -2063,6 +2149,14 @@
           packDiagnostic: () => packDiagnostic,
           packId: () => officePackId,
           applySnapshotManually: (s) => renderer.applySnapshot(s),
+          // P2.3 验收用：把快照喂给**完整渲染链路**（renderer + 面板）。
+          // 注意：不能写成 `onSnapshot(s)` —— onSnapshot 只是 page 对象的属性，
+          // 在这个作用域里不可见（第一版就踩了、报 "onSnapshot is not defined"）。
+          // 正确做法是更新 latestSnapshot 后调 renderAll()，那是页面自己的重绘入口。
+          // ⚠ 必须走 page.applySnapshot()：page 内部有一份自己的 snapshot 副本，
+          // missionBoardView() 读的就是它。直接给 latestSnapshot 赋值不会更新 page，
+          // 于是白板永远是空的（第一版就卡在这里：feed 返回 ok 但 rows 始终为 0）。
+          // page.applySnapshot 会同步更新内部状态并回调 onSnapshot（= 完整重绘）。
           resizeTo: (w, h) => renderer.resize({ width: w, height: h }),
           devicePixelRatio: () => window.devicePixelRatio,
           pixiVersion: () => window.PIXI && window.PIXI.VERSION,
