@@ -27,8 +27,8 @@
 | TD-05 | 备份只覆盖 2 个 key，壳层全部状态无备份 | 存储 | P0 | ✅ 是 |
 | TD-06 | `shell:*` 75 个通道完全无冻结机制、无集合测试 | IPC | P0 | ✅ 是 |
 | TD-07 | 128 个 handler 中只有 1 个（`shell:work`）做发送方信任校验 | IPC/安全 | P1 | ✅ 是 |
-| TD-08 | 全库无 `setPermissionRequestHandler`，摄像头/麦克风/剪贴板权限未显式拒绝 | 安全 | P1 | ⬜ 否 |
-| TD-09 | `harnessView` 加载第三方 Web UI，无 `will-navigate` 拦截 | 安全 | P1 | ⬜ 否 |
+| TD-08 | ~~全库无 `setPermissionRequestHandler`~~ | 安全 | — | ✅ **已修 2026-11-01** |
+| TD-09 | ~~`harnessView` 无 `will-navigate` 拦截~~ | 安全 | — | ✅ **已修 2026-11-01** |
 | TD-10 | CI 不在发布链上跑测试，测试只在 `continue-on-error: true` 的每日工作流跑 | CI | P0 | ✅ 是 |
 | TD-11 | 原子写代码在 15 个文件里各写一遍，质量参差（3 处固定 `.tmp` 会并发互踩） | 重复 | P1 | ✅ 是 |
 | TD-12 | safeStorage 加密仓 3 套重复实现（KeyVault / TokenStore / ChannelSecrets） | 重复 | P2 | ⬜ 否 |
@@ -314,6 +314,17 @@ ipcMain.handle('shell:work', async (event, payload) => handle(payload, isTrusted
 
 ### TD-08 · 无任何 Electron 权限请求处理器
 
+> ✅ **已修（2026-11-01）**：新增 `src/window-hardening.js`，权限**默认全 deny**。
+>
+> - 白名单**当前为空**（有意）：任何权限先拒绝并记录，确认需要时再逐条加入
+> - `setPermissionRequestHandler` + `setPermissionCheckHandler` **两者都装**
+>   （只装 request 会让 `navigator.permissions.query` 报"允许"而实际被拒，
+>   这种策略不一致比全拒绝更难排查）
+> - 装在 `app.whenReady` 的**最早处**——晚于任何窗口加载就来不及
+> - 拒绝**必须记录日志**：静默拒绝与 bug 无法区分
+>
+> 实测：media/geolocation/notifications/clipboard-read/midi 全部 denied。
+
 **位置**：全库缺失
 
 **证据**：`grep -rn "setPermissionRequestHandler\|setPermissionCheckHandler" src` → **0 处**
@@ -329,6 +340,24 @@ ipcMain.handle('shell:work', async (event, payload) => handle(payload, isTrusted
 ---
 
 ### TD-09 · `harnessView` 加载第三方 Web UI，无导航拦截
+
+> ✅ **已修（2026-11-01）**：12 个窗口/视图全部走统一的 `hardenWebContents()`。
+>
+> 一个函数做三件事：
+>   1. `will-navigate` → preventDefault
+>   2. `setWindowOpenHandler` → **永远 deny**（即使转交外链也不派生子窗口）
+>   3. `will-attach-webview` → preventDefault（webview 会绕过以上所有策略）
+>
+> **为什么必须统一而不是逐个加**：仓库已有 4 次"后来才发现漏了"的痕迹。
+> 逐个加的失败模式是**新窗口会继续漏**。现在有机械测试断言
+> "仓库里没有任何内联的 will-navigate / setWindowOpenHandler"。
+>
+> **最关键的是 harnessView**：它是唯一加载第三方代码的视图。
+> 若 dsh UI 里有 `window.open`，Electron 会按**默认 webPreferences**
+> 派生子窗口——安全项不由我们决定。现在它也被加固了。
+>
+> 外链只把 http/https 交给 `shell.openExternal`；file:// / javascript: /
+> data: 一律不传（那是把"打开链接"变成"执行本地文件"）。
 
 **位置**：`src/window-manager.js:395-403`
 

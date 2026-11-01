@@ -34,6 +34,7 @@ Harness owns execution.  DshCockpit owns experience, continuity, capability orch
 ```
 src/main.js                   壳组合根（IPC、runtime 监督）——6041 行 / 60 handler（原 6385/107）
 src/runtime-capability.js     能力矩阵：判定 runtime 是否可用（S1，替代版本号门禁）
+src/window-hardening.js       统一窗口加固 + 权限默认全 deny（TD-08/09）
 src/ipc-*.js                  已提取 IPC 域（features/mcp/remote/misc/mission/skills/models/scheduled/memory-compact/channels）
 src/window-manager.js         窗口/视图/快照广播
 src/runtime-mux.js            /api/remote.mux 多路复用客户端（$events / session/follow）
@@ -47,7 +48,7 @@ src/mission/                  Mission Core 纯逻辑层（P1，8 模块 + IPC + 
 src/ipc-mission.js             Mission IPC（单通道 mission:invoke + 18 action）
 src/mission-desk.html          Mission Desk 窗口（P1 首个用户可见界面）
 src/workbench/                工作台（内容/引擎分离；⚠ 已从 asar 排除，见 TD-26）
-test/                         离线测试（node:test，cwd 必须是仓库根；172 套件 / 2422 项）
+test/                         离线测试（node:test，cwd 必须是仓库根；173 套件 / 2436 项）
 scripts/acceptance/           真机验收探针（需图形会话，不在 CI 跑）
 docs/                         文档，唯一索引 docs/README.md
 archive/ + docs/archive/      本地保险箱（git 忽略）
@@ -65,13 +66,13 @@ archive/ + docs/archive/      本地保险箱（git 忽略）
 ## 5. 命令与坑
 
 ```bash
-npm test                                   # 全量（约 2 分钟，2422 项）
+npm test                                   # 全量（约 2 分钟，2436 项）
 node --test test/docs-index.test.js        # 文档索引（毫秒级，改文档后必跑）
 node --check <file>                        # 语法检查
 ```
 
 - **cwd 坑**：Bash 默认 cwd 可能是仓库父目录。一律用绝对路径或 `zsh -c 'cd <repo> && ...'`。
-- **基线**：`CI=1 npm test` → **2422 passed / 0 failed / 1 skipped**（唯一有效基线）。
+- **基线**：`CI=1 npm test` → **2436 passed / 0 failed / 1 skipped**（唯一有效基线）。
   唯一 skip 是 E5a-R1 真机探针（需图形会话）——**Skip 不计作 Pass**，
   由 `scripts/ci-gate.js` 四态报告保证，见 `docs/quality/test-tiers-and-baseline.md`。
 - **pure Node 门禁**：`src/team/runtime/**` 与 `src/office/runtime/**` 禁止 Electron/DOM/fs/网络；
@@ -106,10 +107,9 @@ node --check <file>                        # 语法检查
   **真机验收 10/10 通过**（`docs/quality/mission-desk-acceptance-2026-11-01.md`）：渲染、三轴分开、诚实降级、sandbox、导航拦截全部实测。唯一未验证：Brief 是否真被下次会话读到（需 #23）。
 - **ADR-0001..0006 全部已接受**（2026-11-01）。ADR-0002 附退役硬约束 R0–R5（禁止直接删旧 Team Runtime）。
 - **已消除的债**：TD-02/03/05（#19）、TD-10（#10）、TD-17（#17）、**TD-29（S1）**、
-  **TD-04 上限+归档**、**TD-15 复核不成立**（均 2026-11-01）；TD-22 部分（#22）。
+  **TD-04**、**TD-15 复核**、**TD-08/09 加固**（均 2026-11-01）；TD-22 部分（#22）。
 - **仍存在的债**（详见 `docs/quality/tech-debt-inventory.md`）：
-  TD-01 main.js 过载（#22 Phase 1 已提取 5 批共 29 个 shell handler，107→60）·
-  TD-06/07 IPC 无冻结。
+  TD-01 main.js 过载（#22 已提取 5 批共 29 个 shell handler，107→60）· TD-06/07 IPC 无冻结。
 
 ## 8. 文档入口（按目的）
 
