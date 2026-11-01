@@ -360,3 +360,83 @@ test('mission-ipc: every action tolerates an undefined payload', async () => {
     assert.equal(typeof out, 'object', `${action} must not throw on undefined payload`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Brief → AGENTS.md 同步（P1 最后一环）
+//
+// 这是 Mission Core 从"可查看"变成"真正生效"的那一步：
+// dsh-agent-instructions 在每次 Session 启动时读 <workspace>/AGENTS.md，
+// 所以写进去的 Brief 会被下一个会话的 Agent 读到。
+// ---------------------------------------------------------------------------
+
+test('mission-ipc: syncBrief writes the brief into AGENTS.md', async () => {
+  const ws = tmpWs();
+  const h = harness({ ws });
+  const c = await h.invoke('create', { title: '转型项目', intent: '把产品转成 Agent-first' });
+
+  const out = await h.invoke('syncBrief', { missionId: c.missionId });
+  assert.strictEqual(out.ok, true);
+  assert.strictEqual(out.action, 'created');
+
+  const text = fs.readFileSync(path.join(ws, 'AGENTS.md'), 'utf8');
+  assert.match(text, /转型项目/);
+  assert.match(text, /Agent-first/);
+  assert.match(text, /dsh-cockpit:mission-brief:begin/, 'the block must be marked so re-sync is safe');
+});
+
+test('mission-ipc: syncBrief NEVER destroys a user-authored AGENTS.md', async () => {
+  const ws = tmpWs();
+  fs.writeFileSync(path.join(ws, 'AGENTS.md'), '# 我的规矩\n\n- 先跑测试\n');
+  const h = harness({ ws });
+  const c = await h.invoke('create', { title: 'T', intent: 'I' });
+  await h.invoke('syncBrief', { missionId: c.missionId });
+
+  const text = fs.readFileSync(path.join(ws, 'AGENTS.md'), 'utf8');
+  assert.match(text, /先跑测试/, 'the user\'s own instructions must survive');
+});
+
+test('mission-ipc: syncBrief is idempotent', async () => {
+  const ws = tmpWs();
+  const h = harness({ ws });
+  const c = await h.invoke('create', { title: 'T', intent: 'I' });
+  const first = await h.invoke('syncBrief', { missionId: c.missionId });
+  const second = await h.invoke('syncBrief', { missionId: c.missionId });
+  assert.strictEqual(first.action, 'created');
+  assert.strictEqual(second.action, 'unchanged');
+});
+
+test('mission-ipc: briefSyncState reflects reality before and after syncing', async () => {
+  const ws = tmpWs();
+  const h = harness({ ws });
+  const c = await h.invoke('create', { title: 'T', intent: 'I' });
+
+  let st = await h.invoke('briefSyncState');
+  assert.strictEqual(st.synced, false);
+  assert.strictEqual(st.exists, false);
+
+  await h.invoke('syncBrief', { missionId: c.missionId });
+  st = await h.invoke('briefSyncState');
+  assert.strictEqual(st.synced, true);
+  assert.strictEqual(st.missionId, c.missionId);
+});
+
+test('mission-ipc: unsyncBrief removes the block but keeps the file', async () => {
+  const ws = tmpWs();
+  fs.writeFileSync(path.join(ws, 'AGENTS.md'), '# 用户内容\n');
+  const h = harness({ ws });
+  const c = await h.invoke('create', { title: 'T', intent: 'I' });
+  await h.invoke('syncBrief', { missionId: c.missionId });
+
+  const out = await h.invoke('unsyncBrief');
+  assert.strictEqual(out.action, 'removed');
+  const text = fs.readFileSync(path.join(ws, 'AGENTS.md'), 'utf8');
+  assert.doesNotMatch(text, /dsh-cockpit:mission-brief:begin/);
+  assert.match(text, /用户内容/);
+});
+
+test('mission-ipc: syncBrief on an unknown mission fails clearly', async () => {
+  const h = harness({ ws: tmpWs() });
+  const out = await h.invoke('syncBrief', { missionId: 'mis-ghost' });
+  assert.strictEqual(out.ok, false);
+  assert.strictEqual(out.code, 'MISSION_NOT_FOUND');
+});

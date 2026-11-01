@@ -191,3 +191,23 @@ test('mission-desk: a throwing opener becomes {ok:false} with a reason', async (
   assert.strictEqual(out.code, 'WINDOW_FAILED');
   assert.match(out.reason, /display unavailable/);
 });
+
+// ------------------------------------- Brief → AGENTS.md 同步（P1 最后一环）
+
+test('mission-desk: syncing the brief requires an explicit user action', () => {
+  // 它会写入用户工作区的 AGENTS.md。自动写用户文件是越界行为——
+  // 即使内容"有用"，用户也必须知道并同意。
+  assert.match(html, /同步到 AGENTS\.md/, 'the action must be visible');
+  assert.match(html, /不会覆盖你手写的内容/, 'and must state the safety property');
+});
+
+test('mission-desk: the sync state is shown honestly (synced vs not synced)', () => {
+  assert.match(html, /已同步到 AGENTS\.md/, 'a synced state must be visible');
+  assert.match(html, /撤销同步/, 'and reversible from the UI');
+  assert.match(html, /briefSyncState/, 'the UI must read the real state, not assume');
+});
+
+test('mission-desk: sync state is scoped to the selected mission', () => {
+  // 另一个 Mission 同步过，不代表当前这个同步过。
+  assert.match(html, /syncState\.missionId === m\.missionId/);
+});

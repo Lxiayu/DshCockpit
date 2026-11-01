@@ -35,6 +35,7 @@ const deliverable = require('./mission/deliverable');
 const harnessReader = require('./mission/harness-reader');
 const migration = require('./mission/migration');
 const schema = require('./mission/schema');
+const briefSync = require('./mission/brief-sync');
 
 /** 冻结的通道集合。新增 action **不需要**动这里。 */
 const MISSION_IPC_CHANNELS = Object.freeze(['mission:invoke']);
@@ -56,6 +57,9 @@ const ACTIONS = Object.freeze([
   'getBrief',             // 生成 Mission Brief
   'diagnostics',          // 日志健康度 / 备份 / 归档状态 / 迁移计划
   'openDesk',             // 打开 Mission Desk 窗口
+  'syncBrief',            // 把 Brief 写入 <workspace>/AGENTS.md（下次会话自动生效）
+  'unsyncBrief',          // 移除 Brief 块（只删标记块，不删文件）
+  'briefSyncState',       // 只读：当前 AGENTS.md 同步到了哪个 Mission
 ]);
 
 function nowMs() { return Date.now(); }
@@ -356,6 +360,56 @@ function registerMissionIpc(ipcMain, ctx) {
         migration: migration.planFile(r.store.file),
         workspaceDir: r.workspaceDir,
       };
+    },
+
+    // ---- Brief → AGENTS.md 同步（P1 最后一环）----
+    //
+    // 为什么是写 AGENTS.md 而不是拦截 Session 注入：壳是 dsh web UI 的容器，
+    // 用户直接在官方 UI 里发 prompt，壳不接管输入面（铁律 5）。
+    // 而 dsh-agent-instructions 每次 Session 启动都会读 <workspace>/AGENTS.md——
+    // 写进去就自动生效，零侵入。
+    syncBrief(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = argString(payload.missionId);
+      if (!missionId) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const view = r.store.missionView(missionId);
+      if (!view) return fail(`mission not found: ${missionId}`, 'MISSION_NOT_FOUND');
+
+      const snap = currentSnapshot();
+      const b = brief.buildBrief(view, {
+        observed: snap || undefined,
+        observedAtMs: snap ? snap.observedAtMs : undefined,
+      });
+      if (b.empty) return fail('brief is empty — nothing to sync', 'BRIEF_EMPTY');
+
+      const out = briefSync.syncToWorkspace({
+        workspaceDir: r.workspaceDir,
+        briefText: b.text,
+        meta: {
+          missionId,
+          missionCount: Object.keys(r.store.snapshot().missions).length,
+          fingerprint: brief.briefFingerprint(b),
+        },
+      });
+      if (!out.ok) return fail(out.reason, 'BRIEF_SYNC_FAILED');
+      return { ok: true, action: out.action, file: out.file, bytes: b.bytes, truncated: b.truncated };
+    },
+
+    unsyncBrief() {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const out = briefSync.unsyncFromWorkspace({ workspaceDir: r.workspaceDir });
+      if (!out.ok) return fail(out.reason, 'BRIEF_UNSYNC_FAILED');
+      return { ok: true, action: out.action, file: out.file };
+    },
+
+    briefSyncState() {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const out = briefSync.inspect({ workspaceDir: r.workspaceDir });
+      if (!out.ok) return fail(out.reason, 'BRIEF_INSPECT_FAILED');
+      return { ok: true, ...out };
     },
 
     openDesk() {

@@ -136,6 +136,7 @@ const state = {
   detail: null,
   brief: null,
   verified: null,
+  syncState: null,
   liveAvailable: false,
 };
 
@@ -395,6 +396,39 @@ function renderDetail() {
         + (state.brief.truncated ? ' · 已截断（省略了 ' + JSON.stringify(state.brief.dropped) + '）' : ' · 未截断'),
     }));
     box.append(el('pre', { id: 'briefText', text: state.brief.text }));
+
+    // ---- 同步到 AGENTS.md（这一步让 Brief 真正生效）----
+    // 为什么需要用户主动点：它会写入用户工作区里的 AGENTS.md 文件。
+    // 自动写用户文件是越界行为——即使内容是"有用的"。
+    const syncRow = el('div', { class: 'row', style: 'margin-top:10px' });
+
+    const syncState = state.syncState || { synced: false };
+    if (syncState.synced && syncState.missionId === m.missionId) {
+      syncRow.append(el('span', { class: 'badge active', text: '已同步到 AGENTS.md' }));
+      const unBtn = el('button', { text: '撤销同步' });
+      unBtn.addEventListener('click', async () => {
+        const r = await api('unsyncBrief');
+        if (!r.ok) { alert(r.reason); return; }
+        state.syncState = { synced: false };
+        renderDetail();
+      });
+      syncRow.append(unBtn);
+    } else {
+      const btn = el('button', { class: 'primary', text: '同步到 AGENTS.md' });
+      btn.addEventListener('click', async () => {
+        const r = await api('syncBrief', { missionId: m.missionId });
+        if (!r.ok) { alert(r.reason); return; }
+        const st = await api('briefSyncState');
+        state.syncState = st.ok ? st : { synced: false };
+        renderDetail();
+      });
+      syncRow.append(btn);
+      syncRow.append(el('span', {
+        class: 'tiny muted',
+        text: '写入工作区的 AGENTS.md，下次会话 Agent 会自动读到。不会覆盖你手写的内容。',
+      }));
+    }
+    box.append(syncRow);
   }
 
   // --- 诊断 ---
@@ -446,6 +480,8 @@ async function loadDetail(missionId) {
   // Brief 单独取（它可能较大，且失败不应影响主视图）
   const b = await api('getBrief', { missionId });
   state.brief = b.ok ? b.brief : { empty: true };
+  const sync = await api('briefSyncState');
+  state.syncState = sync.ok ? sync : { synced: false };
   renderDetail();
 }
 
