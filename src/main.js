@@ -69,6 +69,7 @@ const { registerMiscDomainsIpc } = require('./ipc-misc-domains');
 const { registerMissionIpc } = require('./ipc-mission');
 const { buildMissionBoard } = require('./office/mission-board');
 const { deriveCompanionState, companionSummary } = require('./companion-state');
+const { registerCapabilityPacksIpc } = require('./ipc-capability-packs');
 const { installPermissionHandlers } = require('./window-hardening');
 const { registerSkillsIpc } = require('./ipc-skills');
 const { registerModelsIpc } = require('./ipc-models');
@@ -246,6 +247,66 @@ function currentCompanionState() {
     log(`[companion] state failed: ${error && error.message}`);
     return { kind: 'disconnected', pendingCount: 0, runningCount: 0 };
   }
+}
+
+/**
+ * P3 S7.2：Capability Pack 的组装（主进程侧唯一组装点）。
+ *
+ * 数据目录放在 userData 下（可写），内置包从仓库的 `capability-packs/` 读。
+ * 两者分开是必须的：内置包随应用分发（只读），安装记录属于用户数据。
+ */
+let capabilityInstallerInstance = null;
+
+/**
+ * 扫描内置 capability-packs 目录。
+ *
+ * 只接受**校验通过**的 manifest——坏掉的包不该出现在"可安装"列表里
+ * （用户可以装了一个根本跑不起来的东西，那是更糟的体验）。
+ */
+function availableCapabilityPacks() {
+  const fsx = require('node:fs');
+  const pathx = require('node:path');
+  const root = app.isPackaged
+    ? pathx.join(process.resourcesPath, 'capability-packs')
+    : pathx.join(__dirname, '..', 'capability-packs');
+  let dirs = [];
+  try {
+    dirs = fsx.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
+  } catch { return []; }
+
+  const { validateManifest } = require('./capability-packs/manifest.js');
+  const out = [];
+  for (const name of dirs) {
+    try {
+      const raw = JSON.parse(fsx.readFileSync(pathx.join(root, name, 'manifest.json'), 'utf8'));
+      const validated = validateManifest(raw);
+      if (!validated.ok) {
+        log(`[packs] skipping ${name}: ${validated.errors.join('; ')}`);
+        continue;
+      }
+      out.push({ id: validated.value.id, dir: pathx.join(root, name), manifest: validated.value });
+    } catch (error) {
+      log(`[packs] skipping ${name}: ${error && error.message}`);
+    }
+  }
+  return out;
+}
+
+function capabilityPacksInstaller() {
+  if (capabilityInstallerInstance) return capabilityInstallerInstance;
+  try {
+    const { createCapabilityInstaller } = require('./capability-packs/installer.js');
+    const { createCommandRunner } = require('./work/command-runner.js');
+    capabilityInstallerInstance = createCapabilityInstaller({
+      dataDir: path.join(app.getPath('userData'), 'capability-packs'),
+      runner: createCommandRunner(),
+      log,
+    });
+  } catch (error) {
+    log(`[packs] installer unavailable: ${error && error.message}`);
+    capabilityInstallerInstance = null;
+  }
+  return capabilityInstallerInstance;
 }
 
 function createOfficeCharacterPackManager() {
@@ -2733,6 +2794,16 @@ function registerIpc() {
   ipcMain.handle('companion:get-state', () => {
     try { return { ok: true, state: currentCompanionState() }; }
     catch (error) { return { ok: false, code: 'STATE_FAILED' }; }
+  });
+
+  // ---------------------------------------------------------------- P3 S7.1 Capability Packs
+  //
+  // 通道名用完整的 capability-packs 而不是 packs：`shell:packs-*` 已被
+  // **角色包**（character pack，Issue #24）占用，两者是完全不同的东西。
+  registerCapabilityPacksIpc(ipcMain, {
+    installerOf: () => capabilityPacksInstaller(),
+    availableOf: () => availableCapabilityPacks(),
+    log,
   });
 
   ipcMain.handle('shell:office-settings-get', () => {

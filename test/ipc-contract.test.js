@@ -87,6 +87,7 @@ const IPC_SOURCE_FILES = [
   path.join(ROOT, 'src', 'ipc-scheduled.js'),
   path.join(ROOT, 'src', 'ipc-memory-compact.js'),
   path.join(ROOT, 'src', 'ipc-channels.js'),
+  path.join(ROOT, 'src', 'ipc-capability-packs.js'),
   path.join(ROOT, 'src', 'work', 'work-ipc.js'),
 ];
 
@@ -126,7 +127,14 @@ test('ipc-contract: the registered channel set is stable (snapshot)', () => {
   // 为什么只有两个：Companion 是**常驻**窗口，每个通道都是长期攻击面。
   // 它拿不到 office:dispatch / office:pending / mission:* —— 常驻挂件不需要
   // 那些能力，给了就是多余的风险。
-  const EXPECTED_COUNT = 134;
+  // 2026-11-01（P3.5）：134 → 138，**有意的接口变更**。
+  // 新增 4 个通道给 Capability Pack 的用户入口：
+  //   shell:capability-packs-list / -available / -install / -uninstall
+  //
+  // 为什么叫 capability-packs 而不是 packs：`shell:packs-*` 已被**角色包**
+  // （character pack，Issue #24）占用。两者完全不同——角色包是办公室外观，
+  // 能力包是能力声明。缩写 cpacks 虽然短，但下一个人看不懂。
+  const EXPECTED_COUNT = 138;
   assert.strictEqual(
     channels.size,
     EXPECTED_COUNT,

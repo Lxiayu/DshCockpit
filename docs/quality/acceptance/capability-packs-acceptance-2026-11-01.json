@@ -1,0 +1,71 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "the capability-packs page is reachable (PAGES whitelist)",
+      "ok": true,
+      "detail": "{\"active\":true,\"hasNav\":true}"
+    },
+    {
+      "name": "the nav entry exists",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "name": "the installed list renders both packs",
+      "ok": true,
+      "detail": "rows=2"
+    },
+    {
+      "name": "the available list renders both packs",
+      "ok": true,
+      "detail": "rows=2"
+    },
+    {
+      "name": "a passed pack shows the passed badge",
+      "ok": true,
+      "detail": "工作区验证 @1.0.0通过卸载"
+    },
+    {
+      "name": "a SKIPPED pack shows a DIFFERENT badge (skipped is not passed)",
+      "ok": true,
+      "detail": "研究报告 @1.0.0已跳过卸载"
+    },
+    {
+      "name": "clicking install calls the IPC channel",
+      "ok": true,
+      "detail": "calls=1"
+    },
+    {
+      "name": "the install result surfaces the verify state",
+      "ok": true,
+      "detail": "已安装（verify 通过） · 通过"
+    },
+    {
+      "name": "a failed install explains WHY (not just \"failed\")",
+      "ok": true,
+      "detail": "安装失败: exit code 1"
+    },
+    {
+      "name": "clicking uninstall calls the IPC channel",
+      "ok": true,
+      "detail": "calls=1"
+    },
+    {
+      "name": "i18n resolves (no raw keys on screen)",
+      "ok": true,
+      "detail": "{\"title\":\"能力包\",\"leaked\":false}"
+    },
+    {
+      "name": "screenshot captured",
+      "ok": true,
+      "detail": "2560x1630"
+    },
+    {
+      "name": "the renderer had no fatal errors",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

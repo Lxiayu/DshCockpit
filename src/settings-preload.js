@@ -17,6 +17,11 @@ contextBridge.exposeInMainWorld('dshShell', {
   packsUninstall: (packId) => ipcRenderer.invoke('shell:packs-uninstall', packId),
   pickCharacterPackFolder: () => ipcRenderer.invoke('shell:packs-pick-folder'),
   pickCharacterPackZip: () => ipcRenderer.invoke('shell:packs-pick-zip'),
+  // P3 S7.1：能力包（与角色包不同——角色包是办公室外观，能力包是能力声明）
+  capabilityPacksList: () => ipcRenderer.invoke('shell:capability-packs-list'),
+  capabilityPacksAvailable: () => ipcRenderer.invoke('shell:capability-packs-available'),
+  capabilityPacksInstall: (id) => ipcRenderer.invoke('shell:capability-packs-install', id),
+  capabilityPacksUninstall: (id) => ipcRenderer.invoke('shell:capability-packs-uninstall', id),
   saveSettings: (partial) => ipcRenderer.invoke('shell:save-settings', partial),
   getQuickAskShortcut: () => ipcRenderer.invoke('shell:quickask-shortcut-get'),
   setQuickAskShortcut: (value) => ipcRenderer.invoke('shell:quickask-shortcut-set', value),

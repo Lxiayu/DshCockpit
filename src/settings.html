@@ -384,6 +384,7 @@
       <button class="nav-item" data-page="longsession"><span class="ico">🧠</span><span class="txt" data-i18n="nav.longsession">长会话</span></button>
       <button class="nav-item" data-page="runtime"><span class="ico">⚙️</span><span class="txt" data-i18n="nav.runtime">运行时</span></button>
       <button class="nav-item" data-page="plugins"><span class="ico">🧩</span><span class="txt" data-i18n="nav.plugins">插件</span></button>
+      <button class="nav-item" data-page="capability-packs"><span class="ico">📦</span><span class="txt" data-i18n="nav_capabilityPacks">能力包</span></button>
       <button class="nav-item" data-page="mcp"><span class="ico">🔌</span><span class="txt" data-i18n="nav.mcp">MCP 服务</span></button>
       <button class="nav-item" data-page="office"><span class="ico">🏢</span><span class="txt" data-i18n="nav.office">虚拟办公室</span></button>
       <button class="nav-item" data-page="skills"><span class="ico">✨</span><span class="txt" data-i18n="nav.skills">技能</span></button>
@@ -831,6 +832,39 @@
       </div>
 
       <!-- ------------------------- page: mcp (T1 v0.3.1) -->
+      <div class="page" id="page-capability-packs">
+        <div class="page-head">
+          <h2 data-i18n="nav_capabilityPacks">能力包</h2>
+          <p data-i18n="capPacks_desc">能力包把一套能工作的配置固化下来：每个包都必须通过自己的 verify 才能安装。与「插件」不同——插件是 dsh 生态的扩展，能力包是本应用的能力声明。</p>
+        </div>
+
+        <div class="card">
+          <h3 data-i18n="capPacks_installed">已安装</h3>
+          <p id="packs-empty" class="desc" data-i18n="capPacks_empty" hidden>还没有安装能力包。</p>
+          <ul id="packs-installed-list" class="packs-list"></ul>
+        </div>
+
+        <div class="card">
+          <h3 data-i18n="capPacks_available">可安装</h3>
+          <p id="packs-available-empty" class="desc" data-i18n="capPacks_availableEmpty" hidden>没有可用的内置能力包。</p>
+          <ul id="packs-available-list" class="packs-list"></ul>
+        </div>
+
+        <div class="card">
+          <div class="setting">
+            <div class="setting-info">
+              <label data-i18n="capPacks_cli">命令行用法</label>
+              <div class="desc" data-i18n="capPacks_cliHint">Starter Kit 也可以直接在命令行生成起点文件。</div>
+            </div>
+            <div class="setting-ctrl"><code id="packs-cli-example">node scripts/starter-kit.js research-report</code></div>
+          </div>
+        </div>
+
+        <!-- id 必须独立：角色包页也用了 packs-status，两页共用会让
+             能力包的状态写进角色包页（真机验收抓到的缺陷）。 -->
+        <div class="status" id="cap-packs-status"></div>
+      </div>
+
       <div class="page" id="page-mcp">
         <div class="page-head">
           <h2 data-i18n="nav.mcp">MCP 服务</h2>
@@ -1825,6 +1859,25 @@ nav_office: '虚拟办公室',
       'packs_zipTooLarge': '文件过大（上限 128MB）。',
       'packs_importFailed': '导入失败',
       'packs_title': '角色包',
+      nav_capabilityPacks: '能力包',
+      capPacks_desc: '能力包把一套能工作的配置固化下来：每个包都必须通过自己的 verify 才能安装。与「插件」不同——插件是 dsh 生态的扩展，能力包是本应用的能力声明。',
+      capPacks_installed: '已安装',
+      capPacks_empty: '还没有安装能力包。',
+      capPacks_available: '可安装',
+      capPacks_availableEmpty: '没有可用的内置能力包。',
+      capPacks_install: '安装',
+      capPacks_uninstall: '卸载',
+      capPacks_installing: '正在安装并验证…',
+      capPacks_installedOk: '已安装（verify 通过）',
+      capPacks_installFailed: '安装失败',
+      capPacks_uninstalled: '已卸载，无残留。',
+      capPacks_uninstallResidue: '已卸载，但检测到残留。',
+      capPacks_healthPassed: '通过',
+      capPacks_healthFailed: '失败',
+      capPacks_healthSkipped: '已跳过',
+      capPacks_healthUnknown: '未验证',
+      capPacks_cli: '命令行用法',
+      capPacks_cliHint: 'Starter Kit 也可以直接在命令行生成起点文件。',
       'packs_desc': '安装自定义角色外观。包可以是一个文件夹或 .zip。',
       'packs_importFolder': '从文件夹导入…',
       'packs_importZip': '从 .zip 导入…',
@@ -2334,6 +2387,25 @@ nav_office: 'Virtual Office',
       'packs_zipTooLarge': 'File too large (128MB limit).',
       'packs_importFailed': 'Import failed',
       'packs_title': 'Character packs',
+      nav_capabilityPacks: 'Capability packs',
+      capPacks_desc: 'A capability pack freezes a known-working setup: every pack must pass its own verify before install. Unlike plugins (dsh ecosystem extensions), these are capability declarations for this app.',
+      capPacks_installed: 'Installed',
+      capPacks_empty: 'No capability packs installed yet.',
+      capPacks_available: 'Available',
+      capPacks_availableEmpty: 'No built-in capability packs found.',
+      capPacks_install: 'Install',
+      capPacks_uninstall: 'Uninstall',
+      capPacks_installing: 'Installing and verifying…',
+      capPacks_installedOk: 'Installed (verify passed)',
+      capPacks_installFailed: 'Install failed',
+      capPacks_uninstalled: 'Uninstalled, no residue.',
+      capPacks_uninstallResidue: 'Uninstalled, but residue was detected.',
+      capPacks_healthPassed: 'passed',
+      capPacks_healthFailed: 'failed',
+      capPacks_healthSkipped: 'skipped',
+      capPacks_healthUnknown: 'not verified',
+      capPacks_cli: 'Command line',
+      capPacks_cliHint: 'Starter Kits can also generate a starting file from the command line.',
       'packs_desc': 'Install a custom character appearance. A pack can be a folder or a .zip.',
       'packs_importFolder': 'Import from folder…',
       'packs_importZip': 'Import .zip…',
@@ -2590,10 +2662,10 @@ nav_office: 'Virtual Office',
   // 发现路径：本 Issue 把角色包 UI 放进 #page-office 后真机验证
   // 得到 rows:0，逐层排查才定位到白名单缺失。**离线测试看不到**
   // （它只查字符串存在性），只有真跑页面才发现。
-  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'mcp', 'skills', 'tasks', 'notifications', 'weekly', 'remote', 'channels', 'models', 'longsession', 'data', 'update', 'about', 'office'];
+  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'mcp', 'skills', 'tasks', 'notifications', 'weekly', 'remote', 'channels', 'models', 'longsession', 'data', 'update', 'about', 'office', 'capability-packs'];
   const CONTROL_PAGES = new Set(['cost', 'tasks', 'runtime', 'remote', 'plugins', 'mcp', 'skills', 'channels', 'longsession']);
   // office 页是设置模式下的一个页面（办公室行为/外观），不是控制台页。
-  const SETTINGS_PAGES = new Set(['general', 'cost', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about', 'notifications', 'weekly', 'mcp', 'office']);
+  const SETTINGS_PAGES = new Set(['general', 'cost', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about', 'notifications', 'weekly', 'mcp', 'office', 'capability-packs']);
   const CENTER_INTENTS = new Set(['new-task']);
   const routeParams = new URLSearchParams(location.search);
   let centerMode = routeParams.get('mode') === 'control' ? 'control' : 'settings';
@@ -2669,6 +2741,8 @@ nav_office: 'Virtual Office',
     if (p === 'notifications') { refreshNotifRulesStatus(); renderNotifHistory(); }
     // Issue #24：角色包列表（随 office 页刷新；本地读盘，开销可忽略）
     if (p === 'office') loadPacks();
+    // P3: 能力包（与角色包不同——见 page 头部的说明）
+    if (p === 'capability-packs') loadCapabilityPacks();
   }
   function consumeCenterIntent(intent) {
     if (CENTER_INTENTS.has(intent) && centerMode === 'control') {
@@ -4698,6 +4772,125 @@ nav_office: 'Virtual Office',
   $('officeReducedMotion').addEventListener('change', () => saveOfficeField({ reducedMotion: $('officeReducedMotion').checked }));
   $('officePrivacyMode').addEventListener('change', () => saveOfficeField({ privacyMode: $('officePrivacyMode').value }));
 
+  // ---- P3 S7.3：能力包 UI -----------------------------------------------------
+  //
+  // 设计纪律（沿用 P2.3/P2.4）：**页面只呈现，不重新推导**。
+  //   安装成败 → installer 返回的 code
+  //   verify 四态 → runVerify 返回的 state
+  // 页面自己判断"装好了吗"会导致"库说 not-verified、页面显示绿色"。
+  function capPackStatus(text, isError) {
+    // 注意：不能用 packs-status —— 角色包页也用了那个 id，两页共用会让
+    // 能力包的状态写进角色包页（真机验收实测：状态显示在错误的页面）。
+    const el = $('cap-packs-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.style.color = isError ? 'var(--bad, #ff9d9d)' : '';
+  }
+
+  /** 四态标签（passed/failed/skipped/not-verified）——skipped 不是通过。 */
+  function healthBadge(state) {
+    const badge = document.createElement('span');
+    const map = {
+      passed: { text: tr('capPacks_healthPassed'), color: '#7ddca8' },
+      failed: { text: tr('capPacks_healthFailed'), color: '#ff9d9d' },
+      skipped: { text: tr('capPacks_healthSkipped'), color: '#ffcf7a' },
+      'not-verified': { text: tr('capPacks_healthUnknown'), color: '#9aa0aa' },
+    };
+    const entry = map[state] || map['not-verified'];
+    badge.textContent = entry.text;
+    badge.style.cssText = `margin-left:8px;font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid ${entry.color};color:${entry.color}`;
+    return badge;
+  }
+
+  async function loadCapabilityPacks(opts) {
+    // 只在"刷新列表"时清状态；安装/卸载后重新加载**必须保留**结果消息，
+    // 否则用户点击后看不到任何反馈（真机验收抓到的缺陷：
+    //   设置消息 → loadCapabilityPacks() 立刻清空 → 屏幕一片空白）。
+    if (!opts || opts.clearStatus !== false) capPackStatus('');
+    // ---- 已安装 ----
+    const installedList = $('packs-installed-list');
+    const installedEmpty = $('packs-empty');
+    if (installedList) {
+      installedList.textContent = '';
+      let r;
+      try { r = await window.dshShell.capabilityPacksList(); }
+      catch (e) { capPackStatus(e.message, true); r = null; }
+      const packs = (r && r.ok && r.packs) || [];
+      installedEmpty.hidden = packs.length > 0;
+      for (const p of packs) {
+        const li = document.createElement('li');
+        li.className = 'packs-row';
+        const name = document.createElement('span');
+        name.style.flex = '1';
+        name.textContent = `${p.title || p.id} @${p.version}`;
+        const del = document.createElement('button');
+        del.className = 'btn';
+        del.textContent = tr('capPacks_uninstall');
+        del.addEventListener('click', async () => {
+          const res = await window.dshShell.capabilityPacksUninstall(p.id);
+          if (res && res.ok) {
+            // 卸载后确认无残留——这是"安装=记录"设计带来的可验证性
+            capPackStatus(res.clean ? tr('capPacks_uninstalled') : tr('capPacks_uninstallResidue'), !res.clean);
+            await loadCapabilityPacks({ clearStatus: false });
+          } else {
+            capPackStatus((res && (res.reason || res.code)) || tr('office_invalid'), true);
+          }
+        });
+        li.append(name, healthBadge(p.health), del);
+        installedList.appendChild(li);
+      }
+    }
+    // ---- 可安装 ----
+    const availList = $('packs-available-list');
+    const availEmpty = $('packs-available-empty');
+    if (availList) {
+      availList.textContent = '';
+      let r;
+      try { r = await window.dshShell.capabilityPacksAvailable(); }
+      catch { r = null; }
+      const packs = (r && r.ok && r.packs) || [];
+      const installedIds = new Set(((installedList && [...installedList.children]) || []).map(() => null));
+      availEmpty.hidden = packs.length > 0;
+      for (const p of packs) {
+        const li = document.createElement('li');
+        li.className = 'packs-row';
+        const name = document.createElement('span');
+        name.style.flex = '1';
+        name.textContent = `${p.title || p.id}${p.version ? ` @${p.version}` : ''}`;
+        const add = document.createElement('button');
+        add.className = 'btn';
+        add.textContent = tr('capPacks_install');
+        add.addEventListener('click', async () => {
+          add.disabled = true;
+          capPackStatus(tr('capPacks_installing'));
+          let res;
+          try { res = await window.dshShell.capabilityPacksInstall(p.id); }
+          catch (e) { capPackStatus(e.message, true); add.disabled = false; return; }
+          add.disabled = false;
+          if (res && res.ok) {
+            // 显示 verify 四态——用户要看到"它真的能工作"，不是"装完了"
+            // 用静态映射而不是 'packs_health' + state 拼接：
+            // 动态 key 会让 i18n 静态检查器解析不出真实 key（它看到的是 '_'）。
+            const state = res.verifyState || 'not-verified';
+            const healthText = {
+              passed: tr('capPacks_healthPassed'),
+              failed: tr('capPacks_healthFailed'),
+              skipped: tr('capPacks_healthSkipped'),
+              'not-verified': tr('capPacks_healthUnknown'),
+            }[state] || state;
+            capPackStatus(`${tr('capPacks_installedOk')} · ${healthText}`);
+            await loadCapabilityPacks({ clearStatus: false });
+          } else if (res) {
+            const why = res.reason || res.verifyReason || res.code || '';
+            capPackStatus(`${tr('capPacks_installFailed')}: ${why}`, true);
+          }
+        });
+        li.append(name, add);
+        availList.appendChild(li);
+      }
+    }
+  }
+
   // ---- Issue #24：角色包管理 UI -------------------------------------------------
   //
   // 设计原则：**UI 只负责呈现，不承担正确性**。
@@ -4821,12 +5014,12 @@ nav_office: 'Virtual Office',
       if (!p.builtin) {
         const delBtn = document.createElement('button');
         delBtn.className = 'btn';
-        delBtn.textContent = tr('packs_uninstall');
+        delBtn.textContent = tr('capPacks_uninstall');
         delBtn.addEventListener('click', async () => {
           const del = await packAction({ action: 'packUninstall', packId: p.packId });
           if (del && del.ok) {
             // 卸载当前使用的包会自动回落内置——如实告诉用户，而不是让他猜
-            packStatus(del.fellBackToBuiltin ? tr('packs_fellBack') : tr('packs_uninstalled'));
+            packStatus(del.fellBackToBuiltin ? tr('packs_fellBack') : tr('capPacks_uninstalled'));
             await loadPacks();
           } else if (del && del.error) renderPackError(del.error);
           else packStatus((del && del.code) || tr('office_invalid'), true);
@@ -4844,7 +5037,7 @@ nav_office: 'Virtual Office',
       else packStatus((beginResult && beginResult.code) || tr('office_invalid'), true);
       return;
     }
-    packStatus(tr('packs_installed'));
+    packStatus(tr('capPacks_installed'));
     const done = await packAction({ action: 'packCommitImport', importId: beginResult.importId });
     if (done && done.ok) { packStatus(tr('packs_imported')); await loadPacks(); }
     else if (done && done.error) renderPackError(done.error);
