@@ -1,0 +1,41 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "the office page is actually reachable (PAGES whitelist)",
+      "ok": true,
+      "detail": "active"
+    },
+    {
+      "name": "the character pack list is populated",
+      "ok": true,
+      "detail": "rows=2"
+    },
+    {
+      "name": "the builtin pack is labelled as builtin",
+      "ok": true,
+      "detail": "deepseek-default内置切换my-custom @1.0.0使用中卸载"
+    },
+    {
+      "name": "the active pack is labelled as in-use",
+      "ok": true,
+      "detail": "deepseek-default内置切换my-custom @1.0.0使用中卸载"
+    },
+    {
+      "name": "both import entry points exist (folder + .zip)",
+      "ok": true,
+      "detail": "{\"folder\":true,\"zip\":true,\"status\":true}"
+    },
+    {
+      "name": "i18n resolves to real copy (no raw keys on screen)",
+      "ok": true,
+      "detail": "title=角色包"
+    },
+    {
+      "name": "screenshot captured for visual review",
+      "ok": true,
+      "detail": "2560x1630"
+    }
+  ]
+}

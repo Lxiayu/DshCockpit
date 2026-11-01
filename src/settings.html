@@ -167,6 +167,18 @@
   .setting:hover { background: var(--bg-hover); }
   .setting-info { flex: 1 1 220px; min-width: 180px; }
   .setting-info label, .setting-info .lbl { display: block; color: var(--text-1); font-size: 13px; }
+  /* Issue #24：角色包区（独立容器，不复用 .setting 的 space-between 布局）
+     ⚠ 关键：.setting-info 带 flex: 1 1 220px。在 column 容器里那个
+     flex-basis:220px 会变成**高度**，撑出 220px 空白 —— 真机截图才看出来。
+     所以这里必须把它的 flex 重置掉。 */
+  .packs-section { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px;
+    border-radius: 10px; background: var(--bg-card, rgba(255,255,255,.02)); }
+  .packs-section > .setting-info { flex: 0 0 auto; }
+  .packs-list { display: flex; flex-direction: column; gap: 0; }
+  .packs-list .packs-row { display: flex; align-items: center; gap: 10px; padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,.06); }
+  .packs-list .packs-row:last-child { border-bottom: 0; }
+  .packs-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
   .setting-info .desc { display: block; color: var(--text-3); font-size: 12px; margin-top: 2px; line-height: 1.5; }
   .setting-ctrl { display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
   .setting-ctrl input[type="text"], .setting-ctrl input[type="number"],
@@ -992,12 +1004,15 @@
           <!-- Issue #24：角色包管理。
                放在 office 设置区内，因为它属于"办公室外观"而非独立功能。 -->
           <div class="section-title" style="margin-top:22px" data-i18n="packs_title">角色包</div>
-          <div class="setting" style="flex-direction:column;align-items:stretch;gap:8px">
+          <!-- 不复用 .setting：它是 display:flex + justify-content:space-between，
+               改成 column 后 space-between 会把子元素拉满整个容器高度，
+               于是角色包列表被推到页面底部（真机截图发现，离线测试看不出来）。 -->
+          <div class="packs-section">
             <div class="setting-info">
               <label data-i18n="packs_desc">安装自定义角色外观。包可以是一个文件夹或 .zip。</label>
             </div>
-            <div id="packs-list" style="display:flex;flex-direction:column;gap:6px"></div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+            <div id="packs-list" class="packs-list"></div>
+            <div class="packs-actions">
               <button id="packs-import-folder" class="btn" data-i18n="packs_importFolder">从文件夹导入…</button>
               <button id="packs-import-zip" class="btn" data-i18n="packs_importZip">从 .zip 导入…</button>
               <button id="packs-refresh" class="btn" data-i18n="packs_refresh">刷新</button>
@@ -2566,9 +2581,19 @@ nav_office: 'Virtual Office',
   }
 
   // ------------------------------------------------------------- routing
-  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'mcp', 'skills', 'tasks', 'notifications', 'weekly', 'remote', 'channels', 'models', 'longsession', 'data', 'update', 'about'];
+  // 2026-11-01（Issue #24）：补入 'office'。
+  // 这是一个**既有缺陷**：page-office 的 DOM 存在（#page-office）、导航按钮也存在
+  // （data-page="office"），但 PAGES 白名单里漏了它 —— 于是 showPage('office')
+  // 判定 `!PAGES.includes(p)` 后直接回退到 general，用户点"虚拟办公室"
+  // 永远到不了这一页，office 设置（睡眠/速度/隐私模式）实际上**不可达**。
+  //
+  // 发现路径：本 Issue 把角色包 UI 放进 #page-office 后真机验证
+  // 得到 rows:0，逐层排查才定位到白名单缺失。**离线测试看不到**
+  // （它只查字符串存在性），只有真跑页面才发现。
+  const PAGES = ['general', 'cost', 'runtime', 'plugins', 'mcp', 'skills', 'tasks', 'notifications', 'weekly', 'remote', 'channels', 'models', 'longsession', 'data', 'update', 'about', 'office'];
   const CONTROL_PAGES = new Set(['cost', 'tasks', 'runtime', 'remote', 'plugins', 'mcp', 'skills', 'channels', 'longsession']);
-  const SETTINGS_PAGES = new Set(['general', 'cost', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about', 'notifications', 'weekly', 'mcp']);
+  // office 页是设置模式下的一个页面（办公室行为/外观），不是控制台页。
+  const SETTINGS_PAGES = new Set(['general', 'cost', 'models', 'runtime', 'remote', 'channels', 'data', 'update', 'about', 'notifications', 'weekly', 'mcp', 'office']);
   const CENTER_INTENTS = new Set(['new-task']);
   const routeParams = new URLSearchParams(location.search);
   let centerMode = routeParams.get('mode') === 'control' ? 'control' : 'settings';
@@ -2642,6 +2667,8 @@ nav_office: 'Virtual Office',
     if (p === 'about') { refreshDiagnostics(); refreshBootCheck(); }
     if (p === 'update') refreshCompat();
     if (p === 'notifications') { refreshNotifRulesStatus(); renderNotifHistory(); }
+    // Issue #24：角色包列表（随 office 页刷新；本地读盘，开销可忽略）
+    if (p === 'office') loadPacks();
   }
   function consumeCenterIntent(intent) {
     if (CENTER_INTENTS.has(intent) && centerMode === 'control') {
@@ -4761,7 +4788,7 @@ nav_office: 'Virtual Office',
     }
     for (const p of packs) {
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06)';
+      row.className = 'packs-row';
       const name = document.createElement('div');
       name.style.flex = '1';
       name.textContent = p.packId + (p.version ? ' @' + p.version : '');
@@ -4989,7 +5016,6 @@ nav_office: 'Virtual Office',
       if (wantSearch) $('plugin-search').focus(); // the empty state points here
       loadPlugins();
     loadOffice(); // additive: office state store (SPEC-08), not settings.json // different data source — refetch
-    loadPacks(); // Issue #24: character packs ride the same office page
       return;
     }
     renderPlugins();
