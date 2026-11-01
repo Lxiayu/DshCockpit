@@ -440,6 +440,72 @@ function renderDetail() {
     box.append(wrap);
   }
 
+  // --- 关联的执行（TaskRef）---
+  //
+  // 第一性原理：这是 Mission 与 Harness 之间**唯一**的连接点。
+  //
+  //   没有它，用户在 Desk 里看到 3 个工作流，在 Harness 里看到 5 次会话，
+  //   但两者之间没有任何对应关系 —— 只能靠人记。这就是跨会话连续性
+  //   最实际的断点。
+  //
+  // 边界：这里**只显示"哪次执行属于哪个工作流"，不显示任务状态**。
+  //   任务状态归 Harness，Mission 存状态就是两个事实作者（铁律 1）。
+  box.append(el('h2', { text: '关联的执行' }));
+  const refs = v.taskRefs || [];
+  if (refs.length === 0) {
+    box.append(el('div', { class: 'muted tiny', text: '还没有关联任何执行。' }));
+  } else {
+    const ul = el('ul', {});
+    for (const t of refs) {
+      const li = el('li', {});
+      const ws = (v.workstreams || []).find((w) => w.workstreamId === t.workstreamId);
+      li.append(el('div', { text: (t.summary || '（无摘要）') }));
+      li.append(el('div', {
+        class: 'muted tiny',
+        // harnessRef 是派生句柄，不是 sessionId —— 单独标出来，
+        // 让读的人知道点这里也反查不到原始会话。
+        text: `属于工作流：${ws ? ws.title : t.workstreamId} · 句柄 ${t.harnessRef}`,
+      }));
+      ul.append(li);
+    }
+    box.append(ul);
+  }
+  {
+    // 关联一次执行（就地表单）
+    const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
+    const wsSel = el('select', { style: 'flex:1;min-width:120px' });
+    for (const w of (v.workstreams || [])) {
+      wsSel.append(el('option', { value: w.workstreamId, text: w.title }));
+    }
+    const summary = el('input', { placeholder: '这次执行做了什么…', style: 'flex:2;min-width:160px' });
+    const btn = el('button', { text: '关联执行' });
+    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
+    btn.addEventListener('click', async () => {
+      msg.textContent = '';
+      const workstreamId = wsSel.value;
+      if (!workstreamId) { msg.textContent = '请先新建一个工作流'; return; }
+      if (!summary.value.trim()) { msg.textContent = '请填写摘要 —— 不然下次看到这个句柄不知道它是什么'; return; }
+      btn.disabled = true;
+      let r;
+      try {
+        r = await api('linkTaskRef', {
+          missionId: m.missionId,
+          workstreamId,
+          // 这里本来该由 Harness 提供真实 sessionId；离线/无 runtime 时
+          // 用一个明确的占位值，并让用户在摘要里写清楚。
+          // 绝不伪造一个"看起来像真的" sessionId —— 那会让人以为能反查。
+          sessionId: state.linkSessionId || 'manual-link',
+          summary: summary.value.trim(),
+        });
+      } catch (e) { r = { ok: false, reason: e.message }; }
+      btn.disabled = false;
+      if (r && r.ok) { summary.value = ''; await refresh(); }
+      else { msg.textContent = '失败：' + ((r && (r.reason || r.code)) || '未知错误'); }
+    });
+    wrap.append(wsSel, summary, btn, msg);
+    box.append(wrap);
+  }
+
   // --- 产物 ---
   box.append(el('h2', { text: '产物' }));
   const ver = state.verified;

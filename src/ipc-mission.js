@@ -35,6 +35,7 @@ const deliverable = require('./mission/deliverable');
 const harnessReader = require('./mission/harness-reader');
 const migration = require('./mission/migration');
 const schema = require('./mission/schema');
+const taskRef = require('./mission/task-ref');
 const briefSync = require('./mission/brief-sync');
 
 /** 冻结的通道集合。新增 action **不需要**动这里。 */
@@ -53,6 +54,8 @@ const ACTIONS = Object.freeze([
   'openQuestion',
   'answerQuestion',
   'registerDeliverable',  // 登记产物（自动算 digest）
+  'linkTaskRef',          // 关联一次 Harness 执行到某个 Workstream（只存派生句柄）
+  'listTaskRefs',         // 只读：某个 Mission 关联了哪些执行
   'verifyDeliverables',   // 校验产物是否仍与登记时一致
   'getBrief',             // 生成 Mission Brief
   'diagnostics',          // 日志健康度 / 备份 / 归档状态 / 迁移计划
@@ -317,6 +320,56 @@ function registerMissionIpc(ipcMain, ctx) {
       const out = r.store.append('question.answered', { questionId, answer }, { missionId: payload.missionId });
       if (!out.ok) return fail(out.reason, 'MISSION_APPEND_FAILED');
       return { ok: true, questionId };
+    },
+
+    linkTaskRef(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = argString(payload.missionId);
+      if (!missionId) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const workstreamId = argString(payload.workstreamId);
+      if (!workstreamId) return fail('workstreamId is required', 'WORKSTREAM_ID_REQUIRED');
+
+      // ---- 隐私边界：调用方传 sessionId，我们只存派生句柄 ----
+      //
+      // 第一版设计若直接把 sessionId 存进 TaskRef，会：
+      //   1. 违反 AGENTS.md §2.4（raw sessionId 不进 Mission 事实链）
+      //   2. 诱导后续代码去 Harness 反查甚至缓存状态 → 两个事实作者
+      //
+      // 所以这里**只接受 sessionId 用于派生**，落盘的是 `sess-h-<digest>`。
+      const built = taskRef.buildTaskRef({
+        missionId,
+        workstreamId,
+        taskRefId: argString(payload.taskRefId) || undefined,
+        sessionId: argString(payload.sessionId),
+        turn: Number.isInteger(payload.turn) ? payload.turn : undefined,
+        kind: argString(payload.kind) || undefined,
+        summary: argString(payload.summary),
+        observedAtMs: Number.isFinite(payload.observedAtMs) ? payload.observedAtMs : clock(),
+      });
+      if (!built.ok) return fail(built.reason, built.code);
+
+      // schema 会再挡一次 status —— 但这里先显式拒绝，给出更清楚的理由。
+      // 「TaskRef 不存状态机」是硬边界：状态归 Harness，两个作者 = 撒谎的状态。
+      if (payload.status !== undefined) {
+        return fail(
+          'TaskRef must not carry a status — task state is Harness-owned (two owners = lying state)',
+          'TASK_REF_STATUS_FORBIDDEN',
+        );
+      }
+
+      const out = r.store.append('taskRef.linked', built.taskRef, { missionId });
+      if (!out.ok) return fail(out.reason, 'MISSION_APPEND_FAILED');
+      return { ok: true, taskRef: built.taskRef };
+    },
+
+    listTaskRefs(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = argString(payload.missionId);
+      if (!missionId) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const view = r.store.missionView(missionId);
+      return { ok: true, taskRefs: view.taskRefs || [] };
     },
 
     registerDeliverable(payload) {

@@ -105,6 +105,7 @@
 | `docs/plans/active/P2-COMPANION-MODE-2026-11-01.md` | **P2.4 执行计划** | Companion Mode 的第一性原理分解（澄清 rail≠Companion、三种形态、状态保持） |
 | `docs/plans/active/P3-CAPABILITY-PACKS-2026-11-01.md` | **P3 执行计划** | Capability Pack 的第一性原理分解（verify 是核心、安装=记录、四态结果） |
 | `docs/plans/active/P4-MISSION-DESK-WRITE-PATHS-2026-11-01.md` | **P4 Desk 写入入口计划** | 为什么"只读 Desk 不叫 Desk"；含治理漏洞修复 |
+| `docs/plans/active/P4-TASKREF-WIRING-2026-11-01.md` | **TaskRef 接线计划** | Mission↔Harness 唯一连接点；含隐私派生规则 |
 | `docs/plans/completed/HARNESS-V0.6-PLAN-2026-10-25.md` | 已完成 | v0.6 五工作包计划（续跑/过程可见/首帧/推送/归档） |
 | `docs/plans/completed/HARNESS-V0.6-REPORT-2026-10-26.md` | 已完成 | v0.6 完成报告：变异矩阵、真机脚本、遗留 |
 | `docs/plans/completed/2026-08-30-virtual-office-runtime-implementation.md` | 已完成 | 办公室运行时 Task 0–9（历史记录；路径按当时结构） |
