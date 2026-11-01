@@ -140,3 +140,86 @@ session/projections  →  userQuestions.active[].questions[]
 - ❌ 不删掉 `session/page` 路径（还不确定 projections 覆盖它的全部信息）
 - ❌ 不把 tokenUsage 做成新面板（用户明确不要 Token 看板）
 - ❌ 不在第一版就接 `multiSelect`（先用单选验证链路，再多选）
+
+
+---
+
+# 8. 追加发现（2026-11-02）：`agentTeam` 也能从 projections 拿到
+
+## 8.1 修正一个错误结论
+
+之前我 grep `dsh-api-session-controller/lib/types/` 找 `agentTeam` → 0 次，
+据此认为"未进稳定 API"。
+
+**漏了一步**：Session 投影类型分散在各插件包里，不在 session-controller。
+
+```
+@deepseek-ai/dsh-experimental-agent-team/lib/types/projection.d.ts
+  → declare module '@deepseek-ai/dsh-session-projection/types' {
+      interface SessionProjectionStateMap { agentTeam: TeamProjectionState }
+    }
+```
+
+## 8.2 实测对比
+
+| profile | 投影字段数 | agentTeam |
+|---|---|---|
+| 默认 `web`（我们当前用） | 20 | ❌ |
+| 加 `agent-team-profile` | **21** | ✅ |
+
+启用后实测返回：
+
+```json
+{"agentTeam": {
+  "members": [{"id":"session-…","name":"lead","role":"lead","phase":"active"}],
+  "tasks": []
+}}
+```
+
+## 8.3 `TeamTaskSnapshot` 直接命中了缺口 C
+
+```ts
+export interface TeamTaskSnapshot {
+  readonly id: TeamTaskId;
+  readonly revision: number;
+  readonly subject: string;
+  readonly description: string;
+  readonly status: 'pending'|'in_progress'|'completed'|'deleted';
+  readonly ownerId?: SessionId;
+  readonly blockedBy: TeamTaskId[];     // ← 依赖关系（我们缺的）
+  readonly writeScopes: string[];       // ← 写入范围（防并行冲突）
+}
+export interface TeamTaskView extends TeamTaskSnapshot {
+  readonly ownerName?: string;
+  readonly ready: boolean;              // ← 依赖已满足？
+  readonly writeScopeWarnings: string[];
+}
+```
+
+**所以缺口 C 的方案变了**：不是"自己设计 dependsOn"，
+而是"映射官方 TeamTask"。
+
+## 8.4 但本轮**不在生产启用**
+
+决策：**保持默认 profile（不含 agent-team）**，理由：
+
+| 理由 | 说明 |
+|---|---|
+| experimental 无稳定性保证 | 官方明说 |
+| 尚未验证回归 | 启用后现有功能是否受影响未测 |
+| `tasks[]` 实测为空 | 真实 DAG 形状还没见过 |
+| 不需要急 | 当前 20 个投影字段已够用 |
+
+**启用条件**（满足才考虑）：
+1. 用启用版 profile 跑通我们全部 5 个真机验收探针
+2. 真的 spawn 一个 Lead + 2 teammate，观察到 `tasks[]` 的真实形状
+3. 契约测试能覆盖"投影缺 key 时回落"
+
+## 8.5 下一步（不在本轮）
+
+| # | 任务 |
+|---|---|
+| 1 | 用启用版 profile 跑 5 个验收探针（回归验证） |
+| 2 | spawn Lead + 2 teammate，观察 `agentTeam.tasks[]` |
+| 3 | 设计 TeamTask ↔ Mission/Workstream 映射 |
+| 4 | `ready:false` 在 380px 的表达（不画图，用"等待：X"） |

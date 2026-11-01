@@ -145,6 +145,9 @@
 | `docs/quality/mission-desk-structured-options-acceptance-2026-11-01.md` | **结构化选项验收** | 10/10；升级 0.2.1 直接解决缺口 1 |
 | `docs/quality/gpt-conversation-gap-analysis-2026-11-01.md` | **与 GPT 对话的差距分析** | 它自我推翻第一版；真实差距=右栏没用官方结构化交互 |
 | `docs/quality/status-brief-for-gpt-2026-11-01.md` | **给 GPT 的现状说明** | 可直接贴回做交叉验证；列出 3 个真实缺口 |
+| `docs/quality/status-brief-for-gpt-2026-11-02.md` | **给 GPT 的现状说明 v2（0.2.1）** | 可直接贴回；四个待讨论问题 |
+| `docs/quality/team-projection-breakthrough-2026-11-02.md` | **突破：agentTeam 可从稳定端点拿到** | 启用 profile 后 session/projections 含 agentTeam（members+tasks） |
+| `docs/quality/gpt-dialogue-round2-2026-11-02.md` | **与 GPT 第二轮交流** | 推翻它的两个判断；TeamTask 已含 blockedBy/writeScopes |
 | `docs/quality/testing-strategy.md` | 审计报告（2026-11-01） | 测试体系盘点：137 个套件真实构成、门禁类型、变异纪律、缺口与改进建议 |
 | `docs/quality/quality-gates.md` | **现行（2026-11-01）** | 质量门禁与 CI 策略："什么算通过"的定义 |
 | `docs/quality/compatibility-ledger-spec.md` | **规范草案（2026-11-01，待拍板）** | 兼容性账本 v2：Installed/Healthy/Compatible/Supported 四级分离、通道策略、回写机制（修复 Issue #21 根因） |
