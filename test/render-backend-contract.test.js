@@ -154,3 +154,16 @@ test('seam: the renderer itself is unchanged by this seam', () => {
   assert.doesNotMatch(src, /render-backend-contract/,
     'the renderer must not import the contract — the seam is documentation + a test-time check');
 });
+
+// ============================================ 相邻决策的一致性
+
+test('seam: the VerificationProvider decision still holds (no shell-only branch crept in)', () => {
+  // ADR-0003 复核（2026-11-01）说：如果 verify.js 里出现
+  // `if (kind === 'shell') … else if (…)` 这种分支，就说明该抽接口了。
+  // 这条断言就是这个触发条件的机械版本——真出现了，这里会红。
+  const src = fs.readFileSync(path.join(ROOT, 'src', 'capability-packs', 'verify.js'), 'utf8');
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const branched = /if\s*\(\s*(?:manifest\.)?verify\.kind\s*===|switch\s*\(\s*(?:manifest\.)?verify\.kind\s*\)/.test(code);
+  assert.strictEqual(branched, false,
+    'a per-kind branch means a second verification implementation exists — time to revisit ADR-0003');
+});

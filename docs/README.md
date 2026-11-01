@@ -108,6 +108,7 @@
 | `docs/plans/active/P4-TASKREF-WIRING-2026-11-01.md` | **TaskRef 接线计划** | Mission↔Harness 唯一连接点；含隐私派生规则 |
 | `docs/plans/active/P4-DESK-ACTION-PARITY-2026-11-01.md` | **Desk action 全覆盖计划** | 20 个 action 逐条核对；真缺口只有 2 个 |
 | `docs/plans/active/P4-RENDER-BACKEND-SEAM-2026-11-01.md` | **RenderBackend 接缝计划** | 为什么做接缝而不是抽象层；20 个方法里只有 2 个是技术特有 |
+| `docs/plans/active/P4-VERIFICATION-PROVIDER-DECISION-2026-11-01.md` | **VerificationProvider 决策** | 结论：不做接口（收益已获得，ADR 时机判断有误） |
 | `docs/plans/completed/HARNESS-V0.6-PLAN-2026-10-25.md` | 已完成 | v0.6 五工作包计划（续跑/过程可见/首帧/推送/归档） |
 | `docs/plans/completed/HARNESS-V0.6-REPORT-2026-10-26.md` | 已完成 | v0.6 完成报告：变异矩阵、真机脚本、遗留 |
 | `docs/plans/completed/2026-08-30-virtual-office-runtime-implementation.md` | 已完成 | 办公室运行时 Task 0–9（历史记录；路径按当时结构） |

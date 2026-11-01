@@ -142,7 +142,8 @@
 | ~~中~~ | ~~TaskRef 无生产者~~ | ✅ **已修 2026-11-01**：新增 `linkTaskRef`/`listTaskRefs` + Desk UI；`harnessRef` 走隐私派生（不存 sessionId） |
 | 中 | Brief 跨会话的两处风险 | 已加固（`.git` 检测 + 1 MiB 上限），但端到端仍未验证 |
 | — | `official-teams-shape.js` 零调用方 | ✅ **已判定为「刻意不接线」**（2026-11-01）：Office 已有 `team-office-adapter`+`team-office-bridge` 一条事实路径，再接一套就是双写（违反铁律 1）。已在模块头声明定位，并加机械门禁防止擅自 require。接线的正确时机是 ADR-0002 R2 等价性验证通过、旧 `team/runtime` 开始退役时**替换**而非并存 |
-| 低 | `VerificationProvider` / `RenderBackend` 两个"只做接口"承诺未做 | 都是零成本预留，被跳过后将来换实现要重做架构 |
+| — | `RenderBackend` 接缝 | ✅ **已做 2026-11-01**：`src/office/render/render-backend-contract.js`（接缝不是抽象层；20 个方法里只有 3 个技术特有） |
+| — | `VerificationProvider` 接口 | ✅ **已评估，决定不做** 2026-11-01：收益（可测试/统一入口）已通过 `runVerify` + 注入 runner 获得；缺的是第二个实现，写代码解决不了。触发条件已写进 ADR-0003 |
 
 ## 6. 优先级建议
 

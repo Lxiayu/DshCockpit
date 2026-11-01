@@ -147,9 +147,42 @@ Starter Kit = **面向一类用户任务的 Capability Pack 组合 + 一个 Miss
 | WorkspaceProvider | **暂不抽象** | `dsh-workspace-changes` + git worktree 已覆盖；LayerFS 未验证 |
 | KnowledgeProvider | **暂不抽象** | 当前无真实用户需求证据 |
 | HistoryProvider | **暂不抽象** | 官方 `dsh-experimental-session-search` 已覆盖 |
-| VerificationProvider | **可以抽象** | 已有真实第二实现需求（官方无内置 verification runner；DshCockpit 已有 `src/work/command-runner.js`） |
+| VerificationProvider | **暂不抽象**（2026-11-01 复核） | 原有理由推错了一步："官方没有" + "我们有一个" ≠ 两个实现。收益已通过 `runVerify` + 注入 runner 获得 |
 
 **即：只有 VerificationProvider 现在值得做接口。**
+
+### ⚠ 2026-11-01 复核：这条判断的**时机**错了（方向没错）
+
+复核结论见 `docs/plans/active/P4-VERIFICATION-PROVIDER-DECISION-2026-11-01.md`。
+
+原推理链：「官方无内置 verification runner；DshCockpit 已有 command-runner」
+→「因此有第二实现需求」。
+
+**最后一步不成立**："官方没有" + "我们有一个" ≠ "有两个实现"。
+它恰恰说明当前**只有一个实现**，而那正是 AGENTS.md §2.6 说的不该抽象的条件。
+
+实际代码状态：
+
+```
+runVerify 的调用点：2 处，且已在用同一个入口
+```
+
+也就是说，抽象能带来的三条收益里，两条**已经通过现有设计获得**：
+- 可测试 → `runVerify` 接受注入的 `runner`，测试里就是 fake runner
+- 统一入口 → 2 个调用点用同一个函数
+- 可替换 → ❌ 没有第二个后端，也没有真实需求
+
+**决定：不做完整接口**（那只会增加一份要同步的契约 + 一层间接）。
+
+**重新评估的触发条件**（满足任一）：
+
+1. 出现一个**无法用 shell 命令表达**的 verify（需调 Node API、或走 HTTP 的服务型验证）
+2. 第三方要写自己的 Capability Pack，且需要自定义 verify 方式
+3. `capability-packs/verify.js` 里出现 `if (kind === 'shell') … else if (…)`
+   这类分支——那是"需要接口"的机械信号
+
+**与 RenderBackend（ADR-0006）的区别**：那个缺的是"标出接缝"（20 个平铺方法
+没有统一入口），这个缺的是"第二个实现"。**后者没法靠写代码解决。**
 
 ## 6. 决策理由
 
