@@ -70,6 +70,7 @@ const { registerMissionIpc } = require('./ipc-mission');
 const { registerSkillsIpc } = require('./ipc-skills');
 const { registerModelsIpc } = require('./ipc-models');
 const { registerScheduledIpc } = require('./ipc-scheduled');
+const { registerMemoryCompactIpc } = require('./ipc-memory-compact');
 const { createMcpConnect } = require('./mcp-connect');
 const { createMcpImport } = require('./mcp-import');
 const compact = require('./compact');
@@ -2822,25 +2823,15 @@ function registerIpc() {
   ipcMain.on('center:return-cockpit', () => returnToCockpit('panel'));
 
   // long-session center (C3): compaction + AGENTS.md memory files
-  ipcMain.handle('shell:compact-now', async () => compactNow());
-  ipcMain.handle('shell:compact-status', () => ({
-    compacting: compactTracker ? compactTracker.isCompacting() : false,
-    sessionRunning,
-    last: compactTracker ? (compactTracker.history()[0] || null) : null,
-  }));
-  ipcMain.handle('shell:compact-history', () => (compactTracker ? compactTracker.history() : []));
-  ipcMain.handle('shell:memory-get', (_e, scope) => memory.get(String(scope || '')));
-  ipcMain.handle('shell:memory-save', async (_e, scope, content) => {
-    const r = await memory.save(String(scope || ''), typeof content === 'string' ? content : '');
-    if (r.ok) notify(t(lang(), 'memory.saved'), t(lang(), 'memory.savedBody', { path: r.path }));
-    else log(`[memory] save failed: ${r.code} (${r.reason || ''})`);
-    return r;
-  });
-  ipcMain.handle('shell:memory-delete', async (_e, scope) => {
-    const r = await memory.remove(String(scope || ''));
-    if (r.ok) notify(t(lang(), 'memory.deleted'), t(lang(), 'memory.deletedBody', { path: r.path }));
-    else log(`[memory] delete failed: ${r.code} (${r.reason || ''})`);
-    return r;
+  // Issue #22 Phase 1：6 个 handler 已提取到 src/ipc-memory-compact.js
+  // 注意 sessionRunning 用 getter 注入 —— 它是实时变量（mux session-status
+  // frame 更新），缓存成常量会让"运行中"永远停在启动那一刻。
+  registerMemoryCompactIpc(ipcMain, {
+    memory,
+    compactNow,
+    getCompactTracker: () => compactTracker,
+    isSessionRunning: () => sessionRunning,
+    notify, t, lang, log,
   });
 }
 
