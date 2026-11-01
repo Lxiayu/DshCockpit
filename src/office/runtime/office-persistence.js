@@ -46,6 +46,14 @@ const DEFAULT_FLAGS = Object.freeze({
 });
 
 const DEFAULT_SETTINGS = Object.freeze({
+  // Issue #18（2026-11-01）：main.js 的 selectedOfficeCharacterPackId() 一直
+  // 在读 settings.characterPackId，但这个 key 既不在 DEFAULT_SETTINGS 也不在
+  // SETTINGS_BOUNDS 里 —— normalizeSettings() 只遍历 SETTINGS_BOUNDS，
+  // 所以任何写入都会被**静默丢弃**，读取永远是 null，于是角色包选择功能
+  // 端到端不可用（永远回落内置包）。
+  //
+  // null = 未选择（回落内置 deepseek-default）；字符串 = 用户选中的已安装包 id。
+  characterPackId: null,
   sleepAfterMs: 300000,
   resultPresentationMs: 5000,
   sceneMinDimensionPerSecond: 0.046, // 与 office-module DEFAULT_SETTINGS 同步（步频匹配）
@@ -63,6 +71,9 @@ const SETTINGS_BOUNDS = Object.freeze({
   userFrameDurationOverrideMs: { type: 'intOrNull', min: 60, max: 2000 },
   reducedMotion: { type: 'boolean' },
   privacyMode: { type: 'enum', values: ['redacted', 'full'] },
+  // Issue #18：字符串或 null（null = 未选择，回落内置包）。
+  // 用 intOrNull 的风格新增一个 stringOrNull 类型，见 clampNumber。
+  characterPackId: { type: 'stringOrNull', maxLength: 64 },
 });
 
 function isPlainObject(value) {
@@ -72,6 +83,19 @@ function isPlainObject(value) {
 function clampNumber(value, rule) {
   if (rule.type === 'boolean') return value === true;
   if (rule.type === 'enum') return rule.values.includes(value) ? value : null;
+  // Issue #18：角色包 id 是"字符串或未选择"。必须**校验形状**而不是照单全收——
+  // 这个值最终会拼进文件系统路径（packsRoot/<packId>），
+  // 放任任意字符串等于开了路径穿越。只接受安全的目录名片段。
+  if (rule.type === 'stringOrNull') {
+    if (value === null || value === undefined) return null;
+    if (typeof value !== 'string') return null;
+    if (value === '') return null;
+    if (value.length > (rule.maxLength || 64)) return null;
+    // 只允许字母/数字/点/下划线/连字符；禁止路径分隔符、.. 、绝对路径、控制字符
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) return null;
+    if (value.includes('..')) return null;
+    return value;
+  }
   if (rule.type === 'intOrNull') {
     if (value === null || value === undefined) return null;
     if (!Number.isInteger(value)) return null;
@@ -93,7 +117,9 @@ function normalizeSettings(raw) {
       continue;
     }
     const clamped = clampNumber(input[key], rule);
-    out[key] = clamped === null && rule.type !== 'intOrNull' ? DEFAULT_SETTINGS[key] : clamped;
+    out[key] = clamped === null && rule.type !== 'intOrNull' && rule.type !== 'stringOrNull'
+      ? DEFAULT_SETTINGS[key]
+      : clamped;
   }
   return out;
 }
@@ -120,6 +146,17 @@ function validateSettingsPatch(partial) {
       if (value !== null && !Number.isInteger(value)) return { ok: false, code: 'SETTINGS_INVALID' };
       if (value === null || value <= 0) out[key] = null;
       else out[key] = Math.min(rule.max, Math.max(rule.min, value));
+    } else if (rule.type === 'stringOrNull') {
+      // Issue #18：角色包 id 是"安全的目录名片段或 null"。
+      // 非法值**拒绝整个 patch**（而不是静默降级为 null）——与其它分支
+      // 保持一致：写到磁盘上的东西要么被理解，要么不该发生。
+      // 这里与 clampNumber 的规则必须一致，否则写入和读取会给出不同答案。
+      if (value === null || value === undefined) { out[key] = null; continue; }
+      if (typeof value !== 'string' || value === '') return { ok: false, code: 'SETTINGS_INVALID' };
+      if (value.length > (rule.maxLength || 64)) return { ok: false, code: 'SETTINGS_INVALID' };
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) return { ok: false, code: 'SETTINGS_INVALID' };
+      if (value.includes('..')) return { ok: false, code: 'SETTINGS_INVALID' };
+      out[key] = value;
     } else {
       if (typeof value !== 'number' || !Number.isFinite(value)) return { ok: false, code: 'SETTINGS_INVALID' };
       const clamped = Math.min(rule.max, Math.max(rule.min, value));

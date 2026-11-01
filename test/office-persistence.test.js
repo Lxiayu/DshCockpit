@@ -42,6 +42,11 @@ test('fresh store loads the default schema with both office flags false', () => 
     userFrameDurationOverrideMs: null,
     reducedMotion: false,
     privacyMode: 'redacted',
+    // Issue #18（2026-11-01）：characterPackId 之前既不在 DEFAULT_SETTINGS
+    // 也不在 SETTINGS_BOUNDS 里，normalizeSettings() 会静默丢弃它，
+    // 导致 main.js 的 selectedOfficeCharacterPackId() 永远读到 null。
+    // 现在它是受校验的设置项（null = 未选择，回落内置包）。
+    characterPackId: null,
   });
   assert.deepEqual(state.employees, []);
   assert.deepEqual(state.tasks, []);
@@ -468,4 +473,64 @@ test('saveSavedLayout overwrites atomically and leaves no temp files in userData
   // no temp files leak into userData
   const leftovers = fs.readdirSync(dir).filter((name) => name.includes('.tmp'));
   assert.deepEqual(leftovers, []);
+});
+
+// ---------------------------------------------------------------------------
+// Issue #18（2026-11-01）：characterPackId 端到端断裂
+//
+// 症状链路：
+//   main.js:selectedOfficeCharacterPackId() 读 settings.characterPackId
+//   → 但这个 key 不在 DEFAULT_SETTINGS 也不在 SETTINGS_BOUNDS
+//   → normalizeSettings() 只遍历 SETTINGS_BOUNDS，写入被**静默丢弃**
+//   → 读取永远 null → 角色包选择功能端到端不可用（永远回落内置包）
+//
+// 同时 character-pack-installer.js（442 行 + 18 项测试）**零调用方**，
+// 用户根本无法通过任何 UI 安装角色包。
+// ---------------------------------------------------------------------------
+
+test('issue-18: characterPackId survives a settings round-trip', async () => {
+  const dir = tmpDir();
+  const store = createStore(dir);
+  await store.updateSettings({ characterPackId: 'my-pack' });
+  assert.equal(store.get().settings.characterPackId, 'my-pack',
+    'the value must not be silently dropped by normalizeSettings');
+
+  // 重新加载（真正的持久化验证）
+  const again = createStore(dir);
+  assert.equal(again.get().settings.characterPackId, 'my-pack');
+});
+
+test('issue-18: characterPackId defaults to null (fall back to the built-in pack)', () => {
+  const dir = tmpDir();
+  const store = createStore(dir);
+  assert.equal(store.get().settings.characterPackId, null);
+});
+
+test('issue-18: characterPackId validation blocks path traversal', async () => {
+  // 这个值最终拼进 packsRoot/<packId>，放任任意字符串等于开路径穿越。
+  const dir = tmpDir();
+  const store = createStore(dir);
+  for (const evil of ['../../etc/passwd', '/etc/passwd', 'a/../../b', '..', '.', '']) {
+    await store.updateSettings({ characterPackId: evil });
+    assert.equal(store.get().settings.characterPackId, null,
+      `"${evil}" must be rejected and fall back to null`);
+  }
+});
+
+test('issue-18: characterPackId accepts safe directory-name fragments', async () => {
+  const dir = tmpDir();
+  const store = createStore(dir);
+  for (const ok of ['deepseek-default', 'pack_1', 'v1.2', 'A1']) {
+    await store.updateSettings({ characterPackId: ok });
+    assert.equal(store.get().settings.characterPackId, ok, `"${ok}" is a safe pack id`);
+  }
+});
+
+test('issue-18: characterPackId rejects over-long ids and non-strings', async () => {
+  const dir = tmpDir();
+  const store = createStore(dir);
+  await store.updateSettings({ characterPackId: 'a'.repeat(80) });
+  assert.equal(store.get().settings.characterPackId, null);
+  await store.updateSettings({ characterPackId: 42 });
+  assert.equal(store.get().settings.characterPackId, null);
 });
