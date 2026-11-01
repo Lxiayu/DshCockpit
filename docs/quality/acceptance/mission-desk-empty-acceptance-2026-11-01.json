@@ -1,0 +1,71 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "the empty list shows a lead line (a start point, not a placeholder)",
+      "ok": true,
+      "detail": "{\"lead\":true,\"body\":true}"
+    },
+    {
+      "name": "the empty list explains what a Mission is",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "the empty list offers ONE visible primary action",
+      "ok": true,
+      "detail": "{\"btn\":true,\"visible\":true}"
+    },
+    {
+      "name": "the old dead-end copy is gone",
+      "ok": true,
+      "detail": "no passive \"nothing here\" text"
+    },
+    {
+      "name": "the empty detail pane distinguishes \"no missions\" from \"none selected\"",
+      "ok": true,
+      "detail": "还没有选中任何 Mission\n先在左边创建你的第一个 Mission，或者从列表里点一个已有的。"
+    },
+    {
+      "name": "the empty detail pane tells the user how to get out of it",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "clicking the primary action really opens the create form",
+      "ok": true,
+      "detail": "{\"clicked\":true,\"visible\":true}"
+    },
+    {
+      "name": "the error translator exists on the page",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "name": "a mapped failure reads as plain language AND keeps the code",
+      "ok": true,
+      "detail": "产物路径不对（文件不存在，或不在工作区里）（DELIVERABLE_INVALID）"
+    },
+    {
+      "name": "an unmapped failure still keeps the code",
+      "ok": true,
+      "detail": "操作失败（SOME_NEW_CODE）"
+    },
+    {
+      "name": "a failure with nothing at all is never an empty message",
+      "ok": true,
+      "detail": "操作失败，请重试"
+    },
+    {
+      "name": "screenshot captured",
+      "ok": true,
+      "detail": "2360x1630"
+    },
+    {
+      "name": "the renderer had no fatal errors",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

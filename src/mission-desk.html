@@ -65,6 +65,16 @@
   .dot.unknown { background: transparent; border: 1px solid #555c66; }
 
   .empty { color: var(--text-3, #8a919b); padding: 24px 8px; text-align: center; }
+  /* P4 空状态：不是"占位文案"，是**起点**。
+     所以标题要突出（这是第一步），正文要有信息量（解释这是什么），
+     按钮要唯一（不要给用户一堆选择）。 */
+  .empty-lead { color: var(--text-1, #e6e8ee); font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+  .empty-body { max-width: 420px; margin: 0 auto 14px; line-height: 1.6; font-size: 12px; }
+  .empty button.primary {
+    background: #6b7cff; color: #fff; border: 0; border-radius: 8px;
+    padding: 8px 16px; font-size: 12px; cursor: pointer; font-weight: 600;
+  }
+  .empty button.primary:hover { background: #7d8cff; }
   .soft-hint { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: rgba(255,196,89,.1); color: #ffcf7a; font-size: 11px; }
 
   h2 { font-size: 13px; margin: 18px 0 8px; color: var(--text-2); letter-spacing: .04em; text-transform: uppercase; }
@@ -130,6 +140,43 @@
 
 const api = (action, payload) => window.dshShell.mission(action, payload);
 
+// P4：错误提示的分级（S2）。
+//
+// 第一性原理：不是所有错误都该"人话化"，但**都不该只给 code**。
+//
+//   · 用户能处理的（参数填错、文件不存在）→ 给可执行建议
+//   · 用户不能处理的（内部状态、窗口没接上）→ 一句人话 + **保留 code**
+//
+// 关键是**不能丢掉 code**——那是排查的唯一线索。所以格式是
+// 「人话（代码 XXX）」，而不是二选一。
+const ERROR_HINTS = {
+  MISSION_ID_REQUIRED: '没有选中 Mission',
+  WORKSTREAM_ID_REQUIRED: '先创建一个工作流',
+  MISSION_PATCH_EMPTY: '没有改动',
+  DELIVERABLE_INVALID: '产物路径不对（文件不存在，或不在工作区里）',
+  DECISION_INVALID: '决策内容不完整（决定和理由都要填）',
+  QUESTION_INVALID: '问题内容不完整',
+  STATUS_INVALID: '状态值不对',
+  TASK_REF_STATUS_FORBIDDEN: '任务状态由 Harness 拥有，Mission 不保存它',
+  DESK_UNAVAILABLE: 'Mission Desk 窗口还没接上',
+  DESK_OPEN_FAILED: '打开窗口失败',
+  MISSION_APPEND_FAILED: '写入失败（磁盘可能满了或没有权限）',
+  UNKNOWN_ACTION: '这个操作还没有实现',
+};
+
+/** 把一次失败翻译成「人话（代码）」。永远保留 code。 */
+function explainFailure(r) {
+  const code = (r && (r.code || (r.reason && /^[A-Z_]{3,}$/.test(r.reason) ? r.reason : null))) || null;
+  const hint = code && ERROR_HINTS[code];
+  if (hint) return `${hint}（${code}）`;
+  // 没有映射时：如果 reason 本身像一句话就直接用，否则回退到通用文案
+  const reason = r && r.reason;
+  if (typeof reason === 'string' && reason.length > 0 && !/^[A-Z_]{3,}$/.test(reason)) {
+    return code ? `${reason}（${code}）` : reason;
+  }
+  return code ? `操作失败（${code}）` : '操作失败，请重试';
+}
+
 const state = {
   missions: [],
   selectedId: null,
@@ -177,7 +224,23 @@ function renderList() {
   const active = state.missions.filter((m) => m.status === 'active');
 
   if (state.missions.length === 0) {
-    box.append(el('div', { class: 'empty', text: '还没有 Mission。点右上角新建一个。' }));
+    // 空状态不是"占位文案"。新用户看到的第一屏应该是**明确的第一步**，
+    // 而不是一句被动的"还没有"。
+    //
+    // 设计原则（P4 §5）：
+    //   ❌ 显示"暂无数据" → 用户不知道该做什么
+    //   ✅ 告诉用户下一步做什么，且**只提示最关键的那一个动作**
+    box.append(el('div', { class: 'empty-lead', text: '从这里开始' }));
+    box.append(el('div', { class: 'empty-body',
+      text: '一个 Mission 就是一件你想让 AI 团队做成的事。给它一个标题和目标，之后所有会话、决策、产物都挂在它下面 —— 关掉再打开也不会丢。' }));
+    const cta = el('button', { class: 'primary', text: '创建第一个 Mission' });
+    cta.addEventListener('click', () => {
+      // 复用已有的新建流程，不重复实现
+      const openBtn = [...document.querySelectorAll('button')]
+        .find((b) => b.textContent && b.textContent.includes('新建 Mission'));
+      if (openBtn) openBtn.click();
+    });
+    box.append(cta);
     $('counts').textContent = '';
     return;
   }
@@ -234,7 +297,17 @@ function renderDetail() {
   box.className = '';
   if (!state.detail) {
     box.className = 'empty';
-    box.textContent = '选择一个 Mission 查看详情';
+    // 下面这句原来只说"选择一个 Mission"——但列表里可能**一个都没有**。
+    // 分两种情况给不同的路标，否则用户会卡在一个无解的指令上。
+    if (state.missions.length === 0) {
+      box.append(el('div', { class: 'empty-lead', text: '还没有选中任何 Mission' }));
+      box.append(el('div', { class: 'empty-body',
+        text: '先在左边创建你的第一个 Mission，或者从列表里点一个已有的。' }));
+    } else {
+      box.append(el('div', { class: 'empty-lead', text: '选择一个 Mission' }));
+      box.append(el('div', { class: 'empty-body',
+        text: '从左侧列表点一个，就能看到它的目标、决策、工作流和产物。' }));
+    }
     return;
   }
   const v = state.detail;
@@ -323,7 +396,7 @@ function renderDetail() {
       catch (e) { r = { ok: false, reason: e.message }; }
       saveBtn.disabled = false;
       if (r && r.ok) { editor.style.display = 'none'; editBtn.style.display = ''; await refresh(); }
-      else { msg.textContent = '失败：' + ((r && (r.reason || r.code)) || '未知错误'); }
+      else { msg.textContent = explainFailure(r); }
     });
 
     editor.append(titleInput, intentInput, saveBtn, cancelBtn, msg);
@@ -400,7 +473,7 @@ function renderDetail() {
       } catch (e) { r = { ok: false, reason: e.message }; }
       btn.disabled = false;
       if (r && r.ok) { txt.value = ''; why.value = ''; await refresh(); }
-      else { msg.textContent = '失败：' + ((r && (r.reason || r.code)) || '未知错误'); }
+      else { msg.textContent = explainFailure(r); }
     });
     wrap.append(txt, why, btn, msg);
     box.append(wrap);
@@ -452,7 +525,7 @@ function renderDetail() {
       catch (e) { r = { ok: false, reason: e.message }; }
       askBtn.disabled = false;
       if (r && r.ok) { qInput.value = ''; await refresh(); }
-      else { msg.textContent = '失败：' + ((r && (r.reason || r.code)) || '未知错误'); }
+      else { msg.textContent = explainFailure(r); }
     });
     wrap.append(qInput, askBtn, msg);
     box.append(wrap);
@@ -482,7 +555,7 @@ function renderDetail() {
           });
           b.disabled = false;
           if (r && r.ok) await refresh();
-          else alert('切换失败：' + ((r && (r.reason || r.code)) || '未知错误'));
+          else alert(explainFailure(r));
         });
         row.append(b);
       }
@@ -506,7 +579,7 @@ function renderDetail() {
       catch (e) { r = { ok: false, reason: e.message }; }
       btn.disabled = false;
       if (r && r.ok) { title.value = ''; await refresh(); }
-      else { msg.textContent = '失败：' + ((r && (r.reason || r.code)) || '未知错误'); }
+      else { msg.textContent = explainFailure(r); }
     });
     wrap.append(title, btn, msg);
     box.append(wrap);
@@ -572,7 +645,7 @@ function renderDetail() {
       } catch (e) { r = { ok: false, reason: e.message }; }
       btn.disabled = false;
       if (r && r.ok) { summary.value = ''; await refresh(); }
-      else { msg.textContent = '失败：' + ((r && (r.reason || r.code)) || '未知错误'); }
+      else { msg.textContent = explainFailure(r); }
     });
     wrap.append(wsSel, summary, btn, msg);
     box.append(wrap);
@@ -637,7 +710,7 @@ function renderDetail() {
       if (r && r.ok) { label.value = ''; rel.value = ''; await refresh(); }
       else {
         // 失败原因很有信息量：文件不存在 / 是目录 / 路径越界
-        msg.textContent = '失败：' + ((r && (r.reason || r.code)) || '未知错误');
+        msg.textContent = explainFailure(r);
       }
     });
     wrap.append(label, rel, btn, msg);
