@@ -1,0 +1,96 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "the office page boots",
+      "ok": true,
+      "detail": "{\"ready\":true}"
+    },
+    {
+      "name": "both pending items render as cards",
+      "ok": true,
+      "detail": "rows=2"
+    },
+    {
+      "name": "the count badge shows 2",
+      "ok": true,
+      "detail": "count=2"
+    },
+    {
+      "name": "the empty hint is hidden when there is work",
+      "ok": true,
+      "detail": "{\"count\":\"2\",\"rows\":2,\"risks\":[\"pending-risk risk-high\",\"pending-risk risk-low\"],\"bodyText\":\"高未绑定审批 · Bash · rm -rf /tmp/cache18:02:40查看并批准低未绑定提问 · 要继续吗？18:03:10查看并回答\",\"emptyHidden\":true,\"expiredHidden\":true,\"hasPendingClass\":true}"
+    },
+    {
+      "name": "the expired hint is hidden on a healthy runtime",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "name": "the body marks itself as having pending work",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "name": "a high-risk approval is marked high",
+      "ok": true,
+      "detail": "{\"evt-high-1\":{\"risk\":\"high\",\"cls\":\"pending-item\"},\"evt-low-2\":{\"risk\":\"low\",\"cls\":\"pending-item\"}}"
+    },
+    {
+      "name": "a low-risk question is marked low",
+      "ok": true,
+      "detail": "{\"evt-high-1\":{\"risk\":\"high\",\"cls\":\"pending-item\"},\"evt-low-2\":{\"risk\":\"low\",\"cls\":\"pending-item\"}}"
+    },
+    {
+      "name": "the two cards carry DIFFERENT risk markers",
+      "ok": true,
+      "detail": "{\"evt-high-1\":{\"risk\":\"high\",\"cls\":\"pending-item\"},\"evt-low-2\":{\"risk\":\"low\",\"cls\":\"pending-item\"}}"
+    },
+    {
+      "name": "a card carries in-place action buttons",
+      "ok": true,
+      "detail": "{\"found\":true,\"buttons\":[\"查看并批准\"]}"
+    },
+    {
+      "name": "clicking a high-risk card can open the detail surface",
+      "ok": true,
+      "detail": "{\"found\":true,\"clicked\":\"查看并批准\"}"
+    },
+    {
+      "name": "an empty inbox says so (empty hint visible)",
+      "ok": true,
+      "detail": "{\"rows\":0,\"count\":\"0\",\"emptyHidden\":false,\"zeroClass\":true,\"hasPending\":false}"
+    },
+    {
+      "name": "the count badge drops to neutral zero (no false alarm)",
+      "ok": true,
+      "detail": "{\"rows\":0,\"count\":\"0\",\"emptyHidden\":false,\"zeroClass\":true,\"hasPending\":false}"
+    },
+    {
+      "name": "the body drops the has-pending marker",
+      "ok": true,
+      "detail": "false"
+    },
+    {
+      "name": "after a runtime restart the inbox explains the vanished cards",
+      "ok": true,
+      "detail": "{\"expiredHidden\":false,\"expiredText\":\"运行时已重启，之前的待处理请求已失效（旧请求无法再回答）\",\"emptyHidden\":true}"
+    },
+    {
+      "name": "i18n resolves the inbox copy",
+      "ok": true,
+      "detail": "title=待你处理"
+    },
+    {
+      "name": "screenshots captured (cards state + expired state)",
+      "ok": true,
+      "detail": "cards=2800x1630 final=2800x1630"
+    },
+    {
+      "name": "the renderer had no fatal errors",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}
