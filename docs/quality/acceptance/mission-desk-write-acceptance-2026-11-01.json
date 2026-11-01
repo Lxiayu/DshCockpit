@@ -1,0 +1,61 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "the mission list renders at least one selectable card",
+      "ok": true,
+      "detail": "cards=1"
+    },
+    {
+      "name": "the desk page loads with its bridge",
+      "ok": true,
+      "detail": "{\"ready\":\"complete\",\"hasApi\":\"object\"}"
+    },
+    {
+      "name": "the decision form is present AND visible",
+      "ok": true,
+      "detail": "{\"hasTxt\":true,\"hasWhy\":true,\"hasBtn\":true,\"visible\":true}"
+    },
+    {
+      "name": "clicking \"记录决策\" really writes to the store",
+      "ok": true,
+      "detail": "{\"text\":\"用 SQLite 而不是 JSON\",\"status\":\"accepted\",\"by\":\"user\"}"
+    },
+    {
+      "name": "a user-submitted decision is marked accepted by the user",
+      "ok": true,
+      "detail": "accepted/user"
+    },
+    {
+      "name": "the decision appears in the UI after writing (refresh works)",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "name": "registering a real file computes a real sha256",
+      "ok": true,
+      "detail": "7cc600c9523ac647…"
+    },
+    {
+      "name": "a workstream can be created from the UI",
+      "ok": true,
+      "detail": "接入 StepFun"
+    },
+    {
+      "name": "the workstream status can be changed in place",
+      "ok": true,
+      "detail": "blocked"
+    },
+    {
+      "name": "screenshot captured",
+      "ok": true,
+      "detail": "2360x1630"
+    },
+    {
+      "name": "the renderer had no fatal errors",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

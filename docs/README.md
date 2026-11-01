@@ -136,6 +136,7 @@
 | `docs/quality/office-inbox-acceptance-2026-11-01.md` | **办公室收件箱验收（2026-11-01）** | 18/18 通过；补上纯逻辑测试测不到的视觉与交互证据 |
 | `docs/quality/companion-acceptance-2026-11-01.md` | **Companion 验收（2026-11-01）** | 11/11 通过；常驻小窗的四状态色彩与产品纪律实测 |
 | `docs/quality/capability-packs-acceptance-2026-11-01.md` | **能力包验收（2026-11-01）** | 13/13 通过；抓到三个离线全绿的缺陷（状态清空、i18n 撞车、DOM id 撞车） |
+| `docs/quality/mission-desk-write-acceptance-2026-11-01.md` | **Desk 写入验收（2026-11-01）** | 11/11 通过；真实点击写入、sha256、状态切换全部实测 |
 
 ## 6. 脚本产物（由脚本生成/更新，不要手改）
 
