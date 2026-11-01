@@ -127,6 +127,12 @@ jobs:
       - name: Gate — license compliance
         run: node scripts/check-licenses.js
 
+      # G4: Capability Pack 的 verify（P3）——每个 Pack 必须证明自己真的能工作。
+      #     用真实 command-runner 在临时目录里跑；skipped 不计作 passed，
+      #     "全部 skipped" 也算失败（那说明这个门禁什么都没验证）。
+      - name: Gate — capability packs
+        run: node scripts/verify-capability-packs.js
+
   # --------------------------------------------------------------- 语法/构建
   syntax:
     name: syntax & entry point

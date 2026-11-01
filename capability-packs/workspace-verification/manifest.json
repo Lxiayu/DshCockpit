@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "workspace-verification",
+  "version": "1.0.0",
+  "title": "工作区验证",
+  "description": "在工作区里跑真实的验证命令，产出可复核的结果文件。这是第一个 Capability Pack，用来证明「manifest + verify + 安装记录」这条链路是通的。",
+  "requires": {
+    "platforms": ["darwin", "linux", "win32"],
+    "commands": ["node"]
+  },
+  "provides": {
+    "capabilities": ["workspace.verify"]
+  },
+  "verify": {
+    "command": "node -e \"require('fs').writeFileSync('capability-pack-verify.txt', 'workspace-verification ok'); console.log('verify ok')\"",
+    "expectExitCode": 0,
+    "timeoutMs": 30000
+  }
+}
