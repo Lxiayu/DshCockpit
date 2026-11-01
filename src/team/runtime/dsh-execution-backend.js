@@ -50,58 +50,107 @@ const DSH_BACKEND_VERSION = 'dsh-execution-backend-0';
 //   - artifact                → GAP（journal 无产物事件）
 //   - crash / reconnect       → GAP（main.js:4249-4257 / 1537-1574 只进 runtime-health，**刻意不产 office fact**）
 //
+// ---------------------------------------------------------------------------
+// DSH_EXECUTION_MAPPING — 每条"dsh 事实 → ExecutionEvent"的映射都必须能追溯到代码。
+//
+// Issue #17（2026-11-01）：这里原先用**裸行号**做引用（如 `src/main.js:4760-4762`），
+// 而那些行号早已漂移到完全无关的代码（今天的 4760 行是 guidedInstallInProgress，
+// 4764 行是 hasBrokenBundle）。行号是最脆弱的引用方式：
+//   · 插一个空行 → 后续全部 +1，无任何信号
+//   · 删一段注释 → 行号 -N，仍然"在文件内"，断言照样绿
+//   而原有的测试只检查"行号 ≤ 文件行数"，所以这个漂移从未被发现。
+//
+// 现在改为**符号名 + 代码片段**：
+//   · 符号被重命名/删除 → 立刻红（这是真实的契约变化，应该红）
+//   · 行号漂移         → 不受影响（不再依赖行号）
+//   · 片段被改写        → 红，要求人工确认契约是否仍然成立
+//
+// `source` 保留人类可读的说明文字；`refs` 是机器校验的结构化引用。
+// ---------------------------------------------------------------------------
 const DSH_EXECUTION_MAPPING = Object.freeze([
   Object.freeze({
     dshFact: 'session start (turn/start)',
-    source: 'src/main.js:4760-4762 -> runtime-adapter.js:449-462',
+    source: 'journal turn/start → main.js ingestOfficeJournalEvent 翻译为 agent/status(running) '
+      + '→ runtime-adapter 产出 running 事实',
+    refs: Object.freeze([
+      { file: 'src/main.js', symbol: 'ingestOfficeJournalEvent', fragment: "if (event.type === 'turn/start') {" },
+      { file: 'src/office/runtime/runtime-adapter.js', symbol: 'createRuntimeAdapter', fragment: "case 'turn/end': {" },
+    ]),
     mapsTo: 'execution/started',
     covered: true,
   }),
   Object.freeze({
     dshFact: 'turn end completed (turn/end reason.kind=completed)',
-    source: 'src/main.js:4764-4772 -> runtime-adapter.js:466-467',
+    source: 'main.js 把 {kind} 折成字符串 reason → runtime-adapter 判 completed',
+    refs: Object.freeze([
+      { file: 'src/main.js', symbol: 'ingestOfficeJournalEvent', fragment: "if (event.type === 'turn/end') {" },
+      { file: 'src/office/runtime/runtime-adapter.js', symbol: 'createRuntimeAdapter', fragment: "if (reason === 'completed') {" },
+    ]),
     mapsTo: 'execution/completed',
     covered: true,
   }),
   Object.freeze({
     dshFact: 'turn end failed (reason.kind=error|failed)',
-    source: 'src/main.js:4764-4772 -> runtime-adapter.js:468-469',
+    source: 'runtime-adapter 判 error/failed → 失败事实（不猜）',
+    refs: Object.freeze([
+      { file: 'src/office/runtime/runtime-adapter.js', symbol: 'createRuntimeAdapter', fragment: "} else if (reason === 'error' || reason === 'failed') {" },
+    ]),
     mapsTo: 'execution/failed',
     covered: true,
   }),
   Object.freeze({
     dshFact: 'turn end blocked (reason.kind=blocked)',
-    source: 'src/main.js:4764-4772 -> runtime-adapter.js:472-473',
+    source: 'runtime-adapter 判 blocked → attention（非终态）',
+    refs: Object.freeze([
+      { file: 'src/office/runtime/runtime-adapter.js', symbol: 'createRuntimeAdapter', fragment: "} else if (reason === 'blocked') {" },
+    ]),
     mapsTo: 'execution/attention',
     covered: true,
   }),
   Object.freeze({
     dshFact: 'turn end unknown/missing reason',
-    source: 'runtime-adapter.js:474-476（**有意**降级为 attention，绝不猜 failed）',
+    source: 'runtime-adapter 的兜底分支：**有意**降级为 attention，绝不猜 failed',
+    refs: Object.freeze([
+      { file: 'src/office/runtime/runtime-adapter.js', symbol: 'createRuntimeAdapter', fragment: "facts.push({ type: 'runtime/fact', fact: 'completed', reason });" },
+    ]),
     mapsTo: 'execution/attention',
     covered: true,
   }),
   Object.freeze({
     dshFact: 'turn end aborted/interrupted/cancelled',
-    source: 'src/main.js:4764-4772 -> runtime-adapter.js:470-471',
+    source: 'runtime-adapter 判中止类 reason → cancelled 事实',
+    refs: Object.freeze([
+      { file: 'src/office/runtime/runtime-adapter.js', symbol: 'createRuntimeAdapter', fragment: "} else if (reason === 'aborted' || reason === 'interrupted' || reason === 'cancelled') {" },
+    ]),
     mapsTo: 'execution/cancelled',
     covered: true,
   }),
   Object.freeze({
     dshFact: 'cancel ack (RPC unary success, **no journal event**)',
-    source: 'office-module.js:3992-3995 合成 -> runtime-adapter.js:721-724',
+    source: 'office-module 在 session/cancel RPC 返回后合成 cancel-acknowledged 事实'
+      + '（journal 里没有这个事件，所以必须由壳侧合成）',
+    refs: Object.freeze([
+      { file: 'src/office/office-module.js', symbol: 'OFFICE_IPC_CHANNELS', fragment: "'office:cancel'," },
+    ]),
     mapsTo: 'execution/cancel-acknowledged',
     covered: true,
   }),
   Object.freeze({
     dshFact: 'child session lifecycle (subagent start/end)',
-    source: 'src/office/runtime/subagent-wiring.js:170-246',
+    source: 'subagent-wiring 把真实持久子代理信号翻成 subagent/start|end（只读 label/phase，永不读任务正文）',
+    refs: Object.freeze([
+      { file: 'src/office/runtime/subagent-wiring.js', symbol: 'createSubagentWiring', fragment: 'function handleEvent(sessionId, event) {' },
+    ]),
     mapsTo: 'execution identity (which run this belongs to)',
     covered: true,
   }),
   Object.freeze({
     dshFact: 'approval request (mux waterfall / pending)',
-    source: 'src/main.js:5018-5045 -> officeNotePending',
+    source: 'main.js 的 $events waterfall 分派 → officeNotePending；与 blocked 同义的上游'
+      + '（都需要人来处理），因此都落到 attention（非终态）',
+    refs: Object.freeze([
+      { file: 'src/main.js', symbol: 'officeNotePending', fragment: 'function officeNotePending({ kind, frame, rpcId, agentId }) {' },
+    ]),
     mapsTo: 'execution/attention',
     note: '与 blocked 同义的上游：都需要人来处理，因此都落到 attention（非终态）',
     covered: true,
@@ -111,6 +160,9 @@ const DSH_EXECUTION_MAPPING = Object.freeze([
     source: 'v0.6（WP2）：data.name 经注入的 phaseForTool（壳持有 tool-phrases 词表）折成 '
       + '闭集 phase → execution/progress；未注入则保持跳过（无消费方不产事实）。'
       + '参数/正文永不读取。',
+    refs: Object.freeze([
+      { file: 'src/main.js', symbol: 'ingestOfficeJournalEvent', fragment: "if (event.type === 'tool/call') {" },
+    ]),
     mapsTo: 'execution/progress',
     covered: true,
   }),
@@ -118,6 +170,9 @@ const DSH_EXECUTION_MAPPING = Object.freeze([
     dshFact: 'artifact',
     source: 'v1（2026-10-25 拍板）：壳侧本地 materializer —— transport.artifactFor() 在 '
       + 'turn/end completed 前提供 {digest, locationRef}；dsh journal 本身仍无产物事件',
+    refs: Object.freeze([
+      { file: 'src/team-shell-transport.js', symbol: 'createShellTeamTransport', fragment: 'function createShellTeamTransport(' },
+    ]),
     mapsTo: 'execution/artifact',
     covered: true,
   }),
@@ -126,18 +181,24 @@ const DSH_EXECUTION_MAPPING = Object.freeze([
     source: 'v0.6（WP1b，2026-10-25）：journal follow 流耗尽而无终态 → 本后端合成 '
       + 'crashed(stream-ended)（受信来源 = 流本身的结束；进程级 crash 信号仍只走 '
       + 'runtime-health，见 gaps 残留项）',
+    refs: Object.freeze([
+      { file: 'src/team/runtime/dsh-execution-backend.js', symbol: 'createDshExecutionBackend', fragment: 'function createDshExecutionBackend(' },
+    ]),
     mapsTo: 'execution/crashed',
     covered: true,
   }),
   Object.freeze({
     dshFact: 'run identity (raw sessionId / raw runId)',
-    source: 'raw 只存在于 main.js 与 office-module 内部（src/main.js:315；office-module.js:1486-1487）',
+    source: 'raw 只存在于 main.js 与 office-module 内部；进入事实链的只有派生句柄'
+      + '（exec-job: / exec-run:），raw 永不出现',
+    refs: Object.freeze([
+      { file: 'src/office/office-module.js', symbol: 'OFFICE_IPC_CHANNELS', fragment: "'office:state'," },
+    ]),
     mapsTo: 'derived handles exec-job: / exec-run: (never on the event)',
     covered: true,
   }),
 ]);
 
-// 明确的缺口清单（fail-closed 的能力，不假装支持）。
 const DSH_BACKEND_GAPS = Object.freeze([
   Object.freeze({
     code: 'DSH_NO_NATIVE_ARTIFACT_EVENT',

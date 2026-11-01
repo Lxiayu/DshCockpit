@@ -121,20 +121,50 @@ test('dsh-backend: the mapping table is complete and every row cites a real in-r
   }
 });
 
-test('dsh-backend: every mapping source citation points at an existing file and line', () => {
-  // 防止"来源"退化成散文：引用里的 `src/....js:NNN` 必须真的存在且行号在范围内。
-  const citations = backendModule.DSH_EXECUTION_MAPPING
-    .flatMap((row) => [...row.source.matchAll(/src\/[\w./-]+\.js:(\d+)(?:-(\d+))?/g)])
-    .map((m) => ({ file: m[0].split(':')[0], line: Number(m[1]), end: m[2] ? Number(m[2]) : Number(m[1]) }));
-  assert.ok(citations.length >= 5, 'the table must carry concrete file:line citations');
-  for (const citation of citations) {
-    const file = path.join(ROOT, citation.file);
-    assert.ok(fs.existsSync(file), `cited file must exist: ${citation.file}`);
-    const lines = fs.readFileSync(file, 'utf8').split('\n');
-    assert.ok(citation.line >= 1 && citation.line <= lines.length,
-      `${citation.file}:${citation.line} is outside the file (${lines.length} lines)`);
-    assert.ok(citation.end <= lines.length, `${citation.file}:${citation.end} is outside the file`);
+test('dsh-backend: every mapping row cites a VERIFIABLE source (symbol + fragment, not line numbers)', () => {
+  // Issue #17 (2026-11-01): the old assertion only checked "the cited line number
+  // is <= the file length". That passes even after the code has completely moved —
+  // and it HAD moved: `src/main.js:4760-4762` pointed at `guidedInstallInProgress`
+  // and `4764-4772` at `hasBrokenBundle`, nothing to do with turn events.
+  //
+  // Line numbers are the wrong reference: adding a blank line shifts every one of
+  // them without any signal. So each row now carries `refs: [{file, symbol, fragment}]`
+  // and we verify:
+  //   · the symbol still exists in that file (rename/delete => real contract change => RED)
+  //   · the fragment still appears in that file (code rewritten => needs human review => RED)
+  // Line drift alone no longer breaks anything, which is the point.
+  const sourceRef = require('../scripts/source-ref.js');
+  const rows = backendModule.DSH_EXECUTION_MAPPING;
+  assert.ok(rows.length >= 5, 'the mapping table must be substantial');
+
+  const allRefs = [];
+  for (const row of rows) {
+    assert.ok(Array.isArray(row.refs) && row.refs.length > 0,
+      `row "${row.dshFact}" must carry at least one structured ref (source prose alone is not verifiable)`);
+    for (const ref of row.refs) {
+      assert.equal(typeof ref.file, 'string');
+      assert.equal(typeof ref.symbol, 'string');
+      assert.equal(typeof ref.fragment, 'string');
+      allRefs.push(ref);
+    }
   }
+  assert.ok(allRefs.length >= 8, `expected a meaningful number of refs, got ${allRefs.length}`);
+
+  const result = sourceRef.verifyRefs(allRefs, ROOT);
+  assert.deepEqual(
+    result.failures.map((f) => `${f.ref.file} :: ${f.ref.symbol} :: ${f.reason}`),
+    [],
+    'every cited symbol must still exist and every fragment must still be present',
+  );
+});
+
+test('dsh-backend: no mapping row smuggles a bare line-number citation back in', () => {
+  // Guard against a future edit reintroducing `file.js:123` as the citation
+  // mechanism — that is precisely the drift-prone pattern Issue #17 removed.
+  const lineRefs = backendModule.DSH_EXECUTION_MAPPING
+    .flatMap((row) => [...String(row.source).matchAll(/src\/[\w./-]+\.js:\d+/g)]);
+  assert.deepEqual(lineRefs.map((m) => m[0]), [],
+    'cite symbols + fragments, not line numbers (they drift silently)');
 });
 
 test('dsh-backend: the gap list states each incompatibility with a level and an actionable detail', () => {
