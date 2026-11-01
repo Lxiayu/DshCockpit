@@ -1,7 +1,7 @@
 {
   "schema": 2,
-  "updatedAt": "2026-10-31T20:58:33.710Z",
-  "latestVerified": "0.1.5-rc.2",
+  "updatedAt": "2026-11-01T05:21:29.000Z",
+  "latestVerified": "0.2.1-rc.5",
   "runs": [
     {
       "schema": 1,
@@ -147,12 +147,94 @@
     ]
   },
   "recommended": {
-    "version": "0.1.5-rc.2",
-    "channel": "explicit",
-    "supportedLevel": "healthy",
-    "since": "2026-09-16"
+    "version": "0.2.1-rc.5",
+    "channel": "next",
+    "supportedLevel": "compatible",
+    "since": "2026-11-01"
   },
   "entries": [
+    {
+      "releaseChannel": "alpha",
+      "runtimeVersion": "0.2.2-alpha.2",
+      "resolvedVia": "dist-tag:alpha",
+      "resolvedAt": "2026-11-01T05:20:54.169Z",
+      "platforms": [
+        {
+          "platform": "darwin-arm64",
+          "install": {
+            "result": "pass"
+          },
+          "healthCheck": {
+            "result": "pass"
+          },
+          "protocol": {
+            "result": "pass"
+          },
+          "endToEnd": {
+            "result": "not-run",
+            "reason": "needs interactive model calls"
+          },
+          "teamIntegration": {
+            "result": "not-run",
+            "reason": "needs a driven team session"
+          },
+          "verdict": "compatible"
+        }
+      ],
+      "verifiedCommit": "ec7e5bc",
+      "verifiedAt": "2026-11-01T05:20:54.169Z",
+      "verifiedBy": "poc:runtime-poc",
+      "runId": "",
+      "unverified": [
+        "Team 成员事件（team/member、team/task 的实际 payload）",
+        "User Question 往返",
+        "Approval 往返",
+        "断线重连与状态恢复",
+        "win32-x64 平台（本次 POC 仅在 darwin-arm64 执行）"
+      ],
+      "ok": true
+    },
+    {
+      "releaseChannel": "next",
+      "runtimeVersion": "0.2.1-rc.5",
+      "resolvedVia": "dist-tag:next",
+      "resolvedAt": "2026-11-01T05:14:37.788Z",
+      "platforms": [
+        {
+          "platform": "darwin-arm64",
+          "install": {
+            "result": "pass"
+          },
+          "healthCheck": {
+            "result": "pass"
+          },
+          "protocol": {
+            "result": "pass"
+          },
+          "endToEnd": {
+            "result": "not-run",
+            "reason": "needs interactive model calls"
+          },
+          "teamIntegration": {
+            "result": "not-run",
+            "reason": "needs a driven team session"
+          },
+          "verdict": "compatible"
+        }
+      ],
+      "verifiedCommit": "ec7e5bc",
+      "verifiedAt": "2026-11-01T05:14:37.788Z",
+      "verifiedBy": "poc:runtime-poc",
+      "runId": "",
+      "unverified": [
+        "Team 成员事件（team/member、team/task 的实际 payload）",
+        "User Question 往返",
+        "Approval 往返",
+        "断线重连与状态恢复",
+        "win32-x64 平台（本次 POC 仅在 darwin-arm64 执行）"
+      ],
+      "ok": true
+    },
     {
       "releaseChannel": "explicit",
       "runtimeVersion": "0.1.5-rc.2",
