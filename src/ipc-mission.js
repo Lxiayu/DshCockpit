@@ -77,6 +77,7 @@ const ACTIONS = Object.freeze([
   'bindSession',          // 只写 UI 绑定：把 Mission 关联到一个 Harness 会话
   'getBoundSession',      // 只读：这个 Mission 绑定了哪个会话
   'workStatus',           // 只读：这次执行跑到哪了（turns/steps/是否在跑）
+  'harvestDeliverables',  // 从 Agent 回复里找**真实存在**的产物，登记成 Deliverable
 ]);
 
 function nowMs() { return Date.now(); }
@@ -939,6 +940,113 @@ function registerMissionIpc(ipcMain, ctx) {
       const entry = readBindMap(r.workspaceDir)[missionId];
       if (!entry) return { ok: true, bound: false, sessionId: null };
       return { ok: true, bound: true, sessionId: entry.sessionId, boundAtMs: entry.boundAtMs };
+    },
+
+    /**
+     * 从 Agent 的回复里"收获"真实存在的产物。
+     *
+     * 第一性原理：为什么必须校验文件真实存在
+     *
+     *   Agent 说"我生成了报告 docs/report.md"——**这句话本身不是证据**。
+     *   文件可能：
+     *     · 根本没创建
+     *     · 创建在别的目录
+     *     · 被后续步骤删了
+     *
+     *   所以这里做三件事：
+     *     1. 从回复预览里抽出**看起来像路径**的片段
+     *     2. **逐个校验文件真的存在**（fs.stat）
+     *     3. 只有真实存在的才登记，并算真实 sha256
+     *
+     *   不存在的一律跳过，并在返回值里如实报告 skipped，
+     *   让 UI 能告诉用户"Agent 提到但没找到"。
+     *
+     * 为什么不做"自动全量登记"：那是把 Agent 的自述当事实。
+     * 我们只接受**能验证**的部分。
+     */
+    async harvestDeliverables(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = payload && payload.missionId;
+      if (!isId(missionId)) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      if (typeof projectionsOf !== 'function') return fail('runtime not wired', 'RUNTIME_NOT_WIRED');
+
+      const bound = readBindMap(r.workspaceDir)[missionId];
+      if (!bound || !bound.sessionId) return fail('no session bound to this mission', 'NOT_BOUND');
+
+      let res;
+      try {
+        res = await projectionsOf(bound.sessionId);
+      } catch (err) {
+        return fail(`cannot read projections: ${err.message}`, 'PROJECTION_FAILED');
+      }
+      if (!res || !res.ok) return fail('projection unavailable', 'PROJECTION_FAILED');
+
+      const values = (res.value && res.value.values) || {};
+      const outline = Array.isArray(values.turnOutline) ? values.turnOutline : [];
+      if (outline.length === 0) return { ok: true, added: [], skipped: [], reason: 'no turns yet' };
+
+      // 只看最后一轮的回复（历史轮次的产物可能已经被后续步骤改掉）
+      const last = outline[outline.length - 1];
+      const text = typeof last.response === 'string' ? last.response : '';
+      if (!text) return { ok: true, added: [], skipped: [], reason: 'no response yet' };
+
+      // 抽路径：只认常见的代码/文档扩展名，避免把 "v1.2" 当成文件
+      const candidates = text.match(/[\w./-]+\.(?:md|markdown|js|mjs|cjs|ts|tsx|jsx|json|ya?ml|txt|html|css|py|sh|toml)\b/g) || [];
+      const unique = [...new Set(candidates)]
+        // 过滤明显不是路径的：纯文件名不算（不知道在哪），带 .. 的不算（隐私边界）
+        .filter((p) => p.includes('/'))
+        .filter((p) => !p.startsWith('/') && !p.includes('..') && !/^[A-Za-z]:/.test(p))
+        .slice(0, 10);
+
+      const workspaceDir = r.workspaceDir;
+      const added = [];
+      const skipped = [];
+
+      for (const relPath of unique) {
+        const abs = path.join(workspaceDir, relPath);
+        let stat = null;
+        try { stat = fs.statSync(abs); } catch { /* 不存在 */ }
+        if (!stat || !stat.isFile()) {
+          // Agent 提到了但文件不在 —— 如实记录，不登记
+          skipped.push({ relPath, reason: 'file not found in workspace' });
+          continue;
+        }
+        // 已有同路径的 Deliverable 就跳过（幂等）
+        const view = r.store.missionView(missionId);
+        const exists = view && view.deliverables.some((d) => d.relPath === relPath);
+        if (exists) { skipped.push({ relPath, reason: 'already registered' }); continue; }
+
+        let digest = null;
+        try {
+          digest = require('node:crypto').createHash('sha256').update(fs.readFileSync(abs)).digest('hex');
+        } catch { /* 读不了 */ }
+        if (!digest) { skipped.push({ relPath, reason: 'cannot read file' }); continue; }
+
+        try {
+          r.store.append('deliverable.registered', {
+            deliverableId: `dlv-${randomId()}`,
+            missionId,
+            label: path.basename(relPath),
+            relPath,
+            digest,
+            registeredAtMs: clock(),
+            // 来源标注：这是从 Agent 回复里收获的，不是用户手填的
+            source: 'harvested-from-agent',
+          }, { atMs: clock() });
+          added.push({ relPath, digest: digest.slice(0, 16), bytes: stat.size });
+        } catch (err) {
+          skipped.push({ relPath, reason: `append failed: ${err.message}` });
+        }
+      }
+
+      return {
+        ok: true,
+        added,
+        skipped,
+        // 明确报告"Agent 提到了什么但我们没找到"——这是诚实的关键
+        mentionedTotal: unique.length,
+      };
     },
 
     /**

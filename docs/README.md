@@ -159,6 +159,7 @@
 | `docs/quality/startwork-real-chain-verified-2026-11-02.md` | **交给团队 真实链路验证** | 6/6；真实 Agent 3 秒产出 turn |
 | `docs/quality/agent-reply-writeback-2026-11-02.md` | **Agent 回复回写** | 24/24；turnOutline.response 是准确完成信号 |
 | `docs/quality/startwork-live-verified-2026-11-02.md` | **交给团队 真机上线验证** | 用户点击一次即打通；Agent 2164 chunk |
+| `docs/quality/deliverable-harvest-2026-11-02.md` | **产物收获 + 两个假测试的教训** | 8/8；断言要精确到原因 |
 | `docs/quality/testing-strategy.md` | 审计报告（2026-11-01） | 测试体系盘点：137 个套件真实构成、门禁类型、变异纪律、缺口与改进建议 |
 | `docs/quality/quality-gates.md` | **现行（2026-11-01）** | 质量门禁与 CI 策略："什么算通过"的定义 |
 | `docs/quality/compatibility-ledger-spec.md` | **规范草案（2026-11-01，待拍板）** | 兼容性账本 v2：Installed/Healthy/Compatible/Supported 四级分离、通道策略、回写机制（修复 Issue #21 根因） |

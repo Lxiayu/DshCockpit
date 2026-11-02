@@ -236,6 +236,18 @@
     white-space: pre-wrap; overflow-wrap: anywhere; }
   .start-work-response-prompt { font-size: 10px; color: var(--text-3); margin-top: 4px;
     line-height: 1.45; }
+  .start-work-harvest {
+    margin-top: 7px; background: transparent; border: 1px solid var(--border-2);
+    border-radius: 6px; padding: 4px 10px; font-size: 10.5px; color: var(--text-2);
+    cursor: pointer;
+  }
+  .start-work-harvest:hover { border-color: var(--acc); color: var(--acc); }
+  .start-work-harvest:disabled { opacity: .6; cursor: default; }
+  .start-work-harvest-msg { font-size: 10px; color: var(--text-3); line-height: 1.5; margin-top: 4px; }
+  .start-work-harvest-msg.ok { color: var(--att-ok-fg); }
+  .start-work-harvest-msg.err { color: var(--att-bad-fg); }
+  .start-work-skip-list { margin: 3px 0 0; padding-left: 16px; }
+  .start-work-skip-list li { font-size: 9.5px; color: var(--text-3); line-height: 1.45; }
   .start-work-response-note { font-size: 9.5px; color: var(--text-4); margin-top: 4px;
     line-height: 1.4; font-style: italic; }
 
@@ -1013,6 +1025,52 @@ function renderStartWork(m) {
           }
           resp.append(el('div', { class: 'start-work-response-note',
             text: '这是预览（有长度上限），完整内容请在 Harness 里查看。' }));
+
+          // 「登记产物」：从回复里找**真实存在**的文件，登记成 Deliverable
+          //
+          // 第一性原理：Agent 说"我生成了 docs/report.md"这句话不是证据。
+          // 所以后端会逐个 fs.stat 校验——只有真实存在的才登记。
+          // 用户点这个按钮 = 授权我们去核对并登记。
+          const harvest = el('button', { class: 'start-work-harvest', text: '核对并登记产物' });
+          const harvestMsg = el('div', { class: 'start-work-harvest-msg' });
+          harvest.addEventListener('click', async () => {
+            harvest.disabled = true;
+            harvest.textContent = '核对着…';
+            harvestMsg.textContent = '';
+            harvestMsg.className = 'start-work-harvest-msg';
+            let r;
+            try {
+              r = await api('harvestDeliverables', { missionId: m.missionId });
+            } catch (e) { r = { ok: false, reason: e.message }; }
+            harvest.disabled = false;
+            harvest.textContent = '核对并登记产物';
+            if (!r || !r.ok) {
+              harvestMsg.textContent = explainFailure(r || {});
+              harvestMsg.classList.add('err');
+              return;
+            }
+            const added = r.added || [];
+            const skipped = r.skipped || [];
+            const parts = [];
+            if (added.length) parts.push('已登记 ' + added.length + ' 个真实产物');
+            if (skipped.length) {
+              // 如实报告"Agent 提到但没找到"——这是诚实的关键
+              parts.push(skipped.length + ' 个提到但未找到');
+            }
+            if (!parts.length) parts.push('没有发现可登记的产物');
+            harvestMsg.textContent = parts.join('，') + '。';
+            harvestMsg.classList.add(added.length ? 'ok' : '');
+            if (skipped.length) {
+              const ul = el('ul', { class: 'start-work-skip-list' });
+              for (const sk of skipped) {
+                ul.append(el('li', { text: sk.relPath + ' — ' + sk.reason }));
+              }
+              harvestMsg.append(ul);
+            }
+            if (added.length) await loadDetail(m.missionId);
+          });
+          resp.append(harvest);
+          resp.append(harvestMsg);
           prog.append(resp);
         } else {
           prog.append(el('div', { class: 'start-work-progress-hint',
