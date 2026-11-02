@@ -1,0 +1,81 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "team block renders the REAL tasks",
+      "ok": true,
+      "detail": "[\"设计数据库 Schema\",\"实现后端 API\"]"
+    },
+    {
+      "name": "task subjects come from the projection",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "task status is shown",
+      "ok": true,
+      "detail": "[\"pending\",\"pending\"]"
+    },
+    {
+      "name": "the blocked task shows a blocking section",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "it names the ACTUAL blocker (设计数据库 Schema), not its own owner",
+      "ok": true,
+      "detail": "等待：设计数据库 Schema · 研究员 · 未开始"
+    },
+    {
+      "name": "the blocking line does NOT use the blocked task's own owner as the blocker",
+      "ok": true,
+      "detail": "等待：设计数据库 Schema · 研究员 · 未开始"
+    },
+    {
+      "name": "the unblocked task has NO blocking section",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "MISSING agentTeam means NO team block at all (not \"0 tasks\")",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "and the page never says \"0 个任务\" or \"没有成员\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "a Team with only the lead and no tasks shows nothing",
+      "ok": true,
+      "detail": "false"
+    },
+    {
+      "name": "writeScopeWarnings is shown as a POSSIBLE conflict",
+      "ok": true,
+      "detail": "可能存在文件修改范围冲突：src/api 与 task-8 声明的范围重叠"
+    },
+    {
+      "name": "it NEVER claims the files are locked",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "a projection failure is disclosed (data may be stale)",
+      "ok": true,
+      "detail": "团队状态可能不是最新的（投影异常：task record rejected）。以下内容来自最后一次有效状态。"
+    },
+    {
+      "name": "screenshots captured for both themes",
+      "ok": true,
+      "detail": "dark + light"
+    },
+    {
+      "name": "the renderer had no fatal errors",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

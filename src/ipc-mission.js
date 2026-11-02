@@ -79,6 +79,61 @@ const ACTIONS = Object.freeze([
 function nowMs() { return Date.now(); }
 
 /**
+ * 归一化 agentTeam 投影。
+ *
+ * 实测真实形状（2026-11-02，让 Lead 调 team_task_create 后拿到）：
+ *
+ *   { members: [{id,name,role,phase}],
+ *     tasks: [{id,revision,subject,description,status,
+ *              blockedBy:[],writeScopes:[],ready:boolean,writeScopeWarnings:[]}] }
+ *
+ * **只透传，不加工**：blockedBy / ready / writeScopes 都是官方算好的，
+ * 我们不重新推导（那会变成第二个事实作者）。
+ *
+ * 缺 key 时返回 null —— 调用方据此**不显示团队区块**，
+ * 而不是显示"0 个成员"。
+ */
+function normalizeAgentTeam(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const members = Array.isArray(raw.members) ? raw.members : null;
+  const tasks = Array.isArray(raw.tasks) ? raw.tasks : null;
+  if (members === null && tasks === null) return null;
+
+  const normMembers = (members || [])
+    .filter((m) => m && typeof m === 'object' && typeof m.id === 'string')
+    .map((m) => ({
+      id: m.id,
+      name: typeof m.name === 'string' ? m.name : '',
+      role: m.role === 'lead' ? 'lead' : 'teammate',
+      phase: typeof m.phase === 'string' ? m.phase : 'active',
+    }));
+
+  const normTasks = (tasks || [])
+    .filter((t) => t && typeof t === 'object' && typeof t.id === 'string')
+    .map((t) => ({
+      id: t.id,
+      revision: Number.isFinite(t.revision) ? t.revision : 0,
+      subject: typeof t.subject === 'string' ? t.subject : '',
+      status: typeof t.status === 'string' ? t.status : 'pending',
+      ownerName: typeof t.ownerName === 'string' ? t.ownerName : null,
+      // 官方算好的，原样透传
+      blockedBy: Array.isArray(t.blockedBy) ? t.blockedBy.filter((x) => typeof x === 'string') : [],
+      ready: t.ready === true,
+      writeScopes: Array.isArray(t.writeScopes) ? t.writeScopes.filter((x) => typeof x === 'string') : [],
+      writeScopeWarnings: Array.isArray(t.writeScopeWarnings)
+        ? t.writeScopeWarnings.filter((x) => typeof x === 'string') : [],
+    }));
+
+  return {
+    members: normMembers,
+    tasks: normTasks,
+    // failure 有值时 members/tasks 会**停留在最后一次有效状态**——
+    // 那时不能把任务列表标为实时（官方注释明确说了）。
+    failure: typeof raw.failure === 'string' ? raw.failure : null,
+  };
+}
+
+/**
  * 归一化 inbox 投影（排队中的用户输入）。
  *
  * 官方结构：`{ nextTurn: UserMessage[], nextStep: UserMessage[] }`
@@ -763,6 +818,19 @@ function registerMissionIpc(ipcMain, ctx) {
         settledCount: hasUserQuestions ? uq.settled.length : 0,
         // 其余投影按需透传（当前 UI 不用 tokenUsage，但保留以便将来）
         agentPreset: typeof values.agentPreset === 'string' ? values.agentPreset : null,
+
+        // ---- Team 投影（只读；启用实验性 profile 时才有）------------------
+        //
+        // 第一性原理：**缺 agentTeam 不等于空团队**。GPT 第三轮列了五种状态，
+        // 我们必须区分，否则会把"没启用"误报成"团队没人"：
+        //   · profile 没启用 Team
+        //   · session 不属于 Team
+        //   · 投影尚未加载
+        //   · 读取失败
+        //   · 投影存在但确实没成员/任务
+        //
+        // 这里只能可靠区分"有没有这个 key"。其余交给 UI 按 available 处理。
+        agentTeam: normalizeAgentTeam(values.agentTeam),
 
         // ---- 第二层「团队执行提醒」的数据源 ------------------------------
         //

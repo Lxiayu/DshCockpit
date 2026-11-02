@@ -192,6 +192,39 @@
   .att-rem-title { font-size: 11.5px; color: var(--text-2); line-height: 1.45; }
   .att-rem-detail { font-size: 10.5px; color: var(--text-3); line-height: 1.5; margin-top: 2px; }
 
+  /* --- 团队任务（agentTeam 投影）-------------------------------------
+     层级：比"待办"轻（那是需要行动的），比"参考资料"重（那是当前在跑的）。
+     所以：有卡片底，但无强调色。 */
+  .team { margin: 0 0 10px; padding: 10px 11px; border-radius: 10px;
+    background: var(--bg-panel); border: 1px solid var(--border-1); }
+  .team-head { display: flex; align-items: center; gap: 6px; font-size: 12px;
+    font-weight: 650; color: var(--text-1); margin-bottom: 7px; }
+  .team-count { font-size: 10px; font-weight: 600; padding: 0 6px; border-radius: 999px;
+    background: var(--att-idle-bg); color: var(--att-idle-fg); }
+  .team-empty { font-size: 11.5px; color: var(--text-3); }
+  .team-warn { font-size: 10.5px; color: var(--att-warn-fg); background: var(--att-warn-bg);
+    border-radius: 6px; padding: 6px 8px; margin-bottom: 8px; line-height: 1.5; }
+  .team-task { padding: 6px 0; }
+  .team-task + .team-task { box-shadow: inset 0 1px 0 var(--border-1); }
+  .team-task-line { display: flex; align-items: baseline; gap: 7px; }
+  .team-task-status { font-size: 9.5px; font-weight: 700; letter-spacing: .05em;
+    padding: 1.5px 6px; border-radius: 4px; flex: 0 0 auto; }
+  .st-task-pending { background: var(--att-idle-bg); color: var(--att-idle-fg); }
+  .st-task-in_progress { background: var(--att-info-bg); color: var(--att-info-fg); }
+  .st-task-completed { background: var(--att-ok-bg); color: var(--att-ok-fg); }
+  .st-task-deleted { background: var(--att-idle-bg); color: var(--att-idle-fg); }
+  .team-task-subject { font-size: 12.5px; color: var(--text-1); line-height: 1.5;
+    overflow-wrap: anywhere; }
+  .team-task-meta { font-size: 10.5px; color: var(--text-3); margin-top: 3px; padding-left: 2px; }
+  /* 被阻塞：用琥珀色，与"待办红"区分——它不是要你处理，是在等人 */
+  .team-blocked { margin-top: 4px; padding: 5px 8px; border-radius: 6px;
+    background: var(--att-warn-bg); }
+  .team-blocked-line { font-size: 10.5px; color: var(--att-warn-fg); line-height: 1.5; }
+  .team-blocked-list { margin: 3px 0 0; padding-left: 16px; }
+  .team-blocked-list li { font-size: 10.5px; color: var(--att-warn-fg); line-height: 1.5; }
+  /* 写入范围冲突：只提示"可能"，绝不写"已锁定" */
+  .team-scope-warn { margin-top: 4px; font-size: 10.5px; color: var(--text-3); line-height: 1.5; }
+
   /* --- L2: 离开期间发生了什么（时间线）------------------------------- */
   .tl { margin: 0 0 10px; padding: 10px 11px; border-radius: 10px; background: var(--bg-panel); border: 1px solid var(--border-1); }
   .tl-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; font-weight: 650; color: var(--text-1); margin-bottom: 7px; }
@@ -751,6 +784,121 @@ function collectReminders() {
   return out;
 }
 
+// -------------------------------------------------- 团队任务（agentTeam）
+//
+// 第一性原理：**缺 agentTeam 不等于空团队**。
+//
+//   有五种情况都会让 agentTeam 不存在：
+//     · profile 没启用 Team 插件（我们的默认情况）
+//     · session 不属于 Team
+//     · 投影尚未加载
+//     · 读取失败
+//     · 投影存在但确实没成员/任务
+//
+//   我们只能可靠区分"有没有 key"。所以：
+//     · 没有 key  → **完全不显示团队区块**（不显示"0 个任务"）
+//     · 有 key 但 tasks 为空 → 显示一句"团队没有在跑的任务"
+//
+// 第二性原理：blockedBy 的解析必须查表，不能用当前任务的 ownerName。
+//   （GPT 第三轮指出我原来的错误）
+//   blockedBy 是 **taskId 数组**，要拿每个 id 去 tasks 里找对应任务，
+//   显示那个任务自己的 subject / status / ownerName。
+
+const TASK_STATUS_LABEL = {
+  pending: '未开始', in_progress: '进行中', completed: '已完成', deleted: '已删除',
+};
+const TASK_STATUS_TONE = {
+  pending: 'idle', in_progress: 'info', completed: 'ok', deleted: 'idle',
+};
+
+function renderTeamTasks() {
+  const proj = state.projections;
+  const team = proj && proj.agentTeam;
+  if (!team) return null;   // 没有 key → 不显示（不是显示空的）
+
+  const tasks = Array.isArray(team.tasks) ? team.tasks : [];
+  const members = Array.isArray(team.members) ? team.members : [];
+  if (tasks.length === 0 && members.length <= 1) return null;  // 只有 lead 且无任务 → 无事可说
+
+  const box = el('section', { class: 'team' });
+
+  // 投影异常必须明说——官方注释：failure 有值时数据停留在最后一次有效状态
+  if (team.failure) {
+    box.append(el('div', { class: 'team-warn',
+      text: '团队状态可能不是最新的（投影异常：' + team.failure + '）。以下内容来自最后一次有效状态。' }));
+  }
+
+  const head = el('div', { class: 'team-head' });
+  head.append(el('span', { text: '团队任务' }));
+  if (tasks.length) head.append(el('span', { class: 'team-count', text: String(tasks.length) }));
+  box.append(head);
+
+  if (tasks.length === 0) {
+    box.append(el('div', { class: 'team-empty', text: '团队当前没有在跑的任务。' }));
+    return box;
+  }
+
+  // 建索引：taskId → task（解析 blockedBy 用）
+  const byId = new Map();
+  for (const t of tasks) byId.set(t.id, t);
+
+  for (const t of tasks) {
+    if (t.status === 'deleted') continue;
+    const row = el('div', { class: 'team-task', 'data-status': t.status });
+
+    const line = el('div', { class: 'team-task-line' });
+    line.append(el('span', { class: 'team-task-status st-task-' + t.status,
+      text: TASK_STATUS_LABEL[t.status] || t.status }));
+    line.append(el('span', { class: 'team-task-subject', text: t.subject || t.id }));
+    row.append(line);
+
+    // 负责人（官方给的 ownerName，可能没有）
+    const meta = [];
+    if (t.ownerName) meta.push(t.ownerName);
+    if (meta.length) row.append(el('div', { class: 'team-task-meta', text: meta.join(' · ') }));
+
+    // 被阻塞：读 blockedBy，去 tasks 里找**真正阻塞它**的任务
+    if (t.ready === false && t.blockedBy.length > 0) {
+      const blockers = t.blockedBy.map((id) => byId.get(id)).filter(Boolean);
+      const blocked = el('div', { class: 'team-blocked' });
+      if (blockers.length === 1) {
+        const b = blockers[0];
+        blocked.append(el('div', { class: 'team-blocked-line',
+          text: '等待：' + (b.subject || b.id)
+            + (b.ownerName ? ' · ' + b.ownerName : '')
+            + (TASK_STATUS_LABEL[b.status] ? ' · ' + TASK_STATUS_LABEL[b.status] : '') }));
+      } else if (blockers.length > 1) {
+        blocked.append(el('div', { class: 'team-blocked-line',
+          text: '等待 ' + blockers.length + ' 项前置任务' }));
+        const ul = el('ul', { class: 'team-blocked-list' });
+        for (const b of blockers) {
+          ul.append(el('li', {
+            text: (b.subject || b.id)
+              + (b.ownerName ? ' · ' + b.ownerName : '')
+              + (TASK_STATUS_LABEL[b.status] ? ' · ' + TASK_STATUS_LABEL[b.status] : ''),
+          }));
+        }
+        blocked.append(ul);
+      }
+      // 找不到被引用的任务时如实说，不假装没被阻塞
+      if (blockers.length === 0) {
+        blocked.append(el('div', { class: 'team-blocked-line',
+          text: '被 ' + t.blockedBy.length + ' 项前置任务阻塞（明细暂时读不到）' }));
+      }
+      row.append(blocked);
+    }
+
+    // writeScopeWarnings：**可能是冲突**，不是"已锁定"
+    if (t.writeScopeWarnings.length > 0) {
+      row.append(el('div', { class: 'team-scope-warn',
+        text: '可能存在文件修改范围冲突：' + t.writeScopeWarnings.join('、') }));
+    }
+
+    box.append(row);
+  }
+  return box;
+}
+
 /** 渲染第二层。**中性样式**，不能与第一层抢注意力。 */
 function appendReminders(wrap, reminders) {
   if (!reminders || reminders.length === 0) return;
@@ -887,6 +1035,10 @@ function renderDetail() {
   // --- L2：你离开期间发生了什么 ---
   const sinceBlock = renderSince();
   if (sinceBlock) box.append(sinceBlock);
+
+  // --- 团队任务（只有启用 team 投影时才显示）---
+  const teamBlock = renderTeamTasks();
+  if (teamBlock) box.append(teamBlock);
 
   // --- 头部 ---
   const head = el('div', { class: 'row' });

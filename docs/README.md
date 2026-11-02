@@ -144,6 +144,7 @@
 | `docs/quality/mission-desk-shared-context-acceptance-2026-11-01.md` | **三实体+UI层级验收** | 17/17；层级靠 scale/weight 不靠颜色 |
 | `docs/quality/mission-desk-structured-options-acceptance-2026-11-01.md` | **结构化选项验收** | 10/10；升级 0.2.1 直接解决缺口 1 |
 | `docs/quality/mission-desk-attention-layers-acceptance-2026-11-02.md` | **待办两层分类验收** | 16/16；红框只给"必须决策"，警报疲劳 |
+| `docs/quality/mission-desk-team-blocked-acceptance-2026-11-02.md` | **团队任务+BlockedBy 验收** | 15/15；阻塞者查表而非自己 owner |
 | `docs/quality/gpt-conversation-gap-analysis-2026-11-01.md` | **与 GPT 对话的差距分析** | 它自我推翻第一版；真实差距=右栏没用官方结构化交互 |
 | `docs/quality/status-brief-for-gpt-2026-11-01.md` | **给 GPT 的现状说明** | 可直接贴回做交叉验证；列出 3 个真实缺口 |
 | `docs/quality/status-brief-for-gpt-2026-11-02.md` | **给 GPT 的现状说明 v2（0.2.1）** | 可直接贴回；四个待讨论问题 |
@@ -151,6 +152,7 @@
 | `docs/quality/gpt-dialogue-round2-2026-11-02.md` | **与 GPT 第二轮交流** | 推翻它的两个判断；TeamTask 已含 blockedBy/writeScopes |
 | `docs/quality/gpt-dialogue-round3-analysis-2026-11-02.md` | **GPT 第三轮回复分析** | 纠正我们 2 处错误；三层模型/Verification Profile 采纳 |
 | `docs/architecture/team-task-workstream-mapping.md` | **TeamTask↔Workstream 映射设计** | 三层模型；只存关联不复制事实；回归 10/10 |
+| `docs/quality/real-team-dag-verified-2026-11-02.md` | **真实 Team DAG 已验证** | blockedBy/ready/writeScopes 实测；解除设计阻塞 |
 | `docs/quality/testing-strategy.md` | 审计报告（2026-11-01） | 测试体系盘点：137 个套件真实构成、门禁类型、变异纪律、缺口与改进建议 |
 | `docs/quality/quality-gates.md` | **现行（2026-11-01）** | 质量门禁与 CI 策略："什么算通过"的定义 |
 | `docs/quality/compatibility-ledger-spec.md` | **规范草案（2026-11-01，待拍板）** | 兼容性账本 v2：Installed/Healthy/Compatible/Supported 四级分离、通道策略、回写机制（修复 Issue #21 根因） |
