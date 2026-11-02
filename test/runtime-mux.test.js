@@ -192,6 +192,18 @@ test('reconnect re-opens every registered stream (caller sees no generation chan
     const second = fx.state.connections[1];
     assert.equal(second.cookie, 'dsh-auth-test=signature-1', 'reconnect handshake re-uses the cookie');
     await waitFor(() => mux.clientId === 'cid-ready-1', 'ready frame on the new generation');
+
+    // 竞态修复（2026-11-02）：原来这里**直接**读 second.opens ——
+    // 但"连接建立"和"重放 open 帧"是两步：
+    //   ready 帧到达 ≠ 注册的流已经重新 open。
+    // 全量并发跑时这个窗口会被拉宽，于是偶发 "registered stream is re-opened" 失败
+    // （单独跑 2/2 通过，全量跑偶发红）。
+    //
+    // 正确做法：显式等 open 帧出现，而不是假设它和 ready 同时到。
+    await waitFor(
+      () => second.opens.some((f) => f.streamId === 'session-follow-s1'),
+      'registered stream is re-opened',
+    );
     const reopened = second.opens.find((f) => f.streamId === 'session-follow-s1');
     assert.ok(reopened, 'registered stream is re-opened after reconnect');
     assert.equal(reopened.endpoint, 'session/follow');
