@@ -74,6 +74,8 @@ const ACTIONS = Object.freeze([
   'updateAssumptionStatus',
   'recordEvidence',
   'sessionProjections',   // 只读：向运行时要结构化投影（含 userQuestions.options）
+  'bindSession',          // 只写 UI 绑定：把 Mission 关联到一个 Harness 会话
+  'getBoundSession',      // 只读：这个 Mission 绑定了哪个会话
 ]);
 
 function nowMs() { return Date.now(); }
@@ -188,6 +190,54 @@ function isId(v) { return typeof v === 'string' && /^mis-[A-Za-z0-9][A-Za-z0-9-]
 //   所以存 `<workspace>/.dsh/ui-seen.json`，与 office-state 同级。
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Mission ↔ Harness 会话绑定
+//
+// 第一性原理：为什么需要它
+//
+//   用户创建 Mission 后**无事可做**——这是最严重的产品问题。
+//   Mission 只能"记录"工作，不能"启动"工作。
+//
+//   启动工作需要一个 Harness 会话。但 Mission 按隐私规则**不存 raw sessionId**
+//   （只存派生句柄 sess-h-*），所以绑定必须存别处。
+//
+//   存 `<workspace>/.dsh/mission-sessions.json`，与 ui-seen.json 同级。
+//   理由同 lastSeenAtMs：这是**本机的执行绑定**，不是项目事实，
+//   不该进事件日志（否则会跟着项目同步给别人，而对别人毫无意义）。
+// ---------------------------------------------------------------------------
+
+const BIND_FILE = 'mission-sessions.json';
+
+function bindFilePath(workspaceDir) {
+  return path.join(workspaceDir, '.dsh', BIND_FILE);
+}
+
+function readBindMap(workspaceDir) {
+  try {
+    const raw = fs.readFileSync(bindFilePath(workspaceDir), 'utf8');
+    const parsed = JSON.parse(raw);
+    const map = parsed && typeof parsed.sessions === 'object' && parsed.sessions ? parsed.sessions : {};
+    const out = {};
+    for (const [k, v] of Object.entries(map)) {
+      if (typeof k === 'string' && v && typeof v === 'object' && typeof v.sessionId === 'string') {
+        out[k] = { sessionId: v.sessionId, boundAtMs: Number.isFinite(v.boundAtMs) ? v.boundAtMs : 0 };
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeBindMap(workspaceDir, map) {
+  const dir = path.join(workspaceDir, '.dsh');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = bindFilePath(workspaceDir);
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify({ version: 1, sessions: map }, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+}
+
 const SEEN_FILE = 'ui-seen.json';
 
 function seenFilePath(workspaceDir) {
@@ -247,6 +297,11 @@ function registerMissionIpc(ipcMain, ctx) {
     // 只读的运行时投影获取器（由 main.js 注入，内部走 mux.call）。
     // 注入而不是直接 require mux：ipc-mission 保持纯 Node 可测。
     projectionsOf = null,
+    // 启动/续接 Harness 会话的能力（由 main.js 注入，内部走 harness-rpc）。
+    // 这是解决"创建 Mission 后无事可做"的核心：Mission 必须能**启动工作**，
+    // 而不只是记录工作。
+    ensureSession = null,   // (missionId) => Promise<{ok, sessionId}>
+    promptSession = null,   // (sessionId, text) => Promise<{ok, reason?}>
     log = () => {},
   } = ctx;
 
@@ -849,6 +904,140 @@ function registerMissionIpc(ipcMain, ctx) {
           ? (typeof values.permissions.currentValue === 'string' ? values.permissions.currentValue : null)
           : null,
       };
+    },
+
+    /**
+     * 把 Mission 绑定到一个 Harness 会话。
+     *
+     * 通常不需要手动调——`startWork` 会自动绑定。
+     * 这里暴露出来是为了让 UI 能在"我要用已有会话"时手动指定。
+     */
+    bindSession(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = payload && payload.missionId;
+      if (!isId(missionId)) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const sessionId = argString(payload && payload.sessionId);
+      if (!sessionId) return fail('sessionId is required', 'SESSION_ID_REQUIRED');
+      try {
+        const map = readBindMap(r.workspaceDir);
+        map[missionId] = { sessionId, boundAtMs: clock() };
+        writeBindMap(r.workspaceDir, map);
+      } catch (err) {
+        return fail(`cannot bind session: ${err.message}`, 'BIND_WRITE_FAILED');
+      }
+      return { ok: true, sessionId };
+    },
+
+    /** 这个 Mission 绑定了哪个会话（UI 用来显示"去 Harness 继续"）。 */
+    getBoundSession(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = payload && payload.missionId;
+      if (!isId(missionId)) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const entry = readBindMap(r.workspaceDir)[missionId];
+      if (!entry) return { ok: true, bound: false, sessionId: null };
+      return { ok: true, bound: true, sessionId: entry.sessionId, boundAtMs: entry.boundAtMs };
+    },
+
+    /**
+     * **启动工作**——这是 Mission 从"记录器"变成"发生器"的那个 action。
+     *
+     * 第一性原理：用户创建 Mission 后不知道下一步做什么，因为
+     * Mission 只能记录、不能启动。这个 action 补上那个缺失的环节：
+     *
+     *   1. 拿到（或创建）这个 Mission 的 Harness 会话
+     *   2. 把「任务描述 + Mission Brief」通过 session/prompt 发过去
+     *   3. 绑定 sessionId 到 Mission（存本机绑定文件，不进事件日志）
+     *
+     * 为什么把 Brief 一起发：Agent 在新会话里是"失忆"的。
+     * AGENTS.md 里的 Brief 会在**会话启动时**被读取——但如果会话已经存在，
+     * 它不会再读。所以显式把目标/边界带上，保证 Agent 知道自己在做什么项目。
+     */
+    async startWork(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = payload && payload.missionId;
+      if (!isId(missionId)) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const task = argString(payload && payload.task);
+      if (!task) return fail('需要告诉团队要做什么', 'TASK_REQUIRED');
+      if (typeof ensureSession !== 'function' || typeof promptSession !== 'function') {
+        return fail('runtime session wiring is not available', 'RUNTIME_NOT_WIRED');
+      }
+
+      const view = r.store.missionView(missionId);
+      if (!view) return fail('mission not found', 'MISSION_NOT_FOUND');
+
+      // 1) 会话：优先复用已绑定的，否则新建
+      let sessionId = null;
+      const bound = readBindMap(r.workspaceDir)[missionId];
+      if (bound && bound.sessionId) {
+        sessionId = bound.sessionId;
+      } else {
+        let made;
+        try {
+          made = await ensureSession(missionId);
+        } catch (err) {
+          return fail(`cannot open a session: ${err.message}`, 'SESSION_CREATE_FAILED');
+        }
+        if (!made || !made.ok || !made.sessionId) {
+          return fail((made && made.reason) || 'cannot open a session', 'SESSION_CREATE_FAILED');
+        }
+        sessionId = made.sessionId;
+        try {
+          const map = readBindMap(r.workspaceDir);
+          map[missionId] = { sessionId, boundAtMs: clock() };
+          writeBindMap(r.workspaceDir, map);
+        } catch (err) {
+          // 绑定失败不该让整个启动失败——会话已经在跑
+          log(`[mission] bind after create failed: ${err.message}`);
+        }
+      }
+
+      // 2) 把任务 + Mission 上下文发过去
+      //
+      // 为什么要带上下文：新会话里 Agent 不知道这个 Mission 的目标和边界。
+      // AGENTS.md 的 Brief 只在**会话启动时**被读；已存在的会话不会重读。
+      const m = view.mission;
+      const lines = [];
+      lines.push('【Mission】' + (m.title || m.missionId));
+      if (m.intent) lines.push('目标：' + m.intent);
+      const constraints = Array.isArray(m.constraints) ? m.constraints.filter((c) => c && c.text) : [];
+      for (const c of constraints) lines.push('约束：' + c.text);
+      lines.push('');
+      lines.push('【本次任务】');
+      lines.push(task);
+      const text = lines.join('\n');
+
+      let sent;
+      try {
+        sent = await promptSession(sessionId, text);
+      } catch (err) {
+        return fail(`cannot send to the team: ${err.message}`, 'PROMPT_FAILED');
+      }
+      if (!sent || !sent.ok) {
+        return fail((sent && sent.reason) || 'the runtime rejected the prompt', 'PROMPT_FAILED');
+      }
+
+      // 3) 记一条 TaskRef，让 Mission 知道"有一次执行发生了"
+      //    注意：只存派生句柄，不存 raw sessionId（隐私规则）
+      try {
+        const ref = taskRef.deriveHarnessRef({ sessionId });
+        if (ref && taskRef.isValidHarnessRef(ref)) {
+          r.store.append('taskRef.linked', {
+            taskRefId: `tr-${randomId()}`,
+            missionId,
+            ref,
+            kind: 'session-turn',
+            summary: task.slice(0, 200),
+            observedAtMs: clock(),
+          }, { atMs: clock() });
+        }
+      } catch (err) {
+        log(`[mission] task ref append failed: ${err.message}`);
+      }
+
+      return { ok: true, sessionId, delivered: true };
     },
 
     attention() {

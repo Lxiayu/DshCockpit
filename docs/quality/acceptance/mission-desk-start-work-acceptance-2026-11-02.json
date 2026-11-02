@@ -1,0 +1,86 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "the \"交给团队\" block is ABOVE the fold (the answer to \"what next?\")",
+      "ok": true,
+      "detail": "top=192"
+    },
+    {
+      "name": "it has a clear heading",
+      "ok": true,
+      "detail": "交给团队"
+    },
+    {
+      "name": "it explains what will happen",
+      "ok": true,
+      "detail": "告诉团队这个 Mission 要做什么。会新开一个 Harness 会话，并把目标带过去。"
+    },
+    {
+      "name": "it has a one-line input (not a form)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "it has ONE primary action",
+      "ok": true,
+      "detail": "交给团队"
+    },
+    {
+      "name": "an EMPTY task is refused locally (never sent to the runtime)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "and it tells the user why",
+      "ok": true,
+      "detail": "先写一句要团队做什么。"
+    },
+    {
+      "name": "a non-empty task really calls startWork",
+      "ok": true,
+      "detail": "{\"missionId\":\"mis-1\",\"task\":\"先调研 Agent Team 的前沿方案，输出对比报告\"}"
+    },
+    {
+      "name": "the task text is sent verbatim",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "success gives EXPLICIT feedback (not silence)",
+      "ok": true,
+      "detail": "已交给团队。切到 Harness 视图可以看到执行过程。"
+    },
+    {
+      "name": "feedback is visually marked as success",
+      "ok": true,
+      "detail": "start-work-msg ok"
+    },
+    {
+      "name": "after sending, it offers a way to SEE the execution",
+      "ok": true,
+      "detail": "在 Harness 中查看这个 Mission 的执行 →"
+    },
+    {
+      "name": "the link names the destination (Harness)",
+      "ok": true,
+      "detail": "在 Harness 中查看这个 Mission 的执行 →"
+    },
+    {
+      "name": "the hint tells the user the mission goal is carried over",
+      "ok": true,
+      "detail": "告诉团队这个 Mission 要做什么。会新开一个 Harness 会话，并把目标带过去。"
+    },
+    {
+      "name": "screenshots captured for both themes",
+      "ok": true,
+      "detail": "dark + light"
+    },
+    {
+      "name": "the renderer had no fatal errors",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

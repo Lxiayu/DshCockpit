@@ -192,6 +192,39 @@
   .att-rem-title { font-size: 11.5px; color: var(--text-2); line-height: 1.45; }
   .att-rem-detail { font-size: 10.5px; color: var(--text-3); line-height: 1.5; margin-top: 2px; }
 
+  /* --- 「交给团队」 ---------------------------------------------------
+     这是整个 Desk 最重要的入口，视觉上必须最突出：
+     强调色边框 + 比其它区块更大的输入框。
+     其它区块都是"参考资料"，这一块是"开始工作"。 */
+  .start-work { margin: 0 0 10px; padding: 11px 12px; border-radius: 10px;
+    background: var(--acc-soft); border: 1px solid var(--acc); }
+  .start-work-head { font-size: 12.5px; font-weight: 700; color: var(--text-1); margin-bottom: 3px; }
+  .start-work-hint { font-size: 10.5px; color: var(--text-2); line-height: 1.5; margin-bottom: 7px; }
+  .start-work-row { margin-bottom: 7px; }
+  .start-work-input {
+    width: 100%; box-sizing: border-box; resize: vertical; min-height: 46px;
+    background: var(--bg-input); color: var(--text-1);
+    border: 1px solid var(--border-2); border-radius: 8px;
+    padding: 7px 9px; font-size: 12px; line-height: 1.5; font-family: inherit;
+  }
+  .start-work-input:focus { outline: none; border-color: var(--acc); }
+  .start-work-actions { display: flex; gap: 6px; }
+  .start-work-btn {
+    background: var(--acc); color: var(--on-acc); border: 0; border-radius: 8px;
+    padding: 7px 16px; font-size: 12px; font-weight: 650; cursor: pointer;
+  }
+  .start-work-btn:hover { background: var(--acc-hover); }
+  .start-work-btn:disabled { opacity: .6; cursor: default; }
+  .start-work-msg { font-size: 10.5px; line-height: 1.5; margin-top: 6px; color: var(--text-3); }
+  .start-work-msg.ok { color: var(--att-ok-fg); }
+  .start-work-msg.err { color: var(--att-bad-fg); }
+  .start-work-link {
+    display: block; width: 100%; text-align: left; margin-top: 8px;
+    background: transparent; border: 0; border-top: 1px solid var(--border-1);
+    padding: 7px 0 0; font-size: 11px; color: var(--acc); cursor: pointer;
+  }
+  .start-work-link:hover { color: var(--acc-hover); }
+
   /* --- plan-review 折叠视图 ------------------------------------------
      380px 放不下完整计划 markdown。所以：默认 4 行 + 展开。
      不弹窗、不跳页 —— 用户正在看任务，不该被踢走。 */
@@ -460,6 +493,7 @@ const state = {
   attention: null,
   since: null,
   projections: null,
+  boundSession: null,
   liveAvailable: false,
 };
 
@@ -843,6 +877,114 @@ const TASK_STATUS_TONE = {
   pending: 'idle', in_progress: 'info', completed: 'ok', deleted: 'idle',
 };
 
+/**
+ * 「交给团队」区块 —— 让 Mission 能**启动工作**，而不只是记录。
+ *
+ * 第一性原理：用户创建 Mission 后不知道下一步做什么，因为之前
+ * Mission 的所有 action 都只是"记录/查询"。这个区块是那个缺失的入口。
+ *
+ * 设计要点：
+ *   · 放在详情最顶部（它是"下一步做什么"的答案）
+ *   · 一句话输入 + 一个按钮，不要表单
+ *   · 发出去之后立刻给**明确的反馈**（会话已创建 / 已送达）
+ *   · 已绑定时显示「在 Harness 中继续」，让用户能去看执行过程
+ */
+function renderStartWork(m) {
+  const box = el('section', { class: 'start-work' });
+
+  const head = el('div', { class: 'start-work-head' });
+  head.append(el('span', { text: '交给团队' }));
+  box.append(head);
+
+  const hint = el('div', { class: 'start-work-hint',
+    text: '告诉团队这个 Mission 要做什么。会新开一个 Harness 会话，并把目标带过去。' });
+  box.append(hint);
+
+  const row = el('div', { class: 'start-work-row' });
+  const input = el('textarea', {
+    class: 'start-work-input',
+    rows: '2',
+    placeholder: '例如：先调研 Agent Team 的前沿方案，输出一份对比报告',
+  });
+  row.append(input);
+  box.append(row);
+
+  const actions = el('div', { class: 'start-work-actions' });
+  const send = el('button', { class: 'start-work-btn', text: '交给团队' });
+  actions.append(send);
+  box.append(actions);
+
+  const msg = el('div', { class: 'start-work-msg' });
+  box.append(msg);
+
+  send.addEventListener('click', async () => {
+    const task = input.value.trim();
+    msg.textContent = '';
+    msg.className = 'start-work-msg';
+    if (!task) {
+      msg.textContent = '先写一句要团队做什么。';
+      msg.classList.add('err');
+      return;
+    }
+    send.disabled = true;
+    send.textContent = '发送中…';
+    let r;
+    try {
+      r = await api('startWork', { missionId: m.missionId, task });
+    } catch (e) {
+      r = { ok: false, reason: e.message };
+    }
+    send.disabled = false;
+    send.textContent = '交给团队';
+    if (!r || !r.ok) {
+      msg.textContent = explainFailure(r || {});
+      msg.classList.add('err');
+      return;
+    }
+    input.value = '';
+    // ★ 关键：先刷新再显示反馈。
+    //
+    // 第一版是「先显示成功提示，再 loadDetail()」——但 loadDetail 会
+    // 重建整个详情区 DOM，把刚写进去的提示冲掉了。
+    // 结果：用户点了「交给团队」，工作真的发出去了，**但界面看起来毫无反应**。
+    //
+    // 这正是用户抱怨的"没有反应"。真机验收 2 项红才发现。
+    await loadDetail(m.missionId);
+
+    // 刷新后重新拿节点（旧节点已经不在 DOM 里）
+    const freshMsg = document.querySelector('.start-work-msg');
+    if (freshMsg) {
+      freshMsg.textContent = '已交给团队。切到 Harness 视图可以看到执行过程。';
+      freshMsg.classList.add('ok');
+    } else {
+      // 极端情况：刷新后区块没渲染出来，退回到 alert（不能静默）
+      alert('已交给团队。请切到 Harness 视图查看执行过程。');
+    }
+  });
+
+  // 已绑定会话 → 给一个明确的"去看执行"入口
+  const bound = state.boundSession;
+  if (bound && bound.bound) {
+    const go = el('button', { class: 'start-work-link',
+      text: '在 Harness 中查看这个 Mission 的执行 →' });
+    go.addEventListener('click', () => {
+      // 复用已有的视图切换通道（rail 用它切 harness 视图）
+      try {
+        if (window.dshShell && typeof window.dshShell.showView === 'function') {
+          window.dshShell.showView('harness');
+        } else {
+          alert('请在左侧栏切换到 Harness 视图查看执行过程。');
+        }
+      } catch {
+        alert('请在左侧栏切换到 Harness 视图查看执行过程。');
+      }
+    });
+    box.append(go);
+  }
+  return box;
+}
+
+
 function renderTeamTasks() {
   const proj = state.projections;
   const team = proj && proj.agentTeam;
@@ -1114,6 +1256,18 @@ function renderDetail() {
   // --- L2：你离开期间发生了什么 ---
   const sinceBlock = renderSince();
   if (sinceBlock) box.append(sinceBlock);
+
+  // ================================================================
+  // 「交给团队」—— 这是整个 Mission Desk 最重要的入口
+  //
+  // 第一性原理：用户创建 Mission 后**无事可做**，因为 Mission 只能
+  // 记录工作、不能启动工作。这一块补上那个缺失的环节。
+  //
+  // 放在最顶部而不是底部：它是"下一步做什么"的答案，
+  // 不该藏在十几屏表单之后。
+  // ================================================================
+  box.append(renderStartWork(m));
+
 
   // --- 团队任务（只有启用 team 投影时才显示）---
   const teamBlock = renderTeamTasks();
@@ -1855,11 +2009,13 @@ async function loadDetail(missionId) {
 
   // 待办 / 离开期间 / 运行时投影 并行取：三者互不依赖，
   // 串行会让右栏打开慢一拍。
-  const [att, since, proj] = await Promise.all([
+  const [att, since, proj, bound] = await Promise.all([
     api('attention'),
     api('sinceLastSeen', { missionId }),
     api('sessionProjections'),
+    api('getBoundSession', { missionId }),
   ]);
+  state.boundSession = bound && bound.ok ? bound : null;
   state.attention = att.ok ? att : { ok: false, items: [], total: 0, available: false };
   state.since = since.ok ? since : { ok: false, entries: [], available: false };
   // 运行时投影：给出结构化的 userQuestions（含 options / multiSelect / plan-review）。

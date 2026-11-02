@@ -2486,6 +2486,53 @@ function broadcastRuntimeHealth(health) {
  * 为什么只给这几个字段：harness-reader 有白名单，raw sessionId / prompt /
  * 绝对路径一律丢弃。这里是第一道收窄，那边是第二道。 */
 /**
+ * 为 Mission 打开（或复用）一个 Harness 会话。
+ *
+ * 为什么需要它：用户创建 Mission 后**无事可做**，因为 Mission 只能记录
+ * 不能启动。启动必须有一个 Harness 会话，这个函数负责拿到它。
+ *
+ * 优先复用 workspace 里的空白会话？不——每次 startWork 用一个新会话更安全：
+ * 复用会让不同 Mission 的工作混在一条历史里。
+ */
+async function missionEnsureSession() {
+  const ru = getRuntimeUrl();
+  log(`[mission] startWork: ensureSession runtimeUrl=${ru ? 'yes' : 'no'}`);
+  if (!ru) {
+    const auth = runtimeAuth && runtimeAuth.state === 'authenticated';
+    return { ok: false, reason: auth ? 'runtime url unavailable' : 'runtime offline' };
+  }
+  try {
+    const rpc = createHarnessRpcWire(ru, harnessRpcDeps());
+    const sessionId = await rpc.createSession();
+    if (typeof sessionId !== 'string' || sessionId === '') {
+      return { ok: false, reason: 'runtime returned no session id' };
+    }
+    return { ok: true, sessionId };
+  } catch (err) {
+    return { ok: false, reason: `create session failed: ${err.message}` };
+  }
+}
+
+/**
+ * 往一个会话里发一条用户消息。
+ *
+ * mode 用 'queue' 而不是 'steer'：这是**新任务的开始**，
+ * 不是对正在跑的 turn 插话。
+ */
+async function missionPromptSession(sessionId, text) {
+  const ru = getRuntimeUrl();
+  log(`[mission] startWork: prompt runtimeUrl=${ru ? 'yes' : 'no'} sid=${String(sessionId).slice(0, 14)} len=${text.length}`);
+  if (!ru) return { ok: false, reason: 'runtime offline' };
+  try {
+    const rpc = createHarnessRpcWire(ru, harnessRpcDeps());
+    await rpc.prompt(sessionId, text, 'queue');
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: `prompt failed: ${err.message}` };
+  }
+}
+
+/**
  * 向运行时要一次会话投影（0.2.1 的 `session/projections`）。
  *
  * 为什么不用 mux.openStream：这是 unary 调用（问答式），走 mux.call 的
@@ -3063,6 +3110,9 @@ function registerIpc() {
     // 而不是谎报 running=false）。
     snapshotOf: () => runtimeSnapshotForMission(),
     projectionsOf: (sessionId) => officeSessionProjections(sessionId),
+    // 「启动工作」的两个原语：这是把 Mission 从记录器变成发生器的关键
+    ensureSession: () => missionEnsureSession(),
+    promptSession: (sessionId, text) => missionPromptSession(sessionId, text),
     log,
   });
 
