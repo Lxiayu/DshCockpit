@@ -1482,23 +1482,56 @@ const COST_CACHE_TTL_MS = 10_000;
 if (Number(tokenStats.WALK_TTL_MS) < COST_CACHE_TTL_MS) {
   log(`[perf] WARNING: walk TTL (${tokenStats.WALK_TTL_MS}ms) < cost cache TTL (${COST_CACHE_TTL_MS}ms) — the session-tree walk cache can never be warm (M3 regression)`);
 }
+/**
+ * 正在进行的非强制重算。同一时刻只允许一个。
+ *
+ * 第一性原理：为什么需要它（2026-11-02 实测暴露）
+ *
+ *   日志里出现过**同一毫秒**的两次重算：
+ *     03:40:27.040  collectStats recompute took 8838ms
+ *     03:40:27.040  collectStats recompute took 2838ms
+ *
+ *   说明两个调用者同时发现缓存过期，于是**各自跑了一遍完整扫描**。
+ *   冷启动时扫描是 3.5 秒级，重复一次就是白烧几秒 CPU 和磁盘 IO。
+ *
+ *   缓存只能挡住"已经算完"的情况，挡不住"正在算"的情况。
+ *   所以需要 in-flight 去重：后到的调用者直接等前一个的结果。
+ *
+ * 注意：force 的重算**不复用**别人的结果——它要求"现在必须重新读盘"，
+ * 复用一个正在进行但启动更早的扫描会拿到过期数据。
+ */
+let statsInflight = null;
+
 async function collectStats(force = false) {
   const now = Date.now();
   if (!force && costCache.data && now - costCache.at < COST_CACHE_TTL_MS) {
     log(`[perf] collectStats cache hit (age=${now - costCache.at}ms)`);
     return costCache.data;
   }
+  // 非强制调用：如果已经有一次重算在路上，直接搭车
+  if (!force && statsInflight) {
+    log('[perf] collectStats joined an in-flight recompute');
+    return statsInflight;
+  }
   const t0 = Date.now();
   const windows = cost.parseWindows(settings.get().costPeakWindows) || cost.DEFAULT_WINDOWS;
   // forceWalk only on the forced (turn-end) path; the 5s poll reuses the walk
   // list for up to WALK_TTL_MS. See WALK_TTL_INVARIANT_HINT above.
   const collectOpts = { windows, forceWalk: force };
-  const data = sessionWorkerClient
-    ? await sessionWorkerClient.collect(dshHomeOf(), collectOpts)
-    : await tokenStats.collect(dshHomeOf(), collectOpts);
-  log(`[perf] collectStats ${force ? 'forced ' : ''}recompute took ${Date.now() - t0}ms`);
-  if (!force) costCache = { at: now, data };
-  return data;
+  const run = (async () => {
+    const data = sessionWorkerClient
+      ? await sessionWorkerClient.collect(dshHomeOf(), collectOpts)
+      : await tokenStats.collect(dshHomeOf(), collectOpts);
+    log(`[perf] collectStats ${force ? 'forced ' : ''}recompute took ${Date.now() - t0}ms`);
+    if (!force) costCache = { at: Date.now(), data };
+    return data;
+  })();
+  if (!force) {
+    statsInflight = run;
+    // 无论成功失败都要清掉，否则失败后所有调用者都会搭上一个已 reject 的 Promise
+    run.finally(() => { statsInflight = null; }).catch(() => {});
+  }
+  return run;
 }
 
 const manager = new RuntimeManager({
