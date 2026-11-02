@@ -1,0 +1,81 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "plan-review block renders",
+      "ok": true,
+      "detail": "计划待审阅"
+    },
+    {
+      "name": "it is COLLAPSED by default (preview shorter than the full plan)",
+      "ok": true,
+      "detail": "preview=72 full=194"
+    },
+    {
+      "name": "a toggle button is offered",
+      "ok": true,
+      "detail": "展开全文（还有 9 行）"
+    },
+    {
+      "name": "the toggle says how much is hidden",
+      "ok": true,
+      "detail": "展开全文（还有 9 行）"
+    },
+    {
+      "name": "the body has a bounded height (does not blow up the 380px dock)",
+      "ok": true,
+      "detail": "120px"
+    },
+    {
+      "name": "expanding really reveals the full plan",
+      "ok": true,
+      "detail": "72 → 194"
+    },
+    {
+      "name": "the label switches to 收起 when expanded",
+      "ok": true,
+      "detail": "收起"
+    },
+    {
+      "name": "collapsing restores the preview",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "plan-review options render as buttons",
+      "ok": true,
+      "detail": "[\"批准计划\",\"拒绝，需要修改\"]"
+    },
+    {
+      "name": "the approve label is present as an option (not inferred by index)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "clicking 批准计划 sends that exact label to the Harness",
+      "ok": true,
+      "detail": "{\"action\":\"answer\",\"id\":\"call-1\",\"value\":\"批准计划\"}"
+    },
+    {
+      "name": "a plan-review without detail says so honestly (does not fake content)",
+      "ok": true,
+      "detail": "计划待审阅\n计划没有附带正文。你可以直接批准/拒绝，或到 Harness 里查看完整计划。"
+    },
+    {
+      "name": "a NON-plan-review question shows no plan block",
+      "ok": true,
+      "detail": "false"
+    },
+    {
+      "name": "screenshots captured for both themes",
+      "ok": true,
+      "detail": "dark + light"
+    },
+    {
+      "name": "the renderer had no fatal errors",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

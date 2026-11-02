@@ -192,6 +192,27 @@
   .att-rem-title { font-size: 11.5px; color: var(--text-2); line-height: 1.45; }
   .att-rem-detail { font-size: 10.5px; color: var(--text-3); line-height: 1.5; margin-top: 2px; }
 
+  /* --- plan-review 折叠视图 ------------------------------------------
+     380px 放不下完整计划 markdown。所以：默认 4 行 + 展开。
+     不弹窗、不跳页 —— 用户正在看任务，不该被踢走。 */
+  .plan-review { width: 100%; margin: 2px 0 6px; border-radius: 8px;
+    border: 1px solid var(--border-1); background: var(--bg-input); overflow: hidden; }
+  .plan-review-head { font-size: 9.5px; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text-3); padding: 6px 9px 0; }
+  .plan-review-body {
+    margin: 0; padding: 4px 9px 6px; font-family: var(--mono); font-size: 10.5px;
+    line-height: 1.55; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere;
+    max-height: 120px; overflow-y: auto;
+  }
+  .plan-review-body.expanded { max-height: 320px; }
+  .plan-review-toggle {
+    width: 100%; text-align: left; padding: 5px 9px; cursor: pointer;
+    font-size: 10.5px; color: var(--acc); background: transparent;
+    border: 0; border-top: 1px solid var(--border-1);
+  }
+  .plan-review-toggle:hover { background: var(--bg-hover); }
+  .plan-review-empty { font-size: 10.5px; color: var(--text-3); padding: 4px 9px 7px; line-height: 1.5; }
+
   /* --- 团队任务（agentTeam 投影）-------------------------------------
      层级：比"待办"轻（那是需要行动的），比"参考资料"重（那是当前在跑的）。
      所以：有卡片底，但无强调色。 */
@@ -705,6 +726,17 @@ function renderAttention() {
       // 这是**只读**的；回答仍走 office:pending（已验证可用）。
       const struct = findStructuredQuestion(item);
       if (struct && struct.options.length > 0) {
+        // ---- plan-review：先把计划内容露出来，再给选项 ----
+        //
+        // 第一性原理：plan-review 的 `detail` 是**计划的完整 markdown**。
+        // 官方 Web UI 的做法是放进右侧栏独立 Tab（ctx.sidebarRight），
+        // 但 380px 放不下整篇。
+        //
+        // 所以：**默认折叠**（只露前几行），点开展开在侧栏内滚动。
+        // 不做弹窗、不跳页——用户正在看任务，不该被踢走。
+        if (struct.intent && struct.intent.kind === 'plan-review') {
+          actions.append(renderPlanReview(struct, item));
+        }
         const opts = el('div', { class: 'att-options' });
         for (const opt of struct.options) {
           const btn = el('button', { class: 'att-btn', text: opt.label });
@@ -943,6 +975,53 @@ function findStructuredQuestion(item) {
   if (byId) return pick(byId);
   if (active.length === 1) return pick(active[0]);
   return null;
+}
+
+/**
+ * 渲染 plan-review 的计划内容（折叠式）。
+ *
+ * 官方约束（`AskUserQuestionIntent`）：
+ *   · `detail` 是计划 markdown
+ *   · `approve` 是**批准选项的 label**，且「named rather than positional
+ *     so no UI infers the verdict from option order」
+ *
+ * 所以我们**不按索引猜哪个是批准**——判定完全交给运行时。
+ */
+function renderPlanReview(struct) {
+  const wrap = el('div', { class: 'plan-review' });
+  const text = typeof struct.detail === 'string' ? struct.detail : '';
+
+  const head = el('div', { class: 'plan-review-head', text: '计划待审阅' });
+  wrap.append(head);
+
+  if (!text.trim()) {
+    // 没有 detail 就如实说，不假装有内容可审
+    wrap.append(el('div', { class: 'plan-review-empty',
+      text: '计划没有附带正文。你可以直接批准/拒绝，或到 Harness 里查看完整计划。' }));
+    return wrap;
+  }
+
+  // 折叠：默认只显示前 4 行。计划可能几千字，全展开会把侧栏撑爆。
+  const PREVIEW_LINES = 4;
+  const allLines = text.split('\n');
+  const preview = allLines.slice(0, PREVIEW_LINES).join('\n');
+  const hasMore = allLines.length > PREVIEW_LINES;
+
+  const pre = el('pre', { class: 'plan-review-body', text: hasMore ? preview : text });
+  wrap.append(pre);
+
+  if (hasMore) {
+    const more = el('button', { class: 'plan-review-toggle',
+      text: '展开全文（还有 ' + (allLines.length - PREVIEW_LINES) + ' 行）' });
+    let expanded = false;
+    more.addEventListener('click', () => {
+      expanded = !expanded;
+      pre.textContent = expanded ? text : preview;
+      more.textContent = expanded ? '收起' : '展开全文（还有 ' + (allLines.length - PREVIEW_LINES) + ' 行）';
+    });
+    wrap.append(more);
+  }
+  return wrap;
 }
 
 /**
