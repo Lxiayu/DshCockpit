@@ -21,6 +21,8 @@ function createWindowManager(deps) {
     noTray = false,
     isQuitting = () => false,
     getRuntimeUrl, getRuntimeChild,
+    // runtime 认证 cookie 的来源（harness 页面复用它，避免二次消耗一次性 token）
+    getRuntimeAuth = null,
     traySetTooltip = () => {},
     closeLoading,
     startDeferredServices,
@@ -372,6 +374,18 @@ function createWindowManager(deps) {
   function syncShellViews() {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     const content = mainWindow.getContentBounds();
+    // 诊断（2026-11-02 加的，排查"主区域空白"）：只有当某个视图缺失时才打日志，
+    // 避免正常路径刷屏。缺失是一个**真实异常状态**：
+    //   activeMainView 指向的视图还没创建 → visible 过滤后为空 → 主区域什么都不挂。
+    if (activeMainView === 'harness' && !harnessView) {
+      log('[shell] WARN syncShellViews: activeMainView=harness but harnessView is null');
+    }
+    if (activeMainView === 'office' && !officeShellView) {
+      log('[shell] WARN syncShellViews: activeMainView=office but officeShellView is null');
+    }
+    if (activeMainView === 'work' && !workView) {
+      log('[shell] WARN syncShellViews: activeMainView=work but workView is null');
+    }
     if (railView) {
       railView.setBounds({ x: 0, y: 0, width: OFFICE_RAIL_WIDTH, height: content.height });
     }
@@ -417,6 +431,29 @@ function createWindowManager(deps) {
 
   // ------------------------------------------------------------- main window
   function createWindow(url) {
+    // ★ 关键：url 可能被调用方传成 undefined（例如 companion:expand 的兜底路径
+    //   `wm.createWindow(undefined)`，它只想"重建主窗口"，不知道该填什么 URL）。
+    //
+    //   原来直接 `harnessView.webContents.loadURL(url)` —— 传 undefined 的结果是
+    //   加载 **about:blank**，于是主区域一片空白，而且日志里只看到
+    //   "dom-ready / finished load 成功"，完全没有失败线索。
+    //   （2026-11-02 真机：用户看到 DeepSeek Harness 页整片白。）
+    //
+    //   修法：url 缺省时向 getRuntimeUrl() 要。这是唯一正确的来源 ——
+    //   runtime URL 由主进程在 runtime 起来后登记，view 层不该自己猜。
+    //   如果连 runtime 都还没有，就明确报错，而不是静默加载空白页。
+    if (typeof url !== 'string' || url === '') {
+      const runtimeUrl = typeof getRuntimeUrl === 'function' ? getRuntimeUrl() : null;
+      if (runtimeUrl) {
+        url = runtimeUrl;
+        log('[shell] createWindow: url missing, fell back to the runtime URL');
+      } else {
+        // 真的没有 URL：不加载任何东西，等 runtime 起来后由既有路径补上。
+        // 这里**不能** loadURL(undefined) —— 那会静默变成 about:blank。
+        log('[shell] createWindow: no url and no runtime URL yet; deferring harness load');
+        url = null;
+      }
+    }
     mainWindowPending = false; // the main window is (about to be) open
     const saved = windowState.load(windowStateFile());
     const bounds = safeBounds(saved) || { width: 1280, height: 840 };
@@ -472,7 +509,8 @@ function createWindowManager(deps) {
     mainWindow.contentView.addChildView(harnessView);
     createRailView();
     syncShellViews();
-    harnessView.webContents.loadURL(url);
+    if (url) harnessView.webContents.loadURL(url);
+    else log('[shell] harness view left unloaded (waiting for the runtime URL)');
     // Show the main window when the page is truly paintable (no white flash).
     // ready-to-show is a BrowserWindow event tied to ITS webContents,
     // so the shell listens on the harness view's first non-empty paint. The
@@ -495,6 +533,100 @@ function createWindowManager(deps) {
     };
     harnessView.webContents.once('did-first-visually-non-empty-paint', showMainWhenReady);
     harnessView.webContents.once('dom-ready', () => { setTimeout(showMainWhenReady, 120); });
+
+    // ---- harness 视图的诊断（2026-11-02 补）------------------------------
+    //
+    // 为什么需要这些：harness 视图是**唯一内嵌第三方页面**的视图（dsh 官方
+    // Web UI）。它白屏时，原来我们**一点线索都没有** —— 没有 load 日志、
+    // 没有崩溃日志、没有渲染状态。排查只能靠猜（那次真猜错了方向）。
+    //
+    // 这三条日志覆盖"白屏"的三种常见成因：
+    //   · dom-ready 打了但没内容 → 页面路由/首屏逻辑问题
+    //   · render-process-gone        → 渲染进程崩了（内存/GPU）
+    //   · did-finish-load 后仍空白   → CSS/资源加载或 GPU 合成问题
+    harnessView.webContents.on('dom-ready', () => {
+      log('[shell] harness view dom-ready');
+    });
+    harnessView.webContents.on('did-finish-load', () => {
+      // 主动探一次页面内容 —— 只打日志不会告诉我们"页面是不是空的"。
+      // 2026-11-02：harness 页白屏时，load 事件全部成功、0 错误，
+      // 日志上完全看不出异常。所以这里在加载完成后**量一下真实 DOM**。
+      const wc = harnessView && harnessView.webContents;
+      if (!wc || wc.isDestroyed()) return;
+      wc.executeJavaScript(
+        `({ url: location.href.slice(0, 80),
+            rootChildren: (document.getElementById('root') || document.body).childElementCount,
+            textLen: ((document.getElementById('root') || document.body).innerText || '').length,
+            w: innerWidth, h: innerHeight })`,
+        true,
+      ).then((info) => {
+        log(`[shell] harness view content: url=${info.url} rootChildren=${info.rootChildren}`
+          + ` textLen=${info.textLen} viewport=${info.w}x${info.h}`);
+        if (info.rootChildren === 0 && info.textLen === 0) {
+          log('[shell] WARN harness view is BLANK after load (root empty, no text)');
+        }
+      }).catch((err) => {
+        log(`[shell] harness view content probe failed: ${err && err.message}`);
+      });
+      // 再探几次：SPA 的首屏是异步的，finish-load 时可能还没渲染完。
+      // 这能区分"永远空白"和"只是慢"。
+      for (const delayMs of [1500, 4000, 9000]) {
+        setTimeout(() => {
+          const wc2 = harnessView && harnessView.webContents;
+          if (!wc2 || wc2.isDestroyed()) return;
+          wc2.executeJavaScript(
+            `({ n: (document.getElementById('root') || document.body).childElementCount,
+                t: ((document.getElementById('root') || document.body).innerText || '').length,
+                hasRoot: !!document.getElementById('root'),
+                bodyTag: document.body.tagName,
+                bodyHTML: document.body.innerHTML.slice(0, 400),
+                scripts: [...document.scripts].map(s => (s.src || 'inline').split('/').pop().slice(0,30)) })`,
+            true,
+          ).then((r) => {
+            log(`[shell] harness content @${delayMs}ms: rootChildren=${r.n} textLen=${r.t} hasRoot=${r.hasRoot} body=${r.bodyTag}`);
+            if (delayMs === 4000) log(`[shell] harness bodyHTML: ${String(r.bodyHTML).replace(/\s+/g,' ')}`);
+            if (delayMs === 4000) log(`[shell] harness scripts: ${(r.scripts||[]).join(',')}`);
+          }).catch(() => {});
+        }, delayMs);
+      }
+    });
+    // ★ 抓页面的控制台错误 —— 这是"页面加载成功但渲染空白"唯一的线索来源。
+    //
+    // 2026-11-02 真机事故：dsh Web UI 的 URL 正确、viewport 正常、
+    // 但 React 根节点 childElementCount=0（什么都没渲染）。
+    // 这种情况下 load 事件全成功、主进程 0 错误 —— **只有页面自己的
+    // console.error 能告诉我们为什么**。
+    harnessView.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+      // level: 0=verbose 1=info 2=warning 3=error
+      if (level >= 2) {
+        const src = String(sourceId || '').split('/').pop().slice(0, 40);
+        log(`[shell] harness console L${level}: ${String(message).slice(0, 300)} (${src}:${line})`);
+      }
+    });
+    harnessView.webContents.on('render-process-gone', (_event, details) => {
+      log(`[shell] harness view RENDER PROCESS GONE: reason=${details && details.reason} exitCode=${details && details.exitCode}`);
+    });
+    harnessView.webContents.on('unresponsive', () => {
+      log('[shell] harness view unresponsive');
+    });
+    // 观察 303 重定向是否发生（2026-11-02：白屏时发现 URL 停在带 token 地址，
+    // 说明 303 没被跟随。这里显式记录重定向，否则完全看不见。）
+    harnessView.webContents.on('will-redirect', (_event, url2, isInPlace, isMainFrame) => {
+      log('[shell] harness view will-redirect -> ' + String(url2).slice(0, 70));
+    });
+    harnessView.webContents.on('did-start-navigation', (_event, url2, isInPlace, isMainFrame) => {
+      if (isMainFrame) log('[shell] harness view did-start-navigation -> ' + String(url2).slice(0, 70));
+    });
+    harnessView.webContents.on('did-fail-load', (_event, code, description, url2, isMainFrame) => {
+      // -3 = ERR_ABORTED（导航被取代）。**不能静默丢弃**：
+      // 303 重定向会先 abort 原请求，如果重定向本身失败，用户看到的就是白屏，
+      // 而日志上什么都没有（2026-11-02 就是这么排查了很久）。
+      if (code === -3) {
+        log('[shell] harness view nav aborted (-3) at ' + String(url2).slice(0, 70) + ' main=' + isMainFrame);
+        return;
+      }
+      log(`[shell] harness view did-fail-load code=${code} main=${isMainFrame} url=${String(url2).slice(0, 80)} desc=${description}`);
+    });
     mainShowFallbackTimer = setTimeout(() => {
       if (!mainShown) {
         log('[shell] main window paint timed out; forcing show');
@@ -823,10 +955,135 @@ function createWindowManager(deps) {
   /** Runtime just became healthy: open/refresh the main window + cockpit.
    *  v0.6（WP3）：延迟服务在这里启动（runtime 健康是它们的真实前置）；
    *  startDeferredServices 幂等（deferredServicesStarted 守卫在壳侧）。 */
+  /**
+   * runtime 健康后把 harness 视图指向真正的页面。
+   *
+   * ⚠️ 这里有一个**真实踩过的坑**（2026-11-02，表现为 DeepSeek Harness 页整片白）：
+   *
+   *   runtime 的启动 URL 带一次性 token（形如 ?token=xxx）。
+   *   拿到它的第一个请求会用 token 换一个 dsh-auth cookie，**token 随即失效**。
+   *
+   *   而 supervisor 在 onRemoteUrl 里已经先做了一次交换（给 mux/网关用），
+   *   所以等 harness 视图再去 loadURL(bootUrl) 时，token 已经被用掉了：
+   *     · 服务器返回 401
+   *     · Electron 停在带 token 的地址上，不会重定向
+   *     · 页面 body 完全空 → 白屏，而且 did-finish-load 依然"成功"
+   *       （这部分是本次排查最费时的地方：所有 load 事件都成功、0 报错）
+   *
+   * 正确做法：**复用已经交换好的 cookie**，去加载不带 token 的干净地址。
+   * cookie 的唯一权威来源是 runtimeAuth（它持 cookie、并在新一代 runtime 时失效重换）。
+   *
+   * ⚠️⚠️ 但光换 cookie 还不够 —— 真正的杀手是 **cookie 污染**。
+   *
+   *   dsh 的认证 cookie 名是 `dsh-auth-<每实例随机后缀>`，
+   *   也就是说**每启动一次 runtime 就多一个不同名字的 cookie**，
+   *   而且都是 HttpOnly + 持久化的（Max-Age 30 天）。
+   *
+   *   本机实测累积了 **71 个** dsh-auth-* cookie（71 次调试启动）。
+   *   浏览器带着这一族 71 个 cookie 去请求时，发出的很可能**不是**
+   *   服务端当前那一代认的那个 → 401 → 页面 body 全空 → 白屏。
+   *
+   *   症状特别难查：URL 正确、did-finish-load 成功、0 报错、无 JS 异常，
+   *   唯一的线索是探测到 body.innerHTML === ''。
+   *
+   *   修法：加载前把这一族里**除当前有效项之外**的全部删掉，再注入当前的。
+   *   实测 71 → 1 之后页面立刻正常（rootChildren=1，有真实内容）。
+   *
+   *   ⚠️ 清理范围只限同一 origin 且名字以 dsh-auth- 开头的 cookie，
+   *      绝不碰其它 cookie。
+   */
+  async function loadHarnessWithAuth(bootUrl) {
+    const wc = harnessView && !harnessView.webContents.isDestroyed() ? harnessView.webContents : null;
+    if (!wc) return;
+    let target = bootUrl;
+    try {
+      const parsed = new URL(bootUrl);
+      // 去掉 token，用 origin + path 作为最终页面地址
+      parsed.searchParams.delete('token');
+      target = parsed.toString();
+    } catch { /* 保留原样 */ }
+
+    // 先把已有的 cookie 注入 session，再加载干净 URL。
+    // 这样页面拿到的是"已认证"状态，不需要再消耗任何 token。
+    //
+    // ★★ 清理旧 cookie（2026-11-02 真机事故根因）★★
+    //
+    // dsh 的认证 cookie 名是 `dsh-auth-<每实例随机后缀>`，也就是说
+    // **每启动一次 runtime 就多一个不同名字的 cookie**，而且是 HttpOnly 持久化的。
+    //
+    // 本机实测累积了 **71 个** dsh-auth-* cookie（71 次调试启动）。
+    // 服务端只认它自己那一代；但浏览器拿着 71 个同名族 cookie 去请求时，
+    // 很容易发出服务端不认的那个 → 401 → 页面 body 全空 → 白屏。
+    //
+    // 所以每次加载前，先把**除当前有效那个之外**的 dsh-auth-* 全部清掉。
+    // 只清同一 origin、且名字以 dsh-auth- 开头的 —— 不碰任何其它 cookie。
+    try {
+      const origin = new URL(target).origin;
+      const stale = await wc.session.cookies.get({ url: origin });
+      const staleAuth = stale.filter((c) => typeof c.name === 'string' && c.name.startsWith('dsh-auth-'));
+      if (staleAuth.length > 1) {
+        let removed = 0;
+        for (const c of staleAuth) {
+          try {
+            await wc.session.cookies.remove(origin, c.name);
+            removed += 1;
+          } catch { /* 单个失败不阻断 */ }
+        }
+        log('[shell] harness: cleared ' + removed + ' stale dsh-auth cookie(s) before load');
+      }
+    } catch (err) {
+      log('[shell] harness: stale cookie cleanup failed: ' + (err && err.message));
+    }
+
+    try {
+      const authObj = typeof getRuntimeAuth === 'function' ? getRuntimeAuth() : null;
+      const cookieHeader = authObj && typeof authObj.getCookie === 'function'
+        ? await authObj.getCookie() : null;
+      if (cookieHeader) {
+        const u = new URL(target);
+        const pairs = String(cookieHeader).split(';').map((x) => x.trim()).filter(Boolean);
+        for (const pair of pairs) {
+          const eq = pair.indexOf('=');
+          if (eq <= 0) continue;
+          await wc.session.cookies.set({
+            url: u.origin,
+            name: pair.slice(0, eq),
+            value: pair.slice(eq + 1),
+            path: '/',
+            httpOnly: true,
+          });
+        }
+        // 只打 cookie 的**名字和值长度**，绝不打印值本身（那是凭据）
+        const firstName = pairs.length ? pairs[0].split('=')[0] : '(none)';
+        log('[shell] harness: injected auth cookie (' + pairs.length + ' pair(s), first='
+          + firstName.slice(0, 20) + '…, valueLen='
+          + (pairs.length ? (pairs[0].split('=')[1] || '').length : 0) + '), loading clean URL');
+      } else {
+        log('[shell] harness: no auth cookie available; falling back to the token URL');
+        target = bootUrl;
+      }
+    } catch (err) {
+      log('[shell] harness: cookie injection failed (' + (err && err.message) + '); using the token URL');
+      target = bootUrl;
+    }
+    // 加载前先回读一次 cookie 存储，确认注入**真的生效**了。
+    // （2026-11-02：注入日志打出来了，但页面仍 401 —— 必须确认 cookie 是否
+    //   真的进了 session，而不是被 SameSite/HttpOnly 规则静默丢弃。）
+    try {
+      const stored = await wc.session.cookies.get({ url: new URL(target).origin });
+      log('[shell] harness: cookie store has ' + stored.length + ' cookie(s) for the origin'
+        + (stored.length ? ' [' + stored.map((c) => c.name.slice(0, 16)).join(',') + ']' : ''));
+    } catch (err) {
+      log('[shell] harness: cookie readback failed: ' + (err && err.message));
+    }
+    wc.loadURL(target);
+  }
+
   function onRuntimeHealthy(bootUrl) {
     startDeferredServices();
     if (mainWindow && !mainWindow.isDestroyed()) {
-      if (harnessView && !harnessView.webContents.isDestroyed()) harnessView.webContents.loadURL(bootUrl);
+      // 注意：不 await —— 健康回调不该被页面加载阻塞
+      loadHarnessWithAuth(bootUrl);
       createCockpitWindow();
       showCockpitInactive();
     } else {

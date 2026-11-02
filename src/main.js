@@ -1706,6 +1706,8 @@ const windowManager = createWindowManager({
   isQuitting: () => quitting,
   getRuntimeUrl: () => getRuntimeUrl(),
   getRuntimeChild: () => getRuntimeChild(),
+  // harness 页面用它拿已交换好的 cookie（一次性 token 不能消耗两次）
+  getRuntimeAuth: () => runtimeAuth,
   traySetTooltip: (text) => trayMenu.setTooltip(text),
   closeLoading,
   startDeferredServices,

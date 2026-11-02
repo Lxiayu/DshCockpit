@@ -59,8 +59,19 @@ test('first-paint W2: deferred services start on runtime-healthy, not on the har
 test('first-paint W3: the harness view keeps its real-URL gate (runtime healthy), the office keeps OFFICE-first semantics', () => {
   // onRuntimeHealthy 的"窗口已存在"分支：给 harness 视图换真 URL + 开 cockpit
   //（这条分支在 v0.4 就有 —— WP3 只是让窗口先行后它成为主路径）。
+  //
+  // 2026-11-02 调整断言：不再断言"直接 loadURL(bootUrl)"这个**实现细节**，
+  // 而是断言**行为意图** —— 健康后 harness 必须被指向真实页面。
+  //
+  // 原因：直接 loadURL(bootUrl) 是白屏的根因。bootUrl 带一次性 token，
+  // 而 supervisor 已经用它在 onRemoteUrl 里换过 cookie，token 早已失效 →
+  // 401 → 页面 body 空 → 白屏（load 事件却全部"成功"）。
+  // 现在改为 loadHarnessWithAuth()：清陈旧 cookie → 注入当前 cookie → 载干净 URL。
   const healthyFn = WM.slice(WM.indexOf('function onRuntimeHealthy(bootUrl) {'), WM.indexOf('function onRuntimeHealthy(bootUrl) {') + 700);
-  assert.ok(healthyFn.includes('harnessView.webContents.loadURL(bootUrl)'), 'the harness view still gets the runtime URL on healthy');
+  assert.ok(
+    healthyFn.includes('loadHarnessWithAuth(bootUrl)') || healthyFn.includes('harnessView.webContents.loadURL(bootUrl)'),
+    'the harness view must still be pointed at the real page on healthy',
+  );
   assert.ok(healthyFn.includes('createCockpitWindow()'), 'the cockpit still follows runtime health');
   // 早开办公室尊重 DSH_DESKTOP_OPEN_OFFICE=0（工作台优先的调试回退不被破坏）。
   const earlyOfficeLine = MAIN.slice(MAIN.indexOf('openOfficeView();', MAIN.indexOf("try { createLoadingWindow(); }")) - 200,
