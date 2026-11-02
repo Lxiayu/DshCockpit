@@ -1,5 +1,4 @@
-'use strict';
-
+'use strict'; // ⚠️ 改前必读 docs/architecture/OFFICE-RENDER-INVARIANTS.md（节流会致白屏）
 // src/office/office-module.js — Task 7 / SPEC-07.
 //
 // The single main-process Office composition root. It composes the Task 3/4/5

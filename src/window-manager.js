@@ -97,10 +97,29 @@ function createWindowManager(deps) {
   }
 
   function notifyOfficeShellVisibility() {
-    // 2026-09-22 修正（用户实测：永远看不到对话气泡）：办公室在 M4.2 就是"后台活着"的
-    // 设计——切到 harness 页不该冻结它的仿真，否则闲聊/走位永远积累不到（无头模拟里首聊
-    // 约需 2 分钟）。因此：**只有窗口隐藏/最小化才暂停仿真**；`active`（办公室是否为当前
-    // 主视图）随载荷下发，供页面做"仅在用户注视时"的节流/提示用。
+    // ================================================================
+    // 办公室的"后台活着"设计 —— 两个不同层次的可见性，别混
+    // ================================================================
+    //
+    // 2026-09-22 修正（用户实测：永远看不到对话气泡）：
+    //   办公室在 M4.2 就是"后台活着"的设计——切到 harness 页不该冻结它的仿真，
+    //   否则闲聊/走位永远积累不到（无头模拟里首聊约需 2 分钟）。
+    //   因此：**只有窗口隐藏/最小化才暂停仿真**。
+    //
+    // 两个层次（很容易搞混，2026-11-02 就栽在这）：
+    //
+    //   ① 页面自己的仿真节流（就是这里下发的 `active`）
+    //      `active` = 办公室是否为当前主视图。页面据此做"仅在用户注视时"
+    //      的**轻量**节流（比如气泡动画降频），但**仿真继续推进**。
+    //      这是安全的、设计好的。
+    //
+    //   ② Chromium 的 `backgroundThrottling`
+    //      **完全不同的东西**：它会把整个渲染循环降到 1Hz。
+    //      对办公室是致命的 —— fps-monitor 会 latch 到 LOW_FPS_PERSISTENT，
+    //      那个状态**不可自动恢复**，表现为白屏。
+    //      见 showOfficeShellView() 里那段长注释。
+    //
+    // ⚠️ 所以：可以动 ①（下发 active），**绝对不要动 ②**。
     const windowVisible = !!(mainWindow && !mainWindow.isDestroyed()
       && mainWindow.isVisible() && !mainWindow.isMinimized());
     const active = !!(officeShellView && activeMainView === 'office');
@@ -134,9 +153,31 @@ function createWindowManager(deps) {
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: true,
-          // The office page stays ALIVE in the background (the simulation
-          // keeps pushing): throttling its timers would stall its boot and
-          // its snapshot pump exactly when it is hidden.
+          // ⚠️⚠️ 绝对不要改成 true，也不要加"按可见性动态节流"。⚠️⚠️
+          //
+          // 为什么（2026-11-02 真机踩坑全记录）：
+          //
+          //   我一度认为"后台也保持推送"只是推测性理由，于是改成按可见性
+          //   动态节流。结果用户打开虚拟办公室**一片空白**，切走再切回也不恢复。
+          //
+          //   日志一句话定位：
+          //     [office] renderer mode=static code=LOW_FPS_PERSISTENT
+          //
+          //   链条是：
+          //     节流 → 渲染循环被降到 1Hz → fps-monitor 检测到"连续多个窗口
+          //     帧率过低" → latch degraded=true → **设计上不可自动恢复**
+          //     （只能由视图所有者显式调 reset()）
+          //     → 白屏，且切走再切回也不会好
+          //
+          //   根因是：办公室**不是纯展示页面**，它是一个持续运行的
+          //   仿真 + WebGL 渲染循环（宠物走位、对话气泡都在实时推进）。
+          //   节流掐死的正是它的核心工作，而不是"闲置浪费"。
+          //
+          //   当时我还给出了"主进程 -272MB"的 A/B 数据，那是**假收益**：
+          //   内存下降的原因正是把干活的循环掐死了（用户看不见内容，
+          //   自然也不占渲染资源）。见提交 37d01dc 的撤销。
+          //
+          // 结论：office 必须 backgroundThrottling: false，永久。
           backgroundThrottling: false,
           preload: path.join(__dirname, 'office', 'office-preload.js'),
         },
@@ -183,7 +224,15 @@ function createWindowManager(deps) {
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: true,
-          // 产物读取与状态推送是事件驱动的；后台节流会让"切回来"看到旧状态。
+          // 保持 false 的理由：
+          //   产物读取与状态推送是事件驱动的；后台节流会让"切回来"看到旧状态。
+          //
+          // 注意：这一处**没有** office 那个致命问题（work 页是纯展示，
+          // 被节流只是"切回来旧一下"，不会 latch 降级）。
+          // 但 2026-11-02 的教训是：不要拿"看起来能省内存"去动它们——
+          // 当时把 work/workDock 一起纳入动态节流，间接影响到了 office
+          // 稳定（同一进程组、共享 GPU），实测 office 32 秒后就降级。
+          // 所以这里保守保持 false，除非有同时验证过功能的 A/B 数据。
           backgroundThrottling: false,
           preload: path.join(__dirname, 'work', 'work-preload.js'),
         },
@@ -212,6 +261,8 @@ function createWindowManager(deps) {
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: true,
+          // 同上：右栏是常驻视图，保持 false。
+          // 曾尝试"不可见时才允许节流"，间接把 office 拖进降级（见上）。
           backgroundThrottling: false,
           // Mission Desk 需要 mission 桥 —— settings-preload 是唯一同时提供
           // mission + shell 的那个（与独立 Mission Desk 窗口同源，见 aux-windows.js）。

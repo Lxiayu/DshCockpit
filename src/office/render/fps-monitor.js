@@ -1,5 +1,27 @@
 'use strict';
 
+// ============================================================================
+// ⚠️ 中文速读（2026-11-02 踩坑后补写）
+//
+// 这个模块会**锁定降级状态**：只要连续若干个窗口的呈现帧率低于阈值，
+// 它就 latch degraded=true，并且**永不自动恢复**。
+//
+// 唯一允许的复位是外部显式调用 reset()。
+//
+// 为什么要这么设计：稳定地停在降级态，比"反复降级又恢复"更容易诊断。
+//
+// 踩坑记录：
+//   2026-11-02 有人在 window-manager.js 里给 office 视图开了
+//   backgroundThrottling —— 渲染循环被降到 1Hz → 这里 latch 降级 →
+//   **虚拟办公室白屏，且切走再切回也不会恢复**（因为没人调 reset()）。
+//
+//   所以：**凡是会让 office 呈现帧率掉下来的改动，都必须同时确保
+//   有 reset() 的调用路径**，否则用户会看到永久白屏。
+//   （更简单的做法：别让帧率掉下来 —— see window-manager.js 的长注释）
+//
+// 契约细节见下方英文原文。
+// ============================================================================
+
 // src/office/render/fps-monitor.js — Blocker B / SPEC-07 runtime FPS
 // observer. Pure deterministic CommonJS: no DOM, no Pixi, no timers, no
 // wall-clock reads — the caller injects now() and calls frame() once per

@@ -4028,6 +4028,17 @@ async function createOfficeRenderer(options) {
     // Re-arms the observer with a fresh measurement window. Only ever called
     // at the foreground transition, after a render-profile downgrade, and after
     // a successful recovery rebuild — the monitor never re-arms itself.
+    //
+    // ⚠️ 中文：这是 fps-monitor **唯一**的复位入口（三处调用）。
+    //
+    //   意味着什么（2026-11-02 实测）：
+    //     如果帧率持续掉下去导致 latch 降级，**只有走到这三个时机才会恢复**。
+    //     "切到别的视图再切回来"在当时的实现里**不构成** foreground transition
+    //     （视图只是 removeChildView，页面并没有收到前台转换事件），
+    //     所以用户看到的是"切走再切回也不恢复"。
+    //
+    //   所以别指望靠切换视图来救降级态 —— 真正的做法是**别让帧率掉下来**
+    //   （例如不要给 office 开 backgroundThrottling，见 window-manager.js）。
     if (monitor && typeof monitor.reset === 'function') monitor.reset();
   }
 
