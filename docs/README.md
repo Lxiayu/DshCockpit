@@ -156,6 +156,7 @@
 | `docs/quality/real-team-dag-verified-2026-11-02.md` | **真实 Team DAG 已验证** | blockedBy/ready/writeScopes 实测；解除设计阻塞 |
 | `docs/quality/product-gap-critical-2026-11-02.md` | **严重问题：产品是记录器不是发生器** | 29 个 action 零个能启动工作 |
 | `docs/quality/product-gap-fixed-start-work-2026-11-02.md` | **修复：Mission 能启动工作了** | 新增 startWork；16/16 真机 |
+| `docs/quality/startwork-real-chain-verified-2026-11-02.md` | **交给团队 真实链路验证** | 6/6；真实 Agent 3 秒产出 turn |
 | `docs/quality/testing-strategy.md` | 审计报告（2026-11-01） | 测试体系盘点：137 个套件真实构成、门禁类型、变异纪律、缺口与改进建议 |
 | `docs/quality/quality-gates.md` | **现行（2026-11-01）** | 质量门禁与 CI 策略："什么算通过"的定义 |
 | `docs/quality/compatibility-ledger-spec.md` | **规范草案（2026-11-01，待拍板）** | 兼容性账本 v2：Installed/Healthy/Compatible/Supported 四级分离、通道策略、回写机制（修复 Issue #21 根因） |

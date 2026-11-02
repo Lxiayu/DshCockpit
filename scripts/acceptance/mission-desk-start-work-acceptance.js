@@ -50,6 +50,7 @@ const VIEW = {
 const LIVE = { available: true, observedAtMs: NOW, hasRunningAgent: false, pendingApprovals: 0, pendingQuestions: 0 };
 
 let BOUND = { ok: true, bound: false, sessionId: null };
+let WORK = { ok: true, bound: false, running: false };
 const calls = [];
 
 async function main() {
@@ -62,6 +63,7 @@ async function main() {
       case 'sinceLastSeen': return { ok: true, available: false, reason: 'never-seen', entries: [] };
       case 'sessionProjections': return { ok: true, available: false, reason: 'not wired' };
       case 'getBoundSession': return BOUND;
+      case 'workStatus': return WORK;
       case 'startWork': {
         // 模拟真实后端：成功后变成已绑定
         BOUND = { ok: true, bound: true, sessionId: 'session-new-1234', boundAtMs: Date.now() };
@@ -169,7 +171,35 @@ async function main() {
   record('the hint tells the user the mission goal is carried over',
     /目标|带过去/.test(sw.hint || ''), sw.hint || '');
 
-  // ---- 6. 截图 ----
+  // ---- 6. 已绑定后显示真实进度（不猜"完成"）----
+  WORK = { ok: true, bound: true, available: true, turns: 3, steps: 17, hasRun: true };
+  await ev(`loadDetail('mis-1')`);
+  await new Promise((r) => setTimeout(r, 900));
+  const prog = await ev(`(() => {
+    const p = document.querySelector('.start-work-progress');
+    return {
+      exists: !!p,
+      line: (p && p.querySelector('.start-work-progress-line') || {}).innerText || '',
+      hint: (p && p.querySelector('.start-work-progress-hint') || {}).innerText || '',
+      full: p ? p.innerText : '',
+    };
+  })()`).catch(() => ({}));
+  record('after binding, REAL progress is shown (turns/steps from the projection)',
+    /3 轮/.test(prog.line || '') && /17 步/.test(prog.line || ''), prog.line || '');
+  record('progress does NOT claim the task succeeded',
+    /不代表任务已经达到/.test(prog.hint || ''), prog.hint || '');
+  record('it never says 已完成 / 成功',
+    !/已完成|成功了|完成成功/.test(prog.full || ''), prog.full || '');
+
+  // ---- 6b. 未完成时如实说"还没有完成的轮次" ----
+  WORK = { ok: true, bound: true, available: true, turns: 0, steps: 4, hasRun: false };
+  await ev(`loadDetail('mis-1')`);
+  await new Promise((r) => setTimeout(r, 900));
+  const noRun = await ev(`(document.querySelector('.start-work-progress-line') || {}).innerText || ''`).catch(() => '');
+  record('with zero finished turns it says so honestly',
+    /还没有完成的轮次/.test(noRun), noRun || '');
+
+  // ---- 7. 截图 ----
   try {
     fs.mkdirSync(EVIDENCE, { recursive: true });
     for (const mode of ['dark', 'light']) {

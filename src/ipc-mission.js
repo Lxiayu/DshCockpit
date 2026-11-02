@@ -76,6 +76,7 @@ const ACTIONS = Object.freeze([
   'sessionProjections',   // 只读：向运行时要结构化投影（含 userQuestions.options）
   'bindSession',          // 只写 UI 绑定：把 Mission 关联到一个 Harness 会话
   'getBoundSession',      // 只读：这个 Mission 绑定了哪个会话
+  'workStatus',           // 只读：这次执行跑到哪了（turns/steps/是否在跑）
 ]);
 
 function nowMs() { return Date.now(); }
@@ -938,6 +939,61 @@ function registerMissionIpc(ipcMain, ctx) {
       const entry = readBindMap(r.workspaceDir)[missionId];
       if (!entry) return { ok: true, bound: false, sessionId: null };
       return { ok: true, bound: true, sessionId: entry.sessionId, boundAtMs: entry.boundAtMs };
+    },
+
+    /**
+     * 这次执行跑到哪了 —— 只读，从 Harness 投影取真实进度。
+     *
+     * 第一性原理：用户点了「交给团队」之后，最想知道的是
+     *   "它在跑吗？跑到哪了？完事了吗？"
+     *
+     * 如果没有这个，用户只能自己切到 Harness 视图翻聊天记录。
+     * 而这个信息投影里**已经有**（sessionStats.turns/steps），
+     * 不需要我们监听事件、也不需要写第二个聊天框。
+     *
+     * **不猜**：turns>0 只代表有 turn 结束过，不代表任务成功。
+     * 成功与否要用户自己判断——我们只报事实。
+     */
+    async workStatus(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = payload && payload.missionId;
+      if (!isId(missionId)) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const bound = readBindMap(r.workspaceDir)[missionId];
+      if (!bound || !bound.sessionId) {
+        return { ok: true, bound: false, running: false };
+      }
+      if (typeof projectionsOf !== 'function') {
+        return { ok: true, bound: true, available: false, reason: 'runtime not wired' };
+      }
+      let res;
+      try {
+        res = await projectionsOf(bound.sessionId);
+      } catch (err) {
+        return { ok: true, bound: true, available: false, reason: err.message };
+      }
+      if (!res || !res.ok) {
+        return { ok: true, bound: true, available: false, reason: (res && res.reason) || 'projection unavailable' };
+      }
+      const values = (res.value && res.value.values) || {};
+      const stats = values.sessionStats && typeof values.sessionStats === 'object' ? values.sessionStats : {};
+      const turns = Number.isFinite(stats.turns) ? stats.turns : 0;
+      const steps = Number.isFinite(stats.steps) ? stats.steps : 0;
+
+      // "在跑" 从 inbox 和 userQuestions 推断？不行——那是猜。
+      // 官方给的是 sessionListMetadata/status。这里只用 stats 的变化：
+      // turns 和 steps 都大于 0 说明至少跑过；是否正在跑需要外部信号，
+      // 所以**不声称在跑**，只报数字。
+      return {
+        ok: true,
+        bound: true,
+        available: true,
+        turns,
+        steps,
+        // 有 turn 结束过 = 至少完整跑过一轮
+        hasRun: turns > 0,
+        observedAtMs: clock(),
+      };
     },
 
     /**

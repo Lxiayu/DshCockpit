@@ -224,6 +224,9 @@
     padding: 7px 0 0; font-size: 11px; color: var(--acc); cursor: pointer;
   }
   .start-work-link:hover { color: var(--acc-hover); }
+  .start-work-progress { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--border-1); }
+  .start-work-progress-line { font-size: 11.5px; color: var(--text-2); font-weight: 600; }
+  .start-work-progress-hint { font-size: 10px; color: var(--text-3); line-height: 1.45; margin-top: 2px; }
 
   /* --- plan-review 折叠视图 ------------------------------------------
      380px 放不下完整计划 markdown。所以：默认 4 行 + 展开。
@@ -494,6 +497,7 @@ const state = {
   since: null,
   projections: null,
   boundSession: null,
+  workStatus: null,
   liveAvailable: false,
 };
 
@@ -962,9 +966,30 @@ function renderStartWork(m) {
     }
   });
 
-  // 已绑定会话 → 给一个明确的"去看执行"入口
+  // 已绑定会话 → 显示**真实进度** + "去看执行"入口
+  //
+  // 第一性原理：用户点了「交给团队」之后最想知道"它在跑吗、跑到哪了"。
+  // 这些信息投影里已经有（sessionStats.turns/steps），不需要我们
+  // 监听事件、也不需要写第二个聊天框。
+  //
+  // **不猜**：turns>0 只代表有 turn 结束过，不代表任务成功。
+  // 所以我们只报数字，不写"已完成"。
   const bound = state.boundSession;
   if (bound && bound.bound) {
+    const ws = state.workStatus;
+    if (ws && ws.available) {
+      const prog = el('div', { class: 'start-work-progress' });
+      if (ws.hasRun) {
+        prog.append(el('div', { class: 'start-work-progress-line',
+          text: '已执行 ' + ws.turns + ' 轮 · ' + ws.steps + ' 步' }));
+        prog.append(el('div', { class: 'start-work-progress-hint',
+          text: '这是 Harness 记录的完成轮数，不代表任务已经达到你的要求。' }));
+      } else {
+        prog.append(el('div', { class: 'start-work-progress-line',
+          text: '已交给团队，还没有完成的轮次。' }));
+      }
+      box.append(prog);
+    }
     const go = el('button', { class: 'start-work-link',
       text: '在 Harness 中查看这个 Mission 的执行 →' });
     go.addEventListener('click', () => {
@@ -2016,6 +2041,14 @@ async function loadDetail(missionId) {
     api('getBoundSession', { missionId }),
   ]);
   state.boundSession = bound && bound.ok ? bound : null;
+  // 已绑定会话时，顺手拿一次真实进度（只有绑定过才问，避免无谓调用）
+  state.workStatus = null;
+  if (state.boundSession && state.boundSession.bound) {
+    try {
+      const ws = await api('workStatus', { missionId });
+      if (ws && ws.ok) state.workStatus = ws;
+    } catch { /* 进度拿不到不影响主流程 */ }
+  }
   state.attention = att.ok ? att : { ok: false, items: [], total: 0, available: false };
   state.since = since.ok ? since : { ok: false, entries: [], available: false };
   // 运行时投影：给出结构化的 userQuestions（含 options / multiSelect / plan-review）。
