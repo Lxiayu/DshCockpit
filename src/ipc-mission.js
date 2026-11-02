@@ -83,6 +83,38 @@ const ACTIONS = Object.freeze([
 function nowMs() { return Date.now(); }
 
 /**
+ * 给 user question 的 `detail` 加上长度上限。
+ *
+ * 为什么需要：detail 是 plan-review 的完整计划 markdown，可能非常长。
+ * 它会穿过 IPC 到渲染层，而 380px 侧栏实际能展示的部分很有限。
+ * 实测一个 5MB 的 detail 会原样透传，纯属浪费。
+ *
+ * 超出上限时截断并加 `detailTruncated: true` 标记 —— **不能静默丢**，
+ * 否则用户会以为计划就这么多内容。
+ */
+const MAX_QUESTION_DETAIL_CHARS = 64 * 1024; // 64k 字符，足够放很长的计划
+
+function trimQuestionDetail(entry) {
+  if (!entry || typeof entry !== 'object') return entry;
+  const questions = Array.isArray(entry.questions) ? entry.questions : null;
+  if (!questions) return entry;
+  return {
+    ...entry,
+    questions: questions.map((q) => {
+      if (!q || typeof q !== 'object') return q;
+      const detail = typeof q.detail === 'string' ? q.detail : null;
+      if (detail === null || detail.length <= MAX_QUESTION_DETAIL_CHARS) return q;
+      return {
+        ...q,
+        detail: detail.slice(0, MAX_QUESTION_DETAIL_CHARS),
+        detailTruncated: true,
+        detailFullLength: detail.length,
+      };
+    }),
+  };
+}
+
+/**
  * 归一化 agentTeam 投影。
  *
  * 实测真实形状（2026-11-02，让 Lead 调 team_task_create 后拿到）：
@@ -871,7 +903,15 @@ function registerMissionIpc(ipcMain, ctx) {
         asOfSeq: Number.isFinite(res.value.asOfSeq) ? res.value.asOfSeq : null,
         userQuestionsAvailable: hasUserQuestions,
         // 只有 active 的问题需要用户处理；settled 是历史
-        activeQuestions: hasUserQuestions ? uq.active : [],
+        //
+        // ⚠️ activeQuestions 里带 `detail`（plan-review 的计划 markdown）。
+        // 2026-11-02 复查发现原来**没有任何长度上限**：一个 5MB 的 detail
+        // 会原样穿过 IPC 到渲染层（实测确认），造成序列化开销 + 渲染层内存占用
+        // + 展开时的卡顿。而 plan-review 在 380px 侧栏里最多也就看几千字。
+        //
+        // 这里做个上限：超出的部分截断并**显式标记**，让 UI 知道"没显示全"，
+        // 而不是静默丢内容（那会让用户以为计划就这么短）。
+        activeQuestions: hasUserQuestions ? uq.active.map(trimQuestionDetail) : [],
         settledCount: hasUserQuestions ? uq.settled.length : 0,
         // 其余投影按需透传（当前 UI 不用 tokenUsage，但保留以便将来）
         agentPreset: typeof values.agentPreset === 'string' ? values.agentPreset : null,
@@ -1010,6 +1050,39 @@ function registerMissionIpc(ipcMain, ctx) {
         if (!stat || !stat.isFile()) {
           // Agent 提到了但文件不在 —— 如实记录，不登记
           skipped.push({ relPath, reason: 'file not found in workspace' });
+          continue;
+        }
+
+        // ★ 符号链接防护（2026-11-02 复查发现）。
+        //
+        //   statSync 会**跟随**符号链接，所以工作区里一个指向外部的链接
+        //   （比如 docs/link.md -> /Users/me/.ssh/id_rsa）会被当成"存在的文件"，
+        //   接着我们会读它的内容算 sha256 —— 等于把工作区外的内容泄露进 Mission。
+        //
+        //   实测确认过：在 workspace 里建 symlink 指向外部文件，
+        //   statSync().isFile() 返回 true，readFileSync 能读到明文。
+        //
+        //   两道防护：
+        //     1. lstat 拒绝符号链接本身
+        //     2. realpath 二次确认最终路径仍在工作区内（防链接套链接）
+        let lst = null;
+        try { lst = fs.lstatSync(abs); } catch { /* 上面已处理 */ }
+        if (lst && lst.isSymbolicLink()) {
+          skipped.push({ relPath, reason: 'symbolic link (refused: may point outside the workspace)' });
+          continue;
+        }
+        let real = null;
+        try { real = fs.realpathSync(abs); } catch { /* 不存在 */ }
+        if (!real) {
+          skipped.push({ relPath, reason: 'file not found in workspace' });
+          continue;
+        }
+        let realWs = null;
+        try { realWs = fs.realpathSync(workspaceDir); } catch { realWs = workspaceDir; }
+        // 必须真的在工作区**里面**：realWs + 分隔符 作为前缀
+        const inside = real === realWs || real.startsWith(realWs + path.sep);
+        if (!inside) {
+          skipped.push({ relPath, reason: 'resolves outside the workspace' });
           continue;
         }
         // 已有同路径的 Deliverable 就跳过（幂等）
@@ -1205,16 +1278,39 @@ function registerMissionIpc(ipcMain, ctx) {
       // 3) 记一条 TaskRef，让 Mission 知道"有一次执行发生了"
       //    注意：只存派生句柄，不存 raw sessionId（隐私规则）
       try {
-        const ref = taskRef.deriveHarnessRef({ sessionId });
+        // ⚠️ deriveHarnessRef 返回的是 { ok, ref } **对象**，不是字符串。
+        // 2026-11-02 复查发现：这里原来把整个对象当 ref 用，
+        // 于是 isValidHarnessRef(对象) === false，条件永远不成立 ——
+        // **TaskRef 从来没被写入过**，而且没有任何报错（完全静默失效）。
+        const derived = taskRef.deriveHarnessRef({ sessionId });
+        const ref = derived && derived.ok ? derived.ref : null;
         if (ref && taskRef.isValidHarnessRef(ref)) {
-          r.store.append('taskRef.linked', {
-            taskRefId: `tr-${randomId()}`,
-            missionId,
-            ref,
-            kind: 'session-turn',
-            summary: task.slice(0, 200),
-            observedAtMs: clock(),
-          }, { atMs: clock() });
+          // ⚠️ schema 要求 workstreamId 必填。startWork 时 Mission 可能还没有
+          //    任何 workstream —— 那样就无法记 TaskRef。
+          //
+          //    2026-11-02 复查发现：原来既用错了字段名（ref 而非 harnessRef），
+          //    又漏了 workstreamId，于是 append 被 schema **静默 break 掉**
+          //    （projection.js 里是 `if (!validate) break;`，不抛错）。
+          //    结果是"功能看起来接了，实际一条都没存"。
+          //
+          //    处理：有 workstream 就记在该 workstream 下；没有就跳过并**留日志**，
+          //    不再静默失败。
+          const view0 = r.store.missionView(missionId);
+          const ws0 = view0 && Array.isArray(view0.workstreams) && view0.workstreams.length
+            ? view0.workstreams[0] : null;
+          if (!ws0) {
+            log('[mission] startWork: no workstream yet, skipping the taskRef (nothing lost: the session is bound)');
+          } else {
+            const appended = r.store.append('taskRef.linked', {
+              taskRefId: `tr-${randomId()}`,
+              missionId,
+              workstreamId: ws0.workstreamId,
+              harnessRef: ref,
+              summary: task.slice(0, 200),
+              observedAtMs: clock(),
+            }, { atMs: clock() });
+            if (appended === false) log('[mission] startWork: taskRef append was REJECTED by the store');
+          }
         }
       } catch (err) {
         log(`[mission] task ref append failed: ${err.message}`);

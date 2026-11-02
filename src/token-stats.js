@@ -264,6 +264,20 @@ async function parseSessionLogAsync(file, windows) {
     // 现在：容量足够装下常见规模（1024 个会话文件 = 很重的用户），
     // 真的超了才一次性腾出 25%，减少淘汰频率。
     if (parseCache.size >= PARSE_CACHE_MAX) {
+      // 淘汰策略：删掉最早插入的 25%（FIFO）。
+      //
+      // ⚠️ 已知局限（2026-11-02 复查时记录下来，不是 bug 但要知道）：
+      //
+      //   Map.set 更新**已存在**的 key **不会改变插入顺序**。所以一个"每次
+      //   都命中、但每次都重新 set"的热点会话，它的位置永远停在最早 ——
+      //   一旦真的触发容量淘汰，它会被**优先删掉**，而不是留到最后。
+      //
+      //   当前不构成问题：上限 1024 远大于常见用户的会话数（本机约 102 个），
+      //   正常使用几乎不会被触发。但如果将来有用户常年积累上千个会话，
+      //   这里应该改成真正的 LRU（每次命中先 delete 再 set 以刷新位置）。
+      //
+      //   实现 LRU 的代价是每个文件多一次 Map 操作；在 102 个文件的规模下
+      //   不值得，所以现在保持简单的 FIFO 并明确记录局限。
       const dropCount = Math.ceil(PARSE_CACHE_MAX * 0.25);
       let dropped = 0;
       for (const key of parseCache.keys()) {

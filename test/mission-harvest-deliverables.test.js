@@ -131,6 +131,72 @@ test('harvest refused when no session is bound', async () => {
   assert.strictEqual(r.code, 'NOT_BOUND');
 });
 
+test('a SYMBOLIC LINK is refused even when it resolves to a real file', async () => {
+  // 2026-11-02 复查发现的真实漏洞：statSync 会跟随符号链接，
+  // 所以工作区里一个指向外部的链接会被当成"存在的文件"，
+  // 我们就会读它的内容算 sha256 —— 等于把工作区外的内容泄露进 Mission。
+  const fs2 = require('node:fs');
+  const os2 = require('node:os');
+  const ws = fs2.mkdtempSync(path.join(os2.tmpdir(), 'sym-'));
+  const outside = path.join(os2.tmpdir(), `secret-${Date.now()}.md`);
+  fs2.writeFileSync(outside, '# 工作区外的机密');
+  fs2.mkdirSync(path.join(ws, 'docs'), { recursive: true });
+  fs2.symlinkSync(outside, path.join(ws, 'docs', 'link.md'));
+  fs2.writeFileSync(path.join(ws, 'docs', 'real.md'), '# 真实产物');
+
+  let handler = null;
+  registerMissionIpc({ handle: (_c, fn) => { handler = fn; } }, {
+    workspaceDirOf: () => ws, snapshotOf: () => null, log: () => {},
+    ensureSession: async () => ({ ok: true, sessionId: 's' }),
+    promptSession: async () => ({ ok: true }),
+    projectionsOf: async () => ({ ok: true, value: { values: { turnOutline: [
+      { turn: 1, response: '见 docs/real.md 和 docs/link.md' }] } } }),
+  });
+  const c = await handler(null, 'create', { title: 'T', intent: 'I', workspaceId: 'w' });
+  await handler(null, 'startWork', { missionId: c.missionId, task: 'go' });
+  const r = await handler(null, 'harvestDeliverables', { missionId: c.missionId });
+
+  assert.deepStrictEqual(r.added.map((a) => a.relPath), ['docs/real.md']);
+  assert.strictEqual(r.skipped.length, 1);
+  assert.match(r.skipped[0].reason, /symbolic link/,
+    'the symlink must be refused by the lstat check, not by a downstream failure');
+});
+
+test('a path whose MIDDLE DIRECTORY is a symlink is refused (realpath layer)', async () => {
+  // ★ 这一条测的是 realpath 那一层，lstat 拦不住：
+  //
+  //   lstat 只看**最后一段**。如果中间目录是符号链接、最后一段是真文件，
+  //   lstat().isSymbolicLink() 返回 false，第一层放行。
+  //   只有 realpath 能发现"最终落在工作区外"。
+  //
+  //   实测：ws/outdir -> /tmp，则 ws/outdir/secret.md 的 realpath
+  //   是 /tmp/secret.md —— 在工作区外。
+  const fs2 = require('node:fs');
+  const os2 = require('node:os');
+  const ws = fs2.mkdtempSync(path.join(os2.tmpdir(), 'mid-'));
+  const outsideDir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'elsewhere-'));
+  fs2.writeFileSync(path.join(outsideDir, 'secret.md'), '# 工作区外的机密');
+  // 中间目录是符号链接指向工作区外
+  fs2.symlinkSync(outsideDir, path.join(ws, 'outdir'));
+
+  let handler = null;
+  registerMissionIpc({ handle: (_c, fn) => { handler = fn; } }, {
+    workspaceDirOf: () => ws, snapshotOf: () => null, log: () => {},
+    ensureSession: async () => ({ ok: true, sessionId: 's' }),
+    promptSession: async () => ({ ok: true }),
+    projectionsOf: async () => ({ ok: true, value: { values: { turnOutline: [
+      { turn: 1, response: '结果在 outdir/secret.md' }] } } }),
+  });
+  const c = await handler(null, 'create', { title: 'T', intent: 'I', workspaceId: 'w' });
+  await handler(null, 'startWork', { missionId: c.missionId, task: 'go' });
+  const r = await handler(null, 'harvestDeliverables', { missionId: c.missionId });
+
+  assert.deepStrictEqual(r.added, [], 'nothing outside the workspace may be registered');
+  assert.strictEqual(r.skipped.length, 1);
+  assert.match(r.skipped[0].reason, /outside the workspace/,
+    'it must be the realpath boundary check that refuses this, not lstat');
+});
+
 test('a bare filename is NOT enough (we cannot know where it lives)', async () => {
   const env = makeEnv({ reply: '我更新了 README.md', files: { 'README.md': 'x' } });
   const id = await startMission(env);

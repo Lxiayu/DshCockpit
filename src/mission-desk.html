@@ -270,6 +270,8 @@
     border: 0; border-top: 1px solid var(--border-1);
   }
   .plan-review-toggle:hover { background: var(--bg-hover); }
+  .plan-review-truncated { font-size: 10px; color: var(--att-warn-fg); background: var(--att-warn-bg);
+    padding: 5px 9px; line-height: 1.5; }
   .plan-review-empty { font-size: 10.5px; color: var(--text-3); padding: 4px 9px 7px; line-height: 1.5; }
 
   /* --- 团队任务（agentTeam 投影）-------------------------------------
@@ -1836,6 +1838,15 @@ function renderPlanReview(struct) {
   const pre = el('pre', { class: 'plan-review-body', text: hasMore ? preview : text });
   wrap.append(pre);
 
+  // 后端可能因为体积上限截断过 detail（见 ipc-mission.js 的 MAX_QUESTION_DETAIL_CHARS）。
+  // **必须告诉用户**，否则他会以为计划就只有这些内容。
+  if (struct.detailTruncated) {
+    wrap.append(el('div', { class: 'plan-review-truncated',
+      text: '计划正文过长，这里只显示了前 ' + Math.round(text.length / 1024) + 'k 字符'
+        + '（原文 ' + Math.round((struct.detailFullLength || text.length) / 1024) + 'k）。'
+        + '完整内容请在 Harness 里查看。' }));
+  }
+
   if (hasMore) {
     const more = el('button', { class: 'plan-review-toggle',
       text: '展开全文（还有 ' + (allLines.length - PREVIEW_LINES) + ' 行）' });
@@ -2285,6 +2296,8 @@ $('newForm').addEventListener('submit', async (e) => {
 const PROGRESS_POLL_MS = 4000;
 let progressTimer = null;
 let progressIdleTicks = 0;
+// 防止 setInterval + async 重入（见 startProgressPoll 里的说明）
+let progressBusy = false;
 
 function stopProgressPoll() {
   if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
@@ -2294,6 +2307,29 @@ function stopProgressPoll() {
 function startProgressPoll() {
   stopProgressPoll();
   progressTimer = setInterval(async () => {
+    // ⚠️ 防重入（2026-11-02 复查发现）。
+    //
+    //   setInterval + async 有天然缺陷：**如果一次请求比间隔慢，
+    //   下一次会照常启动**，于是多个请求并发堆积。
+    //   实测在 120ms 的慢请求 + 50ms 间隔下最大并发能到 3。
+    //
+    //   在真机上这意味着 IPC 排队、内存峰值、以及"看到先后乱序的结果"
+    //   （后发的请求先回来 → 进度回退）。
+    //
+    //   加一个 in-flight 标记：上一次没回来就跳过这一跳。
+    if (progressBusy) return;
+    progressBusy = true;
+    try {
+      await pollProgressOnce();
+    } finally {
+      progressBusy = false;
+    }
+  }, PROGRESS_POLL_MS);
+}
+
+/** 单次轮询。抽出来是为了让 startProgressPoll 里的防重入逻辑保持简单。 */
+async function pollProgressOnce() {
+  {
     // 页面隐藏 → 不刷
     if (document.hidden) return;
     const id = state.selectedId;
@@ -2306,6 +2342,18 @@ function startProgressPoll() {
       ws = await api('workStatus', { missionId: id });
     } catch { return; }
     if (!ws || !ws.ok) return;
+
+    // ⚠️ 需求发出后用户可能已经切走了（2026-11-02 复查发现）。
+    //
+    //   这个 await 可能耗时几百毫秒。如果期间用户点了另一个 Mission，
+    //   state.selectedId 已经变了，而这里仍然会把**旧 Mission 的进度**
+    //   写进 state.workStatus 并重绘 —— 于是新 Mission 的卡片上
+    //   显示的是上一个 Mission 的"已执行 N 轮"。
+    //
+    //   判定：请求发出时的 id 与当前选中不一致 → 结果作废，直接丢弃。
+    if (state.selectedId !== id) {
+      return;
+    }
 
     const prev = state.workStatus;
     const changed = !prev
@@ -2330,7 +2378,7 @@ function startProgressPoll() {
       // 等用户下次交互再重启。避免长时间空转。
       if (progressIdleTicks >= 15) stopProgressPoll();
     }
-  }, PROGRESS_POLL_MS);
+  }
 }
 
 // 页面重新可见时，如果有绑定的会话就恢复轮询

@@ -1508,7 +1508,18 @@ async function collectStats(force = false) {
     log(`[perf] collectStats cache hit (age=${now - costCache.at}ms)`);
     return costCache.data;
   }
-  // 非强制调用：如果已经有一次重算在路上，直接搭车
+  // 非强制调用：如果已经有一次重算在路上，直接搭车。
+  //
+  // ⚠️ 为什么需要这层（2026-11-02 实测）：
+  //   日志里出现过**同一毫秒**的两次重算（8838ms + 2838ms）——
+  //   两个调用者同时发现缓存过期，各自跑了一遍完整扫描。
+  //   结果是白烧几秒 CPU + 磁盘 IO。
+  //
+  //   缓存只能挡"算完的"，挡不住"正在算的"。所以需要 in-flight 去重。
+  //
+  // ⚠️ 为什么 force 不搭车：
+  //   force 的语义是"现在必须重新读盘"。复用一个启动更早、正在进行的
+  //   扫描会拿到过期数据，违背调用者的意图。
   if (!force && statsInflight) {
     log('[perf] collectStats joined an in-flight recompute');
     return statsInflight;
@@ -1527,8 +1538,14 @@ async function collectStats(force = false) {
     return data;
   })();
   if (!force) {
+    // 先赋值、再挂 finally —— 顺序不能反（赋值在同步阶段完成，
+    // finally 回调在微任务里跑，所以不存在"还没赋值就被清掉"的窗口）。
     statsInflight = run;
-    // 无论成功失败都要清掉，否则失败后所有调用者都会搭上一个已 reject 的 Promise
+    // **必须**在 finally 里清空：无论成功还是失败。
+    //   · 不清 → 失败后所有后续调用都会搭上一个已 reject 的 Promise，
+    //     造成一次失败永久瘫痪后续所有统计。
+    //   · 加了 .catch(()=>{}) → 这个"清理用的"派生 Promise 自己不会变成
+    //     未处理拒绝（原来的 run 仍然把错误抛给真正的调用者）。
     run.finally(() => { statsInflight = null; }).catch(() => {});
   }
   return run;
