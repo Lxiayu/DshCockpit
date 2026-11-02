@@ -191,6 +191,29 @@ async function main() {
   record('it never says 已完成 / 成功',
     !/已完成|成功了|完成成功/.test(prog.full || ''), prog.full || '');
 
+  // ---- 6a. Agent 回复预览 ----
+  WORK = { ok: true, bound: true, available: true, turns: 2, steps: 9, hasRun: true,
+    hasResponse: true, lastTurn: 2,
+    lastPromptPreview: '先调研 Agent Team', lastResponsePreview: '已完成调研，报告在 docs/r.md' };
+  await ev(`loadDetail('mis-1')`);
+  await new Promise((r) => setTimeout(r, 900));
+  const resp = await ev(`(() => {
+    const box = document.querySelector('.start-work-response');
+    return {
+      exists: !!box,
+      label: (box && box.querySelector('.start-work-response-label') || {}).innerText || '',
+      body: (box && box.querySelector('.start-work-response-body') || {}).innerText || '',
+      prompt: (box && box.querySelector('.start-work-response-prompt') || {}).innerText || '',
+      note: (box && box.querySelector('.start-work-response-note') || {}).innerText || '',
+    };
+  })()`).catch(() => ({}));
+  record('the agent\'s ACTUAL reply is shown when a turn finished',
+    (resp.body || '').includes('已完成调研'), resp.body || '');
+  record('the reply names which turn it came from', /第 2 轮/.test(resp.label || ''), resp.label || '');
+  record('it shows which prompt the reply answers', /先调研 Agent Team/.test(resp.prompt || ''), resp.prompt || '');
+  record('it is HONESTLY labelled as a preview (not the full reply)',
+    /预览|长度上限/.test(resp.note || ''), resp.note || '');
+
   // ---- 6b. 未完成时如实说"还没有完成的轮次" ----
   WORK = { ok: true, bound: true, available: true, turns: 0, steps: 4, hasRun: false };
   await ev(`loadDetail('mis-1')`);

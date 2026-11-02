@@ -980,6 +980,19 @@ function registerMissionIpc(ipcMain, ctx) {
       const turns = Number.isFinite(stats.turns) ? stats.turns : 0;
       const steps = Number.isFinite(stats.steps) ? stats.steps : 0;
 
+      // turnOutline 是判断"完成"的**准确信号**：
+      //   官方注释明确说 response「commits at turn/end」——
+      //   也就是**只有在 turn 结束时才有值**。
+      //   所以「最后一个 turn 的 response 非空」= Agent 真的给出了回复。
+      //
+      // 这比 turns>0 更准：turns 只说明有 turn 结束过，
+      // 而 response 非空说明**那一轮有 assistant 文本产出**。
+      const outline = Array.isArray(values.turnOutline) ? values.turnOutline : [];
+      const last = outline.length > 0 ? outline[outline.length - 1] : null;
+      const lastResponse = last && typeof last.response === 'string' ? last.response : '';
+      const lastPrompt = last && typeof last.prompt === 'string' ? last.prompt : '';
+      const lastTurn = last && Number.isFinite(last.turn) ? last.turn : null;
+
       // "在跑" 从 inbox 和 userQuestions 推断？不行——那是猜。
       // 官方给的是 sessionListMetadata/status。这里只用 stats 的变化：
       // turns 和 steps 都大于 0 说明至少跑过；是否正在跑需要外部信号，
@@ -992,6 +1005,12 @@ function registerMissionIpc(ipcMain, ctx) {
         steps,
         // 有 turn 结束过 = 至少完整跑过一轮
         hasRun: turns > 0,
+        // Agent 真的给出回复了（turn/end 才提交）
+        hasResponse: lastResponse.length > 0,
+        lastTurn,
+        // 预览是有长度上限的（官方为窄栏卡片设计），所以**不是完整回复**
+        lastPromptPreview: lastPrompt || null,
+        lastResponsePreview: lastResponse || null,
         observedAtMs: clock(),
       };
     },

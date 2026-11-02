@@ -227,6 +227,17 @@
   .start-work-progress { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--border-1); }
   .start-work-progress-line { font-size: 11.5px; color: var(--text-2); font-weight: 600; }
   .start-work-progress-hint { font-size: 10px; color: var(--text-3); line-height: 1.45; margin-top: 2px; }
+  /* Agent 的回复：视觉上要比"进度数字"重，因为那是用户真正关心的内容 */
+  .start-work-response { margin-top: 7px; padding: 7px 9px; border-radius: 7px;
+    background: var(--bg-input); border: 1px solid var(--border-2); }
+  .start-work-response-label { font-size: 9.5px; font-weight: 700; letter-spacing: .05em;
+    text-transform: uppercase; color: var(--text-3); margin-bottom: 3px; }
+  .start-work-response-body { font-size: 11.5px; color: var(--text-1); line-height: 1.55;
+    white-space: pre-wrap; overflow-wrap: anywhere; }
+  .start-work-response-prompt { font-size: 10px; color: var(--text-3); margin-top: 4px;
+    line-height: 1.45; }
+  .start-work-response-note { font-size: 9.5px; color: var(--text-4); margin-top: 4px;
+    line-height: 1.4; font-style: italic; }
 
   /* --- plan-review 折叠视图 ------------------------------------------
      380px 放不下完整计划 markdown。所以：默认 4 行 + 展开。
@@ -982,8 +993,31 @@ function renderStartWork(m) {
       if (ws.hasRun) {
         prog.append(el('div', { class: 'start-work-progress-line',
           text: '已执行 ' + ws.turns + ' 轮 · ' + ws.steps + ' 步' }));
-        prog.append(el('div', { class: 'start-work-progress-hint',
-          text: '这是 Harness 记录的完成轮数，不代表任务已经达到你的要求。' }));
+
+        // Agent 真的给出回复了 → 显示**它的原话**（预览）
+        //
+        // 第一性原理：用户点了「交给团队」之后，最想知道"它说了什么"。
+        // 这个信息在 turnOutline[].response 里（官方在 turn/end 时提交）。
+        //
+        // **必须标明是预览**：官方为窄栏卡片设计了这个字段，有长度上限，
+        // 不是完整回复。写成完整回复就是撒谎。
+        if (ws.hasResponse && ws.lastResponsePreview) {
+          const resp = el('div', { class: 'start-work-response' });
+          resp.append(el('div', { class: 'start-work-response-label',
+            text: '团队最近一次回复' + (ws.lastTurn ? '（第 ' + ws.lastTurn + ' 轮）' : '') }));
+          resp.append(el('div', { class: 'start-work-response-body',
+            text: ws.lastResponsePreview }));
+          if (ws.lastPromptPreview) {
+            resp.append(el('div', { class: 'start-work-response-prompt',
+              text: '回应的是：' + ws.lastPromptPreview }));
+          }
+          resp.append(el('div', { class: 'start-work-response-note',
+            text: '这是预览（有长度上限），完整内容请在 Harness 里查看。' }));
+          prog.append(resp);
+        } else {
+          prog.append(el('div', { class: 'start-work-progress-hint',
+            text: '这是 Harness 记录的完成轮数，不代表任务已经达到你的要求。' }));
+        }
       } else {
         prog.append(el('div', { class: 'start-work-progress-line',
           text: '已交给团队，还没有完成的轮次。' }));
