@@ -143,6 +143,7 @@
 | `docs/quality/mission-desk-attention-acceptance-2026-11-01.md` | **待办+离开期间+双主题验收** | 19/19；两主题对比度全部 ≥AA |
 | `docs/quality/mission-desk-shared-context-acceptance-2026-11-01.md` | **三实体+UI层级验收** | 17/17；层级靠 scale/weight 不靠颜色 |
 | `docs/quality/mission-desk-structured-options-acceptance-2026-11-01.md` | **结构化选项验收** | 10/10；升级 0.2.1 直接解决缺口 1 |
+| `docs/design/RIGHT-RAIL-MASTER-PLAN.md` | **右栏方案总纲（唯一入口）** | 思想来源/现状/五个结构病/四个候选方案/待决策问题 |
 | `docs/architecture/OFFICE-RENDER-INVARIANTS.md` | **办公室渲染不变量（改代码前必读）** | 5 条不变量；节流事故因果链；自动防护 |
 | `docs/quality/SESSION-2026-11-02-CONSOLIDATED.md` | **2026-11-02 会话整合（本轮总结）** | 做完的/修掉的/还缺的；含性能 A/B 数据与工程教训 |
 | `docs/archive/session-2026-11-02/` | 该轮的 14 份过程记录（已归档） | 详细推理见 git log |
