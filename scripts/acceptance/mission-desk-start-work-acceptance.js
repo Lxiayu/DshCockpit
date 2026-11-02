@@ -222,6 +222,35 @@ async function main() {
   record('with zero finished turns it says so honestly',
     /还没有完成的轮次/.test(noRun), noRun || '');
 
+  // ---- 6c. 进度自动刷新（用户等待时不能"看着没反应"）----
+  BOUND = { ok: true, bound: true, sessionId: 'session-new-1234', boundAtMs: Date.now() };
+  WORK = { ok: true, bound: true, available: true, turns: 1, steps: 3, hasRun: true,
+    hasResponse: false, lastTurn: null, lastPromptPreview: null, lastResponsePreview: null };
+  await ev(`loadDetail('mis-1')`);
+  await new Promise((r) => setTimeout(r, 1200));
+  const beforePoll = await ev(`(document.querySelector('.start-work-progress-line') || {}).innerText || ''`).catch(() => '');
+
+  // 模拟后端进度前进：turns 1→2，并出现回复
+  const pollCalls = [];
+  WORK = { ok: true, bound: true, available: true, turns: 2, steps: 8, hasRun: true,
+    hasResponse: true, lastTurn: 2,
+    lastPromptPreview: '先调研 Agent Team', lastResponsePreview: '报告已生成：docs/report.md' };
+  const refreshed = await ev(`(async () => {
+    // 等一个轮询周期
+    await new Promise((r) => setTimeout(r, 5200));
+    return {
+      line: (document.querySelector('.start-work-progress-line') || {}).innerText || '',
+      hasResp: !!document.querySelector('.start-work-response'),
+      inputFocusSafe: true,
+    };
+  })()`).catch(() => ({}));
+  record('progress AUTO-UPDATES while the user waits (no manual refresh)',
+    /2 轮/.test(refreshed.line || '') && refreshed.line !== beforePoll,
+    `${beforePoll} → ${refreshed.line}`);
+  record('the auto-update also surfaces the new reply',
+    refreshed.hasResp === true, String(refreshed.hasResp));
+  void pollCalls;
+
   // ---- 7. 截图 ----
   try {
     fs.mkdirSync(EVIDENCE, { recursive: true });

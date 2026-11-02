@@ -2083,6 +2083,12 @@ async function loadDetail(missionId) {
       if (ws && ws.ok) state.workStatus = ws;
     } catch { /* 进度拿不到不影响主流程 */ }
   }
+  // 有绑定的执行在跑 → 开始自动刷新进度（用户正在等，不能"看着没反应"）
+  if (state.boundSession && state.boundSession.bound) {
+    startProgressPoll();
+  } else {
+    stopProgressPoll();
+  }
   state.attention = att.ok ? att : { ok: false, items: [], total: 0, available: false };
   state.since = since.ok ? since : { ok: false, entries: [], available: false };
   // 运行时投影：给出结构化的 userQuestions（含 options / multiSelect / plan-review）。
@@ -2133,6 +2139,78 @@ $('newForm').addEventListener('submit', async (e) => {
   $('dlg').close();
   state.selectedId = r.missionId;
   await refresh();
+});
+
+// -------------------------------------------------- 进度自动刷新
+//
+// 第一性原理：用户点了「交给团队」之后会盯着屏幕等。
+// 如果进度不自己变，他会以为"没反应"——这正是最初被抱怨的那个症状。
+//
+// 但不能无脑轮询：
+//   · 全局每 3 秒刷一次 = 白烧 CPU，且大多数时候没有变化
+//   · 有 Agent 任务在跑时才轮询
+//   · 页面不可见时停（用户切走了就没必要刷）
+//   · 连续多次没有变化就退避
+//
+// 只刷「交给团队」那一块的数字，**不整页重绘**——
+// 整页重绘会让用户正在输入的文本框失焦。
+
+const PROGRESS_POLL_MS = 4000;
+let progressTimer = null;
+let progressIdleTicks = 0;
+
+function stopProgressPoll() {
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+  progressIdleTicks = 0;
+}
+
+function startProgressPoll() {
+  stopProgressPoll();
+  progressTimer = setInterval(async () => {
+    // 页面隐藏 → 不刷
+    if (document.hidden) return;
+    const id = state.selectedId;
+    if (!id) { stopProgressPoll(); return; }
+    const bound = state.boundSession;
+    if (!bound || !bound.bound) { stopProgressPoll(); return; }
+
+    let ws = null;
+    try {
+      ws = await api('workStatus', { missionId: id });
+    } catch { return; }
+    if (!ws || !ws.ok) return;
+
+    const prev = state.workStatus;
+    const changed = !prev
+      || prev.turns !== ws.turns
+      || prev.steps !== ws.steps
+      || prev.lastResponsePreview !== ws.lastResponsePreview
+      || prev.hasResponse !== ws.hasResponse;
+
+    state.workStatus = ws;
+
+    if (changed) {
+      progressIdleTicks = 0;
+      // 只重绘 start-work 区块，不整页重绘（避免抢焦点）
+      const oldBox = document.querySelector('.start-work');
+      if (oldBox && state.detail && state.detail.mission) {
+        const fresh = renderStartWork(state.detail.mission);
+        oldBox.replaceWith(fresh);
+      }
+    } else {
+      progressIdleTicks += 1;
+      // 连续 15 次（≈60 秒）没变化 → 退避到停止，
+      // 等用户下次交互再重启。避免长时间空转。
+      if (progressIdleTicks >= 15) stopProgressPoll();
+    }
+  }, PROGRESS_POLL_MS);
+}
+
+// 页面重新可见时，如果有绑定的会话就恢复轮询
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.boundSession && state.boundSession.bound) {
+    startProgressPoll();
+  }
 });
 
 // 启动
