@@ -675,6 +675,573 @@ const CONF_LABEL = { low: '低', medium: '中', high: '高' };
 const EVIDENCE_LABEL = { file: '文件', commit: '提交', url: '链接', command: '命令', observation: '观察' };
 const KIND_LABEL = { approval: '审批', question: '提问' };
 
+/**
+ * 决策列表 + 就地记录表单。
+ *
+ * 为什么单独一个函数而不走 renderEntitySection：
+ *   · 决策多一个必填的「理由」（rationale）——那正是"不丢决策"的核心
+ *   · 决策的 accepted/proposed 区分有治理语义，不能混进通用徽章
+ *   · 决策没有状态推进按钮（不要"提议→接受"的就地切换，
+ *     那会让用户误以为模型可以自己拍板）
+ *
+ * 共同点（列表 + 空态 + 表单 + 失败提示）仍然复用 el()/explainFailure。
+ */
+/**
+ * 未决问题：列表 + 就地回答 + 就地提问。
+ *
+ * 第一性原理：只能答不能问，等于这一节的内容全部来自外部（模型/他人），
+ * 用户自己无法把脑子里的疑问放进去。
+ *
+ * 它与 renderDecisions 是配对的：
+ *   决策 = 已经想清楚的；未决问题 = 还没想清楚的。
+ * 两者都是 Shared Context 的入口，只做一半等于只记结论不记悬念。
+ */
+function renderOpenQuestions(questions, m) {
+  const open = questions.filter((q) => q.status === 'open');
+  const box = el('div', { class: 'entity-section' });
+  box.append(el('h2', { text: '未决问题' }));
+
+  if (open.length === 0) {
+    box.append(el('div', { class: 'muted tiny', text: '没有未决问题。' }));
+  } else {
+    const ul = el('ul', {});
+    for (const q of open) {
+      const li = el('li', {});
+      li.append(el('div', { text: q.text }));
+      const wrap = el('div', { class: 'row', style: 'margin-top:4px' });
+      const input = el('input', { placeholder: '回答…', style: 'flex:1;min-width:120px' });
+      const btn = el('button', { text: '回答' });
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        let r;
+        try {
+          r = await api('answerQuestion', {
+            questionId: q.questionId, answer: input.value, missionId: m.missionId,
+          });
+        } catch (e) { r = { ok: false, reason: e.message }; }
+        btn.disabled = false;
+        if (!r || !r.ok) { alert(explainFailure(r || {})); return; }
+        await refresh();
+      });
+      wrap.append(input, btn);
+      li.append(wrap);
+      ul.append(li);
+    }
+    box.append(ul);
+  }
+
+  // 就地提问
+  const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
+  const qInput = el('input', { placeholder: '有什么还没想清楚的…', style: 'flex:1;min-width:180px' });
+  const askBtn = el('button', { text: '记下这个问题' });
+  const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
+  askBtn.addEventListener('click', async () => {
+    msg.textContent = '';
+    if (!qInput.value.trim()) { msg.textContent = '请填写问题内容'; return; }
+    askBtn.disabled = true;
+    let r;
+    try { r = await api('openQuestion', { missionId: m.missionId, text: qInput.value.trim() }); }
+    catch (e) { r = { ok: false, reason: e.message }; }
+    askBtn.disabled = false;
+    if (r && r.ok) { qInput.value = ''; await refresh(); }
+    else { msg.textContent = explainFailure(r); }
+  });
+  wrap.append(qInput, askBtn, msg);
+  box.append(wrap);
+  return box;
+}
+
+
+/**
+ * 工作流：列表 + 就地状态切换 + 新建。
+ *
+ * 第一性原理：阻塞是高频动作，必须能**就地**标记——
+ * 再开一个编辑弹窗会让用户放弃标记，于是状态永远不更新。
+ */
+function renderWorkstreams(v, m) {
+  const box = el('div', { class: 'entity-section' });
+    box.append(el('h2', { text: '工作流' }));
+    if (!v.workstreams || v.workstreams.length === 0) {
+      box.append(el('div', { class: 'muted tiny', text: '还没有工作流。' }));
+    } else {
+      const ul = el('ul', {});
+      for (const w of v.workstreams) {
+        const li = el('li', {});
+        const row = el('div', { class: 'row', style: 'gap:6px;align-items:center' });
+        row.append(el('span', { text: '[' + w.status + '] ' + w.title, style: 'flex:1' }));
+        // 状态切换：阻塞是一个高频动作，必须能就地标记，
+        // 而不是"再开一个编辑弹窗"。
+        for (const next of ['active', 'blocked', 'done'].filter((x) => x !== w.status)) {
+          const b = el('button', {
+            text: next === 'active' ? '进行中' : (next === 'blocked' ? '阻塞' : '完成'),
+            class: 'tiny',
+          });
+          b.addEventListener('click', async () => {
+            b.disabled = true;
+            const r = await api('updateWorkstreamStatus', {
+              missionId: m.missionId, workstreamId: w.workstreamId, to: next,
+            });
+            b.disabled = false;
+            if (r && r.ok) await refresh();
+            else alert(explainFailure(r));
+          });
+          row.append(b);
+        }
+        li.append(row);
+        ul.append(li);
+      }
+      box.append(ul);
+    }
+    {
+      // 新建工作流（就地表单）
+      const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
+      const title = el('input', { placeholder: '新工作流名称…', style: 'flex:1;min-width:160px' });
+      const btn = el('button', { text: '新建工作流' });
+      const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
+      btn.addEventListener('click', async () => {
+        msg.textContent = '';
+        if (!title.value.trim()) { msg.textContent = '请填写名称'; return; }
+        btn.disabled = true;
+        let r;
+        try { r = await api('addWorkstream', { missionId: m.missionId, title: title.value.trim() }); }
+        catch (e) { r = { ok: false, reason: e.message }; }
+        btn.disabled = false;
+        if (r && r.ok) { title.value = ''; await refresh(); }
+        else { msg.textContent = explainFailure(r); }
+      });
+      wrap.append(title, btn, msg);
+      box.append(wrap);
+    }
+  return box;
+}
+
+/**
+ * 关联的执行（TaskRef）：Mission 与 Harness 之间**唯一**的连接点。
+ *
+ * 边界：这里只显示"哪次执行属于哪个工作流"，**不显示任务状态**。
+ * 任务状态归 Harness；Mission 再存一份就是两个事实作者（铁律 1）。
+ */
+function renderTaskRefs(v, m) {
+  const box = el('div', { class: 'entity-section' });
+    box.append(el('h2', { text: '关联的执行' }));
+    const refs = v.taskRefs || [];
+    if (refs.length === 0) {
+      box.append(el('div', { class: 'muted tiny', text: '还没有关联任何执行。' }));
+    } else {
+      const ul = el('ul', {});
+      for (const t of refs) {
+        const li = el('li', {});
+        const ws = (v.workstreams || []).find((w) => w.workstreamId === t.workstreamId);
+        li.append(el('div', { text: (t.summary || '（无摘要）') }));
+        li.append(el('div', {
+          class: 'muted tiny',
+          // harnessRef 是派生句柄，不是 sessionId —— 单独标出来，
+          // 让读的人知道点这里也反查不到原始会话。
+          text: `属于工作流：${ws ? ws.title : t.workstreamId} · 句柄 ${t.harnessRef}`,
+        }));
+        ul.append(li);
+      }
+      box.append(ul);
+    }
+    {
+      // 关联一次执行（就地表单）
+      const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
+      const wsSel = el('select', { style: 'flex:1;min-width:120px' });
+      for (const w of (v.workstreams || [])) {
+        wsSel.append(el('option', { value: w.workstreamId, text: w.title }));
+      }
+      const summary = el('input', { placeholder: '这次执行做了什么…', style: 'flex:2;min-width:160px' });
+      const btn = el('button', { text: '关联执行' });
+      const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
+      btn.addEventListener('click', async () => {
+        msg.textContent = '';
+        const workstreamId = wsSel.value;
+        if (!workstreamId) { msg.textContent = '请先新建一个工作流'; return; }
+        if (!summary.value.trim()) { msg.textContent = '请填写摘要 —— 不然下次看到这个句柄不知道它是什么'; return; }
+        btn.disabled = true;
+        let r;
+        try {
+          r = await api('linkTaskRef', {
+            missionId: m.missionId,
+            workstreamId,
+            // 这里本来该由 Harness 提供真实 sessionId；离线/无 runtime 时
+            // 用一个明确的占位值，并让用户在摘要里写清楚。
+            // 绝不伪造一个"看起来像真的" sessionId —— 那会让人以为能反查。
+            sessionId: state.linkSessionId || 'manual-link',
+            summary: summary.value.trim(),
+          });
+        } catch (e) { r = { ok: false, reason: e.message }; }
+        btn.disabled = false;
+        if (r && r.ok) { summary.value = ''; await refresh(); }
+        else { msg.textContent = explainFailure(r); }
+      });
+      wrap.append(wsSel, summary, btn, msg);
+      box.append(wrap);
+    }
+  return box;
+}
+
+/**
+ * 产物：已登记的交付物 + 校验状态 + 登记表单。
+ *
+ * 只存相对路径 + digest；绝对路径是隐私边界。
+ */
+function renderDeliverables(v, m) {
+  const box = el('div', { class: 'entity-section' });
+    box.append(el('h2', { text: '产物' }));
+    const ver = state.verified;
+    if (!v.deliverables || v.deliverables.length === 0) {
+      box.append(el('div', { class: 'muted tiny', text: '还没有登记产物。' }));
+    } else {
+      for (const d of v.deliverables) {
+        const res = ver && ver.results ? ver.results.find((x) => x.deliverableId === d.deliverableId) : null;
+        const status = res ? res.status : 'unchecked';
+        const box2 = el('div', { class: 'deliv' });
+        const row = el('div', { class: 'row' });
+        row.append(el('span', { text: d.label }));
+        row.append(el('span', { class: 'status st-' + status, text: status }));
+        box2.append(row);
+        box2.append(el('div', { class: 'muted tiny', text: d.relPath + ' · sha256:' + String(d.digest).slice(0, 12) + '…' }));
+        if (res && res.status === 'modified') {
+          box2.append(el('div', { class: 'tiny', text: '内容已变化（登记时 ' + String(res.expected).slice(0, 8) + '… → 现在 ' + String(res.actual).slice(0, 8) + '…）' }));
+        }
+        if (res && res.status === 'missing') {
+          box2.append(el('div', { class: 'tiny', text: '文件已不存在：' + res.reason }));
+        }
+        box.append(box2);
+      }
+      const verifyBtn = el('button', { text: '校验产物是否仍是当时那一版' });
+      verifyBtn.addEventListener('click', async () => {
+        const r = await api('verifyDeliverables', { missionId: m.missionId });
+        if (!r.ok) { alert(r.reason); return; }
+        state.verified = r;
+        renderDetail();
+      });
+      box.append(verifyBtn);
+    }
+
+    {
+      // 登记产物。关键设计：registerDeliverable 会**真的读文件算 sha256**，
+      // 所以"登记成功"本身就证明文件存在。用户填一个不存在的路径会被拒绝——
+      // 这比"只存一个路径字符串"强得多（V3「产物是真实文件」的机械保证）。
+      const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
+      const label = el('input', { placeholder: '产物名称…', style: 'flex:1;min-width:120px' });
+      const rel = el('input', { placeholder: '相对工作区的路径，如 docs/report.md', style: 'flex:2;min-width:180px' });
+      const btn = el('button', { text: '登记产物' });
+      const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
+      btn.addEventListener('click', async () => {
+        msg.textContent = '';
+        if (!label.value.trim()) { msg.textContent = '请填写产物名称'; return; }
+        if (!rel.value.trim()) { msg.textContent = '请填写相对路径'; return; }
+        btn.disabled = true;
+        let r;
+        try {
+          r = await api('registerDeliverable', {
+            missionId: m.missionId,
+            label: label.value.trim(),
+            relPath: rel.value.trim(),
+          });
+        } catch (e) { r = { ok: false, reason: e.message }; }
+        btn.disabled = false;
+        if (r && r.ok) { label.value = ''; rel.value = ''; await refresh(); }
+        else {
+          // 失败原因很有信息量：文件不存在 / 是目录 / 路径越界
+          msg.textContent = explainFailure(r);
+        }
+      });
+      wrap.append(label, rel, btn, msg);
+      box.append(wrap);
+    }
+  return box;
+}
+
+/**
+ * Brief 预览/同步 + 诊断信息。
+ *
+ * Brief 是"下次会话 Agent 会读到的东西"——它必须可见，
+ * 否则用户不知道跨会话到底传了什么过去。
+ */
+function renderBriefAndDiagnostics(v, m) {
+  const box = el('div', { class: 'entity-section' });
+    box.append(el('h2', { text: 'Mission Brief（下次会话 Agent 会读到这个）' }));
+    if (!state.brief) {
+      box.append(el('div', { class: 'muted tiny', text: '正在生成…' }));
+    } else if (state.brief.empty) {
+      box.append(el('div', { class: 'muted tiny', text: 'Brief 为空。' }));
+    } else {
+      box.append(el('div', {
+        class: 'tiny muted',
+        text: state.brief.bytes + ' 字节'
+          + (state.brief.truncated ? ' · 已截断（省略了 ' + JSON.stringify(state.brief.dropped) + '）' : ' · 未截断'),
+      }));
+      box.append(el('pre', { id: 'briefText', text: state.brief.text }));
+
+      // ---- 同步到 AGENTS.md（这一步让 Brief 真正生效）----
+      // 为什么需要用户主动点：它会写入用户工作区里的 AGENTS.md 文件。
+      // 自动写用户文件是越界行为——即使内容是"有用的"。
+      const syncRow = el('div', { class: 'row', style: 'margin-top:10px' });
+
+      const syncState = state.syncState || { synced: false };
+      if (syncState.synced && syncState.missionId === m.missionId) {
+        syncRow.append(el('span', { class: 'badge active', text: '已同步到 AGENTS.md' }));
+        const unBtn = el('button', { text: '撤销同步' });
+        unBtn.addEventListener('click', async () => {
+          const r = await api('unsyncBrief');
+          if (!r.ok) { alert(r.reason); return; }
+          state.syncState = { synced: false };
+          renderDetail();
+        });
+        syncRow.append(unBtn);
+      } else {
+        const btn = el('button', { class: 'primary', text: '同步到 AGENTS.md' });
+        btn.addEventListener('click', async () => {
+          const r = await api('syncBrief', { missionId: m.missionId });
+          if (!r.ok) { alert(r.reason); return; }
+          const st = await api('briefSyncState');
+          state.syncState = st.ok ? st : { synced: false };
+          renderDetail();
+        });
+        syncRow.append(btn);
+        syncRow.append(el('span', {
+          class: 'tiny muted',
+          text: '写入工作区的 AGENTS.md，下次会话 Agent 会自动读到。不会覆盖你手写的内容。',
+        }));
+      }
+      box.append(syncRow);
+    }
+
+    // --- 诊断 ---
+    const diagBtn = el('button', { text: '诊断（日志健康 / 备份 / 迁移）' });
+    diagBtn.style.marginTop = '18px';
+    diagBtn.addEventListener('click', async () => {
+      const r = await api('diagnostics');
+      if (!r.ok) { alert(r.reason); return; }
+      alert(JSON.stringify(r, null, 2));
+    });
+    box.append(diagBtn);
+  return box;
+}
+
+function renderDecisions(decisions, m) {
+  const box = el('div', { class: 'entity-section' });
+  box.append(el('h2', { text: '决策（含理由）' }));
+
+  if (decisions.length === 0) {
+    box.append(el('div', { class: 'muted tiny', text: '还没有记录决策。' }));
+  } else {
+    const ul = el('ul', {});
+    for (const d of decisions) {
+      const li = el('li', {});
+      const head = el('div', {
+        text: d.text + (d.status === 'superseded'
+          ? '（已被 ' + (d.supersededBy || '?') + ' 取代）' : ''),
+      });
+      // proposed 与 accepted 必须分得清，否则"模型提议"会被误读成"已经拍板"
+      head.append(el('span', {
+        class: 'tiny',
+        style: d.status === 'accepted'
+          ? 'margin-left:6px;color:var(--att-ok-fg)'
+          : 'margin-left:6px;color:var(--att-warn-fg)',
+        text: d.status === 'accepted' ? '已接受'
+          : (d.status === 'proposed' ? '提议中' : d.status),
+      }));
+      li.append(head);
+      li.append(el('div', { class: 'muted tiny', text: '为什么：' + d.rationale }));
+      ul.append(li);
+    }
+    box.append(ul);
+  }
+
+  // 就地记录：决定 + 为什么（理由必填）
+  const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
+  const txt = el('input', { placeholder: '决定了什么…', style: 'flex:1;min-width:150px' });
+  const why = el('input', { placeholder: '为什么（必填）…', style: 'flex:1;min-width:150px' });
+  const btn = el('button', { text: '记录决策' });
+  const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
+  btn.addEventListener('click', async () => {
+    msg.textContent = '';
+    if (!txt.value.trim()) { msg.textContent = '请填写决定内容'; return; }
+    if (!why.value.trim()) {
+      msg.textContent = '请填写理由 —— 没有理由的决策正是压缩会毁掉的东西';
+      return;
+    }
+    btn.disabled = true;
+    let r;
+    try {
+      r = await api('recordDecision', {
+        missionId: m.missionId,
+        text: txt.value.trim(),
+        rationale: why.value.trim(),
+        // 用户在 UI 里点"记录决策" = 用户自己拍的板
+        status: 'accepted',
+        decidedBy: 'user',
+      });
+    } catch (e) { r = { ok: false, reason: e.message }; }
+    btn.disabled = false;
+    if (r && r.ok) { txt.value = ''; why.value = ''; await refresh(); }
+    else { msg.textContent = explainFailure(r); }
+  });
+  wrap.append(txt, why, btn, msg);
+  box.append(wrap);
+  return box;
+}
+
+
+/**
+ * 通用的「结构化实体」区块渲染器。
+ *
+ * 第一性原理：发现 / 假设 / 证据三者结构同构——
+ *   状态徽章 + 正文 + 元信息 + 状态推进入口 + 就地记录表单
+ *
+ * 之前是**三份几乎相同的 80 行代码**（共 219 行）。这违反高内聚：
+ *   · 加一类实体就要复制 80 行
+ *   · 改一处样式要改三处（实际已经漂移过：假设有 3 个状态转移，发现只有 2 个）
+ *
+ * 现在把差异做成**参数**，共性做成实现。
+ *
+ * 配置项：
+ *   title        区块标题
+ *   hint         空态文案
+ *   items        实体数组
+ *   idKey        主键字段名
+ *   labelMap     状态 → 中文标签
+ *   badgeClass   状态 → 徽章 class
+ *   badgeText    可选：徽章文字（默认用 labelMap[status]）
+ *   body         正文取值
+ *   bodyClass    可选：正文额外 class
+ *   meta         元信息一行
+ *   transitions  状态推进按钮 [{ to, label, hideWhen }]
+ *   apiAction    状态推进调用的 action（transitions 非空时必需）
+ *   form         就地记录表单的形态：'finding' | 'assumption' | 'evidence'
+ */
+function renderEntitySection(cfg) {
+  const items = Array.isArray(cfg.items) ? cfg.items : [];
+  const box = el('div', { class: 'entity-section' });
+  box.append(el('h2', { text: cfg.title }));
+
+  if (items.length === 0) {
+    box.append(el('div', { class: 'muted tiny', text: cfg.hint }));
+  } else {
+    const ul = el('ul', { class: 'sc-list' });
+    for (const it of items) {
+      const li = el('li', { class: 'sc-item' });
+      const line = el('div', { class: 'sc-line' });
+      line.append(el('span', {
+        class: cfg.badgeClass(it),
+        text: cfg.badgeText ? cfg.badgeText(it) : (cfg.labelMap[it.status] || it.status),
+      }));
+      line.append(el('span', { class: cfg.bodyClass || 'sc-text', text: cfg.body(it) }));
+      li.append(line);
+
+      const metaText = cfg.meta(it);
+      if (metaText) li.append(el('div', { class: 'sc-meta', text: metaText }));
+
+      // 状态推进：只显示当前状态允许转移的
+      const transitions = (cfg.transitions || []).filter((t) => !t.hideWhen || !t.hideWhen(it));
+      if (transitions.length > 0 && cfg.apiAction) {
+        const acts = el('div', { class: 'row', style: 'margin-top:5px;gap:6px' });
+        for (const t of transitions) {
+          const btn = el('button', { class: 'att-btn', text: t.label });
+          btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            let r;
+            try {
+              r = await api(cfg.apiAction, { [cfg.idKey]: it[cfg.idKey], to: t.to });
+            } catch (e) { r = { ok: false, reason: e.message }; }
+            btn.disabled = false;
+            if (!r || !r.ok) { alert(explainFailure(r || {})); return; }
+            await refresh();
+          });
+          acts.append(btn);
+        }
+        li.append(acts);
+      }
+      ul.append(li);
+    }
+    box.append(ul);
+  }
+
+  if (cfg.form) box.append(renderEntityForm(cfg));
+  return box;
+}
+
+/**
+ * 就地记录表单。
+ *
+ * 三种实体字段不同，所以这里是**唯一的差异点**（其它都走 renderEntitySection）。
+ * 保持一个 switch 而不是三个函数，因为它们共享"输入 → 校验 → 提交 → 刷新"
+ * 这条主流程，只有字段定义不同。
+ */
+function renderEntityForm(cfg) {
+  const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
+  const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
+
+  const submit = async (action, payload, label) => {
+    msg.textContent = '';
+    let r;
+    try { r = await api(action, payload); } catch (e) { r = { ok: false, reason: e.message }; }
+    if (!r || !r.ok) { msg.textContent = explainFailure(r || {}); return; }
+    await refresh();
+  };
+
+  if (cfg.form === 'finding') {
+    const text = el('input', { placeholder: '发现了什么事实…', style: 'flex:1;min-width:150px' });
+    const conf = el('select', {});
+    for (const [v, l] of [['low', '低'], ['medium', '中'], ['high', '高']]) {
+      conf.append(el('option', { value: v, text: l }));
+    }
+    conf.value = 'medium';
+    const btn = el('button', { text: '记录发现' });
+    btn.addEventListener('click', async () => {
+      const t = text.value.trim();
+      if (!t) { msg.textContent = '请填写发现内容'; return; }
+      btn.disabled = true;
+      await submit('recordFinding', { missionId: state.detail.mission.missionId, text: t, confidence: conf.value });
+      btn.disabled = false;
+        text.value = '';
+    });
+    wrap.append(text, conf, btn);
+  } else if (cfg.form === 'assumption') {
+    const text = el('input', { placeholder: '我们暂时假设…', style: 'flex:1;min-width:150px' });
+    const verify = el('input', { placeholder: '怎么验证它仍成立（可留空）', style: 'flex:1;min-width:150px' });
+    const btn = el('button', { text: '记录假设' });
+    btn.addEventListener('click', async () => {
+      const t = text.value.trim();
+      if (!t) { msg.textContent = '请填写假设内容'; return; }
+      btn.disabled = true;
+      const payload = { missionId: state.detail.mission.missionId, text: t };
+      const v = verify.value.trim();
+      if (v) payload.verification = v;
+      await submit('recordAssumption', payload);
+      btn.disabled = false;
+      text.value = ''; verify.value = '';
+    });
+    wrap.append(text, verify, btn);
+  } else if (cfg.form === 'evidence') {
+    const kind = el('select', {});
+    for (const [v, l] of [['commit', '提交'], ['file', '文件'], ['url', '链接'], ['command', '命令'], ['observation', '观察']]) {
+      kind.append(el('option', { value: v, text: l }));
+    }
+    const ref = el('input', { placeholder: '引用（相对路径/commit/URL）', style: 'flex:1;min-width:130px' });
+    const claim = el('input', { placeholder: '它支持什么结论（必填）', style: 'flex:1;min-width:130px' });
+    const btn = el('button', { text: '记录证据' });
+    btn.addEventListener('click', async () => {
+      const rv = ref.value.trim();
+      const cv = claim.value.trim();
+      if (!rv || !cv) { msg.textContent = '引用和结论都要填'; return; }
+      btn.disabled = true;
+      await submit('recordEvidence', { missionId: state.detail.mission.missionId, kind: kind.value, ref: rv, claim: cv });
+      btn.disabled = false;
+      ref.value = ''; claim.value = '';
+    });
+    wrap.append(kind, ref, claim, btn);
+  }
+
+  wrap.append(msg);
+  return wrap;
+}
+
+
 function renderAttention() {
   const a = state.attention;
   const wrap = el('div', { class: 'att' });
@@ -1494,67 +2061,7 @@ function renderDetail() {
   }
 
   // --- 决策 ---
-  //
-  // 第一性原理：没有写入的 Desk 不叫 Desk，叫报表。
-  // 报表不能支撑"跨会话不丢" —— 而 V2「不丢决策」正是本产品的核心主张。
-  //
-  // 设计要点（与 answerQuestion 的就地输入同一个模式，不新增弹窗）：
-  //   · 「决定」+「为什么」两个输入，理由必填（schema 强制）
-  //   · 默认走 proposed（提议），不是 accepted —— 见治理漏洞修复 S1
-  //   · 失败时显示具体原因，不只 {ok:false}
-  box.append(el('h2', { text: '决策（含理由）' }));
-  if (!v.decisions || v.decisions.length === 0) {
-    box.append(el('div', { class: 'muted tiny', text: '还没有记录决策。' }));
-  } else {
-    const ul = el('ul', {});
-    for (const d of v.decisions) {
-      const li = el('li', {});
-      li.append(el('div', { text: d.text + (d.status === 'superseded' ? '（已被 ' + (d.supersededBy || '?') + ' 取代）' : '') }));
-      // 状态可见：proposed 与 accepted 必须让用户分得清，
-      // 否则"模型提议"会被误读成"已经拍板"。
-      const badge = el('span', {
-        class: 'tiny',
-        style: d.status === 'accepted'
-          ? 'margin-left:6px;color:var(--att-ok-fg)'
-          : 'margin-left:6px;color:var(--att-warn-fg)',
-        text: d.status === 'accepted' ? '已接受' : (d.status === 'proposed' ? '提议中' : d.status),
-      });
-      li.firstChild.append(badge);
-      li.append(el('div', { class: 'muted tiny', text: '为什么：' + d.rationale }));
-      ul.append(li);
-    }
-    box.append(ul);
-  }
-  {
-    // 记录一条决策（就地表单）
-    const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
-    const txt = el('input', { placeholder: '决定了什么…', style: 'flex:1;min-width:140px' });
-    const why = el('input', { placeholder: '为什么（必填）…', style: 'flex:1;min-width:140px' });
-    const btn = el('button', { text: '记录决策' });
-    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
-    btn.addEventListener('click', async () => {
-      msg.textContent = '';
-      if (!txt.value.trim()) { msg.textContent = '请填写决定内容'; return; }
-      if (!why.value.trim()) { msg.textContent = '请填写理由 —— 没有理由的决策正是压缩会毁掉的东西'; return; }
-      btn.disabled = true;
-      let r;
-      try {
-        r = await api('recordDecision', {
-          missionId: m.missionId,
-          text: txt.value.trim(),
-          rationale: why.value.trim(),
-          // 用户在 UI 里点"记录决策"= 用户自己拍的板
-          status: 'accepted',
-          decidedBy: 'user',
-        });
-      } catch (e) { r = { ok: false, reason: e.message }; }
-      btn.disabled = false;
-      if (r && r.ok) { txt.value = ''; why.value = ''; await refresh(); }
-      else { msg.textContent = explainFailure(r); }
-    });
-    wrap.append(txt, why, btn, msg);
-    box.append(wrap);
-  }
+  box.append(renderDecisions(v.decisions || [], m));
 
   // ================================================================
   // Shared Context：发现 / 假设 / 证据（2026-11-01）
@@ -1566,520 +2073,82 @@ function renderDetail() {
   //     · Evidence   = 凭什么相信      → 可信度的来源
   // ================================================================
 
-  // --- 发现 ---
-  const findings = v.findings || [];
-  box.append(el('h2', { text: '发现' }));
-  if (findings.length === 0) {
-    box.append(el('div', { class: 'muted tiny',
-      text: '还没有记录发现。发现是"我们确认了 X 成立"，与决策（我们选择了 A）不同。' }));
-  } else {
-    const ul = el('ul', { class: 'sc-list' });
-    for (const f of findings) {
-      const li = el('li', { class: 'sc-item' });
-      const line = el('div', { class: 'sc-line' });
-      line.append(el('span', { class: 'sc-badge st-finding-' + f.status,
-        text: FINDING_LABEL[f.status] || f.status }));
-      line.append(el('span', { class: 'sc-text', text: f.text }));
-      li.append(line);
-      const meta = [];
-      meta.push('置信 ' + CONF_LABEL[f.confidence] || f.confidence);
-      if (Number.isFinite(f.foundAtMs)) meta.push(relativeTime(f.foundAtMs));
-      if ((f.evidenceIds || []).length) meta.push(f.evidenceIds.length + ' 条证据');
-      li.append(el('div', { class: 'sc-meta', text: meta.join(' · ') }));
-      // 状态推进入口：发现必须能被"确认"或"推翻"，否则它永远停在待验证
-      if (f.status !== 'refuted') {
-        const acts = el('div', { class: 'row', style: 'margin-top:5px;gap:6px' });
-        if (f.status !== 'verified') {
-          const okBtn = el('button', { class: 'att-btn', text: '已验证' });
-          okBtn.addEventListener('click', async () => {
-            const r = await api('updateFindingStatus', { findingId: f.findingId, to: 'verified' });
-            if (!r.ok) { alert(explainFailure(r)); return; }
-            await refresh();
-          });
-          acts.append(okBtn);
-        }
-        const noBtn = el('button', { class: 'att-btn danger', text: '推翻' });
-        noBtn.addEventListener('click', async () => {
-          // refuted 必须给理由——它是语义反转，没有理由就无法追溯
-          const why = prompt('为什么推翻这个发现？（必填）');
-          if (!why || !why.trim()) return;
-          const r = await api('updateFindingStatus', { findingId: f.findingId, to: 'refuted', reason: why.trim() });
-          if (!r.ok) { alert(explainFailure(r)); return; }
-          await refresh();
-        });
-        acts.append(noBtn);
-        li.append(acts);
-      }
-      ul.append(li);
-    }
-    box.append(ul);
-  }
-  {
-    // 记录一条发现（就地表单）。
-    // 第一性原理：只有展示没有入口 = 这块内容永远只能来自别处。
-    const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
-    const txt = el('input', { placeholder: '发现了什么事实…', style: 'flex:1;min-width:160px' });
-    const conf = el('select', {});
-    for (const [val, label] of [['high', '高置信'], ['medium', '中置信'], ['low', '低置信']]) {
-      conf.append(el('option', { value: val, text: label }));
-    }
-    conf.value = 'medium';
-    const btn = el('button', { text: '记录发现' });
-    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
-    btn.addEventListener('click', async () => {
-      msg.textContent = '';
-      if (!txt.value.trim()) { msg.textContent = '请填写发现内容'; return; }
-      btn.disabled = true;
-      let r;
-      try {
-        r = await api('recordFinding', {
-          missionId: m.missionId,
-          text: txt.value.trim(),
-          confidence: conf.value,
-          // 用户在 UI 里录入 = 用户自己的发现
-          foundBy: 'user',
-        });
-      } catch (e) { r = { ok: false, reason: e.message }; }
-      btn.disabled = false;
-      if (r && r.ok) { txt.value = ''; await refresh(); }
-      else { msg.textContent = explainFailure(r); }
-    });
-    wrap.append(txt, conf, btn, msg);
-    box.append(wrap);
-  }
+  // 发现 / 假设 / 证据 —— 三者结构同构（状态徽章 + 正文 + 元信息 + 状态推进入口），
+  // 所以走同一个声明式渲染器。这消除了三份几乎相同的 80 行代码，
+  // 也让"再加一类实体"变成加一条配置，而不是复制 80 行。
+  box.append(renderEntitySection({
+    title: '发现',
+    hint: '还没有记录发现。发现是"我们确认了 X 成立"，与决策（我们选择了 A）不同。',
+    items: v.findings || [],
+    idKey: 'findingId',
+    labelMap: FINDING_LABEL,
+    badgeClass: (it) => 'sc-badge st-finding-' + it.status,
+    body: (it) => it.text,
+    meta: (it) => {
+      const out = ['置信 ' + (CONF_LABEL[it.confidence] || it.confidence)];
+      if (Number.isFinite(it.foundAtMs)) out.push(relativeTime(it.foundAtMs));
+      if ((it.evidenceIds || []).length) out.push(it.evidenceIds.length + ' 条证据');
+      return out.join(' · ');
+    },
+    transitions: [
+      { to: 'verified', label: '已验证', hideWhen: (it) => it.status === 'verified' || it.status === 'refuted' },
+      { to: 'refuted', label: '已推翻', hideWhen: (it) => it.status === 'refuted' },
+    ],
+    apiAction: 'updateFindingStatus',
+    form: 'finding',
+  }));
 
-  // --- 假设 ---
-  const assumptions = v.assumptions || [];
-  box.append(el('h2', { text: '假设' }));
-  if (assumptions.length === 0) {
-    box.append(el('div', { class: 'muted tiny',
-      text: '还没有记录假设。假设是"我们暂时这么认为，但还没验证"——它是最容易在三天后爆炸的东西。' }));
-  } else {
-    const ul = el('ul', { class: 'sc-list' });
-    const now = Date.now();
-    for (const a of assumptions) {
-      const li = el('li', { class: 'sc-item' });
-      const line = el('div', { class: 'sc-line' });
-      line.append(el('span', { class: 'sc-badge st-assumption-' + a.status,
-        text: ASSUMPTION_LABEL[a.status] || a.status }));
-      line.append(el('span', { class: 'sc-text', text: a.text }));
-      li.append(line);
-      const meta = [];
-      if (a.verifyBy) meta.push('验证方式：' + a.verifyBy);
-      if (Number.isFinite(a.expiresAtMs)) {
-        const left = a.expiresAtMs - now;
-        // 过期是**显式**状态；这里只提示"快过期"，不自己改状态
-        meta.push(left < 0 ? '已过期' : `还有 ${Math.ceil(left / 3600e3)}h 过期`);
-      }
-      if (a.violatedReason) meta.push('被推翻：' + a.violatedReason);
-      if (meta.length) li.append(el('div', { class: 'sc-meta', text: meta.join(' · ') }));
-      // 假设必须能被确认或推翻。它是最容易在三天后爆炸的东西，
-      // 没有这两个按钮，用户只能看着它过期。
-      if (a.status !== 'violated' && a.status !== 'expired') {
-        const acts = el('div', { class: 'row', style: 'margin-top:5px;gap:6px' });
-        if (a.status !== 'holding') {
-          const okBtn = el('button', { class: 'att-btn', text: '仍成立' });
-          okBtn.addEventListener('click', async () => {
-            const r = await api('updateAssumptionStatus', { assumptionId: a.assumptionId, to: 'holding' });
-            if (!r.ok) { alert(explainFailure(r)); return; }
-            await refresh();
-          });
-          acts.append(okBtn);
-        }
-        const noBtn = el('button', { class: 'att-btn danger', text: '已推翻' });
-        noBtn.addEventListener('click', async () => {
-          const why = prompt('为什么它不再成立？（必填）');
-          if (!why || !why.trim()) return;
-          const r = await api('updateAssumptionStatus', { assumptionId: a.assumptionId, to: 'violated', reason: why.trim() });
-          if (!r.ok) { alert(explainFailure(r)); return; }
-          await refresh();
-        });
-        acts.append(noBtn);
-        li.append(acts);
-      }
-      ul.append(li);
-    }
-    box.append(ul);
-  }
-  {
-    // 记录一个假设（就地表单）。
-    // verifyBy 是这个表单最重要的字段：假设之所以危险，是因为没人记得怎么验证它。
-    const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
-    const txt = el('input', { placeholder: '我们暂时假设…', style: 'flex:1;min-width:160px' });
-    const verify = el('input', { placeholder: '怎么验证它仍成立（可留空）…', style: 'flex:1;min-width:160px' });
-    const btn = el('button', { text: '记录假设' });
-    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
-    btn.addEventListener('click', async () => {
-      msg.textContent = '';
-      if (!txt.value.trim()) { msg.textContent = '请填写假设内容'; return; }
-      btn.disabled = true;
-      let r;
-      try {
-        r = await api('recordAssumption', {
-          missionId: m.missionId,
-          text: txt.value.trim(),
-          verifyBy: verify.value.trim() || null,
-          assumedBy: 'user',
-        });
-      } catch (e) { r = { ok: false, reason: e.message }; }
-      btn.disabled = false;
-      if (r && r.ok) { txt.value = ''; verify.value = ''; await refresh(); }
-      else { msg.textContent = explainFailure(r); }
-    });
-    wrap.append(txt, verify, btn, msg);
-    box.append(wrap);
-  }
+  box.append(renderEntitySection({
+    title: '假设',
+    hint: '还没有记录假设。假设是"我们暂时这么认为，但还没验证"——它是最容易在三天后爆炸的东西。',
+    items: v.assumptions || [],
+    idKey: 'assumptionId',
+    labelMap: ASSUMPTION_LABEL,
+    badgeClass: (it) => 'sc-badge st-assumption-' + it.status,
+    body: (it) => it.text,
+    meta: (it) => {
+      const out = ['置信 ' + (CONF_LABEL[it.confidence] || it.confidence)];
+      if (Number.isFinite(it.madeAtMs)) out.push(relativeTime(it.madeAtMs));
+      return out.join(' · ');
+    },
+    transitions: [
+      { to: 'holding', label: '仍成立', hideWhen: (it) => it.status === 'holding' },
+      { to: 'violated', label: '已推翻', hideWhen: (it) => it.status === 'violated' },
+      { to: 'expired', label: '已过期', hideWhen: (it) => it.status === 'expired' },
+    ],
+    apiAction: 'updateAssumptionStatus',
+    form: 'assumption',
+  }));
 
-  // --- 证据 ---
-  const evidences = v.evidences || [];
-  box.append(el('h2', { text: '证据' }));
-  if (evidences.length === 0) {
-    box.append(el('div', { class: 'muted tiny',
-      text: '还没有证据。证据是"凭什么相信这个结论"——只存引用，不存内容。' }));
-  } else {
-    const ul = el('ul', { class: 'sc-list' });
-    for (const e of evidences) {
-      const li = el('li', { class: 'sc-item' });
-      const line = el('div', { class: 'sc-line' });
-      line.append(el('span', { class: 'sc-badge sc-badge-kind', text: EVIDENCE_LABEL[e.kind] || e.kind }));
-      line.append(el('span', { class: 'sc-text sc-mono', text: e.ref }));
-      li.append(line);
-      li.append(el('div', { class: 'sc-meta', text: '支持：' + e.claim }));
-      ul.append(li);
-    }
-    box.append(ul);
-  }
-  {
-    // 记录一条证据（就地表单）。
-    // ref 是引用不是内容：commit / 相对路径 / URL / 命令。
-    // claim 必填——没有 claim 的证据只是一个链接。
-    const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
-    const kind = el('select', {});
-    for (const [val, label] of [['commit', '提交'], ['file', '文件'], ['url', '链接'], ['command', '命令'], ['observation', '观察']]) {
-      kind.append(el('option', { value: val, text: label }));
-    }
-    const ref = el('input', { placeholder: '引用（相对路径/commit/URL）…', style: 'flex:1;min-width:160px' });
-    const claim = el('input', { placeholder: '它支持什么结论（必填）…', style: 'flex:1;min-width:160px' });
-    const btn = el('button', { text: '记录证据' });
-    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
-    btn.addEventListener('click', async () => {
-      msg.textContent = '';
-      if (!ref.value.trim()) { msg.textContent = '请填写引用'; return; }
-      if (!claim.value.trim()) { msg.textContent = '请填写它支持什么 —— 没有 claim 的证据只是链接'; return; }
-      btn.disabled = true;
-      let r;
-      try {
-        r = await api('recordEvidence', {
-          missionId: m.missionId,
-          kind: kind.value,
-          ref: ref.value.trim(),
-          claim: claim.value.trim(),
-          recordedBy: 'user',
-        });
-      } catch (e) { r = { ok: false, reason: e.message }; }
-      btn.disabled = false;
-      if (r && r.ok) { ref.value = ''; claim.value = ''; await refresh(); }
-      else { msg.textContent = explainFailure(r); }
-    });
-    wrap.append(kind, ref, claim, btn, msg);
-    box.append(wrap);
-  }
+  box.append(renderEntitySection({
+    title: '证据',
+    hint: '还没有证据。证据是"凭什么相信这个结论"——只存引用，不存内容。',
+    items: v.evidences || [],
+    idKey: 'evidenceId',
+    labelMap: EVIDENCE_LABEL,
+    badgeClass: () => 'sc-badge sc-badge-kind',
+    badgeText: (it) => EVIDENCE_LABEL[it.kind] || it.kind,
+    body: (it) => it.ref,
+    bodyClass: 'sc-text sc-mono',
+    meta: (it) => '支持：' + it.claim,
+    transitions: [],
+    form: 'evidence',
+  }));
 
   // --- 未决问题 ---
-  const openQ = (v.questions || []).filter((q) => q.status === 'open');
-  box.append(el('h2', { text: '未决问题' }));
-  if (openQ.length === 0) {
-    box.append(el('div', { class: 'muted tiny', text: '没有未决问题。' }));
-  } else {
-    const ul = el('ul', {});
-    for (const q of openQ) {
-      const li = el('li', {});
-      li.append(el('div', { text: q.text }));
-      const wrap = el('div', { class: 'row', style: 'margin-top:4px' });
-      const input = el('input', { placeholder: '回答…', style: 'flex:1;min-width:120px' });
-      const btn = el('button', { text: '回答' });
-      btn.addEventListener('click', async () => {
-        const r = await api('answerQuestion', { questionId: q.questionId, answer: input.value, missionId: m.missionId });
-        if (!r.ok) { alert(r.reason); return; }
-        await refresh();
-      });
-      wrap.append(input, btn);
-      li.append(wrap);
-      ul.append(li);
-    }
-    box.append(ul);
-  }
-  {
-    // 提问。第一性原理：没有它，用户**不能把自己脑子里的疑问记进 Mission**。
-    //
-    // 「未决问题」这一节的存在意义就是"把悬而未决的事留下来"。只能答不能问，
-    // 等于这一节的内容全部来自外部（模型/他人），用户自己无法往里放东西。
-    //
-    // 它与 recordDecision 是配对的：
-    //   决策 = 已经想清楚的；未决问题 = 还没想清楚的。
-    // 两者都是 Shared Context 的入口，只做一半等于只记结论不记悬念。
-    const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
-    const qInput = el('input', { placeholder: '有什么还没想清楚的…', style: 'flex:1;min-width:180px' });
-    const askBtn = el('button', { text: '记下这个问题' });
-    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
-    askBtn.addEventListener('click', async () => {
-      msg.textContent = '';
-      if (!qInput.value.trim()) { msg.textContent = '请填写问题内容'; return; }
-      askBtn.disabled = true;
-      let r;
-      try { r = await api('openQuestion', { missionId: m.missionId, text: qInput.value.trim() }); }
-      catch (e) { r = { ok: false, reason: e.message }; }
-      askBtn.disabled = false;
-      if (r && r.ok) { qInput.value = ''; await refresh(); }
-      else { msg.textContent = explainFailure(r); }
-    });
-    wrap.append(qInput, askBtn, msg);
-    box.append(wrap);
-  }
+  box.append(renderOpenQuestions(v.questions || [], m));
 
   // --- Workstreams ---
-  box.append(el('h2', { text: '工作流' }));
-  if (!v.workstreams || v.workstreams.length === 0) {
-    box.append(el('div', { class: 'muted tiny', text: '还没有工作流。' }));
-  } else {
-    const ul = el('ul', {});
-    for (const w of v.workstreams) {
-      const li = el('li', {});
-      const row = el('div', { class: 'row', style: 'gap:6px;align-items:center' });
-      row.append(el('span', { text: '[' + w.status + '] ' + w.title, style: 'flex:1' }));
-      // 状态切换：阻塞是一个高频动作，必须能就地标记，
-      // 而不是"再开一个编辑弹窗"。
-      for (const next of ['active', 'blocked', 'done'].filter((x) => x !== w.status)) {
-        const b = el('button', {
-          text: next === 'active' ? '进行中' : (next === 'blocked' ? '阻塞' : '完成'),
-          class: 'tiny',
-        });
-        b.addEventListener('click', async () => {
-          b.disabled = true;
-          const r = await api('updateWorkstreamStatus', {
-            missionId: m.missionId, workstreamId: w.workstreamId, to: next,
-          });
-          b.disabled = false;
-          if (r && r.ok) await refresh();
-          else alert(explainFailure(r));
-        });
-        row.append(b);
-      }
-      li.append(row);
-      ul.append(li);
-    }
-    box.append(ul);
-  }
-  {
-    // 新建工作流（就地表单）
-    const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
-    const title = el('input', { placeholder: '新工作流名称…', style: 'flex:1;min-width:160px' });
-    const btn = el('button', { text: '新建工作流' });
-    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
-    btn.addEventListener('click', async () => {
-      msg.textContent = '';
-      if (!title.value.trim()) { msg.textContent = '请填写名称'; return; }
-      btn.disabled = true;
-      let r;
-      try { r = await api('addWorkstream', { missionId: m.missionId, title: title.value.trim() }); }
-      catch (e) { r = { ok: false, reason: e.message }; }
-      btn.disabled = false;
-      if (r && r.ok) { title.value = ''; await refresh(); }
-      else { msg.textContent = explainFailure(r); }
-    });
-    wrap.append(title, btn, msg);
-    box.append(wrap);
-  }
+  box.append(renderWorkstreams(v, m));
 
   // --- 关联的执行（TaskRef）---
-  //
-  // 第一性原理：这是 Mission 与 Harness 之间**唯一**的连接点。
-  //
-  //   没有它，用户在 Desk 里看到 3 个工作流，在 Harness 里看到 5 次会话，
-  //   但两者之间没有任何对应关系 —— 只能靠人记。这就是跨会话连续性
-  //   最实际的断点。
-  //
-  // 边界：这里**只显示"哪次执行属于哪个工作流"，不显示任务状态**。
-  //   任务状态归 Harness，Mission 存状态就是两个事实作者（铁律 1）。
-  box.append(el('h2', { text: '关联的执行' }));
-  const refs = v.taskRefs || [];
-  if (refs.length === 0) {
-    box.append(el('div', { class: 'muted tiny', text: '还没有关联任何执行。' }));
-  } else {
-    const ul = el('ul', {});
-    for (const t of refs) {
-      const li = el('li', {});
-      const ws = (v.workstreams || []).find((w) => w.workstreamId === t.workstreamId);
-      li.append(el('div', { text: (t.summary || '（无摘要）') }));
-      li.append(el('div', {
-        class: 'muted tiny',
-        // harnessRef 是派生句柄，不是 sessionId —— 单独标出来，
-        // 让读的人知道点这里也反查不到原始会话。
-        text: `属于工作流：${ws ? ws.title : t.workstreamId} · 句柄 ${t.harnessRef}`,
-      }));
-      ul.append(li);
-    }
-    box.append(ul);
-  }
-  {
-    // 关联一次执行（就地表单）
-    const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
-    const wsSel = el('select', { style: 'flex:1;min-width:120px' });
-    for (const w of (v.workstreams || [])) {
-      wsSel.append(el('option', { value: w.workstreamId, text: w.title }));
-    }
-    const summary = el('input', { placeholder: '这次执行做了什么…', style: 'flex:2;min-width:160px' });
-    const btn = el('button', { text: '关联执行' });
-    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
-    btn.addEventListener('click', async () => {
-      msg.textContent = '';
-      const workstreamId = wsSel.value;
-      if (!workstreamId) { msg.textContent = '请先新建一个工作流'; return; }
-      if (!summary.value.trim()) { msg.textContent = '请填写摘要 —— 不然下次看到这个句柄不知道它是什么'; return; }
-      btn.disabled = true;
-      let r;
-      try {
-        r = await api('linkTaskRef', {
-          missionId: m.missionId,
-          workstreamId,
-          // 这里本来该由 Harness 提供真实 sessionId；离线/无 runtime 时
-          // 用一个明确的占位值，并让用户在摘要里写清楚。
-          // 绝不伪造一个"看起来像真的" sessionId —— 那会让人以为能反查。
-          sessionId: state.linkSessionId || 'manual-link',
-          summary: summary.value.trim(),
-        });
-      } catch (e) { r = { ok: false, reason: e.message }; }
-      btn.disabled = false;
-      if (r && r.ok) { summary.value = ''; await refresh(); }
-      else { msg.textContent = explainFailure(r); }
-    });
-    wrap.append(wsSel, summary, btn, msg);
-    box.append(wrap);
-  }
+  box.append(renderTaskRefs(v, m));
 
   // --- 产物 ---
-  box.append(el('h2', { text: '产物' }));
-  const ver = state.verified;
-  if (!v.deliverables || v.deliverables.length === 0) {
-    box.append(el('div', { class: 'muted tiny', text: '还没有登记产物。' }));
-  } else {
-    for (const d of v.deliverables) {
-      const res = ver && ver.results ? ver.results.find((x) => x.deliverableId === d.deliverableId) : null;
-      const status = res ? res.status : 'unchecked';
-      const box2 = el('div', { class: 'deliv' });
-      const row = el('div', { class: 'row' });
-      row.append(el('span', { text: d.label }));
-      row.append(el('span', { class: 'status st-' + status, text: status }));
-      box2.append(row);
-      box2.append(el('div', { class: 'muted tiny', text: d.relPath + ' · sha256:' + String(d.digest).slice(0, 12) + '…' }));
-      if (res && res.status === 'modified') {
-        box2.append(el('div', { class: 'tiny', text: '内容已变化（登记时 ' + String(res.expected).slice(0, 8) + '… → 现在 ' + String(res.actual).slice(0, 8) + '…）' }));
-      }
-      if (res && res.status === 'missing') {
-        box2.append(el('div', { class: 'tiny', text: '文件已不存在：' + res.reason }));
-      }
-      box.append(box2);
-    }
-    const verifyBtn = el('button', { text: '校验产物是否仍是当时那一版' });
-    verifyBtn.addEventListener('click', async () => {
-      const r = await api('verifyDeliverables', { missionId: m.missionId });
-      if (!r.ok) { alert(r.reason); return; }
-      state.verified = r;
-      renderDetail();
-    });
-    box.append(verifyBtn);
-  }
+  box.append(renderDeliverables(v, m));
 
-  {
-    // 登记产物。关键设计：registerDeliverable 会**真的读文件算 sha256**，
-    // 所以"登记成功"本身就证明文件存在。用户填一个不存在的路径会被拒绝——
-    // 这比"只存一个路径字符串"强得多（V3「产物是真实文件」的机械保证）。
-    const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
-    const label = el('input', { placeholder: '产物名称…', style: 'flex:1;min-width:120px' });
-    const rel = el('input', { placeholder: '相对工作区的路径，如 docs/report.md', style: 'flex:2;min-width:180px' });
-    const btn = el('button', { text: '登记产物' });
-    const msg = el('div', { class: 'muted tiny', style: 'flex-basis:100%' });
-    btn.addEventListener('click', async () => {
-      msg.textContent = '';
-      if (!label.value.trim()) { msg.textContent = '请填写产物名称'; return; }
-      if (!rel.value.trim()) { msg.textContent = '请填写相对路径'; return; }
-      btn.disabled = true;
-      let r;
-      try {
-        r = await api('registerDeliverable', {
-          missionId: m.missionId,
-          label: label.value.trim(),
-          relPath: rel.value.trim(),
-        });
-      } catch (e) { r = { ok: false, reason: e.message }; }
-      btn.disabled = false;
-      if (r && r.ok) { label.value = ''; rel.value = ''; await refresh(); }
-      else {
-        // 失败原因很有信息量：文件不存在 / 是目录 / 路径越界
-        msg.textContent = explainFailure(r);
-      }
-    });
-    wrap.append(label, rel, btn, msg);
-    box.append(wrap);
-  }
-
-  // --- Brief ---
-  box.append(el('h2', { text: 'Mission Brief（下次会话 Agent 会读到这个）' }));
-  if (!state.brief) {
-    box.append(el('div', { class: 'muted tiny', text: '正在生成…' }));
-  } else if (state.brief.empty) {
-    box.append(el('div', { class: 'muted tiny', text: 'Brief 为空。' }));
-  } else {
-    box.append(el('div', {
-      class: 'tiny muted',
-      text: state.brief.bytes + ' 字节'
-        + (state.brief.truncated ? ' · 已截断（省略了 ' + JSON.stringify(state.brief.dropped) + '）' : ' · 未截断'),
-    }));
-    box.append(el('pre', { id: 'briefText', text: state.brief.text }));
-
-    // ---- 同步到 AGENTS.md（这一步让 Brief 真正生效）----
-    // 为什么需要用户主动点：它会写入用户工作区里的 AGENTS.md 文件。
-    // 自动写用户文件是越界行为——即使内容是"有用的"。
-    const syncRow = el('div', { class: 'row', style: 'margin-top:10px' });
-
-    const syncState = state.syncState || { synced: false };
-    if (syncState.synced && syncState.missionId === m.missionId) {
-      syncRow.append(el('span', { class: 'badge active', text: '已同步到 AGENTS.md' }));
-      const unBtn = el('button', { text: '撤销同步' });
-      unBtn.addEventListener('click', async () => {
-        const r = await api('unsyncBrief');
-        if (!r.ok) { alert(r.reason); return; }
-        state.syncState = { synced: false };
-        renderDetail();
-      });
-      syncRow.append(unBtn);
-    } else {
-      const btn = el('button', { class: 'primary', text: '同步到 AGENTS.md' });
-      btn.addEventListener('click', async () => {
-        const r = await api('syncBrief', { missionId: m.missionId });
-        if (!r.ok) { alert(r.reason); return; }
-        const st = await api('briefSyncState');
-        state.syncState = st.ok ? st : { synced: false };
-        renderDetail();
-      });
-      syncRow.append(btn);
-      syncRow.append(el('span', {
-        class: 'tiny muted',
-        text: '写入工作区的 AGENTS.md，下次会话 Agent 会自动读到。不会覆盖你手写的内容。',
-      }));
-    }
-    box.append(syncRow);
-  }
-
-  // --- 诊断 ---
-  const diagBtn = el('button', { text: '诊断（日志健康 / 备份 / 迁移）' });
-  diagBtn.style.marginTop = '18px';
-  diagBtn.addEventListener('click', async () => {
-    const r = await api('diagnostics');
-    if (!r.ok) { alert(r.reason); return; }
-    alert(JSON.stringify(r, null, 2));
-  });
-  box.append(diagBtn);
+  // --- Brief / 诊断 ---
+  box.append(renderBriefAndDiagnostics(v, m));
 }
 
 // ------------------------------------------------------------------ 数据

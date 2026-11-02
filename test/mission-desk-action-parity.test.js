@@ -23,7 +23,17 @@ const deskHtml = fs.readFileSync(path.join(ROOT, 'src', 'mission-desk.html'), 'u
 const deskCode = deskHtml.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
 function usedActions() {
-  return new Set([...deskCode.matchAll(/api\('([a-zA-Z]+)'/g)].map((m) => m[1]));
+  const found = new Set([...deskCode.matchAll(/api\('([a-zA-Z]+)'/g)].map((m) => m[1]));
+  // 2026-11-02 重构：发现/假设/证据走统一的 renderEntitySection，
+  // action 名变成了**配置参数**（apiAction: 'updateFindingStatus'），
+  // 不再是字面量 api('xxx')。所以这里也要认配置形式。
+  //
+  // 这不是放宽标准——配置里的 apiAction 仍然必须真的被调用，
+  // 只是写在了 renderEntitySection/EntityForm 的实现里。
+  for (const m of deskCode.matchAll(/apiAction:\s*'([a-zA-Z]+)'/g)) found.add(m[1]);
+  // renderEntityForm 用 submit('recordXxx', ...) 的形式
+  for (const m of deskCode.matchAll(/submit\('([a-zA-Z]+)'/g)) found.add(m[1]);
+  return found;
 }
 
 // ============================================ 刻意不做 UI 的 action（白名单）

@@ -124,7 +124,9 @@ async function main() {
     };
   })()`).catch((e) => ({ error: String(e) }));
   record('the attention block exists and is ABOVE the fold', att.inViewport === true, `top=${att.top}`);
-  record('it says "需要你处理" with a count', /需要你处理/.test(att.text || ''), '');
+  // 文案在 2026-11-02 的两层分类里从"需要你处理"改成"需要你决策"——
+  // 因为第二层是"执行提醒"，用"处理"会和它混。
+  record('it says "需要你决策" with a count', /需要你决策/.test(att.text || ''), '');
   record('high risk is listed FIRST (order carries meaning)', (att.risks || [])[0] === 'high',
     JSON.stringify(att.risks));
   record('each todo card can be acted on (not display-only)',
