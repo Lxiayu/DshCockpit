@@ -78,6 +78,43 @@ const ACTIONS = Object.freeze([
 
 function nowMs() { return Date.now(); }
 
+/**
+ * 归一化 inbox 投影（排队中的用户输入）。
+ *
+ * 官方结构：`{ nextTurn: UserMessage[], nextStep: UserMessage[] }`
+ *   · nextTurn = 等待后续单独执行的消息（用户排队交代的任务）
+ *   · nextStep = 等待下一个 Agent 步骤的输入
+ *
+ * 为什么值得展示：用户连续交代几件事后，如果看不到队列，
+ * 会误以为 Agent 没收到。这是**执行透明度**，不是任务管理。
+ *
+ * **只取计数和极简摘要**，不把完整消息搬进右栏（那是第二个聊天框）。
+ */
+function normalizeInbox(raw) {
+  const empty = { nextTurnCount: 0, nextStepCount: 0, preview: null };
+  if (!raw || typeof raw !== 'object') return empty;
+  const turn = Array.isArray(raw.nextTurn) ? raw.nextTurn : [];
+  const step = Array.isArray(raw.nextStep) ? raw.nextStep : [];
+  const pickText = (m) => {
+    if (!m || typeof m !== 'object') return null;
+    if (typeof m.text === 'string' && m.text.trim()) return m.text.trim().slice(0, 80);
+    if (Array.isArray(m.content)) {
+      for (const part of m.content) {
+        if (part && part.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
+          return part.text.trim().slice(0, 80);
+        }
+      }
+    }
+    return null;
+  };
+  return {
+    nextTurnCount: turn.length,
+    nextStepCount: step.length,
+    // 只给第一条的摘要，用来让用户认出"这是我刚才交代的那件事"
+    preview: pickText(turn[0]) || pickText(step[0]) || null,
+  };
+}
+
 /** Mission id 形状（与 schema 一致）：mis-<opaque>。 */
 function isId(v) { return typeof v === 'string' && /^mis-[A-Za-z0-9][A-Za-z0-9-]*$/.test(v); }
 
@@ -726,6 +763,23 @@ function registerMissionIpc(ipcMain, ctx) {
         settledCount: hasUserQuestions ? uq.settled.length : 0,
         // 其余投影按需透传（当前 UI 不用 tokenUsage，但保留以便将来）
         agentPreset: typeof values.agentPreset === 'string' ? values.agentPreset : null,
+
+        // ---- 第二层「团队执行提醒」的数据源 ------------------------------
+        //
+        // 第一性原理：待办不能只有一个红框。GPT 第三轮指出应分两层——
+        //   · 需要你决策：human question / approval / plan-review
+        //   · 团队执行提醒：依赖阻塞、文件冲突、排队输入、长时间无进展
+        //
+        // 我们手上**有真实数据**的第二层信号只有两个：
+        //   1. inbox 排队输入（用户交代了但 agent 还没处理）——用户会误以为没收到
+        //   2. permissions 是 danger-full-access 时的风险提示
+        // 其余（blockedBy / writeScopes）要等 team profile 启用，本轮不做。
+        //
+        // 关键：**没有数据就不编**。这两个字段都只有真实来源。
+        inbox: normalizeInbox(values.inbox),
+        permissionPreset: typeof values.permissions === 'object' && values.permissions
+          ? (typeof values.permissions.currentValue === 'string' ? values.permissions.currentValue : null)
+          : null,
       };
     },
 

@@ -171,6 +171,27 @@
   .att-btn.primary { background: var(--acc); border-color: transparent; color: var(--on-acc); }
   .att-btn.primary:hover { background: var(--acc-hover); }
 
+  /* --- 第二层：团队执行提醒 -------------------------------------------
+     第一性原理：这一层**不能长得像待办**。
+     如果它也用红框，用户会学会无视红色，第一层就失效了。
+
+     所以：中性底、更小的字、无边框、用左侧细线表达"仅供参考"。 */
+  .att-reminders { border-top: 1px solid var(--border-1); padding: 8px 11px 9px; background: var(--bg-panel); }
+  .att.att-clear .att-reminders { border-top: 0; padding-top: 0; }
+  .att-rem-head {
+    font-size: 9.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--text-4); margin-bottom: 5px;
+  }
+  .att-rem { padding: 4px 0 4px 9px; position: relative; }
+  .att-rem::before {
+    content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px;
+    border-radius: 1px; background: var(--att-idle-fg);
+  }
+  .att-rem[data-tone="info"]::before { background: var(--info); }
+  .att-rem[data-tone="warn"]::before { background: var(--warn); }
+  .att-rem-title { font-size: 11.5px; color: var(--text-2); line-height: 1.45; }
+  .att-rem-detail { font-size: 10.5px; color: var(--text-3); line-height: 1.5; margin-top: 2px; }
+
   /* --- L2: 离开期间发生了什么（时间线）------------------------------- */
   .tl { margin: 0 0 10px; padding: 10px 11px; border-radius: 10px; background: var(--bg-panel); border: 1px solid var(--border-1); }
   .tl-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; font-weight: 650; color: var(--text-1); margin-bottom: 7px; }
@@ -573,20 +594,46 @@ function renderAttention() {
     return wrap;
   }
 
+  // ---------------------------------------------------------------
+  // 两层分类（GPT 第三轮建议，我核对后采纳）
+  //
+  // 第一性原理：待办不能只有一个红框。
+  //   · 所有东西都标红 → 用户学会无视红色 → 红色失效
+  //   · 必须区分"必须你决定"和"只是提醒你看看"
+  //
+  // 第一层「需要你决策」：approval / question / plan-review
+  //   这些**阻塞团队**，不回答就进行不下去 → 红框
+  // 第二层「团队执行提醒」：排队输入 / 权限风险
+  //   这些**不阻塞**，只是用户看不见会误判 → 中性框，可折叠
+  //
+  // 关键：第二层**没有数据就不显示**，不编造提醒。
+  // ---------------------------------------------------------------
+  const reminders = collectReminders();
+
   if (total === 0) {
-    // 零待办也要占位——这是"你可以放心离开"的信号
     wrap.className = 'att att-clear';
+    if (reminders.length === 0) {
+      // 零待办也要占位——这是"你可以放心离开"的信号
+      wrap.append(el('div', { class: 'att-head' }, [
+        el('span', { text: '✓ 团队运行正常' }),
+      ]));
+      wrap.append(el('div', { class: 'att-clear-msg',
+        text: '没有需要你处理的事。有新情况时会出现在这里。' }));
+      return wrap;
+    }
+    // 没有待决策事项，但有执行提醒 —— 仍然要说"不用你决策"
     wrap.append(el('div', { class: 'att-head' }, [
-      el('span', { text: '✓ 团队运行正常' }),
+      el('span', { text: '✓ 没有需要你决策的事' }),
     ]));
     wrap.append(el('div', { class: 'att-clear-msg',
-      text: '没有需要你处理的事。有新情况时会出现在这里。' }));
+      text: '团队在正常推进。下面只是执行状态提醒，不需要你处理。' }));
+    appendReminders(wrap, reminders);
     return wrap;
   }
 
   wrap.className = 'att att-present';
   wrap.append(el('div', { class: 'att-head' }, [
-    el('span', { text: '⚠ 需要你处理' }),
+    el('span', { text: '⚠ 需要你决策' }),
     el('span', { class: 'att-count', text: String(total) }),
   ]));
 
@@ -655,7 +702,67 @@ function renderAttention() {
     row.append(actions);
     wrap.append(row);
   }
+  // 第一层之后才放第二层：用户先看到必须处理的，再看提醒。
+  appendReminders(wrap, reminders);
   return wrap;
+}
+
+/**
+ * 收集「团队执行提醒」——**只有真实数据源**，没有就不返回。
+ *
+ * 当前只有两个真实来源（都来自 session/projections）：
+ *   1. inbox 排队输入：用户交代了但 agent 还没处理 → 用户会误以为没收到
+ *   2. permissions 是 danger-full-access → 执行风险提示
+ *
+ * 刻意**不做**的（没有数据源，做了就是编造）：
+ *   · TeamTask blockedBy：要启用 team profile，本轮不做
+ *   · writeScopeWarnings：同上
+ *   · "长时间无进展"：需要心跳+事件+任务的综合判断，本轮不做
+ */
+function collectReminders() {
+  const out = [];
+  const proj = state.projections;
+  if (!proj) return out;
+
+  const inbox = proj.inbox;
+  if (inbox && (inbox.nextTurnCount > 0 || inbox.nextStepCount > 0)) {
+    const parts = [];
+    if (inbox.nextTurnCount > 0) parts.push(inbox.nextTurnCount + ' 条下一轮输入');
+    if (inbox.nextStepCount > 0) parts.push(inbox.nextStepCount + ' 条下一步输入');
+    out.push({
+      id: 'inbox',
+      tone: 'info',
+      title: '有 ' + parts.join('、') + ' 在排队',
+      detail: inbox.preview
+        ? '最早一条：' + inbox.preview
+        : '这些是你已经交代、但 agent 还没开始处理的输入——不是没收到。',
+    });
+  }
+
+  // danger-full-access 是最高权限：用户应该知道
+  if (proj.permissionPreset === 'danger-full-access') {
+    out.push({
+      id: 'permission',
+      tone: 'warn',
+      title: '当前会话使用完整访问权限',
+      detail: '这个会话里的工具调用不受工作区沙箱限制。如果不是你有意选的，建议改回 workspace-write。',
+    });
+  }
+  return out;
+}
+
+/** 渲染第二层。**中性样式**，不能与第一层抢注意力。 */
+function appendReminders(wrap, reminders) {
+  if (!reminders || reminders.length === 0) return;
+  const box = el('div', { class: 'att-reminders' });
+  box.append(el('div', { class: 'att-rem-head', text: '执行提醒 · 不需要你决策' }));
+  for (const r of reminders) {
+    const row = el('div', { class: 'att-rem', 'data-tone': r.tone || 'info' });
+    row.append(el('div', { class: 'att-rem-title', text: r.title }));
+    if (r.detail) row.append(el('div', { class: 'att-rem-detail', text: r.detail }));
+    box.append(row);
+  }
+  wrap.append(box);
 }
 
 /**

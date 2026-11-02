@@ -1,0 +1,86 @@
+{
+  "passed": true,
+  "failed": 0,
+  "results": [
+    {
+      "name": "layer 1 (decisions) is rendered",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "layer 2 (execution reminders) is rendered",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "layer 1 header says 需要你决策",
+      "ok": true,
+      "detail": "⚠ 需要你决策\n1"
+    },
+    {
+      "name": "layer 2 header explicitly says \"不需要你决策\"",
+      "ok": true,
+      "detail": "执行提醒 · 不需要你决策"
+    },
+    {
+      "name": "layer 2 shows the REAL inbox count",
+      "ok": true,
+      "detail": "有 2 条下一轮输入 在排队"
+    },
+    {
+      "name": "layer 2 rows have NO own border (visually lighter than layer 1)",
+      "ok": true,
+      "detail": "0px"
+    },
+    {
+      "name": "zero decisions + reminders: header says NO decision needed",
+      "ok": true,
+      "detail": "✓ 没有需要你决策的事"
+    },
+    {
+      "name": "zero decisions + reminders: still shows the reminders",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "zero decisions + reminders: explicitly says no action needed",
+      "ok": true,
+      "detail": "团队在正常推进。下面只是执行状态提醒，不需要你处理。"
+    },
+    {
+      "name": "zero decisions uses the calm style (att-clear, not att-present)",
+      "ok": true,
+      "detail": "att att-clear"
+    },
+    {
+      "name": "when there is genuinely nothing, NO reminder block is fabricated",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "and it says the team is running normally",
+      "ok": true,
+      "detail": "✓ 团队运行正常"
+    },
+    {
+      "name": "danger-full-access produces a permission warning",
+      "ok": true,
+      "detail": "当前会话使用完整访问权限\n这个会话里的工具调用不受工作区沙箱限制。如果不是你有意选的，建议改回 workspace-write。"
+    },
+    {
+      "name": "the permission warning uses the warn tone (not the info tone)",
+      "ok": true,
+      "detail": "[\"warn\"]"
+    },
+    {
+      "name": "screenshots captured for both themes",
+      "ok": true,
+      "detail": "dark + light"
+    },
+    {
+      "name": "the renderer had no fatal errors",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

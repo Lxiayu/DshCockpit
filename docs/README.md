@@ -143,6 +143,7 @@
 | `docs/quality/mission-desk-attention-acceptance-2026-11-01.md` | **待办+离开期间+双主题验收** | 19/19；两主题对比度全部 ≥AA |
 | `docs/quality/mission-desk-shared-context-acceptance-2026-11-01.md` | **三实体+UI层级验收** | 17/17；层级靠 scale/weight 不靠颜色 |
 | `docs/quality/mission-desk-structured-options-acceptance-2026-11-01.md` | **结构化选项验收** | 10/10；升级 0.2.1 直接解决缺口 1 |
+| `docs/quality/mission-desk-attention-layers-acceptance-2026-11-02.md` | **待办两层分类验收** | 16/16；红框只给"必须决策"，警报疲劳 |
 | `docs/quality/gpt-conversation-gap-analysis-2026-11-01.md` | **与 GPT 对话的差距分析** | 它自我推翻第一版；真实差距=右栏没用官方结构化交互 |
 | `docs/quality/status-brief-for-gpt-2026-11-01.md` | **给 GPT 的现状说明** | 可直接贴回做交叉验证；列出 3 个真实缺口 |
 | `docs/quality/status-brief-for-gpt-2026-11-02.md` | **给 GPT 的现状说明 v2（0.2.1）** | 可直接贴回；四个待讨论问题 |
