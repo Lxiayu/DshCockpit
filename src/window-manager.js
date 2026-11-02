@@ -134,9 +134,10 @@ function createWindowManager(deps) {
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: true,
-          // 初始允许节流；**可见时**由 applyThrottling() 动态关掉。
-          // 见 syncShellViews：切换视图时按可见性重设。
-          backgroundThrottling: true,
+          // The office page stays ALIVE in the background (the simulation
+          // keeps pushing): throttling its timers would stall its boot and
+          // its snapshot pump exactly when it is hidden.
+          backgroundThrottling: false,
           preload: path.join(__dirname, 'office', 'office-preload.js'),
         },
       });
@@ -182,8 +183,8 @@ function createWindowManager(deps) {
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: true,
-          // 初始允许节流；可见时动态关掉（见 applyThrottling）。
-          backgroundThrottling: true,
+          // 产物读取与状态推送是事件驱动的；后台节流会让"切回来"看到旧状态。
+          backgroundThrottling: false,
           preload: path.join(__dirname, 'work', 'work-preload.js'),
         },
       });
@@ -211,8 +212,7 @@ function createWindowManager(deps) {
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: true,
-          // 右栏是最常驻的视图；仍然走动态节流（不可见时才允许节流）
-          backgroundThrottling: true,
+          backgroundThrottling: false,
           // Mission Desk 需要 mission 桥 —— settings-preload 是唯一同时提供
           // mission + shell 的那个（与独立 Mission Desk 窗口同源，见 aux-windows.js）。
           preload: path.join(__dirname, 'settings-preload.js'),
@@ -356,23 +356,6 @@ function createWindowManager(deps) {
     }
     for (const view of visible) {
       if (!attached(view)) contentView.addChildView(view);
-    }
-
-    // 按可见性动态设置背景节流。
-    //
-    // 第一性原理：原来 3 个视图都硬编码 backgroundThrottling:false，
-    // 理由是"后台也要保持推送"。但那是**推测**，代价是所有视图
-    // 即使不可见也全速跑定时器/动画/渲染循环 —— 实测 5 个 renderer
-    // 进程共约 780MB，主进程 561MB。
-    //
-    // 现在：**可见的**关掉节流（保持实时），**不可见的**开启节流
-    // （Chromium 会降到 1Hz 定时器并让渲染循环休眠）。
-    // 这样既保住"切回来是最新的"，又不为看不见的视图付全价。
-    for (const view of [harnessView, officeShellView, workDockView, workView]) {
-      if (!view) continue;
-      try {
-        view.webContents.setBackgroundThrottling(!visible.includes(view));
-      } catch { /* 视图可能正在销毁 */ }
     }
   }
 
