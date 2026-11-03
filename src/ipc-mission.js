@@ -37,6 +37,7 @@ const railOrder = require('./mission/rail-order');
 const dispatchConfirmModule = require('./mission/dispatch-confirm');
 const dispatchStrategy = require('./mission/dispatch-strategy');
 const interventionAudit = require('./mission/intervention-audit');
+const auditStore = require('./mission/audit-store');
 const brief = require('./mission/brief');
 const deliverable = require('./mission/deliverable');
 const harnessReader = require('./mission/harness-reader');
@@ -646,6 +647,26 @@ function registerMissionIpc(ipcMain, ctx) {
   // 不落盘：落盘涉及格式版本/轮转/隐私扫描，是独立工程。
   const interventionLog = interventionAudit.createInterventionLog();
 
+  /**
+   * 记录一次干预：内存环 + 磁盘镜像。
+   *
+   * 第一性原理：为什么要两份
+   *
+   *   内存环 —— 让"刚才我做了什么"能在毫秒内读回来，UI 不用等 IO。
+   *   磁盘   —— 让它在重启之后还在。审计的全部价值就在"事后回看"，
+   *             只活一次进程的审计等于没有审计。
+   *
+   *   落盘失败**不影响**记录成功：用户停了团队，不能因为审计写不进去而报错。
+   *   但失败会被 log 出来，不静默。
+   */
+  function recordIntervention(workspaceDir, input) {
+    const r = interventionLog.record(input);
+    if (r && r.ok && r.entry) {
+      auditStore.appendAudit(workspaceDir, r.entry, { log });
+    }
+    return r;
+  }
+
   function storeFor(workspaceDir) {
     const key = path.resolve(String(workspaceDir));
     if (cachedKey !== key) {
@@ -844,7 +865,7 @@ function registerMissionIpc(ipcMain, ctx) {
       }
 
       // 审计：只记动作与目标，**不记消息正文**（隐私铁律 §2.4）
-      const auditResult = interventionLog.record({
+      const auditResult = recordIntervention(r.workspaceDir, {
         action: kind === 'message' ? 'member.messaged' : 'member.interrupted',
         // 干预由用户发起，所以 reason 恒为 user-request。
         // 用户的自由文本原因**不进审计**（闭集设计：审计里不出现任何用户内容），
@@ -876,21 +897,45 @@ function registerMissionIpc(ipcMain, ctx) {
     interventionHistory(payload) {
       const missionId = argString(payload && payload.missionId);
       const limit = Number.isFinite(payload && payload.limit) ? payload.limit : 20;
-      const entries = missionId
-        ? interventionLog.forMission(missionId, limit)
-        : interventionLog.recent(limit);
+
+      const shape = (e) => ({
+        action: e.action,
+        reason: e.reason || null,
+        atMs: e.atMs,
+        memberName: e.memberName || null,
+        taskId: e.taskId || null,
+        // 给人看的一句话（闭集文案，不含用户内容）
+        description: interventionAudit.describeIntervention(e),
+      });
+
+      // 优先读磁盘：它是**持久真相**，包含重启前发生的干预。
+      //
+      // 为什么不用"内存 ∪ 磁盘"的去重合并：磁盘是内存的镜像
+      // （见 recordIntervention），所以内存里的条目磁盘上一定也有。
+      // 做并集只会引入"按 atMs 去重"这种容易出错的逻辑，而收益为零。
+      // 唯一例外是落盘失败的那一刻 —— 那种情况下内存里有、磁盘上没有，
+      // 我们选择**以磁盘为准**：宁可让用户看到"这条没记下来"，
+      // 也不要让他以为审计完整（诚实优先于好看）。
+      const workspaceDir = workspaceDirOf();
+      const disk = auditStore.readAudit(workspaceDir, { limit: Math.max(limit, 200) });
+      let entries = disk.entries;
+      if (missionId) entries = entries.filter((e) => e.missionId === missionId);
+      if (entries.length > limit) entries = entries.slice(entries.length - limit);
+
       return {
         ok: true,
-        entries: entries.map((e) => ({
-          action: e.action,
-          reason: e.reason || null,
-          atMs: e.atMs,
-          memberName: e.memberName || null,
-          taskId: e.taskId || null,
-          // 给人看的一句话（闭集文案，不含用户内容）
-          description: interventionAudit.describeIntervention(e),
-        })),
-        stats: interventionLog.stats(),
+        entries: entries.map(shape),
+        stats: {
+          ...interventionLog.stats(),
+          // 磁盘侧的实况：总数、坏行、以及"内存比磁盘多几条"（落盘失败信号）
+          disk: {
+            total: disk.total,
+            badLines: disk.badLines,
+            memoryRows: missionId
+              ? interventionLog.forMission(missionId, 10000).length
+              : interventionLog.stats().entries,
+          },
+        },
       };
     },
 
@@ -945,7 +990,7 @@ function registerMissionIpc(ipcMain, ctx) {
 
       // 审计：干预必须留痕（只记动作与闭集原因，不记任何内容）
       if (shouldStop) {
-        interventionLog.record({
+        recordIntervention(r.workspaceDir, {
           action: to === 'paused' ? 'mission.paused' : 'mission.stopped',
           reason: 'user-request',
           missionId,
