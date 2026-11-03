@@ -269,7 +269,8 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
 | `src/mission/approval-gate.js` | **无（且不应接）** | ⚠️ **判定不接线**：见下方说明 |
 | `src/mission/rail-order.js` | `ipc-mission.js` 的 `attention()` 返回 `rail` | ✅ **已接线**（集成测试 7 条）：`items` 保持全量给老 UI，`rail` 分层+截断给新 UI |
 | `src/mission/dispatch-confirm.js` | `ipc-mission.js` 的 `confirmDispatch` action；`startWork` 返回 `dispatchKey` | ✅ **已接线**（集成测试 7 条） |
-| `src/mission/deliverable-signal.js` | 无 | ⚠️ **库就绪，待接线**：需要消费 `deliverables/presented` 事件（依赖事件订阅） |
+| `src/mission/deliverable-signal.js` | 无 | ⚠️ **库就绪，待接线**：需要有人喂它 presented + changes 两路数据 |
+| `src/mission/presented-collector.js` | 无 | ⚠️ **库就绪，待接线**：需在 `ingestOfficeJournalEvent` 里消费 `deliverables/presented` |
 
 ### ⚠️ 关于 `approval-gate`：为什么决定**不接线**
 
@@ -561,7 +562,14 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
   （"团队声明交付，但本次变更中没有检出这个文件"——不替模型圆场）；
   有变更但没声明的**不进交付物列表，只计数**（一次调试改 20 个文件不该全变交付物）。
   测试 11 条，变异 DETECTED ×2。
-  ⬜ 仍待接线：需要订阅 `deliverables/presented` 事件喂给它。
+- ✅ **`deliverables/presented` 的收集与隐私闸门（2026-11-04 已完成）**：
+  `src/mission/presented-collector.js`。
+  **为什么隐私过滤必须在这一层**：官方 `present` 记录的是**绝对路径**，
+  而 AGENTS.md §2.4 禁止绝对路径进事实链。若等到 UI 层才隐藏，
+  它已经写进不可篡改的事件日志 —— 删不掉。所以闸门设在**事件被消费的那一刻**：
+  绝对路径削成工作区相对路径，越界/穿越一律拒绝并计数。
+  测试 15 条，变异 DETECTED ×2（边界 / 穿越）。
+  ⬜ 仍待接线：在 `ingestOfficeJournalEvent` 里消费该事件。
 - 验收（未达成）：修改一个文件后，旧凭证自动降级为 stale。
 
 ### S6 纠偏与干预【**审计层已完成（2026-11-04）**】
