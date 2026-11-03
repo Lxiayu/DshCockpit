@@ -69,3 +69,57 @@ test('render safety: blockedBy is guarded at its source', () => {
   assert.doesNotMatch(after.slice(0, 2000), /t\.blockedBy\s*\./,
     'after normalisation the raw t.blockedBy must not be dereferenced again');
 });
+
+// ---------------------------------------------------------------------------
+// 折叠区（§6.2 第 6 块）
+// ---------------------------------------------------------------------------
+//
+// 第一性原理：折叠不是"藏起来"，是**分层**
+//
+//   右栏 380px，用户 80% 的时候只关心三件事：
+//   要我拍板什么、事情做到哪了、谁在做什么。
+//   查阅型内容（决策/发现/证据/工作流/产物/Brief/审计）需要时才找。
+//
+//   但折叠有两条硬约束，否则它会从"分层"退化成"藏起重要东西"：
+//     1. **数量必须显示** —— `交付物 · 1` 比 `交付物` 多告诉用户"里面有事"，
+//        否则没有动机点开。
+//     2. **有内容且是"悬而未决"的必须默认展开** —— 未决问题属于此类。
+//        默认关掉它等于把该处理的事藏起来。
+
+test('collapse: the collapsible helper exists and lazily renders', () => {
+  const src = HTML;
+  assert.match(src, /function collapsibleSection\(\{/,
+    'a shared collapsible helper must exist (one implementation, not five copies)');
+  // 懒渲染：body 只在展开时构造
+  assert.match(src, /let rendered = false;[\s\S]{0,400}if \(rendered\) return;/,
+    'collapsible bodies must render lazily — 380px first screen cannot pay for everything');
+});
+
+test('collapse: a collapsed body that throws does not blank the whole rail', () => {
+  // 与 writeScopeWarnings 那个 bug 同类：一块内容出错不该让整页空掉。
+  assert.match(HTML, /catch \(err\)[\s\S]{0,300}coll-error/,
+    'the collapsible body must catch render errors and show a local message');
+});
+
+test('collapse: review-type blocks are collapsed, but the count is shown', () => {
+  for (const title of ['工作流', '关联执行', '交付物', 'Brief 与诊断']) {
+    assert.ok(HTML.includes(`title: '${title}',`),
+      `${title} must be a collapsible section`);
+  }
+  // 数量徽标：有 count 的区块必须在标题旁显示它
+  assert.match(HTML, /coll-count/);
+});
+
+test('collapse: 未决问题 opens by DEFAULT when there are questions', () => {
+  // 这一条防的是"把该你决定的事藏起来"。
+  assert.match(HTML, /title: '未决问题',[\s\S]{0,200}open: qCount > 0/,
+    'unresolved questions must be expanded when non-empty — never hide pending decisions');
+});
+
+test('collapse: the team roster is NOT collapsed (it answers "who is doing what")', () => {
+  // 团队成员属于用户三大问题之一，不能被收进折叠区。
+  assert.match(HTML, /box\.append\(renderTeamMembers\(m\)\);/,
+    'the roster must stay visible, not live inside a collapsible');
+  assert.doesNotMatch(HTML, /title: '团队成员',[\s\S]{0,120}render: \(\) => renderTeamMembers/,
+    'the roster must not be wrapped in a collapsible');
+});

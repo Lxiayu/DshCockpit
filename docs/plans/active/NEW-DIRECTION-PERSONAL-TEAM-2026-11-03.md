@@ -686,7 +686,20 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
   已加 `Array.isArray` 保护，并新增 `test/mission-desk-render-safety.test.js`
   做**源级门禁**，把 `writeScopeWarnings` / `blockedBy` / `writeScopes`
   三个可选数组字段的裸读全部挡掉。变异 DETECTED ×2。
-- ⬜ 切片 3：团队名册上移、折叠区收纳下方表单（决策/发现/证据等）。
+- ✅ **切片 3 已落地（2026-11-04）**：折叠区（§6.2 第 6 块）。
+  - 新增通用 `collapsibleSection({title, count, render, open})`：
+    **懒渲染**（不点开不构造 DOM）+ **局部容错**（一块出错不让整页崩）。
+  - 收进折叠区的：发现 / 假设 / 证据 / 未决问题 / 工作流 / 关联执行 /
+    交付物 / Brief 与诊断 / 最近的干预。
+  - **留在明面的**：头部、需要你、进展、团队成员（三大问题之一，不能被藏）。
+  - **有条数就显示条数**：`交付物 · 1` 比 `交付物` 多告诉用户"里面有事"，
+    否则没有动机点开。
+  - **未决问题默认展开**（`open: qCount > 0`）：
+    收起它等于把该你决定的事藏起来。
+  - 决策表单改为**低频折叠**：有决策时展开，没有时收成一行
+    （一个常驻两输入框占约 70px，在 380px 右栏里代价不小）。
+  - 实测页面高度从 ~4200px 降到 ~2900px（同视口下）。
+  - 测试 5 条追加到 `test/mission-desk-render-safety.test.js`，变异 DETECTED ×2。
 - ⬜ 把 `renderAttention` / `renderTeamTasks` 改为消费 `rail-order` 的输出。
 
 
