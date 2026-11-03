@@ -1,0 +1,134 @@
+// test/mission-receipt.test.js — 工作凭证（Work Receipt，S5 基础）。
+//
+// 第一性原理：这组测试锁的是"凭证不能说谎"
+//
+//   凭证存在的唯一目的是让"完成"**可证伪**。它一旦说谎，比没有凭证更糟：
+//   用户会以为自己验证过了。
+//
+//   所以这里锁三条：
+//     1. 没有坐标 → 只能叫 "claimed"（团队声称），不能叫 verified
+//     2. stale（Host 已读不到）绝不能显示成"已通过"
+//     3. 凭证里**不允许出现文件内容**（只存坐标与计数）
+//
+//   测试数据取自 2026-11-04 真机探针的实际响应：
+//   GET /api/changes.summary?sessionId=…&seq=29
+//   → {"turn":1,"files":[{"path":"probe-s5.txt","display":"probe-s5.txt",
+//      "added":1,"deleted":0}],"total":1,"added":1,"deleted":0}
+'use strict';
+
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+
+const receipt = require('../src/mission/receipt.js');
+
+/** 真机探针拿到的原始 summary（原样）。 */
+const OBSERVED_SUMMARY = {
+  turn: 1,
+  files: [{ path: 'probe-s5.txt', display: 'probe-s5.txt', added: 1, deleted: 0 }],
+  total: 1,
+  added: 1,
+  deleted: 0,
+};
+
+test('receipt: a coordinate carries the official seq/session and never the file content', () => {
+  const c = receipt.buildReceiptCoordinate({
+    sessionRef: 'sess-h-abc123',
+    seq: 29,
+    turn: 1,
+    summary: OBSERVED_SUMMARY,
+  });
+  assert.equal(c.sessionRef, 'sess-h-abc123');
+  assert.equal(c.seq, 29);
+  assert.equal(c.turn, 1);
+  assert.equal(c.total, 1);
+  assert.equal(c.added, 1);
+  assert.equal(c.deleted, 0);
+  assert.deepEqual(c.files, [{ path: 'probe-s5.txt', display: 'probe-s5.txt', added: 1, deleted: 0 }]);
+
+  // 隐私：凭证里只能有这些 key。任何 "content"/"text"/"body" 都意味着
+  // 我们把产物内容存进了 Mission，违反 AGENTS.md §2.4。
+  const keys = Object.keys(c.files[0]).sort();
+  assert.deepEqual(keys, ['added', 'deleted', 'display', 'path'],
+    'a file entry may only carry path/display/counts — never content');
+});
+
+test('receipt: without a summary the counts stay null, not zero', () => {
+  // 0 的含义是"确实改了 0 个文件"，与"还没读到"完全不同。
+  // 把后者填成 0 会让 UI 显示"改了 0 个文件"——一个假事实。
+  const c = receipt.buildReceiptCoordinate({ sessionRef: 'sess-h-x', seq: 3, turn: 2 });
+  assert.equal(c.total, undefined, 'no summary → no total key (not 0)');
+  assert.equal(c.files, undefined);
+});
+
+test('receipt: state is "claimed" when there is no addressable coordinate', () => {
+  // 最弱但最诚实的状态：团队说做完了，但我们拿不出可复核的东西。
+  assert.equal(receipt.deriveReceiptState({ receipt: null }), 'claimed');
+  assert.equal(receipt.deriveReceiptState({ receipt: {} }), 'claimed');
+  assert.equal(receipt.deriveReceiptState({ receipt: { sessionRef: 'sess-h-a' } }), 'claimed',
+    'a ref without seq cannot be re-checked');
+  assert.equal(receipt.deriveReceiptState({ receipt: { seq: 5 } }), 'claimed',
+    'a seq without ref cannot be re-checked');
+});
+
+test('receipt: verified requires BOTH an addressable coordinate AND a successful re-check', () => {
+  const coord = { sessionRef: 'sess-h-abc', seq: 29, turn: 1, total: 1, added: 1, deleted: 0 };
+  assert.equal(receipt.deriveReceiptState({ receipt: coord, resolvable: true }), 'verified');
+  // 坐标在，但 Host 读不到 → stale，**不是** verified
+  assert.equal(receipt.deriveReceiptState({ receipt: coord, resolvable: false }), 'stale');
+  assert.equal(receipt.deriveReceiptState({ receipt: coord }), 'stale',
+    'an un-checked coordinate defaults to stale, never to verified');
+});
+
+test('receipt: a stale receipt is never described as passed', () => {
+  // 这是本文件最重要的一条断言：措辞层面的"不许撒谎"。
+  const coord = { sessionRef: 'sess-h-abc', seq: 29, turn: 1, total: 3, added: 10, deleted: 2 };
+  const text = receipt.describeReceipt({ receipt: coord, resolvable: false });
+  assert.match(text, /失效/);
+  assert.doesNotMatch(text, /已通过|已完成|通过/,
+    `a stale receipt must not claim success, got: ${text}`);
+});
+
+test('receipt: verified wording includes the turn and change counts (facts, not praise)', () => {
+  const coord = { sessionRef: 'sess-h-abc', seq: 29, turn: 1, total: 1, added: 1, deleted: 0 };
+  const text = receipt.describeReceipt({ receipt: coord, resolvable: true });
+  assert.match(text, /已复核/);
+  assert.match(text, /第 1 轮/);
+  assert.match(text, /1 个文件/);
+  assert.match(text, /\+1/);
+});
+
+test('receipt: the claimed wording says "claimed", never "done"', () => {
+  const text = receipt.describeReceipt({ receipt: null });
+  assert.match(text, /声称/);
+  assert.doesNotMatch(text, /已完成|通过/);
+});
+
+test('receipt: binary and oversized files are preserved as flags (no fake line counts)', () => {
+  // 官方对二进制/超大文件给 added=0/deleted=0，但那不是"改了 0 行"。
+  // 必须带上 flag，否则 UI 会显示"0 行改动"这种误导信息。
+  const c = receipt.buildReceiptCoordinate({
+    sessionRef: 'sess-h-b', seq: 7, turn: 3,
+    summary: {
+      turn: 3,
+      files: [
+        { path: 'logo.png', display: 'logo.png', added: 0, deleted: 0, binary: true },
+        { path: 'big.bin', display: 'big.bin', added: 0, deleted: 0, oversized: true },
+      ],
+      total: 2, added: 0, deleted: 0,
+    },
+  });
+  assert.equal(c.files[0].binary, true);
+  assert.equal(c.files[1].oversized, true);
+});
+
+test('receipt: degenerate input never throws', () => {
+  assert.doesNotThrow(() => receipt.buildReceiptCoordinate());
+  assert.doesNotThrow(() => receipt.buildReceiptCoordinate({ summary: 'nonsense' }));
+  assert.doesNotThrow(() => receipt.isReceiptAddressable(null));
+  assert.doesNotThrow(() => receipt.describeReceipt());
+  assert.equal(receipt.isReceiptAddressable(undefined), false);
+});
+
+test('receipt: the state vocabulary is closed and exported', () => {
+  assert.deepEqual([...receipt.RECEIPT_STATES], ['claimed', 'verified', 'stale']);
+});

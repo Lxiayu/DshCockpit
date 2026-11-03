@@ -386,13 +386,41 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
 - 守护进程形态（D4）：可选，只负责租约与对账，不负责展示。
 - 验收：关闭 app 后重开，团队任务仍可见、可接管；模拟租约过期，不产生重复任务。
 
-### S5 凭证与审批闸门
+### S5 凭证与审批闸门【**部分完成（2026-11-04）**】
 
-- **提案-批准**（借鉴 OpenMuse）：高风险动作只生成提案（动作、参数、风险、来源成员），由办公室批准；批准绑定提案 hash，过期失效。
-- **Work Receipt**（借鉴 OpenDots）：交付凭证 = 工作区指纹 + 命令 + 退出码 + 版本；文件变更后旧凭证降级为"未验证"。
-- 变更来源用官方 `workspace/changes`（S1 接入）。
-- 三态展示：**团队声称完成 / 已验证（指纹 X 上通过）/ 已接受（你确认）**。
-- 验收：修改一个文件后，已通过的凭证自动降级；未批准的提案无法执行。
+> **S0 第二轮实测把这里的关键假设推翻了：不需要自建文件变更捕获，也不要自建指纹。**
+> 证据：`docs/quality/harness-agent-team-probe-2026-11-04.md` §9.3。
+
+**已确认的官方路径（实测 200）**：
+- 每个 top-level turn 结束会 append 一条 `workspace/changes` 事件，payload **只有 `{turn}`**。
+- 文件清单在 Host 端按事件 `seq` 索引，客户端通过认证路由读：
+  `GET /api/changes.summary?sessionId=&seq=` → `{turn, files[], total, added, deleted}`
+  `GET /api/changes.diff?sessionId=&seq=&index=` → 单文件 unified diff
+- 实测响应：`{"turn":1,"files":[{"path":"probe-s5.txt",...,"added":1,"deleted":0}],"total":1,"added":1,"deleted":0}`
+
+**凭证设计（据此修订）**：
+- 凭证坐标 = `{sessionRef(派生句柄), seq, turn}` —— **不是文件指纹**。
+  用坐标去问 Host，得到官方算的清单；我们不重算 diff（否则是第二个事实作者）。
+- 三态：`claimed`（团队声称，无可复核坐标）/ `verified`（坐标可复核且 Host 仍能读）
+  / `stale`（曾经有坐标，现在读不到）。**没有 `done`** —— 完成是人的判断。
+- 已实现纯函数层：`src/mission/receipt.js`
+  （`buildReceiptCoordinate` / `isReceiptAddressable` / `deriveReceiptState` / `describeReceipt`）。
+  测试 `test/mission-receipt.test.js`（10 条），变异验证 DETECTED
+  （把 stale 合并成 verified → 2 条失败）。
+- **限制**：清单仅保留到 Session dispose，Host 重启后 404。
+  → 凭证必须在 turn 结束后**立即落盘**，不能事后再查。这一条决定实现顺序。
+
+**显式交付（官方已有，不重造）**：
+- `dsh-tool-present` 提供 `present({files:[{path,description?}]})`，
+  模型用它声明最终产物；记录路径与描述、**不复制内容**。
+- 我们的 Deliverable 应消费 `present` 的声明（"团队说这是交付物"）
+  + `changes.summary` 的事实（"这次确实改了这些"），两者互补，缺一不可。
+
+**仍未完成**：
+- ⬜ 提案-批准闸门（借鉴 OpenMuse：模型只能提 prepare，批准绑定 hash 且过期）。
+- ⬜ 凭证落盘与失效检测（依赖 turn 事件订阅）。
+- ⬜ `present` 声明与 Deliverable 登记的对接。
+- 验收（未达成）：修改一个文件后，旧凭证自动降级为 stale。
 
 ### S6 纠偏与干预
 

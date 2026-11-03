@@ -266,3 +266,44 @@ node scripts/poc/s0-model-probe.js --root "$POC_ROOT" --timeout 300000
 - **turn 级运行状态**——投影不提供，需从会话状态推导
 
 这修正了计划 §6.4 的名册状态映射（见回填）。
+
+### 9.3 第二轮：U-6 `workspace/changes` 已解决（S5 的关键路径）
+
+**结论：文件变更清单可读，但不在事件里，而在一个认证 GET 路由里。**
+
+第一轮把 U-6 记为"需要真实文件改动"。本轮用真实模型让 Agent 执行 `echo hello-s5 > probe-s5.txt`，实测拿到：
+
+```
+workspace/changes 事件的 seq = 29
+GET /api/changes.summary?sessionId=<id>&seq=29   →  200
+{"turn":1,"files":[{"path":"probe-s5.txt","display":"probe-s5.txt","added":1,"deleted":0}],
+ "total":1,"added":1,"deleted":0}
+```
+
+**机制（读官方源码确认，非猜测）**：
+
+- `dsh-workspace-changes` 在每个 top-level turn 结束时 append 一条
+  `workspace/changes` 事件，**payload 只有 `{turn}`**（没有文件清单）。
+  清单留在 Host 端的 `TurnRecorder.records`（按事件的 `seq` 索引，仅保留到 Session dispose）。
+- 客户端读清单的官方路径是 `dsh-client-ui-deliverables` 注册的认证路由：
+  - `GET /api/changes.summary?sessionId=&seq=` → `{turn, files[], total, added, deleted}`
+  - `GET /api/changes.diff?sessionId=&seq=&index=` → 单文件 unified diff
+- 这两条路由由壳的 mux cookie 认证即可访问（实测 200）。
+
+**对 S5（交付凭证）的影响**：
+
+| 原计划 | 修正后 |
+|---|---|
+| 自建"文件变更捕获" | **不自建**：用官方 `workspace/changes` + `/api/changes.summary` |
+| 凭证绑定"我们读到的文件" | 凭证绑定**官方 summary 的 seq**：`{sessionId, seq}` 就是快照坐标 |
+| 需要自己算增删行 | 官方直接给 `added/deleted/binary/oversized` |
+
+**限制（必须如实处理）**：
+- 清单**仅保留到 Session dispose**；Host 重启后 404（实测未验证重启场景，但源码注释明确）。
+  → 凭证必须**在 turn 结束后立即落盘**，不能事后再查。
+- 不在 git 仓库内时没有 snapshot，但 summary 仍列出 file-tool 改动（源码注释）。
+- `present` 工具（`dsh-tool-present`）是**显式交付**的官方机制：模型调
+  `present({files:[{path,description?}]})` 声明最终产物，记录绝对路径与描述、不复制内容。
+  → 我们的 Deliverable 应消费 `present` 的声明 + `changes.summary` 的事实，两者互补。
+
+**探针脚本**：`/tmp/probe-changes.cjs`（本轮为快速验证写在临时目录；若要在 CI 复用需移入 `scripts/poc/`）。
