@@ -358,7 +358,19 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
   需要接 `officeSessionProjections` + 轮询逻辑，属于 IPC/主进程层。
 - ⬜ 派发面板 UI（右栏结构化表单）。
 - ⬜ Grant 存储与 `grantId` 的实际创建/撤销流程。
-- ⬜ 派发策略的确定性判定实现（当前只定义了 `strategy` 词汇）。
+- ✅ **派发策略的确定性判定（2026-11-04 已完成）**：`src/mission/dispatch-strategy.js`
+  - 五条规则，**约束优先、机会最后**：
+    ① 预算只允许 1 人 → 单成员（硬约束最高优先）
+    ② 有共享写入范围 → 单成员（冲突代价 >> 并行收益）
+    ③ 有依赖 → 顺序链（能拆但不能同时跑）
+    ④ 多个独立验收条件 → 并行（**唯一**适合并行的形状）
+    ⑤ 其余 → 单成员
+  - **默认必须保守**：无预算声明时 `memberBudget` 默认 1，所以空输入得到
+    `single-budget` 而不是并行。猜错的代价不对称（多起成员=浪费+冲突）。
+  - `resolveStrategy()` 允许用户覆盖，但标记 `source:'user'` ——
+    事后必须能区分"系统判的单成员"和"用户改成单成员"，否则无法评估规则准度。
+  - 测试：`test/mission-dispatch-strategy.test.js`（12 条），变异验证 DETECTED ×2
+    （默认预算放大 / 忽略共享范围）。
 
 - 新增 Mission 合同模型（目标、验收条件、约束、预算、审批规则），schema 放 `src/mission/schema.js`。
 - 派发面板替换 `startWork` 的"发一段文本"路径。
