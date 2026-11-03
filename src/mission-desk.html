@@ -1525,7 +1525,9 @@ function renderStartWork(m) {
     send.disabled = true;
     send.textContent = '发送中…';
     let r;
+    let dispatchedAtMs = null;
     try {
+      dispatchedAtMs = Date.now();
       r = await api('startWork', { missionId: m.missionId, task });
     } catch (e) {
       r = { ok: false, reason: e.message };
@@ -1547,14 +1549,47 @@ function renderStartWork(m) {
     // 这正是用户抱怨的"没有反应"。真机验收 2 项红才发现。
     await loadDetail(m.missionId);
 
+    // ---- 派发确认（S2）---------------------------------------------------
+    //
+    // 第一性原理：为什么"已交给团队"这句话不够
+    //
+    //   我们没有 remote 写表面（D11）：派发 = 发一段指令，让 Lead 自己去调
+    //   spawn_teammate / team_task_create。于是 prompt 被接受 ≠ 任务被创建。
+    //
+    //   只显示"已交给团队"，用户会以为事情必成；而实际上模型可能理解偏了、
+    //   建了别的任务、或者压根没动。这里立刻确认一次，把**真实状态**说出来。
+    //
+    //   注意措辞：unconfirmed 绝不说"失败"——那会让用户重复派发、
+    //   凭空多出一支团队。文案由 confirmDispatch 的 description 给，
+    //   前端不自己编。
+    let dispatchLine = '已交给团队。切到 Harness 视图可以看到执行过程。';
+    let dispatchOk = true;
+    if (r.dispatchKey) {
+      try {
+        const conf = await api('confirmDispatch', {
+          missionId: m.missionId,
+          dispatchKey: r.dispatchKey,
+          startedAtMs: dispatchedAtMs,
+        });
+        if (conf && conf.ok && conf.description) {
+          dispatchLine = conf.description;
+          // rejected 才算真失败；pending/unconfirmed 都还是"待观察"
+          dispatchOk = conf.state !== 'rejected';
+        }
+      } catch {
+        // 确认本身失败不该把"已下达"说成失败——那是两件事
+        dispatchLine = '已下达，但确认时出错了（这不代表没有派发）。可稍后刷新查看。';
+      }
+    }
+
     // 刷新后重新拿节点（旧节点已经不在 DOM 里）
     const freshMsg = document.querySelector('.start-work-msg');
     if (freshMsg) {
-      freshMsg.textContent = '已交给团队。切到 Harness 视图可以看到执行过程。';
-      freshMsg.classList.add('ok');
+      freshMsg.textContent = dispatchLine;
+      freshMsg.classList.add(dispatchOk ? 'ok' : 'err');
     } else {
       // 极端情况：刷新后区块没渲染出来，退回到 alert（不能静默）
-      alert('已交给团队。请切到 Harness 视图查看执行过程。');
+      alert(dispatchLine);
     }
   });
 

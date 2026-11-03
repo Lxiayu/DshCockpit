@@ -268,7 +268,7 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
 | `src/mission/dispatch-strategy.js` | 无 | ⚠️ **库就绪，未接线**：需要 S2 派发面板在选择策略时调用 |
 | `src/mission/approval-gate.js` | 无 | ⚠️ **库就绪，未接线**：需要 S5 的"需要你批准"UI 与 IPC action |
 | `src/mission/rail-order.js` | `ipc-mission.js` 的 `attention()` 返回 `rail` | ✅ **已接线**（集成测试 7 条）：`items` 保持全量给老 UI，`rail` 分层+截断给新 UI |
-| `src/mission/dispatch-confirm.js` | 无 | ⚠️ **库就绪，未接线**：`startWork` 返回后轮询投影确认（S2） |
+| `src/mission/dispatch-confirm.js` | `ipc-mission.js` 的 `confirmDispatch` action；`startWork` 返回 `dispatchKey` | ✅ **已接线**（集成测试 7 条） |
 
 **接线的前提**（都与待决策项相关）：
 - `dispatch-strategy` → 需要派发面板 UI（S7 视觉落地的一部分）
@@ -386,7 +386,13 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
   四态 `pending / confirmed / unconfirmed / rejected`，判据是**投影里有没有我们那个 key**。
   关键措辞约束：`unconfirmed` 绝不说成"失败"（那会让用户重复派发、凭空多出团队）；
   只有运行时**明确拒绝**才算 `rejected`。测试 11 条，变异 DETECTED ×2。
-- ⬜ 把 `dispatch-confirm` 接到 `startWork` 的返回路径（需要轮询 + IPC 接线，属实现层）。
+- ✅ **`confirmDispatch` action 已实现（2026-11-04）**：
+  `startWork` 返回 `dispatchKey`（不返回 raw sessionId，隐私规则），
+  UI 拿它调 `confirmDispatch` 轮询确认。四态与措辞约束见 `dispatch-confirm.js`。
+  集成测试 7 条，变异 DETECTED ×2。
+  **不持久化 dispatchKey 的理由**：派发确认是"一次尝试的短期状态"，不是 Mission 长期事实；
+  持久化要扩展 schema（TaskRef 还要求 workstreamId 必填），成本远大于收益。
+- ⬜ 右栏 UI 调用 `confirmDispatch`（S7）。
 - ⬜ 派发面板 UI（右栏结构化表单）。
 - ⬜ Grant 存储与 `grantId` 的实际创建/撤销流程。
 - ✅ **派发策略的确定性判定（2026-11-04 已完成）**：`src/mission/dispatch-strategy.js`

@@ -34,6 +34,7 @@ const { createMissionStore } = require('./mission/store');
 const reconcileModule = require('./mission/reconcile');
 const receiptModule = require('./mission/receipt');
 const railOrder = require('./mission/rail-order');
+const dispatchConfirmModule = require('./mission/dispatch-confirm');
 const brief = require('./mission/brief');
 const deliverable = require('./mission/deliverable');
 const harnessReader = require('./mission/harness-reader');
@@ -81,6 +82,7 @@ const ACTIONS = Object.freeze([
   'getBoundSession',      // 只读：这个 Mission 绑定了哪个会话
   'workStatus',           // 只读：这次执行跑到哪了（turns/steps/是否在跑）
   'harvestDeliverables',  // 从 Agent 回复里找**真实存在**的产物，登记成 Deliverable
+  'confirmDispatch',      // 只读：派发后轮询"投影里有没有出现对应任务"（S2）
 ]);
 
 function nowMs() { return Date.now(); }
@@ -1483,7 +1485,74 @@ function registerMissionIpc(ipcMain, ctx) {
         log(`[mission] task ref append failed: ${err.message}`);
       }
 
-      return { ok: true, sessionId, delivered: true };
+      // 返回 dispatchKey，让 UI 能拿去轮询"投影里有没有出现对应任务"（S2 派发确认）。
+      //
+      // 为什么不持久化它：派发确认是**一次尝试的短期状态**，
+      // 不是 Mission 的长期事实。持久化会逼我们扩展 schema（TaskRef 还要求
+      // workstreamId 必填，没 workstream 时根本记不下来），成本远大于收益。
+      //
+      // 为什么不返回 raw sessionId：隐私规则（AGENTS.md §2.4）。
+      // sessionId 只在这一层用，UI 拿到的是派发键 —— 它不含任何会话身份。
+      return { ok: true, sessionId, delivered: true, dispatchKey };
+    },
+
+    /**
+     * 派发确认（S2）：prompt 已下达，但**不知道模型有没有真的照做**。
+     *
+     * 第一性原理：为什么这个 action 必须存在
+     *
+     *   D11 的事实：agent-team 没有 remote 写表面。我们派发的唯一方式是
+     *   发一段结构化指令，让模型自己去调 spawn_teammate / team_task_create。
+     *   于是"下令成功"与"事情发生"之间出现了一条我们看不见的缝。
+     *
+     *   没有这个 action 时，UI 只能说"已下达"然后什么都不显示 ——
+     *   用户不知道团队到底动没动。有了它，UI 可以回答：
+     *   任务建好了 / 还没建好 / 建的是别的任务 / 运行时拒绝了。
+     *
+     * 判据只有一个：团队投影里有没有出现带我们这个 dispatchKey 的任务。
+     * 不做任何推断（比如"turns 增加了所以大概建了"）。
+     */
+    async confirmDispatch(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = argString(payload && payload.missionId);
+      if (!isId(missionId)) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const dispatchKey = argString(payload && payload.dispatchKey);
+      if (!dispatchKey) return fail('dispatchKey is required', 'DISPATCH_KEY_REQUIRED');
+      const startedAtMs = Number.isFinite(payload && payload.startedAtMs)
+        ? payload.startedAtMs : null;
+      const promptRejected = payload && payload.promptRejected === true;
+
+      // 团队投影来自绑定会话。读不到就是读不到 —— 不猜"大概建好了"。
+      let team = null;
+      const bound = readBindMap(r.workspaceDir)[missionId];
+      if (bound && bound.sessionId && typeof projectionsOf === 'function') {
+        try {
+          const res = await projectionsOf(bound.sessionId);
+          if (res && res.ok && res.value && res.value.values) {
+            // 复用同一份归一化：右栏与确认逻辑必须看到完全一样的团队形状
+            team = normalizeAgentTeam(res.value.values.agentTeam);
+          }
+        } catch { team = null; }
+      }
+
+      const verdict = dispatchConfirmModule.evaluateDispatch({
+        dispatchKey, team, startedAtMs, nowMs: clock(), promptRejected,
+      });
+      return {
+        ok: true,
+        state: verdict.state,
+        description: dispatchConfirmModule.describeDispatchState(verdict.state, verdict.reason),
+        reason: verdict.reason,
+        // 只回传任务的**标识与状态**，不回传 description 正文（隐私）
+        task: verdict.task ? {
+          id: verdict.task.id,
+          subject: verdict.task.subject,
+          status: verdict.task.status,
+          ready: verdict.task.ready === true,
+        } : null,
+        observedAtMs: clock(),
+      };
     },
 
     attention() {
