@@ -35,6 +35,7 @@ const reconcileModule = require('./mission/reconcile');
 const receiptModule = require('./mission/receipt');
 const railOrder = require('./mission/rail-order');
 const dispatchConfirmModule = require('./mission/dispatch-confirm');
+const dispatchStrategy = require('./mission/dispatch-strategy');
 const brief = require('./mission/brief');
 const deliverable = require('./mission/deliverable');
 const harnessReader = require('./mission/harness-reader');
@@ -294,6 +295,42 @@ function renderDispatchInstruction({ mission, task, dispatchKey } = {}) {
     lines.push('');
     lines.push('【要求】请用 team_task_create 把上面的验收条件写进团队任务板'
       + '（subject 概括任务，description 里逐条列出验收条件），然后再开始执行。');
+  }
+
+  // 6) 派发策略（S2）：由**确定性规则**算出"该由几个人做"，而不是让模型自己看着办。
+  //
+  //    实证结论（Google Research 180 配置实验，按博客摘要引用）：
+  //    多 Agent 在可并行任务上更好，顺序推理任务上反而更差。
+  //    所以"起几个成员"是任务结构的函数，不是性能旋钮。
+  //
+  //    为什么把结论写进指令而不是只存字段：Lead 是唯一能调 spawn_teammate 的角色。
+  //    我们不告诉它该几个人，它就会按自己的直觉起团队 —— 而那个直觉往往倾向于
+  //    "多派几个人显得努力"。
+  if (contract) {
+    // 冲突信号必须传进去：合同里若声明了重叠的写入范围，
+    // "并行"就是错的（冲突代价远高于并行收益）。漏传会让这条规则静默失效。
+    const decided = dispatchStrategy.decideStrategy({
+      contract,
+      memberBudget: Number.isFinite(contract.maxMembers) ? contract.maxMembers : 4,
+      sharedWriteScopes: Number.isFinite(contract.sharedWriteScopes) ? contract.sharedWriteScopes : 0,
+      hasDependencies: contract.hasDependencies === true,
+    });
+    const resolved = dispatchStrategy.resolveStrategy({
+      decision: decided,
+      override: contract.strategy,
+    });
+    lines.push('');
+    lines.push('【执行规模】' + resolved.reason);
+    if (resolved.strategy === 'single') {
+      lines.push('请自己完成，**不要**派生 teammate（这个任务没有可并行的独立部分）。');
+    } else if (resolved.strategy === 'sequential') {
+      lines.push('可以拆成有序任务链，但同一时刻只让一个成员执行（有依赖）。');
+    } else if (resolved.strategy === 'parallel') {
+      lines.push('验收条件相互独立，可以派生成员并行推进；每个成员负责一组独立验收条件。');
+    }
+    if (resolved.source === 'user') {
+      lines.push('（执行规模是用户明确指定的，以此为准。）');
+    }
   }
 
   return lines.join('\n');

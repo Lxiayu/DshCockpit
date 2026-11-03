@@ -314,3 +314,84 @@ test('dispatch: degenerate inputs never throw and never invent content', () => {
   assert.equal(parseDispatchKey(empty), null, 'no key given → no key marker');
   assert.ok(empty.includes('【本次任务】'), 'structure survives degenerate input');
 });
+
+// ---------------------------------------------------------------------------
+// 6. 派发指令里的"执行规模"（S2：确定性策略注入）
+// ---------------------------------------------------------------------------
+//
+// 第一性原理：为什么必须把结论写进指令，而不只存字段
+//
+//   Lead 是唯一能调 spawn_teammate 的角色。我们不告诉它该几个人，
+//   它就按自己的直觉起团队 —— 而那个直觉倾向于"多派几个人显得努力"。
+//
+//   实证（Google Research 180 配置实验，按博客摘要引用）：多 Agent 在可并行
+//   任务上更好，顺序推理任务上反而更差。所以"起几个成员"是任务结构的函数。
+
+function missionWithContract(contractOver = {}) {
+  return {
+    missionId: 'mis-a', title: 't', intent: 'i', status: 'active',
+    workspaceId: 'ws-1', createdAtMs: 1, updatedAtMs: 2,
+    contract: {
+      status: 'draft',
+      acceptance: [{ id: 'a1', text: '通过测试', kind: 'command', command: 'npm test' }],
+      ...contractOver,
+    },
+  };
+}
+
+test('dispatch instruction: a single-unit task is told NOT to spawn teammates', () => {
+  // 这是最容易被做错的一环：不提醒的话模型很爱派一个"reviewer"。
+  const text = renderDispatchInstruction({
+    mission: missionWithContract(), task: '改个 typo', dispatchKey: 'k1',
+  });
+  assert.match(text, /【执行规模】/);
+  assert.match(text, /不要\*\*派生 teammate|不要.*派生/);
+});
+
+test('dispatch instruction: independent criteria allow parallel members', () => {
+  const text = renderDispatchInstruction({
+    mission: missionWithContract({
+      acceptance: [
+        { id: 'a', text: 'x', kind: 'manual' },
+        { id: 'b', text: 'y', kind: 'manual' },
+        { id: 'c', text: 'z', kind: 'manual' },
+      ],
+      maxMembers: 4,
+    }),
+    task: 't', dispatchKey: 'k2',
+  });
+  assert.match(text, /可以派生成员并行推进/);
+});
+
+test('dispatch instruction: shared write scopes force single even if tasks look parallel', () => {
+  // 冲突的代价远高于并行的收益 —— 这条必须优先于"多个验收条件"。
+  const text = renderDispatchInstruction({
+    mission: missionWithContract({
+      acceptance: [
+        { id: 'a', text: 'x', kind: 'manual' },
+        { id: 'b', text: 'y', kind: 'manual' },
+      ],
+      maxMembers: 4,
+      sharedWriteScopes: 2,
+    }),
+    task: 't', dispatchKey: 'k3',
+  });
+  assert.doesNotMatch(text, /可以派生成员并行推进/);
+  assert.match(text, /不要.*派生/);
+});
+
+test('dispatch instruction: a user override is stated as authoritative', () => {
+  // 允许用户改，但必须让 Lead 知道"这是人的决定"，否则它可能按规则又改回去。
+  const text = renderDispatchInstruction({
+    mission: missionWithContract({ strategy: 'parallel', maxMembers: 4 }),
+    task: 't', dispatchKey: 'k4',
+  });
+  assert.match(text, /用户明确指定/);
+});
+
+test('dispatch instruction: no contract → no execution-scale section (老行为不变)', () => {
+  const text = renderDispatchInstruction({
+    mission: { missionId: 'mis-a', title: 't', intent: 'i' }, task: 'do', dispatchKey: 'k5',
+  });
+  assert.doesNotMatch(text, /【执行规模】/);
+});
