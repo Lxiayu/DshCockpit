@@ -5699,6 +5699,46 @@ const OFFICE_ASSISTANT_STREAM_LOG_EVERY = 40; // chunks between log lines
 const officeAssistantStreamStats = new Map(); // sessionId -> {chunks, attempts, ended, lastLogAt}
 
 // ---------------------------------------------------------------------------
+// 变更清单读取（S5）：GET /api/changes.summary
+//
+// 第一性原理：为什么清单不在事件里
+//
+//   workspace/changes 事件的 payload **只有 {turn}**（读官方源码确认）。
+//   文件清单留在 Host 侧，按事件的 seq 索引，客户端用认证路由读取。
+//   这是"两路信号"里的事实侧：present 说"这是交付物"，这里说"确实动了什么"。
+//
+// 隐私：清单里带**相对路径**（官方给的就是相对 cwd 的路径），相对路径可接受；
+//   但为稳妥仍做一次越界/穿越过滤 —— 如果某天官方改成绝对路径，
+//   这道闸门会把它们挡在外面，而不是等它们进了事实链才发现。
+// ---------------------------------------------------------------------------
+
+/**
+ * 读某个 seq 对应的变更清单。
+ *
+ * @param {string} sessionId
+ * @param {number} seq
+ * @returns {Promise<{ok:boolean, value?:object, reason?:string}>}
+ */
+async function readWorkspaceChanges(sessionId, seq) {
+  const ru = getRuntimeUrl();
+  if (!ru) return { ok: false, reason: 'runtime offline' };
+  if (typeof sessionId !== 'string' || !sessionId) return { ok: false, reason: 'sessionId is required' };
+  if (!Number.isFinite(seq)) return { ok: false, reason: 'seq is required' };
+  try {
+    const cookie = await runtimeAuth.getCookie();
+    if (!cookie) return { ok: false, reason: 'no runtime cookie' };
+    const url = `${new URL(ru).origin}/api/changes.summary`
+      + `?sessionId=${encodeURIComponent(sessionId)}&seq=${encodeURIComponent(String(seq))}`;
+    const res = await fetch(url, { headers: { cookie } });
+    if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` };
+    const body = await res.json();
+    return { ok: true, value: presentedCollectorModule.sanitizeChangesSummary(body) };
+  } catch (err) {
+    return { ok: false, reason: `changes read failed: ${err.message}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 交付声明收集器（S5）
 //
 // 唯一职责：把 deliverables/presented 事件里的**绝对路径**削成工作区相对路径，

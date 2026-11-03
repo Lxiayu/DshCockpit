@@ -128,11 +128,29 @@ function createPresentedCollector({ cap = MAX_TURNS_KEPT } = {}) {
       return { accepted: true, turn, count: bucket.files.size };
     },
 
-    /** 某一 turn 的交付清单（按 relPath 稳定排序）。 */
+    /**
+     * 某一 turn 的交付清单（按 relPath 稳定排序）。
+     *
+     * 返回形状与 `deliverable-signal.normalizePresentedFiles` 的输出对齐：
+     *   { relPath, rawPath, key, description }
+     *
+     * 为什么要对齐：下游 `mergeDeliverableEvidence` 按 `key` 和变更清单
+     * 做尾部匹配、按 `rawPath` 显示。早期只返回 {relPath, description}，
+     * 结果链路**静默断开** —— 合并出来的永远是 claimed（实测发现：
+     * 一个确实变更过的文件被判成"声明了但没变更"）。
+     * 同时保留 relPath 语义名与下游契约字段，避免两个模块各自约定一套形状。
+     */
     forTurn(turn) {
       const b = byTurn.get(turn);
       if (!b) return [];
-      return [...b.files.values()].sort((a, c) => a.relPath.localeCompare(c.relPath));
+      return [...b.files.values()]
+        .sort((a, c) => a.relPath.localeCompare(c.relPath))
+        .map((f) => ({
+          relPath: f.relPath,
+          rawPath: f.relPath,
+          key: f.relPath.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase(),
+          description: f.description,
+        }));
     },
 
     /** 最近一个 turn 的交付清单。 */
@@ -160,8 +178,56 @@ function createPresentedCollector({ cap = MAX_TURNS_KEPT } = {}) {
   };
 }
 
+/**
+ * 清洗 `/api/changes.summary` 的返回体（S5 事实侧）。
+ *
+ * 为什么这个函数必须放在可测模块里，而不是 main.js：
+ *   它是**隐私闸门**——变更清单要进 Mission 事实链，而事实链不可篡改，
+ *   入口是唯一能拦住的地方。main.js 依赖 Electron，无法被离线测试，
+ *   把闸门放在那里等于没测过。
+ *
+ * 清洗规则（保守）：
+ *   · 绝对路径（`/x/y` 或 `C:\\x`）→ 丢弃（官方本该给相对路径，这是防御）
+ *   · 含 `..` 的 → 丢弃（不归一化"修正"可疑路径）
+ *   · 空路径 / 非对象 → 丢弃
+ *   丢弃的**计数**而不是静默遗忘。
+ *
+ * @param {object} body
+ * @returns {{turn:number|null, files:Array<{path:string,added:number,deleted:number}>, total:number, added:number, deleted:number, dropped:number}}
+ */
+function sanitizeChangesSummary(body) {
+  const empty = { turn: null, files: [], total: 0, added: 0, deleted: 0, dropped: 0 };
+  if (!body || typeof body !== 'object') return empty;
+  const files = Array.isArray(body.files) ? body.files : [];
+  const out = [];
+  let dropped = 0;
+  for (const f of files) {
+    if (!f || typeof f !== 'object') { dropped += 1; continue; }
+    const raw = typeof f.path === 'string' ? f.path : '';
+    const normalized = raw.replace(/\\/g, '/');
+    if (!normalized) { dropped += 1; continue; }
+    if (normalized.startsWith('/')) { dropped += 1; continue; }
+    if (/^[a-zA-Z]:/.test(normalized)) { dropped += 1; continue; }
+    if (normalized.split('/').includes('..')) { dropped += 1; continue; }
+    out.push({
+      path: normalized,
+      added: Number.isFinite(f.added) ? f.added : 0,
+      deleted: Number.isFinite(f.deleted) ? f.deleted : 0,
+    });
+  }
+  return {
+    turn: Number.isFinite(body.turn) ? body.turn : null,
+    files: out,
+    total: out.length,
+    added: out.reduce((n, f) => n + f.added, 0),
+    deleted: out.reduce((n, f) => n + f.deleted, 0),
+    dropped,
+  };
+}
+
 module.exports = {
   MAX_TURNS_KEPT,
+  sanitizeChangesSummary,
   toWorkspaceRelative,
   extractPresented,
   createPresentedCollector,

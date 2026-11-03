@@ -164,3 +164,136 @@ test('traversal: the relative result itself is never allowed to contain ..', () 
     assert.equal(r, 'a/../b.js');
   }
 });
+
+// ---------------------------------------------------------------------------
+// 变更清单的隐私闸门（S5 事实侧）
+// ---------------------------------------------------------------------------
+//
+// 第一性原理：为什么这个清洗必须能被离线测试
+//
+//   变更清单要进 Mission 事实链，而事实链不可篡改 —— 入口是唯一能拦住的地方。
+//   它原本写在 main.js 里（依赖 Electron，无法离线测试），等于"闸门从未被测过"。
+//   移到这里之后，下面这些拒绝规则才有真实的验证。
+
+test('changes: relative paths are kept with their line counts', () => {
+  const r = pc.sanitizeChangesSummary({
+    turn: 4,
+    files: [
+      { path: 'src/a.js', added: 10, deleted: 2 },
+      { path: 'docs/b.md', added: 3, deleted: 0 },
+    ],
+  });
+  assert.equal(r.turn, 4);
+  assert.equal(r.total, 2);
+  assert.equal(r.added, 13);
+  assert.equal(r.deleted, 2);
+  assert.equal(r.dropped, 0);
+});
+
+test('changes: absolute paths are DROPPED (the official API should not send them)', () => {
+  const r = pc.sanitizeChangesSummary({
+    turn: 1,
+    files: [
+      { path: '/Users/xia/program/dsh/proj/src/a.js', added: 1, deleted: 0 },
+      { path: 'C:\\Users\\x\\a.js', added: 1, deleted: 0 },
+      { path: 'ok.js', added: 1, deleted: 0 },
+    ],
+  });
+  assert.equal(r.total, 1, 'only the relative path survives');
+  assert.equal(r.files[0].path, 'ok.js');
+  assert.equal(r.dropped, 2);
+});
+
+test('changes: traversal paths are dropped, not normalized', () => {
+  const r = pc.sanitizeChangesSummary({
+    turn: 1,
+    files: [
+      { path: '../outside.txt', added: 1, deleted: 0 },
+      { path: 'a/../../b.txt', added: 1, deleted: 0 },
+      { path: 'a/../b.txt', added: 1, deleted: 0 },  // 这一条最终还是工作区内，但含 ..
+      { path: 'safe/c.txt', added: 1, deleted: 0 },
+    ],
+  });
+  assert.equal(r.total, 1);
+  assert.equal(r.files[0].path, 'safe/c.txt');
+  assert.equal(r.dropped, 3, 'anything carrying .. is refused rather than repaired');
+});
+
+test('changes: missing/garbage line counts become 0, never NaN', () => {
+  const r = pc.sanitizeChangesSummary({
+    turn: 2,
+    files: [{ path: 'a.js' }, { path: 'b.js', added: 'x', deleted: null }],
+  });
+  assert.equal(r.added, 0);
+  assert.equal(r.deleted, 0);
+  assert.equal(Number.isNaN(r.added), false);
+});
+
+test('changes: a body without turn number still yields a usable (turn: null) result', () => {
+  const r = pc.sanitizeChangesSummary({ files: [{ path: 'a.js', added: 1, deleted: 0 }] });
+  assert.equal(r.turn, null);
+  assert.equal(r.total, 1, 'files are still usable; only the attribution is missing');
+});
+
+test('changes: degenerate bodies never throw', () => {
+  assert.doesNotThrow(() => pc.sanitizeChangesSummary(null));
+  assert.doesNotThrow(() => pc.sanitizeChangesSummary('nope'));
+  assert.doesNotThrow(() => pc.sanitizeChangesSummary({ files: 'nope' }));
+  assert.deepEqual(pc.sanitizeChangesSummary(null).files, []);
+  assert.equal(pc.sanitizeChangesSummary(undefined).dropped, 0);
+});
+
+// ---------------------------------------------------------------------------
+// 端到端：收集器 + 变更清单 -> 交付物证据（S5 完整链路）
+// ---------------------------------------------------------------------------
+//
+// 第一性原理：为什么必须有这条集成测试
+//
+//   两个模块各自测试都通过，接起来却**静默失效**：
+//   presented-collector 产出 {relPath, description}，
+//   deliverable-signal 却按 {rawPath, key} 消费。
+//   于是 merge 出来的永远是 claimed —— 一个确实变更过的文件
+//   被判成"团队声明了但没变更"。
+//
+//   这种"各自都对、合起来错"的缺陷，只有跨模块断言能抓住。
+
+test('e2e: a declared + changed file is recognised as "both" through the real pipeline', () => {
+  const ds = require('../src/mission/deliverable-signal.js');
+  const c = pc.createPresentedCollector();
+  const WS = '/ws';
+
+  // 模型调用 present，官方记绝对路径
+  c.ingest({ turn: 3, files: [{ path: `${WS}/src/auth.js`, description: 'JWT 改造' }] }, WS);
+  // 同一 turn 的真实文件变更
+  const changes = pc.sanitizeChangesSummary({
+    turn: 3,
+    files: [
+      { path: 'src/auth.js', added: 12, deleted: 3 },
+      { path: 'debug.log', added: 500, deleted: 0 },
+    ],
+  });
+
+  const merged = ds.mergeDeliverableEvidence({
+    presented: c.forTurn(3),
+    changed: changes.files,
+  });
+
+  assert.equal(merged.items.length, 1, 'only the declared file is a deliverable');
+  assert.equal(merged.items[0].evidence, 'both',
+    'the pipeline must recognise declared+changed (a shape mismatch here silently degrades to claimed)');
+  assert.equal(merged.items[0].added, 12);
+  assert.equal(merged.items[0].description, 'JWT 改造');
+  // 调试文件改了但没被声明 → 不进交付物列表，只计数
+  assert.equal(merged.changedOnly, 1);
+});
+
+test('e2e: the pipeline output never carries an absolute path', () => {
+  const ds = require('../src/mission/deliverable-signal.js');
+  const c = pc.createPresentedCollector();
+  c.ingest({ turn: 1, files: [{ path: '/Users/xia/proj/src/a.js' }] }, '/Users/xia/proj');
+  const changes = pc.sanitizeChangesSummary({ turn: 1, files: [{ path: 'src/a.js', added: 1, deleted: 0 }] });
+  const merged = ds.mergeDeliverableEvidence({ presented: c.forTurn(1), changed: changes.files });
+  assert.equal(JSON.stringify(merged).includes('/Users/'), false,
+    'no absolute path may survive to the fact chain');
+  assert.equal(merged.items[0].evidence, 'both');
+});

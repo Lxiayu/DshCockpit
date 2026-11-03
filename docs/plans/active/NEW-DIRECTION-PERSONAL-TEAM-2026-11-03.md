@@ -269,7 +269,7 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
 | `src/mission/approval-gate.js` | **无（且不应接）** | ⚠️ **判定不接线**：见下方说明 |
 | `src/mission/rail-order.js` | `ipc-mission.js` 的 `attention()` 返回 `rail` | ✅ **已接线**（集成测试 7 条）：`items` 保持全量给老 UI，`rail` 分层+截断给新 UI |
 | `src/mission/dispatch-confirm.js` | `ipc-mission.js` 的 `confirmDispatch` action；`startWork` 返回 `dispatchKey` | ✅ **已接线**（集成测试 7 条） |
-| `src/mission/deliverable-signal.js` | 无 | ⚠️ **库就绪，待接线**：需要有人喂它 presented + changes 两路数据 |
+| `src/mission/deliverable-signal.js` | 由 presented-collector + sanitizeChangesSummary 提供两路数据 | ✅ **链路已通**（端到端测试 2 条） |
 | `src/mission/presented-collector.js` | `main.js` 的 `ingestOfficeJournalEvent` 早期分叉（不进办公室） | ✅ **已接线**（源级边界断言 1 条） |
 
 ### ⚠️ 关于 `approval-gate`：为什么决定**不接线**
@@ -574,7 +574,18 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
   事件永远不到达 office module。
   `test/office-runtime-boundary.test.js` 用源级断言钉住"分支必须在 office ingest 之前
   且必须 return"，变异 DETECTED（去掉 return）。
-  ⬜ 仍待：把收集器的结果与 `workspace/changes` 合并成 Mission 交付物（需要 changes 侧接线）。
+- ✅ **变更清单读取 + 双信号合并打通（2026-11-04）**：
+  `readWorkspaceChanges()` 走 `GET /api/changes.summary?sessionId=&seq=`，
+  返回体经 `sanitizeChangesSummary` 清洗（绝对路径/穿越一律丢弃并计数）。
+  清洗逻辑放在可测模块而非 main.js —— 它是隐私闸门，
+  而 main.js 依赖 Electron 无法离线测试，放那里等于"闸门从未被测过"。
+  测试 6 条 + 端到端 2 条，变异 DETECTED ×3。
+
+  **接线时发现并修了一个静默断链**：collector 产出 `{relPath, description}`，
+  而 `deliverable-signal` 按 `{rawPath, key}` 消费 —— 两个模块各自测试全绿，
+  合起来却让 `mergeDeliverableEvidence` 永远返回 `claimed`
+  （一个确实变更过的文件被判成"声明了但没变更"）。
+  已让 collector 的 `forTurn` 输出同时带两种字段，并补端到端断言钉住。
 - 验收（未达成）：修改一个文件后，旧凭证自动降级为 stale。
 
 ### S6 纠偏与干预【**审计层已完成（2026-11-04）**】
