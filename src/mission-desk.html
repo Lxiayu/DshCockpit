@@ -196,8 +196,23 @@
      这是整个 Desk 最重要的入口，视觉上必须最突出：
      强调色边框 + 比其它区块更大的输入框。
      其它区块都是"参考资料"，这一块是"开始工作"。 */
-  .start-work { margin: 0 0 10px; padding: 11px 12px; border-radius: 10px;
+  /* 折叠态：只是**一行**轻量入口，不占首屏。
+     展开态才用原来的强调底色 —— 用户点开时他已经明确要派活，
+     那时用强视觉是对的；平时用强视觉等于天天喊"来派活"，
+     而用户大多数时候是来看进展的。 */
+  .start-work { margin: 0 0 10px; }
+  .start-work.open { padding: 11px 12px; border-radius: 10px;
     background: var(--acc-soft); border: 1px solid var(--acc); }
+  .start-work-trigger { display: flex; }
+  .start-work-open { width: 100%; font-size: 12px; padding: 7px 10px;
+    border-radius: 8px; cursor: pointer; font-family: inherit;
+    background: transparent; color: var(--text-2);
+    border: 1px dashed var(--border-1); transition: color .12s, border-color .12s; }
+  .start-work-open:hover { color: var(--text-1); border-color: var(--text-3); }
+  .start-work-close { margin-left: auto; font-size: 10.5px; padding: 1px 7px;
+    border-radius: 5px; cursor: pointer; font-family: inherit;
+    background: transparent; color: var(--text-3); border: 1px solid var(--border-1); }
+  .start-work-head { display: flex; align-items: center; }
   .start-work-head { font-size: 12.5px; font-weight: 700; color: var(--text-1); margin-bottom: 3px; }
   .start-work-hint { font-size: 10.5px; color: var(--text-2); line-height: 1.5; margin-bottom: 7px; }
   .start-work-row { margin-bottom: 7px; }
@@ -298,6 +313,54 @@
   .team-task-subject { font-size: 12.5px; color: var(--text-1); line-height: 1.5;
     overflow-wrap: anywhere; }
   .team-task-meta { font-size: 10.5px; color: var(--text-3); margin-top: 3px; padding-left: 2px; }
+  /* ---- 头部（§6.2 第 1 块）----
+     只放三样：标题 / 状态徽标 / 目标一行。
+     首屏 380px 里，这三样回答"我在看什么、它怎么样、它要干什么"。 */
+  /* width:100% 是必须的：详情区是 flex 容器，不写就会被按内容压缩，
+     实测被压到 94px，导致目标文字折成三行（截图验证）。 */
+  /* display:block 是必须的：站内某条通用规则会让 header 变成 flex，
+     于是子元素横排、目标块被压到 94px（截图 + 计算样式确认）。
+     显式写成 block，让它按行堆叠。 */
+  .mhead { display: block; width: 100%; box-sizing: border-box; padding: 10px 0 8px;
+    border-bottom: 1px solid var(--border-1); margin-bottom: 8px; }
+  .mhead-line1 { display: flex; align-items: center; gap: 8px; }
+  /* 标题单行：首屏 380px 里，两行标题会挤掉"需要你"的位置。
+     超长用省略号，完整标题通过 title 属性（hover 可见）。
+     这不是隐藏信息——列表里也是同一个标题，用户点进来前就见过。 */
+  .mhead-title { flex: 1; margin: 0; font-size: 14px; font-weight: 600;
+    color: var(--text-1); line-height: 1.35;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mhead-badge { flex: none; font-size: 10.5px; padding: 2px 8px; border-radius: 999px;
+    cursor: pointer; border: 1px solid transparent; font-family: inherit; }
+  /* 状态色语义（§6.3）：绿=已验证/正常，琥珀=等你，蓝=进行中，灰=已结束
+     红色只给高风险与阻塞 —— 状态本身不用红，否则红色贬值。
+     **必须用语义 token**：直接写 rgba/#hex 会在浅色主题里变成浅底浅字
+     （test/theme-tokens.test.js 机械校验这条，本轮被它抓到）。 */
+  .mhead-badge.mh-active { background: var(--att-info-bg); color: var(--att-info-fg);
+    border-color: var(--att-info-fg); }
+  .mhead-badge.mh-paused { background: var(--att-warn-bg); color: var(--att-warn-fg);
+    border-color: var(--att-warn-fg); }
+  .mhead-badge.mh-completed { background: var(--att-ok-bg); color: var(--att-ok-fg);
+    border-color: var(--att-ok-fg); }
+  .mhead-badge.mh-abandoned { background: var(--att-idle-bg); color: var(--att-idle-fg);
+    border-color: var(--border-1); }
+  .mhead-status-menu { position: absolute; right: 14px; z-index: 40; margin-top: 4px;
+    background: var(--bg-panel); border: 1px solid var(--border-1); border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.45); padding: 4px; min-width: 104px; }
+  .mhead-status-opt { display: block; width: 100%; text-align: left; font-size: 12px;
+    padding: 5px 9px; border-radius: 5px; background: transparent; color: var(--text-1);
+    border: 0; cursor: pointer; font-family: inherit; }
+  .mhead-status-opt:hover { background: var(--bg-input); }
+  /* 目标块独占一行（在标题行下面）。
+     早期实现让它在标题行内与徽标抢空间，结果被挤到右侧折成三行 ——
+     在 380px 里，标题、徽标、目标三者不可能同一行。 */
+  .mhead-intent { margin-top: 5px; display: block; font-size: 12.5px;
+    color: var(--text-2); line-height: 1.5; overflow-wrap: anywhere; }
+  .mhead-intent-label { font-size: 10.5px; color: var(--text-3); margin-right: 6px; }
+  .mhead-intent-text { color: var(--text-2); }
+  /* 目标最多两行，超出省略：首屏不能让一句话吃掉半屏 */
+  .mhead-intent-text { display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical; overflow: hidden; }
   /* ---- 团队成员名册（S6）----
      名册在这里的意义不是"再看一遍成员"，而是**让我能对某个人做点什么**。
      所以操作按钮与名字同行，不藏在二级菜单里。 */
@@ -1530,22 +1593,67 @@ const TASK_STATUS_TONE = {
 function renderStartWork(m) {
   const box = el('section', { class: 'start-work' });
 
-  const head = el('div', { class: 'start-work-head' });
-  head.append(el('span', { text: '交给团队' }));
-  box.append(head);
+  // §6.2 第 4 块：派发入口默认是**一行**，点击才展开。
+  //
+  // 第一性原理：为什么不能常驻一个大文本框
+  //
+  //   380px 首屏里，一个 2 行 textarea + 说明文字 + 按钮约占 180px，
+  //   等于把"团队在做什么"整个挤出首屏。而用户**大多数时候不是来派活的**
+  //   —— 他来是看进展、看有没有要拍板的事。
+  //
+  //   派发是低频动作（一个 Mission 通常一两次），不该占用首屏最高的位置。
+  const collapse = () => {
+    box.classList.remove('open');
+    box.textContent = '';
+    box.append(triggerRow());
+  };
 
-  const hint = el('div', { class: 'start-work-hint',
-    text: '告诉团队这个 Mission 要做什么。会新开一个 Harness 会话，并把目标带过去。' });
-  box.append(hint);
+  const triggerRow = () => {
+    const row = el('div', { class: 'start-work-trigger' });
+    const btn = el('button', { class: 'start-work-open', text: '＋ 交代新任务' });
+    btn.addEventListener('click', () => expand());
+    row.append(btn);
+    return row;
+  };
 
-  const row = el('div', { class: 'start-work-row' });
-  const input = el('textarea', {
-    class: 'start-work-input',
-    rows: '2',
-    placeholder: '例如：先调研 Agent Team 的前沿方案，输出一份对比报告',
-  });
-  row.append(input);
-  box.append(row);
+  const expand = () => {
+    box.classList.add('open');
+    box.textContent = '';
+
+    const head = el('div', { class: 'start-work-head' });
+    head.append(el('span', { text: '交代新任务' }));
+    const closeBtn = el('button', { class: 'start-work-close', text: '收起' });
+    closeBtn.addEventListener('click', () => collapse());
+    head.append(closeBtn);
+    box.append(head);
+
+    const hint = el('div', { class: 'start-work-hint',
+      text: '告诉团队这次要做什么。会新开一个会话，并把目标和边界带过去。' });
+    box.append(hint);
+
+    const row = el('div', { class: 'start-work-row' });
+    const input = el('textarea', {
+      class: 'start-work-input',
+      rows: '2',
+      placeholder: '例如：先调研 Agent Team 的前沿方案，输出一份对比报告',
+    });
+    row.append(input);
+    box.append(row);
+    attachStartWorkActions(m, box, input);
+    input.focus();
+  };
+
+  box.append(triggerRow());
+  return box;
+}
+
+/**
+ * 把「交给团队」的提交逻辑挂到展开后的面板上。
+ *
+ * 拆出来是为了让 renderStartWork 只管**折叠/展开**的视觉，
+ * 提交逻辑（含派发确认）保持独立可读。
+ */
+function attachStartWorkActions(m, box, input) {
 
   const actions = el('div', { class: 'start-work-actions' });
   const send = el('button', { class: 'start-work-btn', text: '交给团队' });
@@ -2000,6 +2108,81 @@ function renderSince() {
   return box;
 }
 
+/**
+ * 头部：一行标题 + 一个状态徽标 + 一行目标（§6.2 第 1 块）。
+ *
+ * 第一性原理：为什么状态是**徽标**而不是常驻下拉框
+ *
+ *   状态切换是低频动作（一个 Mission 从 active 到 completed 通常就一次）。
+ *   把它做成常驻下拉框，等于用低频控件占掉首屏一个高频位置；
+ *   而浏览器原生 select 在深色界面里是一块白，刺眼。
+ *
+ *   所以：徽标显示当前状态（一眼看到），点击才展开切换
+ *   —— 低频动作收到它该在的层级里。
+ */
+function renderMissionHead(m, v) {
+  const head = el('header', { class: 'mhead' });
+
+  const line1 = el('div', { class: 'mhead-line1' });
+  line1.append(el('h2', {
+    class: 'mhead-title',
+    text: m.title || '(未命名)',
+    title: m.title || '',   // 省略号截断时，hover 能看到全文
+  }));
+
+  const badge = el('button', {
+    class: 'mhead-badge mh-' + (m.status || 'active'),
+    text: STATUS_TEXT[m.status] || m.status || '未知',
+    title: '点击切换状态',
+  });
+  const menu = el('div', { class: 'mhead-status-menu' });
+  menu.style.display = 'none';
+  for (const s of ['active', 'paused', 'completed', 'abandoned']) {
+    if (s === m.status) continue;
+    const opt = el('button', { class: 'mhead-status-opt', text: STATUS_TEXT[s] || s });
+    opt.addEventListener('click', async () => {
+      menu.style.display = 'none';
+      const r = await api('updateStatus', { missionId: m.missionId, to: s });
+      if (!r || !r.ok) { alert((r && r.reason) || '切换失败'); return; }
+      // 状态字段不能替代刹车：取消失败必须说出来，否则用户以为已经停了。
+      if (r.stopped === 'cancel-failed') {
+        alert('状态已改为 ' + (STATUS_TEXT[r.status] || r.status) + '，但**未能停止正在执行的会话**。'
+          + '它可能还在跑，请到 Harness 视图确认。');
+      } else if (r.stopped === 'not-wired') {
+        alert('状态已改为 ' + (STATUS_TEXT[r.status] || r.status) + '，但当前环境没接上停止能力。'
+          + '如果团队在跑，请到 Harness 视图手动停止。');
+      }
+      await refresh();
+    });
+    menu.append(opt);
+  }
+  badge.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+  });
+  document.addEventListener('click', () => { menu.style.display = 'none'; });
+  line1.append(badge);
+  head.append(line1);
+  head.append(menu);
+
+  if (m.intent) {
+    const intentLine = el('div', { class: 'mhead-intent' });
+    intentLine.append(el('span', { class: 'mhead-intent-label', text: '目标' }));
+    intentLine.append(el('span', { class: 'mhead-intent-text', text: m.intent }));
+    head.append(intentLine);
+  }
+  return head;
+}
+
+// 状态的人话标签。**不直接用 active/paused** ——
+// 用户看不懂英文状态词，而"进行中/已暂停"是零学习成本的。
+const STATUS_TEXT = {
+  active: '进行中',
+  paused: '已暂停',
+  completed: '已完成',
+  abandoned: '已放弃',
+};
+
 function renderDetail() {
   const box = $('detail');
   box.textContent = '';
@@ -2021,6 +2204,17 @@ function renderDetail() {
   }
   const v = state.detail;
   const m = v.mission;
+
+  // --- 头部：标题 + 状态 + 目标（§6.2 第 1 块）---
+  //
+  // 第一性原理：为什么头部必须置顶，且只放三样东西
+  //
+  //   右栏 380px。用户每次看它，第一个问题都是"这是哪个 Mission、它现在怎么样、
+  //   它要完成什么"。这三件事必须在**第一眼**答完。
+  //
+  //   原实现把头部放在最下面（在"需要你"、"交给团队"、"团队任务"之后），
+  //   于是首屏看不到"我在看哪个 Mission"——这正是用户抱怨的开头。
+  box.append(renderMissionHead(m, v));
 
   // --- L1：需要你处理（最高优先级，永远置顶）---
   box.append(renderAttention());
@@ -2045,35 +2239,6 @@ function renderDetail() {
   const teamBlock = renderTeamTasks();
   if (teamBlock) box.append(teamBlock);
 
-  // --- 头部 ---
-  const head = el('div', { class: 'row' });
-  head.append(el('span', { class: 'badge ' + m.status, text: m.status }));
-  const sel = el('select', {});
-  for (const s of ['active', 'paused', 'completed', 'abandoned']) {
-    const o = el('option', { value: s, text: s });
-    if (s === m.status) o.selected = true;
-    sel.append(o);
-  }
-  sel.addEventListener('change', async () => {
-    const r = await api('updateStatus', { missionId: m.missionId, to: sel.value });
-    if (!r.ok) { alert(r.reason); return; }
-    // 第一性原理：状态字段不能替代刹车。
-    //
-    // 改状态的同时会尝试取消正在执行的会话。取消可能失败（运行时离线、
-    // 会话已结束等），这时**必须说出来**——否则界面显示"已暂停"，
-    // 团队却还在写文件，用户会以为自己已经刹车了。
-    //
-    // stopped 的取值：cancelled / cancel-failed / not-running / not-wired / null
-    if (r.stopped === 'cancel-failed') {
-      alert('状态已改为 ' + r.status + '，但**未能停止正在执行的会话**。'
-        + '它可能还在跑，请到 Harness 视图确认。');
-    } else if (r.stopped === 'not-wired') {
-      alert('状态已改为 ' + r.status + '，但当前环境没有接上停止能力。'
-        + '如果团队在跑，请到 Harness 视图手动停止。');
-    }
-    await refresh();
-  });
-  box.append(el('h3', { text: 'Mission 状态（我们拥有）' }), sel);
 
   // --- 实时（Harness 的事实）---
   const live = v.live || {};
@@ -2091,7 +2256,8 @@ function renderDetail() {
     }));
     liveBlock.append(el('div', {
       class: 'tiny muted',
-      text: '这项状态由 Harness 提供，DshCockpit 只读不写（所以不会在重启后撒谎）。',
+      // 保留"不会撒谎"这个**用户利益**，去掉"Harness/只读不写"这个**实现细节**。
+      text: '这些数字直接来自运行时，我们不缓存、不推测，重启后也不会编造。',
     }));
   } else {
     liveBlock.append(el('div', {
@@ -2099,7 +2265,11 @@ function renderDetail() {
       text: '实时状态不可用——没有 Harness 快照。这不代表"没有在跑"，只代表我们现在读不到。',
     }));
   }
-  box.append(el('h3', { text: '实时状态（Harness 拥有，只读）' }), liveBlock);
+  // 术语修正（§6.1）：原来写"实时状态（Harness 拥有，只读）"——
+  // "Harness 拥有"是架构术语，用户不知道 Harness 是什么，更不关心谁拥有它。
+  // 他只想确认"这数字是真的吗"。所以标题说"现在的运行情况"，
+  // 真实性由下面那句人话解释。
+  box.append(el('h3', { text: '现在的运行情况' }), liveBlock);
 
   // --- 目标 ---
   //
@@ -2109,7 +2279,9 @@ function renderDetail() {
   //
   // 边界：这里**不提供**改 status 的入口。状态变更是独立事实，
   // 必须走 updateStatus（顶部选择器），不能混进 update 的 patch。
-  box.append(el('h2', { text: '目标' }));
+  // 注意：这里不是「目标」的展示（那在头部），而是**编辑入口**。
+  // 标题必须区分开，否则用户会以为页面上有两个目标。
+  box.append(el('h2', { text: '编辑标题与目标' }));
   {
     const wrap = el('div', { class: 'row', style: 'gap:6px;align-items:flex-start' });
     const view = el('div', { text: m.intent || '（未填写）', style: 'flex:1' });

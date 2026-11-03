@@ -661,7 +661,19 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
   - **最危险的空态已处理**：数据源缺席返回 `tone:'unknown'` 而不是 `calm`。
     运行时没连上时显示"团队运行正常"会让用户以为一切安好，实际我们什么都没看到。
   - 测试：`test/mission-rail-order.test.js`（13 条），变异验证 DETECTED ×2。
-- ⬜ 右栏 UI 改造（`mission-desk.html`，2395 行）—— 需要用户先确认视觉方案。
+- ✅ **切片 1 已落地（2026-11-04）**：头部 + 派发入口折叠 + 术语人话化。
+  - **头部置顶**（§6.2 第 1 块）：标题单行 + 状态徽标 + 目标一行。
+    原先头部在最底部（"需要你"/"交给团队"/"团队任务"之后），
+    首屏根本看不到"我在看哪个 Mission"。
+  - **状态徽标替代原生下拉**：状态切换是低频动作，不该用常驻 select
+    占掉首屏；且原生 select 在深色界面里是一块白。
+  - **派发入口折叠**（§6.2 第 4 块）：`交给团队` 从 350px 大块收成
+    一行「＋ 交代新任务」，点击才展开。腾出的约 300px 给了进展与团队。
+  - **术语人话化**："Harness 拥有，只读" → "现在的运行情况"；
+    "我们拥有" → 删除；状态词 active/paused → 进行中/已暂停。
+  - 渲染方式：CDP + chrome-headless-shell 直接截图（playwright 库已不可用），
+    脚本见 `/tmp/rail-design/render.mjs`。截图对比确认前后差异。
+- ⬜ 切片 2：进展（任务板）与团队名册上移、折叠区收纳表单。
 - ⬜ 把 `renderAttention` / `renderTeamTasks` 改为消费 `rail-order` 的输出。
 
 
