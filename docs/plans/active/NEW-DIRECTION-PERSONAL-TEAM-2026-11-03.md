@@ -298,10 +298,10 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
 | P-0.1 团队创建与投影 | ✅ **PASS** | 真实模型下 `probehelper` 出现在 `agentTeam.members` |
 | P-0.2 `agentTeam` 字段形状 | ✅ **PASS** | 与声明逐字段一致；`TeamMemberProjection` 只有 id/name/role/phase，**无"正在做什么"** |
 | P-0.3 readiness / blockedBy | ⚠️ **部分** | 拿到 `ready:true`/空 `blockedBy`；有依赖的 DAG 未测 |
-| P-0.4 成员 inbox 消息 | ⬜ 未验证 | 需要运行中的 teammate（U-1） |
+| P-0.4 成员 inbox 消息 | ✅ **已验证（第二轮，U-1）** | `send_message` 发出的暗号真实出现在会话历史里（用 follow cursor 读 page 验证）。机制成立 |
 | P-0.5 任务修改/重分配 | ✅ **CAS 已验证（第五轮）** | 过期 revision 更新被拒绝，状态完全不变（revision 1→3 后仍为 3）。8 种 action 存在；reassign 的实际效果未单独测 |
-| P-0.6 停止成员 | ⬜ 未验证 | `interrupt` 需长任务 teammate（U-2） |
-| P-0.7 提问回流 | ⬜ 未验证 | 需要模型主动提问（U-5） |
+| P-0.6 停止成员 | ⚠️ **接口已验证，效果需细化（U-2）** | `interrupt_agent` 被接受，但成员的 `phase` 仍是 `active` —— **phase 不反映 turn 级中断**。右栏必须区分"成员生命周期"与"turn 运行状态" |
+| P-0.7 提问回流 | ✅ **文档级确认（第六轮）** | 官方 README 逐字：只 admit **runtime root**，"A live child cannot open a human interaction"。→ 提问只能来自 Lead；成员要请求决策必须经 Lead 转发。未做实测（文档已给出确定答案，实测只会重复它） |
 | P-0.8 Brief 跨会话（#23） | ✅ **PASS（第三轮，8/8）** | 暗号法：随机 token 写入 AGENTS.md -> 新会话问暗号 -> 模型答对，证明真的读了文件。**#23 可关闭**。限制：需 git 仓库；仅验证启动时读到 |
 | P-0.9 `workspace/changes` | ✅ **PASS（第二轮）** | 事件存在（payload 只有 `{turn}`）；文件清单经 `GET /api/changes.summary?sessionId=&seq=` 读取，实测 200 并返回 `{turn,files[],total,added,deleted}` |
 | P-0.10 `session/create` 的 cwd | ✅ **PASS（部分）** | `cwd` 参数被接受并创建成功；**未验证会话真的在该目录读写** |

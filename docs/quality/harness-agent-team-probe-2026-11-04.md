@@ -498,3 +498,28 @@ counts: {"pass":9}
   因为进程没了；这与我们 S4 的对账逻辑（把 dispatching 回退为 draft）方向一致）。
 - 未验证 teammate 的**对话历史**是否完整（roster 持久 ≠ 会话内容持久，
   虽然 jsonl persistence 应该覆盖，但未单独测）。
+
+### 9.8 第六轮：U-5 提问归属 —— 文档级确认（teammate 不能直接提问）
+
+**结论：只有 runtime root（Lead）能向人提问，teammate 不能。**
+
+权威依据（`dsh-user-questions/README.md` 逐字）：
+
+> "When a request carries an agent, `ask()` authenticates its exact identity through
+> the live `AgentRegistry` and admits only a **runtime root**. A **live child cannot
+> open a human interaction**. An agentless programmatic request remains available to
+> unscoped local waterfall listeners and fails with `NO_PROVIDER` when none accepts it."
+
+**这意味着**：
+- 右栏"需要你"里的提问，来源**只能是 Lead**，不可能是某个 teammate。
+- 如果产品上希望"成员也能请求决策"，正确形态是：**成员把问题交给 Lead，由 Lead 统一提问**
+  （这正是 2026-11-03 对话里预判的"Lead 收集机制"）。
+- 我们不应设计"点击某个成员直接问他"的交互——那在协议层做不到。
+
+**未做实测的原因**：要触发它需要 teammate 主动调用提问工具，而模型是否照做不可控；
+文档已给出确定答案（不是"没找到"），实测只会重复它。按 AGENTS.md 的诚实纪律，
+标为"文档级确认"，**不写成"真机验证通过"**。
+
+**对 S7 的影响**：右栏提问卡片不需要标注"来自哪个成员"来区分能力——
+所有提问都来自 Lead；如果将来要显示"这是谁的疑问"，那信息应由 Lead 在提问文本里带出，
+而不是靠协议层的 agent 归属。
