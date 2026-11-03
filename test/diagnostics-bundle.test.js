@@ -37,6 +37,7 @@ function makeDeps(overrides = {}) {
     crashDir: () => overrides.crashDir || null,
     officeDiagnostics: () => overrides.officeDiagnostics || null,
     officeEmployees: () => overrides.officeEmployees || [],
+    officeUnmappedEvents: () => (Array.isArray(overrides.officeUnmappedEvents) ? overrides.officeUnmappedEvents : []),
     locale: () => 'zh-CN',
     home: () => HOME,
     now: () => new Date('2026-09-26T08:00:00.000Z'),
@@ -275,4 +276,58 @@ test('build: missing log/crash dirs and no office module degrade gracefully', as
   assert.equal(summary.render, null);
   assert.equal(summary.sessions.boundCount, 0);
   fs.rmSync(target, { recursive: true, force: true });
+});
+
+// --- 未映射 journal 事件计数（S1：让"上游发了但我们没接"可观测）---------------
+
+test('diagnostics: unmapped journal events are reported with type+count and NO payload', () => {
+  // 第一性原理：这份计数的唯一职责是回答"这个事件到底来没来"。
+  // 它绝不能夹带上游载荷（prompt / 工具参数 / 产物内容），
+  // 所以这里既验证"在"，也验证"只有白名单字段"。
+  const logDir = tmpDir('dsh-unmapped-');
+  const bundle = createDiagnosticsBundle(makeDeps({
+    logDir,
+    officeUnmappedEvents: [
+      { type: 'workspace/changes', count: 7, firstAtMs: 1000, lastAtMs: 9000 },
+      { type: 'permission/preset', count: 3, firstAtMs: 2000, lastAtMs: 8000 },
+    ],
+  }));
+  const out = bundle.collectOfficeDiagnostics();
+  assert.ok(out, 'unmapped stats alone must produce a report (office module may be off)');
+  assert.equal(out.unmappedJournalEvents.length, 2);
+  const wc = out.unmappedJournalEvents.find((e) => e.type === 'workspace/changes');
+  assert.equal(wc.count, 7);
+  assert.equal(wc.lastAtMs, 9000);
+  // 只允许这四个键
+  assert.deepEqual(Object.keys(wc).sort(), ['count', 'firstAtMs', 'lastAtMs', 'type']);
+});
+
+test('diagnostics: unmapped event rows are bounded (a noisy runtime cannot grow the bundle)', () => {
+  const rows = Array.from({ length: 100 }, (_, i) => ({
+    type: `future/event-${i}`, count: i + 1, firstAtMs: i, lastAtMs: i,
+  }));
+  const bundle = createDiagnosticsBundle(makeDeps({ officeUnmappedEvents: rows }));
+  const out = bundle.collectOfficeDiagnostics();
+  assert.ok(out.unmappedJournalEvents.length <= 32,
+    'the row cap must hold regardless of how many types the runtime invents');
+});
+
+test('diagnostics: with no office module and no unmapped events the section is absent (null)', () => {
+  // 缺文件与"有文件但是 null"在诊断里含义不同；
+  // 这里锁的是"两者都没有 → null"，不伪造一个空壳对象。
+  const bundle = createDiagnosticsBundle(makeDeps({}));
+  assert.equal(bundle.collectOfficeDiagnostics(), null);
+});
+
+test('diagnostics: unmapped events alone still report even when the office is stopped', () => {
+  // 办公室模块可能没在跑，但壳层一直在收 journal 事件；
+  // 这时"上游发了 workspace/changes 7 次"依然是有价值的事实。
+  const bundle = createDiagnosticsBundle(makeDeps({
+    officeDiagnostics: null,
+    officeUnmappedEvents: [{ type: 'workspace/changes', count: 2, firstAtMs: 1, lastAtMs: 2 }],
+  }));
+  const out = bundle.collectOfficeDiagnostics();
+  assert.ok(out);
+  assert.equal(out.employeeCount, null, 'office fields stay honestly null, not 0');
+  assert.equal(out.unmappedJournalEvents.length, 1);
 });

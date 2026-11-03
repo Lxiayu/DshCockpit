@@ -139,6 +139,38 @@ function collectForbidden(obj, path = '', out = []) {
   return out;
 }
 
+/**
+ * 收集隐私禁用字段（递归）。与 collectForbidden 分开，因为**语义不同**：
+ *
+ *   collectForbidden  → "这是 Harness 或 UI 的事实，你不许存"（事实作者唯一）
+ *   collectPrivacy    → "这是敏感数据，存下来就泄露了"（隐私铁律 §2.4）
+ *
+ * 一个字段可以同时属于两者（sessionId），但修复动作完全不同：
+ * 前者要改成读投影，后者要改成存派生句柄/相对路径。
+ *
+ * 2026-11-04 修正：`PRIVACY_FORBIDDEN_FIELDS` 此前**只定义未使用**——
+ * 也就是说 `cwd` / `absolutePath` 这两条隐私约束在代码里从未被执行。
+ * 一个"写在常量里但没人调用"的防线等于没有防线，所以这里补上执行点。
+ *
+ * @param {object} obj 待检查对象
+ * @param {string} [path] 递归路径前缀（错误信息用）
+ * @param {string[]} [out] 累积结果
+ * @returns {string[]} 命中的字段路径
+ */
+function collectPrivacy(obj, path = '', out = []) {
+  if (!obj || typeof obj !== 'object') return out;
+  if (Array.isArray(obj)) {
+    obj.forEach((item, i) => collectPrivacy(item, `${path}[${i}]`, out));
+    return out;
+  }
+  for (const [key, value] of Object.entries(obj)) {
+    const here = path ? `${path}.${key}` : key;
+    if (PRIVACY_FORBIDDEN_FIELDS.includes(key)) out.push(here);
+    collectPrivacy(value, here, out);
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // 实体校验
 // ---------------------------------------------------------------------------
@@ -203,13 +235,150 @@ function validateMission(m) {
     }
   }
 
+  // 交付合同（S2）：可选字段，但一旦存在就必须自洽。
+  // 老 Mission 没有 contract 仍然有效 —— 升级不是迁移，新能力不强迫旧数据变形状。
+  if (m.contract !== undefined && m.contract !== null) {
+    if (!isPlainObject(m.contract)) {
+      errors.push('contract must be an object when present');
+    } else {
+      for (const e of validateContract(m.contract)) errors.push(e);
+    }
+  }
+
   // 派生字段黑名单
   const forbidden = collectForbidden(m);
   if (forbidden.length) {
     errors.push(`derived fields must not be persisted (they belong to Harness or UI): ${forbidden.join(', ')}`);
   }
 
+  // 隐私黑名单（2026-11-04 起真正执行；此前 PRIVACY_FORBIDDEN_FIELDS 只定义未使用）
+  const privacy = collectPrivacy(m);
+  if (privacy.length) {
+    errors.push(`privacy-sensitive fields must not be persisted (store a derived handle or a Grant reference instead): ${privacy.join(', ')}`);
+  }
+
   return { ok: errors.length === 0, errors };
+}
+
+// ---------------------------------------------------------------------------
+// 交付合同（S2，2026-11-04）
+// ---------------------------------------------------------------------------
+
+/**
+ * 验收条件的验证方式。**闭集**：新增一种必须先想清楚"谁来检查、凭什么相信"。
+ *
+ * 之所以是闭集而不是自由字符串：验证方式是"凭证"的判据。
+ * 如果允许模型自己发明一种（比如 "agent-says-so"），
+ * 那合同就重新变成了自我报告 —— 而自我报告正是我们要修的病。
+ */
+const ACCEPTANCE_KINDS = Object.freeze([
+  'command',   // 跑一条命令，按退出码判定（真正的自动验证）
+  'artifact',  // 必须产出一个具体文件（存在性 + 可选的内容检查）
+  'manual',    // 人明确点了"我验收了"（最弱，但诚实）
+]);
+
+/** 合同状态。draft = 还在编辑，不参与派发。 */
+const CONTRACT_STATUSES = Object.freeze(['draft', 'dispatching', 'active', 'ended']);
+
+/** 派发策略：由确定性规则选出，用户可覆盖。 */
+const DISPATCH_STRATEGIES = Object.freeze(['single', 'sequential', 'parallel']);
+
+/**
+ * 校验交付合同。返回错误字符串数组（空 = 通过）。
+ *
+ * 第一性原理：为什么合同不是"多几个输入框"
+ *
+ *   派发现在只是"发一段文本给 Lead"。Agent 收到后自己决定做多少、
+ *   做到什么程度算完成 —— 于是"完成"由**执行者自己定义**。
+ *   这正是"Agent 自我报告不能成为完成依据"那句诊断的根。
+ *
+ *   合同把判定权拿回人类一侧：人先写下"什么算做完"，
+ *   并给每条验收条件绑定一种**可检查的**验证方式。
+ *   没有验收条件的合同不许存在 —— 否则它只是一段更长的 prompt。
+ *
+ * 刻意不检查的东西：绝对路径、cwd、sessionId ——
+ * 它们在 FORBIDDEN_PERSISTED_FIELDS 里，由 collectForbidden 统一拦截。
+ * 合同里放的是 `grantId`（我们自己的授权记录引用），永远不是目录路径。
+ *
+ * @param {object} c 合同对象
+ * @returns {string[]} 错误列表
+ */
+function validateContract(c) {
+  const errors = [];
+  if (!isPlainObject(c)) return ['contract must be an object'];
+
+  if (!CONTRACT_STATUSES.includes(c.status)) {
+    errors.push(`contract.status must be one of ${CONTRACT_STATUSES.join('|')}`);
+  }
+
+  // 验收条件：必须有，且每条都要有可检查的验证方式。
+  // 「一条都没有」不是"还没填"，而是"这份合同无法判定完成"——直接拒。
+  if (!Array.isArray(c.acceptance)) {
+    errors.push('contract.acceptance must be an array');
+  } else if (c.acceptance.length === 0) {
+    errors.push('contract.acceptance must contain at least one criterion '
+      + '(a contract with no acceptance test cannot decide when the work is done)');
+  } else {
+    c.acceptance.forEach((a, i) => {
+      if (!isPlainObject(a)) { errors.push(`contract.acceptance[${i}] must be an object`); return; }
+      if (!isNonEmptyString(a.id)) errors.push(`contract.acceptance[${i}].id is required`);
+      if (!isNonEmptyString(a.text)) {
+        errors.push(`contract.acceptance[${i}].text is required (what must be true)`);
+      }
+      if (!ACCEPTANCE_KINDS.includes(a.kind)) {
+        errors.push(`contract.acceptance[${i}].kind must be one of ${ACCEPTANCE_KINDS.join('|')}`);
+      }
+      // 只写 kind 而不写判据等于没有验证方式：
+      // command 必须给出跑什么，artifact 必须给出产物引用。
+      if (a.kind === 'command' && !isNonEmptyString(a.command)) {
+        errors.push(`contract.acceptance[${i}].command is required when kind=command`);
+      }
+      if (a.kind === 'artifact' && !isNonEmptyString(a.artifactRef)) {
+        errors.push(`contract.acceptance[${i}].artifactRef is required when kind=artifact`);
+      }
+    });
+  }
+
+  // 预算：可留空（空 = 不限），给了就必须是非负有限数。
+  // 0 合法（"不许花"），负数与 NaN 不合法。
+  if (c.budget !== undefined && c.budget !== null) {
+    if (!isPlainObject(c.budget)) {
+      errors.push('contract.budget must be an object when present');
+    } else {
+      if (c.budget.maxTokens !== undefined && c.budget.maxTokens !== null
+        && !isFiniteNonNegative(c.budget.maxTokens)) {
+        errors.push('contract.budget.maxTokens must be a non-negative finite number');
+      }
+      if (c.budget.maxWallMs !== undefined && c.budget.maxWallMs !== null
+        && !isFiniteNonNegative(c.budget.maxWallMs)) {
+        errors.push('contract.budget.maxWallMs must be a non-negative finite number');
+      }
+    }
+  }
+
+  // 工作目录只能引用 Grant，不能是路径。
+  if (c.grantId !== undefined && c.grantId !== null) {
+    if (!isNonEmptyString(c.grantId) || !/^gr-[A-Za-z0-9][A-Za-z0-9-]*$/.test(c.grantId)) {
+      errors.push('contract.grantId must look like "gr-<opaque>" (a Grant reference, never a path)');
+    }
+  }
+
+  // 派发策略：确定性规则选出来的结果，用户可覆盖。
+  if (c.strategy !== undefined && c.strategy !== null) {
+    if (!DISPATCH_STRATEGIES.includes(c.strategy)) {
+      errors.push(`contract.strategy must be one of ${DISPATCH_STRATEGIES.join('|')}`);
+    }
+  }
+
+  // 幂等键：同一份合同重复派发时用来识别"这是同一次下达"。
+  // 它会写进 prompt 的固定首行标记，派发确认阶段用它匹配。
+  if (c.dispatchKey !== undefined && c.dispatchKey !== null) {
+    if (!isNonEmptyString(c.dispatchKey)) {
+      errors.push('contract.dispatchKey must be a non-empty string when present');
+    }
+  }
+
+  return errors;
 }
 
 /** 校验一个 Workstream。 */
@@ -468,11 +637,16 @@ module.exports = {
   QUESTION_STATUSES,
   FORBIDDEN_PERSISTED_FIELDS,
   PRIVACY_FORBIDDEN_FIELDS,
+  ACCEPTANCE_KINDS,
+  CONTRACT_STATUSES,
+  DISPATCH_STRATEGIES,
+  validateContract,
   isPlainObject,
   isNonEmptyString,
   isFiniteNonNegative,
   isDerivedHandle,
   collectForbidden,
+  collectPrivacy,
   validateMission,
   validateWorkstream,
   validateDecision,

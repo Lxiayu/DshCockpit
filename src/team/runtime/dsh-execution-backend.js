@@ -289,6 +289,22 @@ function mapDshJournalEvent(raw, phaseForTool) {
     case 'interrupted':
     case 'cancelled':
       return Object.freeze({ type: 'execution/cancelled', reason: 'cancelled', code: null });
+    case 'forked':
+      // 0.2.x 新增的 turn-end reason（TurnEndReasonMap）。
+      //
+      // 官方原文（dsh-session types.d.ts）：
+      //   "Fork-seed construction closed a turn that was still open at the fork
+      //    boundary in the source session. **Only fork seeds carry this marker —
+      //    the loop never emits it**"
+      //
+      // 也就是说：它不是 Agent 失败，也不是用户中断，而是**fork 动作合成了一个
+      // "关闭未结束 turn" 的事件**（源会话的事件前缀被复制进 fork 子会话）。
+      // 它对"这次执行"的含义是：这个 turn 在源会话里没有跑完，被 fork 边界截断。
+      //
+      // 修复前它落到 default → attention("unknown-reason")，
+      // 结果是把一次 fork **误报成"需要你处理"**，污染右栏待办。
+      // 归入 cancelled 是保守且不撒谎的：非失败、非正常完成、无需人处理。
+      return Object.freeze({ type: 'execution/cancelled', reason: 'forked', code: null });
     default:
       // 未知/缺失 reason：**有意**降级为 attention（继承 adapter 的保守立场，绝不猜 failed）。
       return Object.freeze({ type: 'execution/attention', reason: 'unknown-reason', code: null });

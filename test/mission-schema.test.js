@@ -343,3 +343,137 @@ test('projection: question.answered records the answer and the reply time', () =
   assert.strictEqual(p.questions['q-1'].answer, '升级');
   assert.strictEqual(p.questions['q-1'].answeredAtMs, 400);
 });
+
+// ===========================================================================
+// 交付合同（S2，2026-11-04）
+//
+// 第一性原理：合同要解决的问题不是"多填几个字段"，而是**把"算做完"的
+// 判定权从执行者手里拿回人类一侧**。
+//
+//   没有合同时：Lead 收到一段文本，自己决定做多少、做到什么程度算完成。
+//   合同存在时：人先写下验收条件，每条绑定一种可检查的验证方式。
+//
+// 所以这组测试锁三件事：
+//   1. 没有验收条件的合同**不允许存在**（否则只是更长的 prompt）
+//   2. 每条验收条件必须带可检查的判据（kind + 对应字段）
+//   3. 合同里**不允许出现路径**（只能引用 Grant），否则破坏隐私铁律
+// ===========================================================================
+
+function aContract(over = {}) {
+  return {
+    status: 'draft',
+    acceptance: [
+      { id: 'ac-1', text: 'npm test 全绿', kind: 'command', command: 'npm test' },
+    ],
+    ...over,
+  };
+}
+
+test('contract: a mission without a contract stays valid (upgrade is not a migration)', () => {
+  // 老数据没有 contract 字段。新能力不得强迫旧 Mission 改形状，
+  // 否则升级就等于一次数据迁移，而迁移总会有人失败。
+  const r = schema.validateMission(aMission());
+  assert.equal(r.ok, true, r.errors.join('; '));
+});
+
+test('contract: a contract with NO acceptance criteria is rejected', () => {
+  // 这是整个合同模型的存在理由：
+  // 「完成」如果没有判据，就必然回到"Agent 说了算"。
+  const r = schema.validateMission(aMission({ contract: aContract({ acceptance: [] }) }));
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => /at least one criterion/.test(e)),
+    `expected a "cannot decide when done" error, got: ${r.errors.join('; ')}`);
+});
+
+test('contract: every acceptance kind must carry its own checkable criterion', () => {
+  // kind=command 却没有 command，等于"我说要验证但不说什么算通过"。
+  const noCommand = schema.validateMission(aMission({
+    contract: aContract({ acceptance: [{ id: 'ac-1', text: '通过测试', kind: 'command' }] }),
+  }));
+  assert.equal(noCommand.ok, false);
+  assert.ok(noCommand.errors.some((e) => /command is required/.test(e)));
+
+  // kind=artifact 却没有 artifactRef，同理。
+  const noArtifact = schema.validateMission(aMission({
+    contract: aContract({ acceptance: [{ id: 'ac-1', text: '产出报告', kind: 'artifact' }] }),
+  }));
+  assert.equal(noArtifact.ok, false);
+  assert.ok(noArtifact.errors.some((e) => /artifactRef is required/.test(e)));
+
+  // manual 不需要额外字段：它本来就是"人自己看"。
+  const manual = schema.validateMission(aMission({
+    contract: aContract({ acceptance: [{ id: 'ac-1', text: '我看着可以', kind: 'manual' }] }),
+  }));
+  assert.equal(manual.ok, true, manual.errors.join('; '));
+});
+
+test('contract: an invented acceptance kind is rejected (the vocabulary is closed)', () => {
+  // 如果允许模型发明 "agent-says-so" 这种 kind，合同立刻退化成自我报告。
+  const r = schema.validateMission(aMission({
+    contract: aContract({
+      acceptance: [{ id: 'ac-1', text: 'x', kind: 'agent-says-so' }],
+    }),
+  }));
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => /kind must be one of/.test(e)));
+});
+
+test('contract: paths are forbidden — only a Grant reference may name a directory', () => {
+  // 隐私铁律：绝对路径与 cwd 不得持久化。
+  // 合同如果要指目录，只能指向我们自己的 Grant 记录。
+  const withCwd = schema.validateMission(aMission({ contract: aContract({ cwd: '/Users/someone/project' }) }));
+  assert.equal(withCwd.ok, false, 'a raw cwd must be rejected by the forbidden-field scan');
+
+  const withBadGrant = schema.validateMission(aMission({ contract: aContract({ grantId: '/tmp/x' }) }));
+  assert.equal(withBadGrant.ok, false);
+  assert.ok(withBadGrant.errors.some((e) => /grantId must look like/.test(e)));
+
+  const goodGrant = schema.validateMission(aMission({ contract: aContract({ grantId: 'gr-abc123' }) }));
+  assert.equal(goodGrant.ok, true, goodGrant.errors.join('; '));
+});
+
+test('contract: budget accepts zero (meaning "spend nothing") but rejects negatives and NaN', () => {
+  const zero = schema.validateMission(aMission({ contract: aContract({ budget: { maxTokens: 0 } }) }));
+  assert.equal(zero.ok, true, 'zero is a legitimate budget');
+
+  const negative = schema.validateMission(aMission({ contract: aContract({ budget: { maxTokens: -1 } }) }));
+  assert.equal(negative.ok, false);
+
+  const nan = schema.validateMission(aMission({ contract: aContract({ budget: { maxTokens: NaN } }) }));
+  assert.equal(nan.ok, false);
+
+  const absent = schema.validateMission(aMission({ contract: aContract() }));
+  assert.equal(absent.ok, true, 'no budget means unlimited, which is allowed');
+});
+
+test('contract: status is a closed set and draft is distinct from active', () => {
+  for (const status of ['draft', 'dispatching', 'active', 'ended']) {
+    const r = schema.validateMission(aMission({ contract: aContract({ status }) }));
+    assert.equal(r.ok, true, `status ${status} must be accepted: ${r.errors.join('; ')}`);
+  }
+  const bad = schema.validateMission(aMission({ contract: aContract({ status: 'running' }) }));
+  assert.equal(bad.ok, false, '"running" is a Harness fact, not a contract state');
+});
+
+test('contract: strategy is one of the three deterministic outcomes', () => {
+  for (const strategy of ['single', 'sequential', 'parallel']) {
+    const r = schema.validateMission(aMission({ contract: aContract({ strategy }) }));
+    assert.equal(r.ok, true, `strategy ${strategy} must be accepted`);
+  }
+  const bad = schema.validateMission(aMission({ contract: aContract({ strategy: 'auto-magic' }) }));
+  assert.equal(bad.ok, false);
+});
+
+test('contract: validateContract is exported and rejects non-objects without throwing', () => {
+  assert.equal(typeof schema.validateContract, 'function');
+  assert.deepEqual(schema.validateContract(null), ['contract must be an object']);
+  assert.deepEqual(schema.validateContract('nope'), ['contract must be an object']);
+  // 脏数据不得抛异常（schema 层的既有契约）
+  assert.doesNotThrow(() => schema.validateContract({ acceptance: [null, 42, {}] }));
+});
+
+test('contract: the closed vocabularies are exported so the UI cannot invent values', () => {
+  assert.deepEqual([...schema.ACCEPTANCE_KINDS], ['command', 'artifact', 'manual']);
+  assert.deepEqual([...schema.CONTRACT_STATUSES], ['draft', 'dispatching', 'active', 'ended']);
+  assert.deepEqual([...schema.DISPATCH_STRATEGIES], ['single', 'sequential', 'parallel']);
+});

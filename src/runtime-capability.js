@@ -75,6 +75,20 @@ const CAPABILITIES = Object.freeze([
     since: '0.2.0',
     why: '官方 Agent Teams（Mission Core 的团队层依赖）',
     evidence: 'POC 2026-11-01 实测：0.2.1-rc.5 / 0.2.2-alpha.2 有 dsh-experimental-agent-team；0.1.5 无',
+    // S0 第二轮（2026-11-04）实测补充：**包存在 ≠ 能力生效**。
+    // `dsh-experimental-agent-team` 只是领域服务；要让 session/projections 真正下发
+    // `agentTeam`，profile 的 dsh.profile.bundles 必须包含
+    // `@deepseek-ai/dsh-experimental-agent-team-profile`。
+    // 实测：bundles 仅 base+web-app 时 projections 20 键（无 agentTeam）；
+    //       加入 team-profile 后 21 键（含 agentTeam，值为 {members:[lead], tasks:[]}）。
+    // 证据：docs/quality/harness-agent-team-probe-2026-11-04.md §1
+    activation: {
+      kind: 'profile-bundle',
+      bundle: '@deepseek-ai/dsh-experimental-agent-team-profile',
+      observable: 'session/projections 的 values.agentTeam 存在',
+      note: '仅安装包不会生效；官方默认关闭，需在 Plugins 页启用或写入 profile bundles',
+      evidence: 'docs/quality/harness-agent-team-probe-2026-11-04.md §1（bundles 20 键 → 加 team-profile 后 21 键）',
+    },
   }),
   Object.freeze({
     id: 'workspace.changes',
@@ -245,6 +259,47 @@ function needsCompatibilityNote(version) {
   return judge(version).verdict === VERDICTS.UNVERIFIED;
 }
 
+/**
+ * 按 id 取能力声明（找不到返回 null）。
+ * @param {string} id 能力 id
+ */
+function capabilityById(id) {
+  return CAPABILITIES.find((c) => c.id === id) || null;
+}
+
+/**
+ * 该能力是否需要"额外的启用动作"才能生效。
+ *
+ * 第一性原理：为什么"包在"与"能用"必须分开
+ *
+ *   0.2.1 安装了 dsh-experimental-agent-team，但 session/projections 里**没有**
+ *   agentTeam —— 因为它只是一个领域服务插件，默认没有挂进 profile 的 bundle 层。
+ *   这类差异如果不建模，壳层就会把"读不到 agentTeam"误判成"团队不支持"，
+ *   进而把一个**可修复的配置问题**报成**能力缺失**。两者对用户的含义完全不同：
+ *     · 能力缺失 → 升级运行时
+ *     · 未启用   → 去设置里打开一个开关
+ *
+ * @param {string} id 能力 id
+ * @returns {boolean}
+ */
+function requiresActivation(id) {
+  const cap = capabilityById(id);
+  return !!(cap && cap.activation);
+}
+
+/**
+ * 描述某个能力的启用要求，供设置页/诊断/右栏空态使用。
+ * 无启用要求时返回 null。
+ *
+ * @param {string} id 能力 id
+ * @returns {{kind:string, bundle?:string, observable:string, note:string}|null}
+ */
+function describeActivation(id) {
+  const cap = capabilityById(id);
+  if (!cap || !cap.activation) return null;
+  return { ...cap.activation };
+}
+
 module.exports = {
   CAPABILITIES,
   CAPABILITY_IDS,
@@ -254,4 +309,7 @@ module.exports = {
   judge,
   canRun,
   needsCompatibilityNote,
+  capabilityById,
+  requiresActivation,
+  describeActivation,
 };

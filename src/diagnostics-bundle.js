@@ -38,6 +38,9 @@ const BUNDLE_PREFIX = 'dsh-cockpit-diagnostics-';
 const MAX_LOG_FILES = 3;          // newest N shell logs (runtime-*.log only)
 const MAX_LOG_LINES = 2000;       // tail cap per log file
 const MAX_CRASH_RECORDS = 10;     // newest crash-*.json records
+// Bounded so a pathological runtime that invents event types every turn
+// cannot grow the bundle. 32 is well above the 52-type 0.2.1 vocabulary.
+const MAX_UNMAPPED_EVENT_ROWS = 32;
 const REDACTED = '[REDACTED]';
 
 // --- line redactor ------------------------------------------------------------
@@ -137,6 +140,8 @@ function readmeText(ctx) {
     '- office-diagnostics.json  办公室模块诊断（office:diagnostics 投影）：',
     '                        diagnostics 环只有 {atMs, code, count}（固定诊断码词表），',
     '                        不含任何事件正文',
+    '                        unmappedJournalEvents 只有 {type, count, firstAtMs, lastAtMs}：',
+    '                        上游发来但尚未专门翻译的 journal 事件名与次数，同样不含载荷',
     '- crashes.json          最近崩溃记录：时间、退出码/信号、壳与运行时版本、',
     '                        日志尾部（同样逐行脱敏，且已去掉文件路径）',
     '- logs/runtime-*.log    最近的壳日志（最多 3 个、每文件最多 2000 行尾摘），',
@@ -279,22 +284,40 @@ function createDiagnosticsBundle(deps) {
 
   function collectOfficeDiagnostics() {
     const office = d.officeDiagnostics ? d.officeDiagnostics() : null;
-    if (!office) return null;
+    // 未映射事件计数独立于 office module：即使办公室模块没在跑，
+    // 壳层也一直在收 journal 事件，这份计数仍然有意义。
+    const unmapped = d.officeUnmappedEvents ? d.officeUnmappedEvents() : null;
+    // 空数组 == 没有观测到任何未映射事件，与"没有这份数据"同义。
+    // 不这样归一化的话，一个恒返回 [] 的依赖会让"办公室没跑"也产出非 null 区块，
+    // 破坏既有的 null 契约（缺文件与空对象在诊断里含义不同）。
+    const hasUnmapped = Array.isArray(unmapped) ? unmapped.length > 0 : !!unmapped;
+    if (!office && !hasUnmapped) return null;
     return {
       schemaVersion: BUNDLE_SCHEMA_VERSION,
       projectedFrom: 'office:diagnostics',
-      simulatedAtMs: office.simulatedAtMs,
-      sync: office.sync,
-      paused: office.paused,
-      employeeCount: office.employeeCount,
-      activityLogSize: office.activityLogSize,
-      packPresent: office.packPresent,
-      adapterCount: office.adapterCount,
-      renderer: office.renderer ? { ...office.renderer } : null,
-      clock: office.clock ? JSON.parse(JSON.stringify(office.clock)) : null,
+      simulatedAtMs: office ? office.simulatedAtMs : null,
+      sync: office ? office.sync : null,
+      paused: office ? office.paused : null,
+      employeeCount: office ? office.employeeCount : null,
+      activityLogSize: office ? office.activityLogSize : null,
+      packPresent: office ? office.packPresent : null,
+      adapterCount: office ? office.adapterCount : null,
+      renderer: office && office.renderer ? { ...office.renderer } : null,
+      clock: office && office.clock ? JSON.parse(JSON.stringify(office.clock)) : null,
       // diagnostics ring entries are {atMs, code, count} — fixed app
       // vocabulary, no payload text ever enters this ring.
-      diagnostics: (office.diagnostics || []).map((e) => ({ atMs: e.atMs, code: e.code, count: e.count })),
+      diagnostics: office
+        ? (office.diagnostics || []).map((e) => ({ atMs: e.atMs, code: e.code, count: e.count }))
+        : [],
+      // 上游新增但尚未专门翻译的 journal 事件（按次数降序）。
+      // 只有事件名与计数/时间戳——**没有 payload**：prompt、工具参数、
+      // 产物内容都不进诊断包（AGENTS.md §2.4）。
+      // 用途：升级运行时后判断"某能力到底发没发事件"，而不是靠猜。
+      unmappedJournalEvents: Array.isArray(unmapped)
+        ? unmapped.slice(0, MAX_UNMAPPED_EVENT_ROWS).map((e) => ({
+          type: e.type, count: e.count, firstAtMs: e.firstAtMs, lastAtMs: e.lastAtMs,
+        }))
+        : [],
       // Deliberately ABSENT: activityLog content, usage (costs/budgets),
       // pending requests (they carry task text), employees list w/ ids.
     };

@@ -4913,6 +4913,10 @@ const diagnosticsBundle = createDiagnosticsBundle({
     } catch { return []; }
   },
   locale: () => app.getLocale(),
+  // 未映射 journal 事件的计数（只有事件名与次数，无 payload —— 见
+  // noteOfficeUnmappedEvent 的第一性原理注释）。用途：升级后判断
+  // "某个上游能力到底有没有发事件"，而不是靠猜。
+  officeUnmappedEvents: () => officeUnmappedEventSnapshot(),
   home: () => os.homedir(),
   log,
 });
@@ -5576,6 +5580,72 @@ const OFFICE_ASSISTANT_STREAM = true;
 const OFFICE_ASSISTANT_STREAM_LOG_EVERY = 40; // chunks between log lines
 const officeAssistantStreamStats = new Map(); // sessionId -> {chunks, attempts, ended, lastLogAt}
 
+// ---------------------------------------------------------------------------
+// 未映射 journal 事件的观测计数（S1：不让新能力静默流失）
+//
+// 第一性原理：为什么"透传但没映射"必须被计数
+//
+//   ingestOfficeJournalEvent 的最后一行是**兜底透传**：未识别的 journal 事件
+//   原样交给 office module，映射不到就不产 fact。这个设计是对的（不崩溃、不猜），
+//   但它有一个沉默的代价：**上游每新增一种事件，我们只会"看到它没生效"，看不到
+//   "它发生过几次"**。
+//
+//   0.2.x 一次就新增了 12 种事件（deepseek-harness-api-surface.md §4.1），
+//   其中 workspace/changes、permission/preset 都是我们需要的。如果只在升级后
+//   发现"右栏怎么没变化"，就无从判断是"上游没发"还是"我们没接"。
+//
+//   所以这里统计每个 type 的**到达次数**（只记事件名，绝不记 payload —
+//   隐私铁律 §2.4：prompt / 工具参数 / 产物内容不进办公室快照）。
+//   诊断包与体检可读它，用来回答"这个事件到底来没来"。
+// ---------------------------------------------------------------------------
+const OFFICE_UNMAPPED_EVENT_LOG_EVERY = 200;
+/** journal type -> {count, firstAtMs, lastAtMs}；仅事件名，不含载荷。 */
+const officeUnmappedEventStats = new Map();
+
+/**
+ * 已经有专门翻译分支的 journal 事件类型（不参与"未映射"计数）。
+ *
+ * 维护规则：每当 ingestOfficeJournalEvent 或 subagent-wiring 新增一个 type 分支，
+ * 必须同步加到这里；否则它会既被翻译、又被计成"未映射"，让诊断数字失真。
+ * 反向也成立：从代码里删掉一个分支时必须同步删这里。
+ */
+const OFFICE_TRANSLATED_EVENT_TYPES = new Set([
+  'turn/start',
+  'turn/end',
+  'tool/call',
+  'assistant/message',
+  // subagent-wiring 消费的（handleEvent 返回 true 时直接 return）
+  'subagent/catalog',
+  'tool-workflow/run-start',
+  'tool-workflow/run-end',
+  'tool-workflow/agent-start',
+  'tool-workflow/agent-end',
+  'user/message',
+]);
+
+/** 记录一次"透传但未专门映射"的 journal 事件（只计数，无 payload）。 */
+function noteOfficeUnmappedEvent(type, nowMs) {
+  if (typeof type !== 'string' || !type) return;
+  let stat = officeUnmappedEventStats.get(type);
+  const at = Number.isFinite(nowMs) ? nowMs : Date.now();
+  if (!stat) {
+    stat = { count: 0, firstAtMs: at, lastAtMs: at };
+    officeUnmappedEventStats.set(type, stat);
+  }
+  stat.count += 1;
+  stat.lastAtMs = at;
+  if (stat.count % OFFICE_UNMAPPED_EVENT_LOG_EVERY === 0) {
+    log(`[office] unmapped journal event "${type}" seen ${stat.count}x (payload never recorded)`);
+  }
+}
+
+/** 只读快照：按次数降序。供诊断包/体检使用。 */
+function officeUnmappedEventSnapshot() {
+  return [...officeUnmappedEventStats.entries()]
+    .map(([type, s]) => ({ type, count: s.count, firstAtMs: s.firstAtMs, lastAtMs: s.lastAtMs }))
+    .sort((a, b) => b.count - a.count);
+}
+
 /** session/follow 的请求体。地址来自地址簿：
  *  - 根会话 `{kind:'session'}`；
  *  - 子代理会话 `{kind:'subagent', parentSessionId, childSessionId, mode}`（0.1.5 的
@@ -5833,6 +5903,12 @@ function ingestOfficeJournalEvent(sessionId, event) {
   // ingest below, which is what advances the watermark for them.
   // -------------------------------------------------------------------------
   if (officeSubagentWiring.handleEvent(sessionId, event)) return;
+  // 走到这里说明该事件没有专门翻译分支，原样透传给 office module。
+  // 计数（只记 type，不记 payload），让"上游发了但我们没接"变成可观测事实，
+  // 而不是升级后才发现"某个能力怎么没生效"。
+  if (!OFFICE_TRANSLATED_EVENT_TYPES.has(event.type)) {
+    noteOfficeUnmappedEvent(event.type, event.time);
+  }
   mod.ingestHarnessEvent({ sessionId, type: event.type, seq: event.seq, time: event.time, data });
 }
 

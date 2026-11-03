@@ -848,3 +848,59 @@ test('dsh-backend v1: exhaustion crash synthesis stays pull-driven (no timers, n
     assert.equal(pattern.test(source), false, `the backend must not use ${pattern}`);
   }
 });
+
+// ------------------------------------------- 0.2.x 的 forked turn-end reason
+
+test('dsh-backend: turn-end reason "forked" is NOT surfaced as "needs you"', () => {
+  // 第一性原理：为什么这一条必须单独锁住
+  //
+  // `forked` 是 0.2.x 新增的 TurnEndReasonMap 成员。官方原文（dsh-session types.d.ts）：
+  //   "Fork-seed construction closed a turn that was still open at the fork boundary
+  //    in the source session. Only fork seeds carry this marker — the loop never emits it"
+  //
+  // 它不是失败，也不是用户中断，而是 fork 时合成的一个"关闭未结束 turn"的事件。
+  //
+  // 修复前它落入 default 分支 → execution/attention("unknown-reason")，
+  // 于是**一次 fork 会在右栏变成一条"需要你处理"的待办**。
+  // 这类误报最伤：用户学会无视红色，真正需要处理的事就淹没在里面。
+  const mapped = backendModule.mapDshJournalEvent(
+    journalEvent('turn/end', { reason: { kind: 'forked' } }),
+  );
+  assert.notEqual(mapped.type, 'execution/attention',
+    'forked must never become a human-attention item');
+  assert.equal(mapped.type, 'execution/cancelled');
+  assert.equal(mapped.reason, 'forked',
+    'the reason distinguishes a fork cut from a real user cancellation');
+});
+
+test('dsh-backend: forked and cancelled are both non-completions but distinguishable', () => {
+  const forked = backendModule.mapDshJournalEvent(journalEvent('turn/end', { reason: { kind: 'forked' } }));
+  const cancelled = backendModule.mapDshJournalEvent(journalEvent('turn/end', { reason: { kind: 'cancelled' } }));
+  assert.equal(forked.type, cancelled.type, 'both end the run without a result');
+  assert.notEqual(forked.reason, cancelled.reason,
+    'but the reason must stay distinguishable for diagnostics');
+  assert.equal(cancelled.reason, 'cancelled');
+});
+
+test('dsh-backend: exactly the five real reasons are known; anything else stays conservative', () => {
+  // 防止将来有人把新 reason 悄悄塞进 completed/failed。
+  // 已知集合：completed / failed+error / blocked / aborted+interrupted+cancelled / forked
+  const known = {
+    completed: 'execution/completed',
+    failed: 'execution/failed',
+    error: 'execution/failed',
+    blocked: 'execution/attention',
+    aborted: 'execution/cancelled',
+    interrupted: 'execution/cancelled',
+    cancelled: 'execution/cancelled',
+    forked: 'execution/cancelled',
+  };
+  for (const [reason, expected] of Object.entries(known)) {
+    const mapped = backendModule.mapDshJournalEvent(journalEvent('turn/end', { reason: { kind: reason } }));
+    assert.equal(mapped.type, expected, `reason ${reason}`);
+  }
+  // 真正未知的仍然保守降级，绝不猜 completed
+  const unknown = backendModule.mapDshJournalEvent(journalEvent('turn/end', { reason: { kind: 'brand-new' } }));
+  assert.equal(unknown.type, 'execution/attention');
+  assert.notEqual(unknown.type, 'execution/completed');
+});

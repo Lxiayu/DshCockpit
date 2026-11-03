@@ -166,3 +166,43 @@ test('capability: the 0.2.x matrix entry matches what the POC actually proved', 
   }
   assert.deepEqual(entry.missing, [], 'POC found nothing missing in 0.2.x');
 });
+
+// ------------------------------------------- 能力"启用"与"存在"的区分（S0 第二轮）
+
+test('capability: agent-team declares an activation requirement (presence != enabled)', () => {
+  // 第一性原理：0.2.1 装了 dsh-experimental-agent-team，但 session/projections 里
+  // 没有 agentTeam，因为 profile bundles 没挂 team-profile 层。
+  // 若把"读不到 agentTeam"报成能力缺失，用户会被告知"升级运行时"，
+  // 而真正要做的只是"打开一个开关"。二者的修复动作完全不同。
+  const decl = cap.capabilityById('agent-team');
+  assert.ok(decl, 'agent-team capability must exist');
+  assert.ok(decl.activation, 'agent-team must declare how it is activated');
+  assert.strictEqual(decl.activation.kind, 'profile-bundle');
+  assert.strictEqual(decl.activation.bundle, '@deepseek-ai/dsh-experimental-agent-team-profile');
+  assert.match(decl.activation.observable, /agentTeam/);
+});
+
+test('capability: requiresActivation distinguishes conditional capabilities from always-on ones', () => {
+  assert.strictEqual(cap.requiresActivation('agent-team'), true);
+  assert.strictEqual(cap.requiresActivation('remote.mux'), false);
+  assert.strictEqual(cap.requiresActivation('session.create'), false);
+  assert.strictEqual(cap.requiresActivation('no-such-capability'), false);
+});
+
+test('capability: describeActivation returns a copy, not the frozen declaration', () => {
+  const a = cap.describeActivation('agent-team');
+  assert.ok(a);
+  assert.strictEqual(a.bundle, '@deepseek-ai/dsh-experimental-agent-team-profile');
+  // 修改返回值不得污染全局声明（否则一次 UI 调用就会改变矩阵语义）
+  a.bundle = 'tampered';
+  assert.strictEqual(cap.describeActivation('agent-team').bundle,
+    '@deepseek-ai/dsh-experimental-agent-team-profile');
+  assert.strictEqual(cap.describeActivation('remote.mux'), null);
+});
+
+test('capability: activation evidence points at the probe that proved it', () => {
+  // 防凭印象：这条事实必须有可追溯的真机证据。
+  const decl = cap.capabilityById('agent-team');
+  assert.match(decl.activation.note, /默认关闭|仅安装/);
+  assert.match(decl.activation.evidence, /harness-agent-team-probe-2026-11-04/);
+});

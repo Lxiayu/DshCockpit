@@ -210,6 +210,100 @@ function normalizeInbox(raw) {
 function isId(v) { return typeof v === 'string' && /^mis-[A-Za-z0-9][A-Za-z0-9-]*$/.test(v); }
 
 // ---------------------------------------------------------------------------
+// 派发指令渲染（S2，2026-11-04）—— 纯函数，零 IO，可离线测试
+//
+// 第一性原理：为什么"派发"要是一个可测试的纯函数
+//
+//   我们没有 remote 写表面（D11：agent-team 不暴露 RPC），所以派发的**唯一**
+//   实现方式是"给 Lead 发一段结构化指令，让它去调 spawn_teammate/team_task_create"。
+//   这段文字因此不是 UI 文案，而是**执行契约的传输格式**：
+//     它的每一个字段都必须能被测试断言，否则"合同写进去了没有"只能靠肉眼。
+//
+//   三个必须由测试锁住的语义：
+//     1. 幂等键出现在**固定首行**（确认阶段靠它匹配，位置一漂移就匹配不上）
+//     2. 验收条件必须逐条出现在指令里（否则 Agent 看不见就等于没有）
+//     3. 没有合同时**退回旧行为**（不能因为新功能让老 Mission 派发失败）
+// ---------------------------------------------------------------------------
+
+/** 幂等键在指令首行的固定标记。**改动这个字符串会破坏所有已下达的确认匹配。** */
+const DISPATCH_KEY_PREFIX = '[mission-dispatch:';
+
+/**
+ * 构造派发指令。
+ *
+ * @param {object} input
+ * @param {object} input.mission       Mission 实体（title / intent / constraints / contract）
+ * @param {string} input.task          本次任务描述（用户原话）
+ * @param {string} input.dispatchKey   幂等键（同一次下达保持相同）
+ * @returns {string} 要发给 Lead 的完整指令文本
+ */
+function renderDispatchInstruction({ mission, task, dispatchKey } = {}) {
+  const m = mission && typeof mission === 'object' ? mission : {};
+  const lines = [];
+
+  // 1) 固定首行：幂等键。确认阶段用 DISPATCH_KEY_PREFIX 匹配，
+  //    所以它必须在第一行、且格式稳定。
+  if (typeof dispatchKey === 'string' && dispatchKey) {
+    lines.push(`${DISPATCH_KEY_PREFIX}${dispatchKey}]`);
+  }
+
+  // 2) 任务书主体
+  lines.push('【Mission】' + (m.title || m.missionId || '(未命名)'));
+  if (m.intent) lines.push('目标：' + m.intent);
+  const constraints = Array.isArray(m.constraints) ? m.constraints.filter((c) => c && c.text) : [];
+  for (const c of constraints) lines.push('约束：' + c.text);
+
+  // 3) 合同：验收条件逐条列出，并明确要求 Agent 把它们落到任务板上。
+  //    为什么逐条列而不是概括：Agent 只有「看见」某条验收才能为它负责；
+  //    概括成"按合同验收"等于什么都没说。
+  const contract = m.contract && typeof m.contract === 'object' ? m.contract : null;
+  if (contract && Array.isArray(contract.acceptance) && contract.acceptance.length > 0) {
+    lines.push('');
+    lines.push('【验收条件】以下每一条都必须被验证，未通过不算完成：');
+    contract.acceptance.forEach((a, i) => {
+      if (!a || typeof a.text !== 'string') return;
+      let line = `${i + 1}. ${a.text}`;
+      if (a.kind === 'command' && typeof a.command === 'string') {
+        line += `（验证方式：执行 \`${a.command}\`，退出码 0 才算通过）`;
+      } else if (a.kind === 'artifact' && typeof a.artifactRef === 'string') {
+        line += `（验证方式：产出文件 ${a.artifactRef} 并确认存在）`;
+      } else if (a.kind === 'manual') {
+        line += '（验证方式：由人确认）';
+      }
+      lines.push(line);
+    });
+    if (contract.budget && Number.isFinite(contract.budget.maxTokens)) {
+      lines.push('');
+      lines.push(`【预算】最多 ${contract.budget.maxTokens} tokens，超出请停下并汇报。`);
+    }
+  }
+
+  // 4) 本次任务
+  lines.push('');
+  lines.push('【本次任务】');
+  lines.push(typeof task === 'string' ? task : '');
+
+  // 5) 落板要求：把验收条件写进团队任务板，而不是只在对话里承诺。
+  //    这样右栏与 Harness 都能读到"这次做到什么程度算完"。
+  if (contract && Array.isArray(contract.acceptance) && contract.acceptance.length > 0) {
+    lines.push('');
+    lines.push('【要求】请用 team_task_create 把上面的验收条件写进团队任务板'
+      + '（subject 概括任务，description 里逐条列出验收条件），然后再开始执行。');
+  }
+
+  return lines.join('\n');
+}
+
+/** 从一段指令文本里取出幂等键；没有则 null。 */
+function parseDispatchKey(text) {
+  if (typeof text !== 'string') return null;
+  const firstLine = text.split('\n', 1)[0] || '';
+  if (!firstLine.startsWith(DISPATCH_KEY_PREFIX) || !firstLine.endsWith(']')) return null;
+  const key = firstLine.slice(DISPATCH_KEY_PREFIX.length, -1);
+  return key || null;
+}
+
+// ---------------------------------------------------------------------------
 // lastSeenAtMs —— UI 偏好，不是项目事实
 //
 // 第一性原理：为什么它不能写进 Mission 实体
@@ -1254,16 +1348,14 @@ function registerMissionIpc(ipcMain, ctx) {
       //
       // 为什么要带上下文：新会话里 Agent 不知道这个 Mission 的目标和边界。
       // AGENTS.md 的 Brief 只在**会话启动时**被读；已存在的会话不会重读。
+      //
+      // S2（2026-11-04）：改为调用 renderDispatchInstruction —— 同一段文本现在
+      // 还会带上合同（验收条件/预算）与固定首行的幂等键。没有合同时输出与旧行为
+      // 完全一致（除首行多了幂等键），所以老 Mission 的派发不受影响。
       const m = view.mission;
-      const lines = [];
-      lines.push('【Mission】' + (m.title || m.missionId));
-      if (m.intent) lines.push('目标：' + m.intent);
-      const constraints = Array.isArray(m.constraints) ? m.constraints.filter((c) => c && c.text) : [];
-      for (const c of constraints) lines.push('约束：' + c.text);
-      lines.push('');
-      lines.push('【本次任务】');
-      lines.push(task);
-      const text = lines.join('\n');
+      const dispatchKey = String(payload && payload.dispatchKey ? payload.dispatchKey : '').trim()
+        || `mis-${randomId()}`;
+      const text = renderDispatchInstruction({ mission: m, task, dispatchKey });
 
       let sent;
       try {
@@ -1484,4 +1576,16 @@ function hashOf(text) {
   return require('node:crypto').createHash('sha256').update(String(text)).digest('hex').slice(0, 12);
 }
 
-module.exports = { registerMissionIpc, MISSION_IPC_CHANNELS, ACTIONS };
+// normalizeAgentTeam 是纯函数，导出仅供离线测试。
+// 它决定右栏"团队区块"看到什么：一旦它把"没有团队"归一化成"空团队"，
+// 或者擅自重算 ready/blockedBy，右栏就会显示与 Harness 不一致的事实。
+module.exports = {
+  registerMissionIpc,
+  MISSION_IPC_CHANNELS,
+  ACTIONS,
+  normalizeAgentTeam,
+  // 纯函数导出仅供离线测试（派发指令是执行契约的传输格式，必须可断言）
+  renderDispatchInstruction,
+  parseDispatchKey,
+  DISPATCH_KEY_PREFIX,
+};
