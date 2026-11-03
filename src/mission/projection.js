@@ -42,6 +42,8 @@ const EVENT_TYPES = Object.freeze([
   'assumption.recorded',
   'assumption.statusChanged',
   'evidence.recorded',
+  // S5：凭证坐标（可复核的交付指针）
+  'receipt.recorded',
 ]);
 
 function emptyProjection() {
@@ -269,6 +271,24 @@ function applyEvent(projection, event) {
       if (!schema.validateTaskRef(payload).ok) break;
       next.taskRefs[payload.taskRefId] = { ...payload };
       ensureMissionIndex(next, payload.missionId).taskRefIds.push(payload.taskRefId);
+      applied = true;
+      break;
+    }
+    case 'receipt.recorded': {
+      // 凭证挂在 Mission 上，只保留**每个 Mission 最新一份**。
+      //
+      // 为什么只留一份：凭证回答的是"最近这次执行可信吗"。
+      // 攒一堆历史凭证会让 UI 无法回答"现在该信哪个"，
+      // 而历史价值有限（真要看历史，事件日志里有 —— 这里不需要重复）。
+      const v = schema.validateReceipt(payload && payload.receipt
+        ? payload.receipt : payload);
+      if (!v.ok) break;
+      const missionId = payload && typeof payload.missionId === 'string' ? payload.missionId : null;
+      if (!missionId || !next.missions[missionId]) break;
+      next.missions[missionId] = {
+        ...next.missions[missionId],
+        receipt: { ...(payload.receipt || payload), recordedAtMs: at },
+      };
       applied = true;
       break;
     }

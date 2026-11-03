@@ -561,8 +561,16 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
   （"没有观测到" vs "读取失败"是两件不同的事）。
   **`total=0` 也仍是 verified** —— "复核过且确实没变"≠"没能复核"。
   新增 `src/mission/turn-seq-tracker.js`（7 条测试），变异 DETECTED ×3。
-- ⬜ 凭证落盘（当前只在 workStatus 时即时读取；Host 清单不持久，
-  所以需要 turn 结束时立刻落盘才能在重启后复核）。
+- ✅ **凭证落盘（2026-11-04 完成）**：
+  新增 `receipt.recorded` 事件 + `schema.validateReceipt` + projection 分支。
+  为什么必须落盘：官方变更清单**只在 Session 存活期间可用**（Host 不持久），
+  所以即时读取的凭证一重启就永久丢失，用户历史里只剩一句"团队说做完了"。
+  落盘的是**坐标**（sessionRef/seq/turn + 计数 + 相对路径清单），不是变更内容。
+  隐私闸门在 schema 层：`sessionRef` 必须是派生句柄（`sess-h-…`），
+  `files[].path` 必须是相对路径且不含 `..`，否则**整个凭证不落盘**。
+  每个 Mission 只保留最新一份（攒历史会让 UI 无法回答"现在该信哪个"）。
+  测试 7 条 + schema 7 条，变异 DETECTED ×3。
+  ⬜ 仍待：`workStatus` 读到 verified 后把它 append 进日志（当前已能读，未自动落盘）。
 - ✅ **`present` 声明与变更事实的合并逻辑（2026-11-04 已完成）**：
   `src/mission/deliverable-signal.js` —— 官方 `deliverables/presented` 事件
   payload 为 `{turn, callId, files:[{path, description?}]}`（读 `.d.ts` 确认）。

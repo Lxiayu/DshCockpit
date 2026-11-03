@@ -477,3 +477,71 @@ test('contract: the closed vocabularies are exported so the UI cannot invent val
   assert.deepEqual([...schema.CONTRACT_STATUSES], ['draft', 'dispatching', 'active', 'ended']);
   assert.deepEqual([...schema.DISPATCH_STRATEGIES], ['single', 'sequential', 'parallel']);
 });
+
+// ---------------------------------------------- 凭证坐标的持久化校验（S5）
+
+test('schema: a well-formed receipt coordinate is accepted', () => {
+  // 凭证要回答"我能不能复核这次交付"，所以它必须**持久化一个可寻址的坐标**。
+  const r = schema.validateReceipt({
+    sessionRef: 'sess-h-abc123',
+    seq: 29,
+    turn: 3,
+    total: 2,
+    added: 15,
+    deleted: 3,
+    files: [{ path: 'src/a.js', added: 15, deleted: 3 }],
+  });
+  assert.equal(r.ok, true, r.errors.join('; '));
+});
+
+test('schema: a raw sessionId as sessionRef is REFUSED (privacy §2.4)', () => {
+  // 这是最容易犯的错：凭证要指向会话，手一滑就把 raw id 存进去了。
+  const r = schema.validateReceipt({ sessionRef: 'session-9f2c-...', seq: 29 });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => /derived handle/.test(e)));
+});
+
+test('schema: absolute paths in the file list are REFUSED (privacy §2.4)', () => {
+  const abs = schema.validateReceipt({
+    sessionRef: 'sess-h-abc', seq: 1, files: [{ path: '/Users/xia/proj/a.js' }],
+  });
+  assert.equal(abs.ok, false);
+  assert.ok(abs.errors.some((e) => /must be relative/.test(e)));
+
+  const win = schema.validateReceipt({
+    sessionRef: 'sess-h-abc', seq: 1, files: [{ path: 'C:\\Users\\x\\a.js' }],
+  });
+  assert.equal(win.ok, false);
+});
+
+test('schema: traversal in the file list is REFUSED', () => {
+  const r = schema.validateReceipt({
+    sessionRef: 'sess-h-abc', seq: 1, files: [{ path: 'a/../../etc/passwd' }],
+  });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => /traversal/.test(e)));
+});
+
+test('schema: seq is mandatory (a coordinate without it cannot be resolved)', () => {
+  const r = schema.validateReceipt({ sessionRef: 'sess-h-abc' });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => /seq/.test(e)));
+});
+
+test('schema: negative or non-numeric counts are refused, not coerced to 0', () => {
+  // 0 是"确实没改"，负数是脏数据。两者不能混。
+  const r = schema.validateReceipt({
+    sessionRef: 'sess-h-abc', seq: 1, total: -1, added: 'x',
+  });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => /total/.test(e)));
+  assert.ok(r.errors.some((e) => /added/.test(e)));
+});
+
+test('schema: the receipt validator rejects privacy-forbidden keys anywhere inside', () => {
+  const r = schema.validateReceipt({
+    sessionRef: 'sess-h-abc', seq: 1, cwd: '/Users/xia/proj',
+  });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => /privacy-forbidden/.test(e)));
+});

@@ -534,6 +534,79 @@ function validateAssumption(a) {
  * `ref` 是相对路径 / commit sha / URL / 命令 / 观察描述，
  * 绝不存文件内容本身（那是隐私边界，也会让事件日志爆炸）。
  */
+/**
+ * 校验一份持久化的凭证坐标（S5）。
+ *
+ * 第一性原理：为什么凭证持久化需要**自己的校验器**，不能复用 evidence
+ *
+ *   凭证要回答"我能不能复核这次交付"。要复核就得有一个能拿去问 Host 的坐标：
+ *   {sessionRef, seq, turn}。这是**执行事实的指针**，不是我们自己的实体。
+ *
+ *   但它同时是一个容易泄密的形状：
+ *     · 若把 sessionRef 写成 raw sessionId（而不是派生句柄）→ 泄露会话身份
+ *     · 若把 files[].path 写成绝对路径 → 泄露用户目录结构
+ *   这两条 AGENTS.md §2.4 都禁止。所以持久化入口必须逐条挡住，
+ *   而不是等它写进不可篡改的日志之后再想办法。
+ *
+ * @param {object} r
+ * @returns {{ok:boolean, errors:string[]}}
+ */
+function validateReceipt(r) {
+  const errors = [];
+  if (!isPlainObject(r)) return { ok: false, errors: ['receipt must be an object'] };
+
+  // sessionRef 必须是**派生句柄**（sess-h-…），不是 raw sessionId
+  if (!isNonEmptyString(r.sessionRef)) {
+    errors.push('sessionRef is required');
+  } else if (!isDerivedHandle(r.sessionRef, 'sess-h')) {
+    errors.push('sessionRef must be a derived handle, never a raw sessionId');
+  }
+
+  if (!isFiniteNonNegative(r.seq)) errors.push('seq must be a non-negative finite number');
+  if (r.turn !== null && r.turn !== undefined && !isFiniteNonNegative(r.turn)) {
+    errors.push('turn must be a non-negative finite number when present');
+  }
+  for (const k of ['total', 'added', 'deleted']) {
+    if (r[k] !== null && r[k] !== undefined && !isFiniteNonNegative(r[k])) {
+      errors.push(`${k} must be a non-negative finite number when present`);
+    }
+  }
+
+  // 文件清单：只许相对路径与计数
+  if (r.files !== null && r.files !== undefined) {
+    if (!Array.isArray(r.files)) {
+      errors.push('files must be an array when present');
+    } else {
+      for (const f of r.files) {
+        if (!isPlainObject(f)) { errors.push('files[] entries must be objects'); continue; }
+        if (!isNonEmptyString(f.path)) { errors.push('files[].path is required'); continue; }
+        const p = f.path.replace(/\\/g, '/');
+        if (p.startsWith('/') || /^[a-zA-Z]:/.test(p)) {
+          errors.push('files[].path must be relative, never absolute (privacy)');
+        }
+        if (p.split('/').includes('..')) {
+          errors.push('files[].path must not contain traversal segments');
+        }
+        for (const k of ['added', 'deleted']) {
+          if (f[k] !== undefined && !isFiniteNonNegative(f[k])) {
+            errors.push(`files[].${k} must be a non-negative finite number`);
+          }
+        }
+        if (f.display !== undefined && typeof f.display !== 'string') {
+          errors.push('files[].display must be a string when present');
+        }
+      }
+    }
+  }
+
+  const forbidden = collectForbidden(r);
+  if (forbidden.length) errors.push(`derived fields must not be persisted: ${forbidden.join(', ')}`);
+  const privacy = collectPrivacy(r);
+  if (privacy.length) errors.push(`privacy-forbidden fields must not be persisted: ${privacy.join(', ')}`);
+
+  return { ok: errors.length === 0, errors };
+}
+
 function validateEvidence(e) {
   const errors = [];
   if (!isPlainObject(e)) return { ok: false, errors: ['evidence must be an object'] };
@@ -656,6 +729,7 @@ module.exports = {
   validateFinding,
   validateAssumption,
   validateEvidence,
+  validateReceipt,
   validateEntity,
   FINDING_STATUSES,
   ASSUMPTION_STATUSES,
