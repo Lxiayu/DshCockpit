@@ -570,7 +570,13 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
   `files[].path` 必须是相对路径且不含 `..`，否则**整个凭证不落盘**。
   每个 Mission 只保留最新一份（攒历史会让 UI 无法回答"现在该信哪个"）。
   测试 7 条 + schema 7 条，变异 DETECTED ×3。
-  ⬜ 仍待：`workStatus` 读到 verified 后把它 append 进日志（当前已能读，未自动落盘）。
+- ✅ **自动落盘已接线（2026-11-04 完成）**：
+  `workStatus` 读到 `verified` 后自动 append `receipt.recorded`。
+  **只落 verified**：`claimed` 的含义是"我们没能复核"，是观测缺口不是交付事实，
+  写进不可篡改的日志等于把噪音固化成历史。
+  `coordinate` 字段是内部落盘用形状，不回传给 UI。
+  端到端验证：verify → 重新打开 store → 凭证还在，且 `sessionRef` 是
+  `sess-h-…` 派生句柄、全串不含 raw sessionId 与绝对路径。
 - ✅ **`present` 声明与变更事实的合并逻辑（2026-11-04 已完成）**：
   `src/mission/deliverable-signal.js` —— 官方 `deliverables/presented` 事件
   payload 为 `{turn, callId, files:[{path, description?}]}`（读 `.d.ts` 确认）。

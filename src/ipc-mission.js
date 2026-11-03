@@ -466,9 +466,21 @@ async function buildReceiptFor({ bound, lastTurn, lastResponse, deps = {} } = {}
     };
   }
 
-  // 拿到了真实清单 → 可复核
+  // 拿到了真实清单 → 可复核。
+  //
+  // sessionRef 必须是**派生句柄**（sess-h-…），不能是 raw sessionId，
+  // 也不能是占位字符串 —— schema.validateReceipt 会拒绝后者，
+  // 届时整个凭证静默不落盘（这正是本项目反复踩的坑）。
+  const refOut = taskRef.deriveHarnessRef({ sessionId: bound.sessionId });
+  if (!refOut.ok) {
+    return {
+      state: 'claimed',
+      description: '团队已给出回复，但无法生成可复核的引用',
+      reason: `派生引用失败：${refOut.reason || refOut.code}`,
+    };
+  }
   const derived = receiptModule.buildReceiptCoordinate({
-    sessionRef: 'bound', seq, turn: lastTurn, summary,
+    sessionRef: refOut.ref, seq, turn: lastTurn, summary,
   });
   const state = receiptModule.deriveReceiptState({ receipt: derived, resolvable: true });
   return {
@@ -479,6 +491,8 @@ async function buildReceiptFor({ bound, lastTurn, lastResponse, deps = {} } = {}
       : `已复核：这一轮变更了 ${summary.total} 个文件`,
     turn: lastTurn,
     total: Number.isFinite(summary.total) ? summary.total : null,
+    // 可落盘的坐标（由调用方决定是否 append）。只在 verified 时给出。
+    coordinate: derived,
   };
 }
 
@@ -1702,10 +1716,29 @@ function registerMissionIpc(ipcMain, ctx) {
         //   ① seqOfTurn  —— 官方 workspace/changes 事件的 seq（事件流已记录）
         //   ② changesSummaryOf —— 按 seq 读那份变更清单
         // 两步任何一步失败都如实降级，**不猜**（读不到 ≠ 没变更）。
-        receipt: await buildReceiptFor({
-          bound, lastTurn, lastResponse,
-          deps: { seqOfTurn, changesSummaryOf },
-        }),
+        receipt: await (async () => {
+          const built = await buildReceiptFor({
+            bound, lastTurn, lastResponse,
+            deps: { seqOfTurn, changesSummaryOf },
+          });
+          // 落盘（S5）：只有 verified 的凭证才值得写进事实链。
+          //
+          // 为什么只落 verified：claimed 的含义是"我们没能复核" ——
+          // 它不是一次交付事实，而是一次观测缺口。
+          // 把观测缺口写进不可篡改的日志，等于把噪音固化成历史。
+          //
+          // 为什么在这里落而不是在事件流里：凭证是我们**读官方数据后得出**的，
+          // 不是官方事件本身，事件流里没有"凭证"这个概念。
+          if (built && built.state === 'verified' && built.coordinate) {
+            try {
+              r.store.append('receipt.recorded',
+                { missionId, receipt: built.coordinate }, { missionId });
+            } catch { /* 落盘失败不该让 workStatus 失败：读取本身已成功 */ }
+          }
+          // coordinate 是内部落盘用的形状，不回传给 UI（UI 只看 state/description）
+          const { coordinate, ...visible } = built;
+          return visible;
+        })(),
         observedAtMs: clock(),
       };
     },

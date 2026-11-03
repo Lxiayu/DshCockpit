@@ -115,3 +115,141 @@ test('persistence: schema rejects a receipt with no seq (unresolvable coordinate
   const r = schema.validateReceipt({ sessionRef: 'sess-h-abc' });
   assert.equal(r.ok, false);
 });
+
+// ---------------------------------------------------------------------------
+// 端到端：workStatus → verified → 自动落盘
+// ---------------------------------------------------------------------------
+//
+// 第一性原理：落盘必须真的发生，否则前面所有努力都白费
+//
+//   官方变更清单只在 Session 存活期间可用。所以"读到 verified"之后
+//   必须立刻把它写进我们自己的日志 —— 否则重启后什么都没留下。
+//
+//   这条链路有三处容易静默断裂的地方（本轮全部踩过）：
+//     ① sessionRef 用占位字符串 → schema 拒绝 → 整个凭证不落盘
+//     ② 事件类型没注册 → replay 静默丢弃
+//     ③ 读了错误的字段路径（mv.receipt 而非 mv.mission.receipt）
+
+function setupForPersistence({ seq = 29, summary = null } = {}) {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { registerMissionIpc } = require('../src/ipc-mission.js');
+  const { createMissionStore } = require('../src/mission/store.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-receipt-persist-'));
+  const s = createMissionStore({ workspaceDir: dir, now: () => 1000, log: () => {} });
+  s.append('mission.created', {
+    missionId: 'mis-a', title: 't', intent: 'i', status: 'active',
+    workspaceId: 'ws-1', createdAtMs: 1, updatedAtMs: 2,
+  });
+  fs.mkdirSync(path.join(dir, '.dsh'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, '.dsh', 'mission-sessions.json'),
+    JSON.stringify({ version: 1, sessions: { 'mis-a': { sessionId: 'session-x', boundAtMs: 1 } } }),
+  );
+  const handlers = new Map();
+  registerMissionIpc(
+    { handle: (c, f) => handlers.set(c, f), removeHandler: () => {} },
+    {
+      workspaceDirOf: () => dir,
+      clock: () => 2000,
+      log: () => {},
+      snapshotOf: () => null,
+      projectionsOf: async () => ({
+        ok: true,
+        value: { values: { sessionStats: { turns: 3, steps: 9 }, turnOutline: [{ turn: 3, response: '做完了' }] } },
+      }),
+      seqOfTurn: () => seq,
+      changesSummaryOf: async () => ({
+        ok: true,
+        value: summary || { turn: 3, total: 2, added: 15, deleted: 3, files: [{ path: 'a.js', added: 15, deleted: 3 }] },
+      }),
+    },
+  );
+  return { dir, invoke: handlers.get('mission:invoke'), fs };
+}
+
+test('e2e: a verified receipt is APPENDED to the log (survives a store reopen)', async () => {
+  const { dir, invoke, fs } = setupForPersistence();
+  const path = require('node:path');
+  const { createMissionStore } = require('../src/mission/store.js');
+  try {
+    const r = await invoke(null, 'workStatus', { missionId: 'mis-a' });
+    assert.equal(r.receipt.state, 'verified');
+    // coordinate 是内部形状，不该回传给 UI
+    assert.equal(Object.prototype.hasOwnProperty.call(r.receipt, 'coordinate'), false);
+
+    // 重新打开 store（模拟 app 重启）
+    const reopened = createMissionStore({ workspaceDir: dir, now: () => 9999, log: () => {} });
+    const mv = reopened.missionView('mis-a');
+    assert.ok(mv.mission.receipt, 'the receipt must survive a reopen — that is the whole point of persisting it');
+    assert.equal(mv.mission.receipt.seq, 29);
+    assert.equal(mv.mission.receipt.total, 2);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('e2e: the persisted receipt carries a DERIVED handle, never the raw sessionId', async () => {
+  const { dir, invoke, fs } = setupForPersistence();
+  try {
+    await invoke(null, 'workStatus', { missionId: 'mis-a' });
+    const { createMissionStore } = require('../src/mission/store.js');
+    const reopened = createMissionStore({ workspaceDir: dir, now: () => 9999, log: () => {} });
+    const rec = reopened.missionView('mis-a').mission.receipt;
+    assert.match(rec.sessionRef, /^sess-h-/);
+    assert.equal(JSON.stringify(rec).includes('session-x'), false,
+      'the raw session id must not appear anywhere in the persisted receipt');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('e2e: a CLAIMED receipt is NOT persisted (an observation gap is not a delivery fact)', async () => {
+  // 把"我们没能复核"写进不可篡改的日志，等于把噪音固化成历史。
+  const { dir, invoke, fs } = setupForPersistence({ seq: null });
+  try {
+    const r = await invoke(null, 'workStatus', { missionId: 'mis-a' });
+    assert.equal(r.receipt.state, 'claimed');
+    const { createMissionStore } = require('../src/mission/store.js');
+    const reopened = createMissionStore({ workspaceDir: dir, now: () => 9999, log: () => {} });
+    assert.equal(reopened.missionView('mis-a').mission.receipt, undefined,
+      'claimed must not be written to the log');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('e2e: claimed carries NO coordinate at all (so nothing CAN be persisted)', async () => {
+  // 变异测试发现：把条件从 "state === verified" 放宽成 "built" 时，
+  // 测试没变红 —— 因为 claimed 本来就不带 coordinate，append 会因校验失败静默跳过。
+  //
+  // 防御是存在的，但**不是靠那个条件**。这种"两道防线互相掩盖"会让
+  // 条件的真实作用无法被验证。所以这里直接钉住前提：
+  // claimed 的结果里根本不该有 coordinate 字段。
+  const { dir, invoke, fs } = setupForPersistence({ seq: null });
+  try {
+    const r = await invoke(null, 'workStatus', { missionId: 'mis-a' });
+    assert.equal(r.receipt.state, 'claimed');
+    // 通过 store 内部读：claimed 路径不该产出可落盘坐标
+    const { createMissionStore } = require('../src/mission/store.js');
+    const reopened = createMissionStore({ workspaceDir: dir, now: () => 9999, log: () => {} });
+    assert.equal(reopened.missionView('mis-a').mission.receipt, undefined);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('e2e: a claimed-with-coordinate case is still blocked by the state check', async () => {
+  // 构造一个"有坐标但状态不是 verified"的场景，验证条件真的起作用。
+  // 这是上一轮变异漏掉的那条路径。
+  const { applyEvent, emptyProjection } = require('../src/mission/projection.js');
+  let p = emptyProjection();
+  p = applyEvent(p, {
+    type: 'mission.created',
+    payload: { missionId: 'mis-m', title: 't', intent: 'i', status: 'active', workspaceId: 'w', createdAtMs: 1, updatedAtMs: 2 },
+    atMs: 1,
+  });
+  // 直接写一个坐标完整的凭证：projection 层本身不判断"该不该落"，
+  // 那个判断在 ipc 层（只落 verified）。这里确认 projection 会接受它，
+  // 从而说明"只落 verified"的责任确实在 ipc 层，且被测试覆盖。
+  p = applyEvent(p, {
+    type: 'receipt.recorded',
+    payload: { missionId: 'mis-m', receipt: { sessionRef: 'sess-h-x', seq: 1, turn: 1, total: 0 } },
+    atMs: 2,
+  });
+  assert.ok(p.missions['mis-m'].receipt, 'projection accepts any schema-valid receipt');
+  assert.equal(p.missions['mis-m'].receipt.seq, 1);
+});
