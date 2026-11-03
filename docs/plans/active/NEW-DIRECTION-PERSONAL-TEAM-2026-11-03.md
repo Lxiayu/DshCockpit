@@ -468,7 +468,15 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
   + `changes.summary` 的事实（"这次确实改了这些"），两者互补，缺一不可。
 
 **仍未完成**：
-- ⬜ 提案-批准闸门（借鉴 OpenMuse：模型只能提 prepare，批准绑定 hash 且过期）。
+- ✅ **提案-批准闸门（2026-11-04 已完成）**：`src/mission/approval-gate.js`
+  - 三个漏洞分别封堵：① 批准必须提交**内容 hash**（"模型提议了 A，人正在读，
+    模型又提了 B，人点批准"→ 批准的是哪份？）；② TTL 30 分钟，
+    过期是**记录下来的状态**而非每次推算；③ 幂等键让重试不产生第二张卡片。
+  - 动作种类闭集 6 种（`command.run` / `file.write` / `file.delete` /
+    `message.send` / `task.create` / `member.spawn`）。
+  - 本模块**不执行**任何动作 —— 执行是 Harness 的事。
+  - 测试：`test/mission-approval-gate.test.js`（13 条），
+    变异验证 DETECTED ×2（摘掉 hash 校验 / 摘掉过期校验）。
 - ⬜ 凭证落盘与失效检测（依赖 turn 事件订阅）。
 - ⬜ `present` 声明与 Deliverable 登记的对接。
 - 验收（未达成）：修改一个文件后，旧凭证自动降级为 stale。
