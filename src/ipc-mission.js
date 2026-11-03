@@ -38,6 +38,7 @@ const dispatchConfirmModule = require('./mission/dispatch-confirm');
 const dispatchStrategy = require('./mission/dispatch-strategy');
 const interventionAudit = require('./mission/intervention-audit');
 const auditStore = require('./mission/audit-store');
+const grantModule = require('./mission/grant');
 const brief = require('./mission/brief');
 const deliverable = require('./mission/deliverable');
 const harnessReader = require('./mission/harness-reader');
@@ -89,6 +90,9 @@ const ACTIONS = Object.freeze([
   'interventionHistory',  // 只读：最近的干预记录（S6，闭集字段，无内容）
   'interveneMember',      // S6：对成员转达消息 / 中断（经 Lead，非直连）
   'rewriteTask',          // S6：改写 / 重分配团队任务（带 CAS，经 Lead）
+  'listGrants',           // D10：列出工作区授权记录
+  'createGrant',          // D10：创建授权（只能由用户发起）
+  'revokeGrant',          // D10：撤销授权（标记而非删除）
 ]);
 
 function nowMs() { return Date.now(); }
@@ -946,6 +950,166 @@ function registerMissionIpc(ipcMain, ctx) {
           ? '已请 Lead 中断该成员。Lead 是否执行、成员何时停下，以团队状态为准。'
           : '已请 Lead 转达。这代表指令已发出，不代表对方已处理。',
       };
+    },
+
+    // ------------------------------------------------------------------
+    // Grant（D10）—— 工作区级授权记录。
+    //
+    // 第一性原理：为什么 Grant 的 IPC 与 Mission 的 action 平级
+    //
+    //   Grant 不是某个 Mission 的属性（见 grant.js 的说明）。
+    //   它属于工作区，和 Mission 列表同级。放进某个 Mission 的子操作里，
+    //   会制造"这条授权属于这个 Mission"的误解，而实际上它服务所有 Mission。
+    // ------------------------------------------------------------------
+
+    /**
+     * 只读：列出当前工作区的授权记录。
+     *
+     * 回传的 `workspaceDir` 是**必要的**：用户要能看清"我授权了哪些目录"，
+     * 否则撤销时不知道该撤哪条。这是 Grant 自己的字段，
+     * 与"绝对路径不进 Mission 事实链"的规则不冲突 ——
+     * Mission 存的是 grantId 引用，目录只活在 Grant 表里。
+     */
+    listGrants() {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const loaded = grantModule.loadGrants(r.workspaceDir);
+      return {
+        ok: true,
+        grants: loaded.grants.map((g) => ({
+          grantId: g.grantId,
+          workspaceDir: g.workspaceDir,
+          access: g.access,
+          grantedBy: g.grantedBy,
+          createdAtMs: g.createdAtMs,
+          active: grantModule.isGrantActive(g),
+          revokedAtMs: Number.isFinite(g.revokedAtMs) ? g.revokedAtMs : null,
+          revokeReason: g.revokeReason || null,
+        })),
+        // 不要静默跳过坏数据：用户看到"少了几条"却不知原因更糟
+        degraded: loaded.bad ? { reason: loaded.reason } : null,
+      };
+    },
+
+    /**
+     * 创建一条 Grant（**只能由用户发起**）。
+     *
+     * 为什么这个 action 强制 grantedBy='user' 而不接受参数：
+     *   如果让调用方传 grantedBy，那么任何能调 IPC 的代码都能自称用户。
+     *   信任根必须写死在这里，而不是信任调用方。
+     */
+    createGrant(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const sub = argString(payload && payload.subdir);
+      const access = argString(payload && payload.access) || 'read';
+      if (access !== 'read' && access !== 'write') {
+        return fail('access must be "read" or "write"', 'GRANT_ACCESS_INVALID');
+      }
+
+      const root = r.workspaceDir;
+      // 目标目录：不填就等于工作区根本身
+      let target = root;
+      if (sub) {
+        // D9：新目录必须位于已登记的工作区根之内。
+        // 不解析 .. —— 含 .. 的一律拒绝（解析会把它"修正"成合法路径）。
+        if (sub.split(/[\\/]/).includes('..')) {
+          return fail('subdir must not contain ".."', 'GRANT_PATH_TRAVERSAL');
+        }
+        if (sub.startsWith('/') || /^[a-zA-Z]:/.test(sub)) {
+          return fail('subdir must be relative to the workspace', 'GRANT_PATH_ABSOLUTE');
+        }
+        target = path.join(root, sub);
+        const norm = (s) => s.replace(/\\/g, '/').replace(/\/+$/, '');
+        const tn = norm(target);
+        const rn = norm(root);
+        if (tn !== rn && !tn.startsWith(rn + '/')) {
+          return fail('the target directory is outside the workspace', 'GRANT_PATH_OUTSIDE');
+        }
+      }
+
+      // 新建目录即授权（D10）：同一步骤内创建目录并创建 Grant，
+      // 用户不需要额外确认两次。
+      try {
+        fs.mkdirSync(target, { recursive: true });
+      } catch (err) {
+        return fail(`cannot create the directory: ${err.message}`, 'GRANT_MKDIR_FAILED');
+      }
+
+      const loaded = grantModule.loadGrants(r.workspaceDir);
+      // 同目录同权限已有有效 Grant → 直接返回它（幂等）。
+      // 否则用户连点两次就会得到两条一样的授权，撤销时很容易漏掉一条。
+      const existing = loaded.grants.find((g) => g.workspaceDir === target
+        && g.access === access && grantModule.isGrantActive(g));
+      if (existing) {
+        return { ok: true, grant: existing, reused: true };
+      }
+
+      const draft = {
+        grantId: grantModule.newGrantId(),
+        grantedBy: 'user',
+        access,
+        workspaceDir: target,
+        createdAtMs: clock(),
+      };
+      const v = grantModule.validateGrant(draft);
+      if (!v.ok) return fail(v.errors.join('; '), 'GRANT_INVALID');
+
+      const next = [...loaded.grants, draft];
+      const saved = grantModule.saveGrants(r.workspaceDir, next, { log });
+      if (!saved.ok) return fail(saved.reason, 'GRANT_SAVE_FAILED');
+      return { ok: true, grant: draft, reused: false };
+    },
+
+    /**
+     * 撤销一条 Grant。
+     *
+     * 第一性原理：为什么是"标记撤销"而不是删除
+     *
+     *   删掉的话，历史里引用它的 Mission 会变成"指向一个不存在的 Grant"，
+     *   我们再也无法回答"当时是谁在什么时间授权的"。
+     *   标记撤销保留了这段历史，同时让后续访问立即失效。
+     *
+     * 为什么不能恢复：D10 明确"快照不随撤销复活"。
+     * 要重新授权就**新建一条** —— 这样时间线是诚实的。
+     */
+    revokeGrant(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const grantId = argString(payload && payload.grantId);
+      if (!grantId) return fail('grantId is required', 'GRANT_ID_REQUIRED');
+      const reason = argString(payload && payload.reason) || 'user-revoked';
+      if (!grantModule.GRANT_REVOKE_REASONS.includes(reason)) {
+        return fail(`reason must be one of ${grantModule.GRANT_REVOKE_REASONS.join('|')}`, 'GRANT_REASON_INVALID');
+      }
+
+      const loaded = grantModule.loadGrants(r.workspaceDir);
+      const idx = loaded.grants.findIndex((g) => g.grantId === grantId);
+      if (idx === -1) return fail('no such grant', 'GRANT_NOT_FOUND');
+      const cur = loaded.grants[idx];
+      if (cur.revokedAtMs !== undefined && cur.revokedAtMs !== null) {
+        // 已经撤销过：幂等返回，不报错也不改时间（撤销时间只有一个）
+        return { ok: true, grant: cur, alreadyRevoked: true };
+      }
+
+      const revoked = { ...cur, revokedAtMs: clock(), revokeReason: reason };
+      const v = grantModule.validateGrant(revoked);
+      if (!v.ok) return fail(v.errors.join('; '), 'GRANT_INVALID');
+
+      const next = loaded.grants.slice();
+      next[idx] = revoked;
+      const saved = grantModule.saveGrants(r.workspaceDir, next, { log });
+      if (!saved.ok) return fail(saved.reason, 'GRANT_SAVE_FAILED');
+
+      // 审计：撤销是安全动作，值得留痕（只记动作与 id，不记目录）
+      recordIntervention(r.workspaceDir, {
+        action: 'contract.revoked',
+        reason: 'user-revoked',
+        missionId: null,
+        atMs: clock(),
+      });
+
+      return { ok: true, grant: revoked, alreadyRevoked: false };
     },
 
     /**

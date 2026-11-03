@@ -321,6 +321,29 @@
   .team-task-subject { font-size: 12.5px; color: var(--text-1); line-height: 1.5;
     overflow-wrap: anywhere; }
   .team-task-meta { font-size: 10.5px; color: var(--text-3); margin-top: 3px; padding-left: 2px; }
+  /* ---- 授权目录（D10）----
+     用户要敢离开屏幕，前提是能回答"团队被允许访问哪些目录"。
+     所以目录必须**完整显示**（超长省略 + title 提示），不藏。 */
+  .grant-row { padding: 6px 0; border-top: 1px solid var(--border-1); }
+  .grant-row:first-of-type { border-top: 0; }
+  .grant-row-off { opacity: .55; }
+  .grant-line { display: flex; align-items: center; gap: 6px; }
+  .grant-dir { flex: 1; font-size: 11.5px; color: var(--text-1);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    direction: rtl; text-align: left; }
+  .grant-access { flex: none; font-size: 10px; padding: 1px 5px; border-radius: 4px;
+    background: var(--att-idle-bg); color: var(--att-idle-fg); }
+  .grant-status { flex: none; font-size: 10px; color: var(--text-3); }
+  .grant-ops { display: flex; gap: 6px; margin-top: 4px; }
+  .grant-empty, .grant-warn { font-size: 11px; padding: 4px 0; }
+  .grant-empty { color: var(--text-3); }
+  .grant-warn { color: var(--att-warn-fg); }
+  .grant-form { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-1); }
+  .grant-form-title { font-size: 11.5px; color: var(--text-2); margin-bottom: 5px; }
+  .grant-access-sel { display: block; width: 100%; margin-bottom: 5px;
+    background: var(--bg-input); color: var(--text-1);
+    border: 1px solid var(--border-1); border-radius: 6px;
+    padding: 5px 7px; font-size: 12px; font-family: inherit; }
   /* ---- 折叠区（§6.2 第 6 块）----
      查阅型内容默认关掉，把首屏留给"需要你 / 进展 / 团队"。
      标题带数量，让用户知道值不值得点开。 */
@@ -2760,6 +2783,8 @@ function renderDetail() {
     render: () => renderDeliverables(v, m),
   }));
 
+  box.append(renderGrants());
+
   box.append(collapsibleSection({
     title: 'Brief 与诊断',
     count: null,
@@ -2775,6 +2800,112 @@ function renderDetail() {
     count: null,
     render: () => renderInterventionHistory(m),
   }));
+}
+
+/**
+ * 授权（Grant）面板 —— D10。
+ *
+ * 第一性原理：为什么这个面板必须存在，且必须显示目录
+ *
+ *   用户要敢离开屏幕，前提是能回答"这个团队被允许访问哪些目录"。
+ *   如果只有一条 Grant 而界面上什么也不显示，那句"我已授权"就只是记忆，
+ *   而记忆会在十分钟后消失。
+ *
+ *   所以这里显示每条的**目录与权限与状态**，撤销也在这里。
+ *
+ * 但默认折叠：授权是低频动作（建一次用很久），
+ * 常驻会挤掉首屏的"需要你 / 进展"。
+ */
+function renderGrants() {
+  const body = el('div', {});
+  let loaded = false;
+
+  const load = async () => {
+    loaded = true;
+    body.textContent = '';
+    let r;
+    try { r = await api('listGrants'); } catch (e) { r = { ok: false, reason: e.message }; }
+    if (!r || !r.ok) {
+      body.append(el('div', { class: 'grant-empty', text: '读取授权失败：' + ((r && r.reason) || '未知原因') }));
+      return;
+    }
+    if (r.degraded) {
+      body.append(el('div', { class: 'grant-warn',
+        text: '部分授权记录无法读取：' + (r.degraded.reason || '格式异常') }));
+    }
+    if (!r.grants || r.grants.length === 0) {
+      body.append(el('div', { class: 'grant-empty',
+        text: '还没有授权任何目录。派发前需要先授权一个目录。' }));
+    } else {
+      for (const g of r.grants) {
+        const row = el('div', { class: 'grant-row' + (g.active ? '' : ' grant-row-off') });
+        const line = el('div', { class: 'grant-line' });
+        line.append(el('span', { class: 'grant-dir', text: g.workspaceDir, title: g.workspaceDir }));
+        line.append(el('span', { class: 'grant-access', text: g.access === 'write' ? '读写' : '只读' }));
+        if (!g.active) line.append(el('span', { class: 'grant-status', text: '已撤销' }));
+        row.append(line);
+
+        if (g.active) {
+          const ops = el('div', { class: 'grant-ops' });
+          const revoke = el('button', { class: 'task-op', text: '撤销授权' });
+          revoke.addEventListener('click', async () => {
+            // 撤销是安全动作，必须确认 —— 误点会让正在跑的任务失去授权
+            if (!confirm('撤销后，派发到这个目录会被拒绝。确定撤销？')) return;
+            revoke.disabled = true;
+            let rr;
+            try { rr = await api('revokeGrant', { grantId: g.grantId }); }
+            catch (e) { rr = { ok: false, reason: e.message }; }
+            revoke.disabled = false;
+            if (!rr || !rr.ok) { alert('撤销失败：' + ((rr && rr.reason) || '未知原因')); return; }
+            await load();
+          });
+          ops.append(revoke);
+          row.append(ops);
+        }
+        body.append(row);
+      }
+    }
+
+    // 新建授权：子目录用相对路径（D9：必须位于工作区根之内）
+    const form = el('div', { class: 'grant-form' });
+    form.append(el('div', { class: 'grant-form-title', text: '授权一个目录' }));
+    const sub = el('input', { class: 'task-rw-input',
+      placeholder: '子目录（留空 = 工作区根）。例如 work/feature-x' });
+    const accessSel = el('select', { class: 'grant-access-sel' });
+    for (const [v, label] of [['read', '只读'], ['write', '读写']]) {
+      const o = el('option', { value: v, text: label });
+      accessSel.append(o);
+    }
+    const createBtn = el('button', { class: 'task-op', text: '创建授权' });
+    const msg = el('div', { class: 'task-rw-msg' });
+    createBtn.addEventListener('click', async () => {
+      createBtn.disabled = true;
+      let cr;
+      try {
+        cr = await api('createGrant', {
+          subdir: sub.value.trim() || undefined,
+          access: accessSel.value,
+        });
+      } catch (e) { cr = { ok: false, reason: e.message }; }
+      createBtn.disabled = false;
+      if (!cr || !cr.ok) {
+        msg.textContent = '创建失败：' + ((cr && cr.reason) || '未知原因');
+        msg.className = 'task-rw-msg err';
+        return;
+      }
+      msg.textContent = cr.reused ? '这个目录已有相同授权，未重复创建。' : '已授权。';
+      msg.className = 'task-rw-msg ok';
+      await load();
+    });
+    form.append(sub, accessSel, createBtn, msg);
+    body.append(form);
+  };
+
+  return collapsibleSection({
+    title: '授权目录',
+    count: null,
+    render: () => { load(); return body; },
+  });
 }
 
 /**
