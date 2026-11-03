@@ -269,6 +269,7 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
 | `src/mission/approval-gate.js` | **无（且不应接）** | ⚠️ **判定不接线**：见下方说明 |
 | `src/mission/rail-order.js` | `ipc-mission.js` 的 `attention()` 返回 `rail` | ✅ **已接线**（集成测试 7 条）：`items` 保持全量给老 UI，`rail` 分层+截断给新 UI |
 | `src/mission/dispatch-confirm.js` | `ipc-mission.js` 的 `confirmDispatch` action；`startWork` 返回 `dispatchKey` | ✅ **已接线**（集成测试 7 条） |
+| `src/mission/deliverable-signal.js` | 无 | ⚠️ **库就绪，待接线**：需要消费 `deliverables/presented` 事件（依赖事件订阅） |
 
 ### ⚠️ 关于 `approval-gate`：为什么决定**不接线**
 
@@ -552,7 +553,15 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
   - 测试：`test/mission-approval-gate.test.js`（13 条），
     变异验证 DETECTED ×2（摘掉 hash 校验 / 摘掉过期校验）。
 - ⬜ 凭证落盘与失效检测（依赖 turn 事件订阅）。
-- ⬜ `present` 声明与 Deliverable 登记的对接。
+- ✅ **`present` 声明与变更事实的合并逻辑（2026-11-04 已完成）**：
+  `src/mission/deliverable-signal.js` —— 官方 `deliverables/presented` 事件
+  payload 为 `{turn, callId, files:[{path, description?}]}`（读 `.d.ts` 确认）。
+  合并两路信号：`present`（团队认为这是交付物）vs `workspace/changes`（确实动了什么）。
+  **只有两者都有才标 `both`**；只有声明没变更的标 `claimed`
+  （"团队声明交付，但本次变更中没有检出这个文件"——不替模型圆场）；
+  有变更但没声明的**不进交付物列表，只计数**（一次调试改 20 个文件不该全变交付物）。
+  测试 11 条，变异 DETECTED ×2。
+  ⬜ 仍待接线：需要订阅 `deliverables/presented` 事件喂给它。
 - 验收（未达成）：修改一个文件后，旧凭证自动降级为 stale。
 
 ### S6 纠偏与干预【**审计层已完成（2026-11-04）**】
