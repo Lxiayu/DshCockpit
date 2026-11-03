@@ -88,6 +88,7 @@ const ACTIONS = Object.freeze([
   'confirmDispatch',      // 只读：派发后轮询"投影里有没有出现对应任务"（S2）
   'interventionHistory',  // 只读：最近的干预记录（S6，闭集字段，无内容）
   'interveneMember',      // S6：对成员转达消息 / 中断（经 Lead，非直连）
+  'rewriteTask',          // S6：改写 / 重分配团队任务（带 CAS，经 Lead）
 ]);
 
 function nowMs() { return Date.now(); }
@@ -497,6 +498,65 @@ async function buildReceiptFor({ bound, lastTurn, lastResponse, deps = {} } = {}
   };
 }
 
+/**
+ * 渲染"改写/重分配团队任务"的指令（S6）。
+ *
+ * 第一性原理：为什么任务修改也必须经 Lead，而不是我们直接写
+ *
+ *   S0 实测（D11 + 本轮复核）：`dsh-experimental-agent-team` 包里
+ *   只有 index.js 和 types，**没有 typert/remote 表面**。
+ *   也就是说壳层没有任何"直接改任务板"的 RPC。
+ *
+ *   唯一的写路径是：发指令给 Lead，由它调 team_task_update。
+ *   所以这个函数渲染的是**意图**，不是执行。
+ *
+ *   CAS 的诚实处理（U-4 实测：过期 revision 会被拒绝，状态完全不变）：
+ *   我们把 expectedRevision 显式写进指令，让 Lead 用当前值。
+ *   如果它在提交前被别人改过，官方会拒绝 —— 那是**正确的行为**，
+ *   我们不做"自动重试覆盖"，因为那等于替用户决定"谁赢"。
+ *
+ * @param {object} input
+ * @param {'edit'|'reassign'} input.kind
+ * @param {string} input.taskId
+ * @param {number} input.expectedRevision
+ * @param {string} [input.subject]       kind=edit 时的新标题
+ * @param {string} [input.description]   kind=edit 时的新描述
+ * @param {string} [input.owner]         kind=reassign 时的新负责人
+ * @param {string} [input.reason]
+ * @returns {string}
+ */
+function renderTaskRewriteInstruction({ kind, taskId, expectedRevision, subject, description, owner, reason } = {}) {
+  const lines = [];
+  const id = typeof taskId === 'string' ? taskId.trim() : '';
+  const rev = Number.isFinite(expectedRevision) ? expectedRevision : null;
+
+  if (kind === 'reassign') {
+    const to = typeof owner === 'string' ? owner.trim() : '';
+    lines.push(`【干预】请用 team_task_update 把任务 ${id} 重新分配。`);
+    lines.push(`action: reassign，owner: "${to}"，expectedRevision: ${rev === null ? '（用你读到的最新值）' : rev}`);
+    lines.push('只改负责人，不要改写任务内容，也不要改它的依赖关系。');
+  } else {
+    lines.push(`【干预】请用 team_task_update 改写任务 ${id}。`);
+    lines.push(`action: edit，expectedRevision: ${rev === null ? '（用你读到的最新值）' : rev}`);
+    lines.push('');
+    lines.push('【新的任务内容】');
+    if (typeof subject === 'string' && subject.trim()) lines.push(`标题：${subject.trim()}`);
+    if (typeof description === 'string' && description.trim()) {
+      lines.push('描述：');
+      lines.push(description);
+    }
+    lines.push('');
+    lines.push('按上面给的内容改写，不要自己增补需求。');
+  }
+  if (reason) lines.push(`原因：${reason}`);
+
+  // CAS 的诚实说明：被拒绝是正确的，不要绕过
+  lines.push('');
+  lines.push('如果 expectedRevision 过期而被拒绝，**不要重试**，'
+    + '直接告诉我"任务已被别人改过，请重新查看后再改"。');
+  return lines.join('\n');
+}
+
 /** 从一段指令文本里取出幂等键；没有则 null。 */
 function parseDispatchKey(text) {
   if (typeof text !== 'string') return null;
@@ -885,6 +945,86 @@ function registerMissionIpc(ipcMain, ctx) {
         note: kind === 'interrupt'
           ? '已请 Lead 中断该成员。Lead 是否执行、成员何时停下，以团队状态为准。'
           : '已请 Lead 转达。这代表指令已发出，不代表对方已处理。',
+      };
+    },
+
+    /**
+     * 改写或重分配一个团队任务（S6）。
+     *
+     * 第一性原理：为什么这个 action 带 expectedRevision 参数
+     *
+     *   用户在看右栏时读到的是**某个时刻的**任务状态。等他把新内容填好、
+     *   点提交，中间可能已经过了几秒 —— 期间成员可能已经改过这个任务。
+     *
+     *   如果我们不带 revision，Lead 会用"它读到的值"去改，
+     *   于是**用户的修改会静默覆盖成员的修改**，而且没人知道。
+     *
+     *   所以 UI 把读到的 revision 传上来，我们写进指令。
+     *   过期就让它被拒绝 —— 那是正确行为，不是错误。
+     */
+    async rewriteTask(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = argString(payload && payload.missionId);
+      if (!isId(missionId)) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const kind = argString(payload && payload.kind);
+      if (kind !== 'edit' && kind !== 'reassign') {
+        return fail('kind must be "edit" or "reassign"', 'TASK_REWRITE_KIND_INVALID');
+      }
+      const taskId = argString(payload && payload.taskId);
+      if (!taskId) return fail('taskId is required', 'TASK_ID_REQUIRED');
+      const expectedRevision = Number.isFinite(payload && payload.expectedRevision)
+        ? payload.expectedRevision : null;
+      const subject = argString(payload && payload.subject);
+      const description = argString(payload && payload.description);
+      const owner = argString(payload && payload.owner);
+      const why = argString(payload && payload.reason);
+
+      if (kind === 'edit' && !subject && !description) {
+        return fail('edit needs a subject or a description', 'TASK_EDIT_EMPTY');
+      }
+      if (kind === 'reassign' && !owner) {
+        return fail('reassign needs an owner', 'TASK_OWNER_REQUIRED');
+      }
+      if (description && description.length > 8000) {
+        return fail('description is too long (8000 chars max)', 'TASK_DESCRIPTION_TOO_LONG');
+      }
+
+      const bound = readBindMap(r.workspaceDir)[missionId];
+      if (!bound || !bound.sessionId) {
+        return fail('this mission has no bound session yet', 'SESSION_NOT_BOUND');
+      }
+      if (typeof promptSession !== 'function') {
+        return fail('runtime session wiring is not available', 'RUNTIME_NOT_WIRED');
+      }
+
+      const text = renderTaskRewriteInstruction({
+        kind, taskId, expectedRevision, subject, description, owner, reason: why,
+      });
+      let sent;
+      try {
+        sent = await promptSession(bound.sessionId, text);
+      } catch (err) {
+        return fail(`cannot reach the team: ${err.message}`, 'PROMPT_FAILED');
+      }
+      if (!sent || !sent.ok) {
+        return fail((sent && sent.reason) || 'the runtime rejected the instruction', 'PROMPT_FAILED');
+      }
+
+      // 审计：只记动作与任务 id，**不记新旧文本**（隐私铁律）
+      const auditResult = recordIntervention(r.workspaceDir, {
+        action: kind === 'reassign' ? 'task.reassigned' : 'task.rewritten',
+        reason: 'user-request',
+        missionId,
+        taskId,
+        atMs: clock(),
+      });
+
+      return {
+        ok: true,
+        delivered: true,
+        audited: auditResult.ok === true,
+        note: '已请 Lead 改写。任务板是否真的变了，以团队状态为准（过期 revision 会被拒绝）。',
       };
     },
 

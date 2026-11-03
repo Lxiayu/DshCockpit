@@ -324,6 +324,25 @@
   /* ---- 折叠区（§6.2 第 6 块）----
      查阅型内容默认关掉，把首屏留给"需要你 / 进展 / 团队"。
      标题带数量，让用户知道值不值得点开。 */
+  /* 任务级干预（S6）：按钮与表单都内联在任务行下，保留上下文 */
+  .team-task-ops { display: flex; gap: 6px; margin-top: 5px; }
+  .task-op { font-size: 10.5px; padding: 2px 8px; border-radius: 5px; cursor: pointer;
+    background: transparent; color: var(--text-3);
+    border: 1px solid var(--border-1); font-family: inherit; }
+  .task-op:hover { color: var(--text-1); border-color: var(--text-3); }
+  .task-op:disabled { opacity: .5; cursor: default; }
+  .task-rw-form { margin-top: 6px; padding: 8px 0; border-top: 1px solid var(--border-1); }
+  .task-rw-title { font-size: 11.5px; color: var(--text-2); margin-bottom: 6px;
+    overflow-wrap: anywhere; }
+  .task-rw-input { display: block; width: 100%; box-sizing: border-box;
+    background: var(--bg-input); color: var(--text-1);
+    border: 1px solid var(--border-1); border-radius: 6px;
+    padding: 5px 7px; font-size: 12px; font-family: inherit; margin-bottom: 5px; }
+  .task-rw-desc { resize: vertical; min-height: 44px; }
+  .task-rw-actions { display: flex; gap: 6px; }
+  .task-rw-msg { font-size: 11px; margin-top: 5px; line-height: 1.5; }
+  .task-rw-msg.ok { color: var(--text-2); }
+  .task-rw-msg.err { color: var(--att-warn-fg); }
   .coll { margin-top: 6px; border-top: 1px solid var(--border-1); }
   .coll-head { display: flex; align-items: center; gap: 6px; width: 100%;
     padding: 8px 0; background: transparent; border: 0; cursor: pointer;
@@ -2007,6 +2026,26 @@ function renderTeamTasks() {
     if (t.ownerName) meta.push(t.ownerName);
     if (meta.length) row.append(el('div', { class: 'team-task-meta', text: meta.join(' · ') }));
 
+    // 任务级干预：改写 / 重分配（S6）。
+    //
+    // 第一性原理：为什么这两个按钮出现在**任务行**上，而不是一个"任务管理"页
+    //
+    //   用户看到某个任务的标题写错了、或者派给了错的人，是在**看进展的时候**
+    //   发现的。要他去另一个页面找到同一个任务再改，等于让他丢掉上下文。
+    //
+    // CAS：按钮携带渲染时的 revision（见 rewriteTask 的注释）——
+    //   这期间若成员改过，官方会拒绝，而不是让用户的修改静默覆盖。
+    if (t.status !== 'completed') {
+      const ops = el('div', { class: 'team-task-ops' });
+      const editBtn = el('button', { class: 'task-op', text: '改写' });
+      editBtn.addEventListener('click', () => openTaskRewrite(m, t, 'edit'));
+      ops.append(editBtn);
+      const reassignBtn = el('button', { class: 'task-op', text: '转交' });
+      reassignBtn.addEventListener('click', () => openTaskRewrite(m, t, 'reassign'));
+      ops.append(reassignBtn);
+      row.append(ops);
+    }
+
     // 被阻塞：读 blockedBy，去 tasks 里找**真正阻塞它**的任务
     // blockedBy 同理：官方投影里通常有，但缺省时不该让整块崩。
     const blockedBy = Array.isArray(t.blockedBy) ? t.blockedBy : [];
@@ -2356,6 +2395,83 @@ function collapsibleSection({ title, count = null, render, open = false }) {
     if (!isOpen) ensure();
   });
   return wrap;
+}
+
+/**
+ * 打开任务的改写 / 转交表单（S6）。
+ *
+ * 第一性原理：为什么表单是**内联展开**而不是弹窗
+ *
+ *   380px 右栏里弹窗会遮住任务列表 —— 而用户正是看着那个列表才决定要改的。
+ *   内联展开保留上下文：他看到原任务、看到新输入框、看到其它任务。
+ *
+ * CAS 的 UI 侧处理：
+ *   把渲染时的 t.revision 一起提交。若期间被成员改过，官方拒绝，
+ *   我们如实告诉用户"任务已被改过，请重新查看" —— 不自动重试覆盖。
+ */
+function openTaskRewrite(m, task, kind) {
+  const existing = document.querySelector('.task-rw-form');
+  if (existing) existing.remove();
+
+  const wrap = el('div', { class: 'task-rw-form' });
+  wrap.append(el('div', { class: 'task-rw-title',
+    text: (kind === 'reassign' ? '转交任务：' : '改写任务：') + (task.subject || task.id) }));
+
+  let subjectInput = null;
+  let descInput = null;
+  let ownerInput = null;
+
+  if (kind === 'reassign') {
+    ownerInput = el('input', { class: 'task-rw-input', placeholder: '新负责人（成员名）' });
+    wrap.append(ownerInput);
+  } else {
+    subjectInput = el('input', { class: 'task-rw-input', value: task.subject || '', placeholder: '新标题' });
+    descInput = el('textarea', { class: 'task-rw-input task-rw-desc', rows: '2',
+      placeholder: '新描述（可留空，留空则只改标题）' });
+    wrap.append(subjectInput, descInput);
+  }
+  const why = el('input', { class: 'task-rw-input', placeholder: '原因（可选）' });
+  wrap.append(why);
+
+  const row = el('div', { class: 'task-rw-actions' });
+  const send = el('button', { class: 'task-op', text: '请 Lead 执行' });
+  const cancel = el('button', { class: 'task-op', text: '取消' });
+  row.append(send, cancel);
+  wrap.append(row);
+  const msg = el('div', { class: 'task-rw-msg' });
+  wrap.append(msg);
+
+  cancel.addEventListener('click', () => wrap.remove());
+  send.addEventListener('click', async () => {
+    send.disabled = true;
+    let r;
+    try {
+      r = await api('rewriteTask', {
+        missionId: m.missionId,
+        kind,
+        taskId: task.id,
+        // CAS：带上渲染时的 revision。过期就让官方拒绝，不自动重试。
+        expectedRevision: Number.isFinite(task.revision) ? task.revision : undefined,
+        subject: subjectInput ? subjectInput.value.trim() : undefined,
+        description: descInput ? descInput.value.trim() : undefined,
+        owner: ownerInput ? ownerInput.value.trim() : undefined,
+        reason: why.value.trim() || undefined,
+      });
+    } catch (e) { r = { ok: false, reason: e.message }; }
+    send.disabled = false;
+    if (!r || !r.ok) {
+      msg.textContent = '未发出：' + ((r && r.reason) || '未知原因');
+      msg.classList.add('err');
+      return;
+    }
+    msg.textContent = r.note || '已下达。';
+    msg.classList.add('ok');
+    if (typeof refresh === 'function') await refresh();
+  });
+
+  const host = document.querySelector('#detail');
+  if (host) host.append(wrap);
+  if (subjectInput) subjectInput.focus(); else if (ownerInput) ownerInput.focus();
 }
 
 function renderDetail() {

@@ -633,7 +633,18 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
 - ✅ **暂停 / 恢复 / 终止 Mission（2026-11-04 已完成，见上）**：
   `updateStatus` 现在真的会 cancel 正在执行的会话。
 - ⬜ 停止成员的**效果**仍需观察（`interrupt_agent` 不改变 `phase`，只能从团队状态侧面验证）。
-- ⬜ 改写任务描述或重新分配（U-4 未验 CAS 冲突）。
+- ✅ **改写/重分配团队任务（2026-11-04 完成）**：
+  `rewriteTask` action + 右栏任务行上的「改写」「转交」按钮（内联表单）。
+  - **协议复核**：`dsh-experimental-agent-team` 包只有 `index.js` + `types`，
+    **没有 typert/remote 表面** → 任务修改只能经 Lead 调 `team_task_update`。
+  - **CAS 的 UI 侧处理**：按钮携带渲染时的 `task.revision`。
+    若期间成员改过，官方拒绝 → 如实告诉用户"任务已被改过，请重新查看"，
+    **不自动重试覆盖**（那等于替用户决定"谁赢"）。
+    没有 revision 时指令写"用你读到的最新值"，不编造数字。
+  - 已完成的任务不显示改按钮（改它是无意义的动作）。
+  - 审计记 `task.rewritten` / `task.reassigned`，**不记新旧文本**。
+  测试 8 条，变异 DETECTED ×2。
+- ⬜ 停止成员的**效果**仍需真机观察（`interrupt_agent` 不改变 `phase`）。
 - ✅ **审计落盘（2026-11-04 完成）**：`src/mission/audit-store.js` + `interventions.jsonl`。
   - **为什么独立文件**：审计不是 Mission 状态。混进 `events.jsonl` 会让 projection
     为它写 no-op 分支，还会污染日志的"永不删除"承诺；两者的保留策略与隐私规则都不同。
