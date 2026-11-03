@@ -673,7 +673,20 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
     "我们拥有" → 删除；状态词 active/paused → 进行中/已暂停。
   - 渲染方式：CDP + chrome-headless-shell 直接截图（playwright 库已不可用），
     脚本见 `/tmp/rail-design/render.mjs`。截图对比确认前后差异。
-- ⬜ 切片 2：进展（任务板）与团队名册上移、折叠区收纳表单。
+- ✅ **切片 2 已落地（2026-11-04）**：`团队任务` → `进展`（§6.2 第 3 块）。
+  - 标题从"团队任务"改为"进展"：同一份数据，回答的问题不同
+    （用户想知道"事情做到哪了"，不是"有哪些任务"）。
+  - 头部带 `1/4` 进度 + `1 阻塞` 徽标，**统计全部来自任务板**，
+    我们只计数不推断（分母排除 `deleted`；阻塞 = 未完成且 blockedBy 非空）。
+  - 截图确认：首屏现在能看到 进展 → 任务逐条 → 负责人 → 阻塞原因。
+- ✅ **顺带修一个会白屏的真 bug（2026-11-04）**：
+  `team.writeScopeWarnings` 在投影缺省时（未启用 team profile）被直接 `.length`，
+  抛 TypeError → **renderTeamTasks 之后的整段右栏都不渲染**。
+  表现是"右栏莫名少了一大半"，控制台之外没有任何提示 —— 比报错更迷惑。
+  已加 `Array.isArray` 保护，并新增 `test/mission-desk-render-safety.test.js`
+  做**源级门禁**，把 `writeScopeWarnings` / `blockedBy` / `writeScopes`
+  三个可选数组字段的裸读全部挡掉。变异 DETECTED ×2。
+- ⬜ 切片 3：团队名册上移、折叠区收纳下方表单（决策/发现/证据等）。
 - ⬜ 把 `renderAttention` / `renderTeamTasks` 改为消费 `rail-order` 的输出。
 
 

@@ -298,6 +298,12 @@
     font-weight: 650; color: var(--text-1); margin-bottom: 7px; }
   .team-count { font-size: 10px; font-weight: 600; padding: 0 6px; border-radius: 999px;
     background: var(--att-idle-bg); color: var(--att-idle-fg); }
+  /* 进展统计：3/7 一眼看出规模；阻塞单独标色（琥珀，不是红—— */
+  /* 阻塞不是"你该处理的事"，它是在等别的任务，用红会让红色贬值） */
+  .team-progress { font-size: 10px; font-weight: 600; padding: 0 6px; border-radius: 999px;
+    background: var(--att-idle-bg); color: var(--att-idle-fg); }
+  .team-blocked-count { font-size: 10px; font-weight: 600; padding: 0 6px; border-radius: 999px;
+    background: var(--att-warn-bg); color: var(--att-warn-fg); }
   .team-empty { font-size: 11.5px; color: var(--text-3); }
   .team-warn { font-size: 10.5px; color: var(--att-warn-fg); background: var(--att-warn-bg);
     border-radius: 6px; padding: 6px 8px; margin-bottom: 8px; line-height: 1.5; }
@@ -1873,13 +1879,44 @@ function renderTeamTasks() {
       text: '团队状态可能不是最新的（投影异常：' + team.failure + '）。以下内容来自最后一次有效状态。' }));
   }
 
+  // ---- §6.2 第 3 块：进展（Task-centric）----
+  //
+  // 第一性原理：为什么这一块的标题是"进展"而不是"团队任务"
+  //
+  //   用户打开右栏想知道的是"事情做到哪了"，不是"团队有哪些任务"。
+  //   同一份数据，语序不同，回答的问题不同。
+  //
+  //   统计**全部来自任务板**，我们只做计数，不做推断：
+  //     · 分母 = 未删除的任务数（deleted 不计入进度，它等于不存在）
+  //     · 完成 = status === 'completed'
+  //     · 阻塞 = 存在未完成的 blockedBy（这是官方 ready 字段的语义来源）
+  //
+  //   绝不自己判断"应该完成"—— 那是 Harness 的事实。
+  const live = tasks.filter((x) => x && x.status !== 'deleted');
+  const doneCount = live.filter((x) => x.status === 'completed').length;
+  const runningCount = live.filter((x) => x.status === 'in_progress').length;
+  const blockedTasks = live.filter((x) => x.status !== 'completed'
+    && Array.isArray(x.blockedBy) && x.blockedBy.length > 0);
+
   const head = el('div', { class: 'team-head' });
-  head.append(el('span', { text: '团队任务' }));
-  if (tasks.length) head.append(el('span', { class: 'team-count', text: String(tasks.length) }));
+  head.append(el('span', { text: '进展' }));
+  if (live.length) {
+    // 进度数字用 "3/7"，一眼看出规模；阻塞单独标红点
+    head.append(el('span', { class: 'team-progress',
+      text: `${doneCount}/${live.length}` }));
+    if (blockedTasks.length > 0) {
+      head.append(el('span', { class: 'team-blocked-count',
+        text: `${blockedTasks.length} 阻塞` }));
+    }
+  }
   box.append(head);
 
   if (tasks.length === 0) {
     box.append(el('div', { class: 'team-empty', text: '团队当前没有在跑的任务。' }));
+    return box;
+  }
+  if (live.length === 0) {
+    box.append(el('div', { class: 'team-empty', text: '任务都已被删除，没有剩余工作。' }));
     return box;
   }
 
@@ -1903,8 +1940,10 @@ function renderTeamTasks() {
     if (meta.length) row.append(el('div', { class: 'team-task-meta', text: meta.join(' · ') }));
 
     // 被阻塞：读 blockedBy，去 tasks 里找**真正阻塞它**的任务
-    if (t.ready === false && t.blockedBy.length > 0) {
-      const blockers = t.blockedBy.map((id) => byId.get(id)).filter(Boolean);
+    // blockedBy 同理：官方投影里通常有，但缺省时不该让整块崩。
+    const blockedBy = Array.isArray(t.blockedBy) ? t.blockedBy : [];
+    if (t.ready === false && blockedBy.length > 0) {
+      const blockers = blockedBy.map((id) => byId.get(id)).filter(Boolean);
       const blocked = el('div', { class: 'team-blocked' });
       if (blockers.length === 1) {
         const b = blockers[0];
@@ -1928,15 +1967,19 @@ function renderTeamTasks() {
       // 找不到被引用的任务时如实说，不假装没被阻塞
       if (blockers.length === 0) {
         blocked.append(el('div', { class: 'team-blocked-line',
-          text: '被 ' + t.blockedBy.length + ' 项前置任务阻塞（明细暂时读不到）' }));
+          text: '被 ' + blockedBy.length + ' 项前置任务阻塞（明细暂时读不到）' }));
       }
       row.append(blocked);
     }
 
     // writeScopeWarnings：**可能是冲突**，不是"已锁定"
-    if (t.writeScopeWarnings.length > 0) {
+    // 防御：writeScopeWarnings 在某些投影里可能缺省（如队友未启用 team profile）。
+    // 直接 .length 会让整块渲染崩掉 —— 而它只是"可能冲突"的提示，
+    // 不值得因为一个可选字段让整个右栏白屏。
+    const scopeWarns = Array.isArray(t.writeScopeWarnings) ? t.writeScopeWarnings : [];
+    if (scopeWarns.length > 0) {
       row.append(el('div', { class: 'team-scope-warn',
-        text: '可能存在文件修改范围冲突：' + t.writeScopeWarnings.join('、') }));
+        text: '可能存在文件修改范围冲突：' + scopeWarns.join('、') }));
     }
 
     box.append(row);
