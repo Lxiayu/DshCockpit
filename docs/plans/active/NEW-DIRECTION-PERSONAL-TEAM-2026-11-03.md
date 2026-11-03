@@ -267,6 +267,7 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
 | `src/mission/intervention-audit.js` | 无 | ⚠️ **库就绪，未接线**：需要 S6 的干预 action 才能调用 |
 | `src/mission/dispatch-strategy.js` | 无 | ⚠️ **库就绪，未接线**：需要 S2 派发面板在选择策略时调用 |
 | `src/mission/approval-gate.js` | 无 | ⚠️ **库就绪，未接线**：需要 S5 的"需要你批准"UI 与 IPC action |
+| `src/mission/rail-order.js` | 无 | ⚠️ **库就绪，未接线**：右栏 `renderAttention` 改为调用它（S7） |
 
 **接线的前提**（都与待决策项相关）：
 - `dispatch-strategy` → 需要派发面板 UI（S7 视觉落地的一部分）
@@ -525,7 +526,24 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
 - ⬜ 审计落盘（当前是内存缓冲；落盘涉及格式版本/轮转/隐私扫描，属独立工程）。
 - 验收（未达成）：真机纠偏探针 + 审计记录可查。
 
-### S7 右栏视觉落地
+### S7 右栏视觉落地【**数据层已备（2026-11-04）**】
+
+- ✅ **"需要你"的分级与排序抽成纯函数**（`src/mission/rail-order.js`）：
+  - 现状问题：排序规则内联在 `attention()` 与 `mission-desk.html` 里，
+    导致三条关键判断**无法被测试**——哪些属于"需要你"、同层谁先谁后、空态说什么。
+    这三条恰恰是"红色泛滥 → 用户学会无视红色"的病根。
+  - **两层严格分开**：`decision`（阻塞团队：approval / question / plan-review /
+    conflict）vs `reminder`（不阻塞：inbox / permission-risk / blocked / stale-owner）。
+    提醒**不进决策计数**，否则第一层被稀释。
+  - 层内排序：风险高 → 等得久 → kind 优先级。**缺失风险按 medium 处理**，
+    不把未知当低风险（那是拿猜测当事实）。
+  - 首屏最多 3 条决策，`overflow` 给出被隐藏数量（不静默丢弃）。
+  - **最危险的空态已处理**：数据源缺席返回 `tone:'unknown'` 而不是 `calm`。
+    运行时没连上时显示"团队运行正常"会让用户以为一切安好，实际我们什么都没看到。
+  - 测试：`test/mission-rail-order.test.js`（13 条），变异验证 DETECTED ×2。
+- ⬜ 右栏 UI 改造（`mission-desk.html`，2395 行）—— 需要用户先确认视觉方案。
+- ⬜ 把 `renderAttention` / `renderTeamTasks` 改为消费 `rail-order` 的输出。
+
 
 - 按 §6 实施：首屏结构、颜色语义、术语、派发面板、空态、未连接状态。
 - 验收：真实渲染截图逐项对照 §6.2 与 §6.3；mock 字段与 IPC 对齐。
