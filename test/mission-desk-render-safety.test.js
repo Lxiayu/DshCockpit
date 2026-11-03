@@ -123,3 +123,46 @@ test('collapse: the team roster is NOT collapsed (it answers "who is doing what"
   assert.doesNotMatch(HTML, /title: '团队成员',[\s\S]{0,120}render: \(\) => renderTeamMembers/,
     'the roster must not be wrapped in a collapsible');
 });
+
+// ---------------------------------------------------------------------------
+// 右栏消费 rail-order 的分层输出（S7 接线）
+// ---------------------------------------------------------------------------
+//
+// 第一性原理：为什么"哪些算需要你"只能有**一个**判断处
+//
+//   后端 src/mission/rail-order.js 做了严格分层并配了 13 条测试：
+//     decision（approval/question/plan-review/conflict）→ 阻塞团队
+//     reminder（inbox/permission-risk/blocked/stale-owner）→ 不阻塞
+//
+//   前端如果也判断一遍，两边规则迟早漂移，而漂移的表现是
+//   "某个审批被悄悄归到提醒里"——用户不会发现，团队会一直卡着。
+//
+//   所以前端只做呈现：用 header 的计数与 tone 决定外观，
+//   用 visible 决定首屏放哪几条，用 overflow 决定要不要提示"还有 N 条"。
+
+test('rail: the desk consumes the backend rail field instead of re-deciding', () => {
+  assert.match(HTML, /const rail = a\.rail \|\| null;/,
+    'the desk must read a.rail (single source of truth for the layering)');
+});
+
+test('rail: overflow is ALWAYS stated, never silently truncated', () => {
+  // 静默截断是最危险的"省略"：用户会以为就这些，
+  // 而漏掉的那条按风险排序可能正是最紧急的。
+  assert.match(HTML, /rail\.overflow\.decisions > 0/,
+    'when decisions exceed the first screen, the count must be shown');
+  assert.match(HTML, /还有 \$\{rail\.overflow\.decisions\} 项待处理/,
+    'the hint must state the exact number');
+});
+
+test('rail: the unknown tone is handled (absent data must not read as all-clear)', () => {
+  // 后端 rail-order 对"数据源缺席"返回 tone: 'unknown'。
+  // 前端不能把它渲染成"团队运行正常"。
+  assert.match(HTML, /待办状态未知/,
+    'the desk must have an explicit "unknown" presentation');
+});
+
+test('rail: decision count in the badge comes from the backend, not a re-count', () => {
+  // 徽标上的数字必须来自后端 header，否则又出现第二个判断处。
+  assert.match(HTML, /rail\.header/,
+    'the badge must read rail.header rather than counting items itself');
+});

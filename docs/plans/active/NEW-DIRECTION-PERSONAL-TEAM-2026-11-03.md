@@ -706,7 +706,18 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
     （一个常驻两输入框占约 70px，在 380px 右栏里代价不小）。
   - 实测页面高度从 ~4200px 降到 ~2900px（同视口下）。
   - 测试 5 条追加到 `test/mission-desk-render-safety.test.js`，变异 DETECTED ×2。
-- ⬜ 把 `renderAttention` / `renderTeamTasks` 改为消费 `rail-order` 的输出。
+- ✅ **`renderAttention` 已消费 `rail-order` 输出（2026-11-04）**：
+  前端不再自己判断"哪些算需要你"——那是**第二个判断处**，两边迟早漂移，
+  而漂移的表现是"某个审批被悄悄归到提醒里"，用户不会发现、团队一直卡着。
+  现在前端只做呈现：`header` 决定计数与外观、`visible` 决定首屏、`overflow` 提示"还有 N 条"。
+  - **overflow 必须说出来**：静默截断是最危险的省略 ——
+    漏掉的那条按风险排序可能正是最紧急的。
+  - 徽标计数改用 `header.decisionCount`（阻塞团队的条数），
+    不再用 `total`（所有待办的条数）—— 两者差在提醒类，
+    放错会让人以为有 9 件事要决策。
+  - `tone: 'unknown'`（数据源缺席）已有独立呈现"待办状态未知"，不渲染成"团队运行正常"。
+  测试 4 条，变异 DETECTED ×2。
+- ⬜ `renderTeamTasks` 仍用自有结构（它渲染的是任务板，与 rail 分层无关，可不动）。
 
 
 - 按 §6 实施：首屏结构、颜色语义、术语、派发面板、空态、未连接状态。

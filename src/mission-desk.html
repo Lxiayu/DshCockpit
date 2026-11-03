@@ -151,6 +151,8 @@
   }
   .att-item[data-kind="approval"] .att-item-kind { background: var(--att-bad-bg); color: var(--att-bad-fg); }
   .att-item[data-kind="question"] .att-item-kind { background: var(--att-info-bg); color: var(--att-info-fg); }
+  .att-overflow { font-size: 10.5px; color: var(--text-3); padding: 6px 0 2px;
+    border-top: 1px solid var(--border-1); margin-top: 4px; }
   .att-item-text { font-size: 12px; color: var(--text-1); line-height: 1.45; overflow-wrap: anywhere; }
   /* 元信息（工具名/风险/时间）是**要读的**，所以不能用 --text-4（最弱层）。
      真机对比度实测：--text-4 在深色是 2.89:1、浅色 2.57:1，都低于 AA 4.5:1。
@@ -1393,6 +1395,22 @@ function renderAttention() {
   const wrap = el('div', { class: 'att' });
   if (!a) return wrap;
 
+  // ---------------------------------------------------------------------
+  // 消费后端 rail-order 的分层结果（S7）。
+  //
+  // 第一性原理：为什么"哪些算需要你"只能有**一个**判断处
+  //
+  //   后端 src/mission/rail-order.js 已经做了严格分层并配了 13 条测试：
+  //     decision（approval/question/plan-review/conflict）→ 阻塞团队
+  //     reminder（inbox/permission-risk/blocked/stale-owner）→ 不阻塞
+  //   前端如果也判断一遍，两边规则迟早漂移，而漂移的表现是
+  //   "某个审批被悄悄归到提醒里"——用户不会发现，团队会一直卡着。
+  //
+  //   所以前端只做**呈现**：拿 header 的计数与 tone 决定外观，
+  //   拿 visible 决定首屏放哪几条，拿 overflow 决定要不要提示"还有 N 条"。
+  // ---------------------------------------------------------------------
+  const rail = a.rail || null;
+
   if (!a.available) {
     wrap.className = 'att att-clear';
     wrap.append(el('div', { class: 'att-head' }, [
@@ -1460,9 +1478,14 @@ function renderAttention() {
   }
 
   wrap.className = 'att att-present';
+  // 计数取后端的 header.decisionCount（"阻塞团队"的条数），
+  // 不是 a.total（"所有待办"的条数）—— 两者差在提醒类。
+  // 徽标上放的是"要你拍板几件事"，放错会让人以为有 9 件事要决策。
+  const decisionCount = rail && rail.header && Number.isFinite(rail.header.decisionCount)
+    ? rail.header.decisionCount : total;
   wrap.append(el('div', { class: 'att-head' }, [
     el('span', { text: '⚠ 需要你决策' }),
-    el('span', { class: 'att-count', text: String(total) }),
+    el('span', { class: 'att-count', text: String(decisionCount) }),
   ]));
 
   for (const item of a.items || []) {
@@ -1541,6 +1564,18 @@ function renderAttention() {
     row.append(actions);
     wrap.append(row);
   }
+
+  // 首屏放不下的决策项：**必须说出还有几条**。
+  //
+  // 第一性原理：静默截断是最危险的一种"省略"。
+  //   如果后端只给前 3 条而前端不说"还有 4 条"，用户会以为就这些，
+  //   于是漏掉真正紧急的那条（它按风险排序可能就在后面）。
+  //   所以这里把 overflow 明确写出来。
+  if (rail && rail.overflow && rail.overflow.decisions > 0) {
+    wrap.append(el('div', { class: 'att-overflow',
+      text: `还有 ${rail.overflow.decisions} 项待处理（按风险排序，展开可看全部）` }));
+  }
+
   // 第一层之后才放第二层：用户先看到必须处理的，再看提醒。
   appendReminders(wrap, reminders);
   return wrap;
@@ -2357,6 +2392,9 @@ function renderDetail() {
   box.append(renderMissionHead(m, v));
 
   // --- L1：需要你处理（最高优先级，永远置顶）---
+  //
+  // 注意 renderAttention 现在消费后端 rail-order 的分层结果（见该函数注释），
+  // 前端不再自己判断"哪些算需要你" —— 两处各自判断会漂移。
   box.append(renderAttention());
 
   // --- L2：你离开期间发生了什么 ---
