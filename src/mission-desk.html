@@ -2015,6 +2015,20 @@ function renderDetail() {
   sel.addEventListener('change', async () => {
     const r = await api('updateStatus', { missionId: m.missionId, to: sel.value });
     if (!r.ok) { alert(r.reason); return; }
+    // 第一性原理：状态字段不能替代刹车。
+    //
+    // 改状态的同时会尝试取消正在执行的会话。取消可能失败（运行时离线、
+    // 会话已结束等），这时**必须说出来**——否则界面显示"已暂停"，
+    // 团队却还在写文件，用户会以为自己已经刹车了。
+    //
+    // stopped 的取值：cancelled / cancel-failed / not-running / not-wired / null
+    if (r.stopped === 'cancel-failed') {
+      alert('状态已改为 ' + r.status + '，但**未能停止正在执行的会话**。'
+        + '它可能还在跑，请到 Harness 视图确认。');
+    } else if (r.stopped === 'not-wired') {
+      alert('状态已改为 ' + r.status + '，但当前环境没有接上停止能力。'
+        + '如果团队在跑，请到 Harness 视图手动停止。');
+    }
     await refresh();
   });
   box.append(el('h3', { text: 'Mission 状态（我们拥有）' }), sel);
@@ -2195,6 +2209,70 @@ function renderDetail() {
 
   // --- Brief / 诊断 ---
   box.append(renderBriefAndDiagnostics(v, m));
+
+  // --- 最近的干预（S6 审计）---
+  box.append(renderInterventionHistory(m));
+}
+
+/**
+ * 「最近的干预」——回答"刚才我做了什么"。
+ *
+ * 第一性原理：干预是产品里权力最不对称的动作（点一下停掉整支团队）。
+ * 没有这块，用户过十分钟就记不清自己停过什么、为什么停。
+ *
+ * 隐私：只显示闭集文案（"暂停了团队" / "中断了成员 xyz"），
+ * 绝不显示任务正文或消息内容 —— 审计本身不能成为泄露面。
+ */
+function renderInterventionHistory(m) {
+  const box = el('section', { class: 'entity-section' });
+  const head = el('div', { class: 'entity-head' });
+  head.append(el('h3', { text: '最近的干预' }));
+  box.append(head);
+
+  const list = el('div', { class: 'iv-list' });
+  box.append(list);
+  let loaded = false;
+
+  const load = async () => {
+    if (loaded) return;
+    loaded = true;
+    list.textContent = '';
+    let r;
+    try {
+      r = await api('interventionHistory', { missionId: m.missionId, limit: 10 });
+    } catch (e) {
+      r = { ok: false, reason: e.message };
+    }
+    if (!r || !r.ok) {
+      list.append(el('div', { class: 'entity-empty', text: '读取干预记录失败：' + ((r && r.reason) || '未知原因') }));
+      return;
+    }
+    if (!r.entries || r.entries.length === 0) {
+      list.append(el('div', { class: 'entity-empty', text: '这个 Mission 还没有干预记录。' }));
+      return;
+    }
+    for (const e of r.entries) {
+      const row = el('div', { class: 'iv-row' });
+      row.append(el('span', { class: 'iv-desc', text: e.description || e.action }));
+      const meta = [];
+      if (Number.isFinite(e.atMs)) meta.push(relativeTime(e.atMs));
+      if (e.reason) meta.push(e.reason);
+      if (meta.length) row.append(el('span', { class: 'iv-meta', text: meta.join(' · ') }));
+      list.append(row);
+    }
+  };
+
+  // 折叠加载：默认收起，展开时才请求（右栏首屏被这一块挤掉不值得）
+  const toggle = el('button', { class: 'iv-toggle', text: '展开' });
+  toggle.addEventListener('click', async () => {
+    const open = toggle.textContent === '收起';
+    toggle.textContent = open ? '展开' : '收起';
+    list.style.display = open ? 'none' : 'block';
+    if (!open) await load();
+  });
+  list.style.display = 'none';
+  head.append(toggle);
+  return box;
 }
 
 // ------------------------------------------------------------------ 数据

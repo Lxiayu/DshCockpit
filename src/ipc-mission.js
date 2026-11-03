@@ -36,6 +36,7 @@ const receiptModule = require('./mission/receipt');
 const railOrder = require('./mission/rail-order');
 const dispatchConfirmModule = require('./mission/dispatch-confirm');
 const dispatchStrategy = require('./mission/dispatch-strategy');
+const interventionAudit = require('./mission/intervention-audit');
 const brief = require('./mission/brief');
 const deliverable = require('./mission/deliverable');
 const harnessReader = require('./mission/harness-reader');
@@ -84,6 +85,7 @@ const ACTIONS = Object.freeze([
   'workStatus',           // 只读：这次执行跑到哪了（turns/steps/是否在跑）
   'harvestDeliverables',  // 从 Agent 回复里找**真实存在**的产物，登记成 Deliverable
   'confirmDispatch',      // 只读：派发后轮询"投影里有没有出现对应任务"（S2）
+  'interventionHistory',  // 只读：最近的干预记录（S6，闭集字段，无内容）
 ]);
 
 function nowMs() { return Date.now(); }
@@ -472,12 +474,17 @@ function registerMissionIpc(ipcMain, ctx) {
     // 而不只是记录工作。
     ensureSession = null,   // (missionId) => Promise<{ok, sessionId}>
     promptSession = null,   // (sessionId, text) => Promise<{ok, reason?}>
+    cancelSession = null,   // (sessionId) => Promise<{ok, reason?}>  停止执行（S6）
     log = () => {},
   } = ctx;
 
   // 按 resolved 路径缓存 store：切换工作区时自动重建
   let cachedKey = null;
   let cachedStore = null;
+
+  // 干预审计日志（S6）：进程内的有界环，回答"刚才我做了什么"。
+  // 不落盘：落盘涉及格式版本/轮转/隐私扫描，是独立工程。
+  const interventionLog = interventionAudit.createInterventionLog();
 
   function storeFor(workspaceDir) {
     const key = path.resolve(String(workspaceDir));
@@ -620,7 +627,34 @@ function registerMissionIpc(ipcMain, ctx) {
       return { ok: true, missionId: id, event: out.event };
     },
 
-    updateStatus(payload) {
+    /**
+     * 只读：最近的干预记录（S6 审计）。
+     *
+     * 只回传闭集字段（动作/原因/成员名/任务 id/时间），
+     * 不含任何任务正文或消息内容 —— 审计本身不能成为泄露面。
+     */
+    interventionHistory(payload) {
+      const missionId = argString(payload && payload.missionId);
+      const limit = Number.isFinite(payload && payload.limit) ? payload.limit : 20;
+      const entries = missionId
+        ? interventionLog.forMission(missionId, limit)
+        : interventionLog.recent(limit);
+      return {
+        ok: true,
+        entries: entries.map((e) => ({
+          action: e.action,
+          reason: e.reason || null,
+          atMs: e.atMs,
+          memberName: e.memberName || null,
+          taskId: e.taskId || null,
+          // 给人看的一句话（闭集文案，不含用户内容）
+          description: interventionAudit.describeIntervention(e),
+        })),
+        stats: interventionLog.stats(),
+      };
+    },
+
+    async updateStatus(payload) {
       const r = requireStore();
       if (!r.ok) return r;
       const missionId = argString(payload.missionId);
@@ -629,9 +663,61 @@ function registerMissionIpc(ipcMain, ctx) {
       if (!schema.MISSION_STATUSES.includes(to)) {
         return fail(`status must be one of ${schema.MISSION_STATUSES.join('|')} (note: "focused" is a UI concept)`, 'STATUS_INVALID');
       }
+
+      // 先停执行，再改状态。
+      //
+      // 第一性原理：**状态字段不能替代刹车。**
+      // 改这个字段之前，用户点"暂停"后团队仍在写文件 —— 界面显示已暂停，
+      // 实际还在跑。那比没有暂停按钮更糟：他以为自己已经安全了。
+      //
+      // 顺序也是有意的：先 cancel 再 append。
+      // 如果 append 失败，执行已经停了（多停一次无害）；
+      // 反过来若先 append 成功而 cancel 失败，就会出现"状态说停了、实际在跑"，
+      // 那正是我们要消除的谎。
+      let stopped = null;
+      const shouldStop = to === 'paused' || to === 'abandoned';
+      if (shouldStop) {
+        const bound = readBindMap(r.workspaceDir)[missionId];
+        if (bound && bound.sessionId) {
+          if (typeof cancelSession === 'function') {
+            try {
+              const c = await cancelSession(bound.sessionId);
+              stopped = c && c.ok ? 'cancelled' : 'cancel-failed';
+              if (!stopped || stopped === 'cancel-failed') {
+                log(`[mission] updateStatus: cancel failed for ${missionId}: ${(c && c.reason) || 'unknown'}`);
+              }
+            } catch (err) {
+              stopped = 'cancel-failed';
+              log(`[mission] updateStatus: cancel threw for ${missionId}: ${err.message}`);
+            }
+          } else {
+            stopped = 'not-wired';
+            log('[mission] updateStatus: cancelSession is not wired — execution may continue');
+          }
+        } else {
+          // 没绑定会话 = 没有在执行。这不是失败，是"没有需要停的东西"。
+          stopped = 'not-running';
+        }
+      }
+
       const out = r.store.append('mission.statusChanged', { missionId, to }, { missionId });
       if (!out.ok) return fail(out.reason, 'MISSION_APPEND_FAILED');
-      return { ok: true, missionId, status: to };
+
+      // 审计：干预必须留痕（只记动作与闭集原因，不记任何内容）
+      if (shouldStop) {
+        interventionLog.record({
+          action: to === 'paused' ? 'mission.paused' : 'mission.stopped',
+          reason: 'user-request',
+          missionId,
+          atMs: clock(),
+        });
+      }
+
+      return {
+        ok: true, missionId, status: to,
+        // 如实回报：执行是否真的停了。UI 必须显示它，不能假装。
+        stopped,
+      };
     },
 
     update(payload) {

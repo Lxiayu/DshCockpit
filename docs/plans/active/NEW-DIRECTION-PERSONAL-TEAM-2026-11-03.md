@@ -264,11 +264,42 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
 |---|---|---|
 | `src/mission/receipt.js` | `ipc-mission.js` 的 `workStatus` 返回 `receipt` | ✅ **已接线**（集成测试 2 条） |
 | `src/mission/reconcile.js` | `ipc-mission.js` 的 `storeFor` 加载时对账 | ✅ **已接线**（集成测试 3 条） |
-| `src/mission/intervention-audit.js` | 无 | ⚠️ **库就绪，未接线**：需要 S6 的干预 action 才能调用 |
+| `src/mission/intervention-audit.js` | `updateStatus` 记录 + `interventionHistory` action + 右栏「最近的干预」 | ✅ **已接线** |
 | `src/mission/dispatch-strategy.js` | `ipc-mission.js` 的 `renderDispatchInstruction` | ✅ **已接线**：派发指令里带【执行规模】段 |
-| `src/mission/approval-gate.js` | 无 | ⚠️ **库就绪，未接线**：需要 S5 的"需要你批准"UI 与 IPC action |
+| `src/mission/approval-gate.js` | **无（且不应接）** | ⚠️ **判定不接线**：见下方说明 |
 | `src/mission/rail-order.js` | `ipc-mission.js` 的 `attention()` 返回 `rail` | ✅ **已接线**（集成测试 7 条）：`items` 保持全量给老 UI，`rail` 分层+截断给新 UI |
 | `src/mission/dispatch-confirm.js` | `ipc-mission.js` 的 `confirmDispatch` action；`startWork` 返回 `dispatchKey` | ✅ **已接线**（集成测试 7 条） |
+
+### ⚠️ 关于 `approval-gate`：为什么决定**不接线**
+
+第一性原理：**再接一套审批 = 第二套事实作者。**
+
+`approval-gate.js` 的提案类型是 `command.run` / `file.write` / `file.delete` /
+`message.send` / `task.create` / `member.spawn` —— **全部由 Harness 执行**。
+而官方的 `dsh-user-approval` 已经完整覆盖这条链路，其 README 逐字写着：
+
+> "Use this package to require a one-shot decision before a sensitive tool action proceeds."
+> "**Every request and outcome is recorded in the requesting session's audit log.**"
+
+也就是说：官方审批已经**有审计**、已经**fail-closed**（缺 answerer 时返回
+`unavailable` 并拒绝执行）、已经有 `ask` / `never` 策略。
+
+壳层现在的"需要你"区块走的就是这条官方通道（`office:pending` →
+`approval/request` waterfall），已经能用。
+
+**如果我们再实现一套 `approval-gate` 去管同样的动作**，会出现：
+- 同一个动作有两套批准状态，不一致时**没人知道哪个对**（违反 AGENTS.md §2.1）
+- 用户可能在官方 UI 批了、我们不认；或反之
+
+**保留 `approval-gate.js` 的理由**（而不是删掉）：它验证过的三条语义
+（hash 绑定 / TTL / 幂等）是**我们自己产品层**未来可能需要的——
+比如"办公室内一次性授权某个 Mission 的某类动作"这类官方没有的概念。
+但在那之前，它只能作为**候选实现**存在，不能接线。
+
+**判定**：`approval-gate.js` 标记为「已验证的候选实现，不接线」。
+若将来官方确实没有对应能力（例如"跨会话的 Mission 级授权"），再用它。
+
+---
 
 **接线的前提**（都与待决策项相关）：
 - `dispatch-strategy` → 需要派发面板 UI（S7 视觉落地的一部分）

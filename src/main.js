@@ -2585,6 +2585,28 @@ async function missionPromptSession(sessionId, text) {
 }
 
 /**
+ * 取消一个会话的当前执行。
+ *
+ * 与 missionPromptSession 对称：都只做一件事，错误如实返回。
+ * 不重试、不静默 —— 取消失败必须让调用方知道"它可能还在跑"。
+ *
+ * @returns {Promise<{ok:boolean, reason?:string}>}
+ */
+async function missionCancelSession(sessionId) {
+  const ru = getRuntimeUrl();
+  if (!ru) return { ok: false, reason: 'runtime offline' };
+  if (typeof sessionId !== 'string' || !sessionId) return { ok: false, reason: 'sessionId is required' };
+  try {
+    const rpc = createHarnessRpcWire(ru, harnessRpcDeps());
+    await rpc.cancel(sessionId);
+    log(`[mission] cancel: sid=${shortSessionId(sessionId)}`);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: `cancel failed: ${err.message}` };
+  }
+}
+
+/**
  * 向运行时要一次会话投影（0.2.1 的 `session/projections`）。
  *
  * 为什么不用 mux.openStream：这是 unary 调用（问答式），走 mux.call 的
@@ -3244,6 +3266,17 @@ function registerIpc() {
     // 「启动工作」的两个原语：这是把 Mission 从记录器变成发生器的关键
     ensureSession: () => missionEnsureSession(),
     promptSession: (sessionId, text) => missionPromptSession(sessionId, text),
+    // 停止执行（S6）：Mission 的 status 改变必须能真的让团队停下来。
+    //
+    // 第一性原理：为什么必须补这个注入
+    //
+    //   在此之前 updateStatus 只改 Mission 的状态字段，**不动正在跑的会话**。
+    //   于是用户点"暂停"，界面显示 paused，团队却还在写文件 ——
+    //   这是一个会让人失去信任的谎：他以为自己已经刹车了。
+    //
+    //   官方提供了 session/cancel（我们早已在用：IM 的 /stop、office 的停止）。
+    //   这里把它接到 Mission 层，让"状态"与"执行"联动。
+    cancelSession: (sessionId) => missionCancelSession(sessionId),
     log,
   });
 
