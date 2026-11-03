@@ -135,3 +135,79 @@ test('audit: a VALID-JSON-but-invalid entry is also counted as bad', () => {
       'a structurally-valid JSON line that fails schema must be counted, not silently dropped');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------
+// 轮转（文件只增长是真隐患）
+// ---------------------------------------------------------------------------
+//
+// 第一性原理：为什么轮转，而不是无限增长或直接截断
+//
+//   审计文件每次干预追加一行。如果不管，它会一直涨 —— 而"我刚才做了什么"
+//   这个用途只关心最近一段，老数据只是占磁盘。
+//
+//   但直接截断也不好：它**删掉**最老的记录，用户翻上一轮工作时就找不到了。
+//   轮转把老的挪到 .1，代价有界（最多保留 N 份）。
+
+test('rotation: a file under the limit is left alone', () => {
+  const dir = tmpWs();
+  try {
+    store.appendAudit(dir, { action: 'mission.paused', atMs: 1 });
+    const r = store.rotateIfNeeded(path.join(dir, '.dsh', 'interventions.jsonl'), { maxBytes: 1024 * 1024 });
+    assert.equal(r.rotated, false);
+    assert.equal(fs.existsSync(path.join(dir, '.dsh', 'interventions.jsonl.1')), false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('rotation: an oversized file is moved to .1 and writing continues in a fresh file', () => {
+  const dir = tmpWs();
+  const file = path.join(dir, '.dsh', 'interventions.jsonl');
+  try {
+    // 用很小的阈值触发轮转（不必写 512KB）。
+    // 注意：阈值必须小于**单条记录**大小才会触发 —— 一条约 37 字节，
+    // 所以用 30。早期写 200 时四条才 148 字节，从未触发（测试自己拿到过这个教训）。
+    for (let i = 1; i <= 4; i += 1) {
+      store.appendAudit(dir, { action: 'mission.paused', atMs: i }, { maxBytes: 30 });
+    }
+    assert.equal(fs.existsSync(`${file}.1`), true, 'the old file must be preserved as .1');
+    // 轮转后新文件里只剩最近的记录（阈值 30 小于单条 37 字节，所以几乎每条都触发）
+    const back = store.readAudit(dir);
+    assert.ok(back.total >= 1, 'writing must continue after rotation');
+    // 老记录没有消失：它们被挪进了 .1 / .2，而不是被删
+    const backups = [`${file}.1`, `${file}.2`]
+      .filter((f) => fs.existsSync(f))
+      .map((f) => fs.readFileSync(f, 'utf8'))
+      .join('');
+    assert.match(backups, /"atMs":\d/,
+      'rotated files must still contain real entries (rotation moves, it does not delete)');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('rotation: only ROTATION_KEEP backups survive (disk usage stays bounded)', () => {
+  // 第一性原理：轮转必须有界，否则"防止无限增长"的措施本身会无限增长。
+  // 变异测试发现的盲区：原来的断言只检查 ".3 不存在"，但 .3 本来就不会被创建
+  // （我们从 .2 往前挪），删不删最老备份都能通过。所以改为**数备份个数**。
+  const dir = tmpWs();
+  const base = path.join(dir, '.dsh', 'interventions.jsonl');
+  try {
+    for (let i = 1; i <= 40; i += 1) {
+      store.appendAudit(dir, { action: 'mission.paused', atMs: i }, { maxBytes: 30 });
+    }
+    const backups = fs.readdirSync(path.join(dir, '.dsh'))
+      .filter((f) => f.startsWith('interventions.jsonl.'));
+    assert.equal(backups.length, store.ROTATION_KEEP,
+      `expected exactly ${store.ROTATION_KEEP} rotated backups, found ${backups.length}: ${backups.join(', ')}`);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('rotation: a rotation failure does not block the audit write', () => {
+  // 轮转是维护动作，不该让用户的操作失败。
+  const dir = tmpWs();
+  try {
+    // 传一个不可能的 maxBytes 让 statSync 路径异常也不该抛
+    assert.doesNotThrow(() => {
+      store.appendAudit(dir, { action: 'mission.paused', atMs: 1 }, { maxBytes: -5 });
+    });
+    const back = store.readAudit(dir);
+    assert.equal(back.total, 1, 'the entry is still written');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

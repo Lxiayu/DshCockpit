@@ -32,8 +32,67 @@ const PERSISTED_FIELDS = Object.freeze([
 /** 审计文件的相对路径（相对 workspaceDir）。 */
 const AUDIT_FILE_REL = path.join('.dsh', 'interventions.jsonl');
 
-/** 落盘上限：超出后只读最近 N 行（文件本身不截断，避免"静默丢历史"的错觉）。 */
+/** 读时上限：最多返回最近 N 条（这是**视图**上限，不是文件上限）。 */
 const MAX_PERSISTED_ENTRIES = 500;
+
+/**
+ * 轮转阈值：单个文件超过这个大小就轮转。
+ *
+ * 为什么按**字节**而不是按条数：
+ *   条数需要每次写都数行（O(n)），而审计是"用户点一下就要立刻落盘"的路径，
+ *   不该在写的时候做全文件扫描。文件大小是 O(1) 就能拿到的。
+ *
+ * 512KB ≈ 数千条记录（每条约 100-150 字节）。对"我刚才做了什么"这个用途，
+ * 这个跨度足够长；再老的历史价值递减，而磁盘占用会一直涨。
+ */
+const MAX_FILE_BYTES = 512 * 1024;
+
+/** 保留几份历史（.1 / .2）。审计主要是查最近，两份足够回溯到上一轮工作。 */
+const ROTATION_KEEP = 2;
+
+/** 轮转后的备份路径：audit.jsonl -> audit.jsonl.1 -> audit.jsonl.2 */
+function rotatedPath(file, index) {
+  return index === 1 ? `${file}.1` : `${file}.${index}`;
+}
+
+/**
+ * 按大小轮转审计文件。
+ *
+ * 为什么轮转而不是截断：
+ *   截断会**删掉**最老的记录，而轮转把它们挪到 .1。
+ *   用户翻上一轮工作留下的审计时还能找回来。
+ *   代价是磁盘上最多保留 (ROTATION_KEEP + 1) 份 —— 有界。
+ *
+ * 为什么失败不影响写入：轮转是维护动作，不该让用户的操作失败。
+ */
+function rotateIfNeeded(file, { log = () => {}, maxBytes = MAX_FILE_BYTES } = {}) {
+  try {
+    if (!fs.existsSync(file)) return { rotated: false };
+    const size = fs.statSync(file).size;
+    const limit = Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : MAX_FILE_BYTES;
+    if (size < limit) return { rotated: false };
+    // 从最老的开始往后挪：.2 -> .3（覆盖）...，.1 -> .2，current -> .1
+    //
+    // 注意：这里**不需要**先删最老的备份。`fs.renameSync` 会覆盖已存在的目标
+    // （实测量过），所以最后一次 rename 天然把最老的挤掉。
+    //
+    // 早期版本在这里写了一行 rmSync 删 .2 —— 变异测试证明它永远不影响结果
+    // （删不删，备份数都是 2）。那种"看起来在保护"的冗余代码更危险：
+    // 它让人以为有边界检查，实际真正起作用的是别处。
+    for (let i = ROTATION_KEEP - 1; i >= 1; i -= 1) {
+      const from = rotatedPath(file, i);
+      const to = rotatedPath(file, i + 1);
+      if (fs.existsSync(from)) {
+        try { fs.renameSync(from, to); } catch { /* */ }
+      }
+    }
+    try { fs.renameSync(file, rotatedPath(file, 1)); } catch { /* */ }
+    return { rotated: true, size };
+  } catch (err) {
+    log(`[mission] audit rotate failed: ${err.message}`);
+    return { rotated: false, reason: err.message };
+  }
+}
 
 function auditFilePath(workspaceDir) {
   return path.join(workspaceDir, AUDIT_FILE_REL);
@@ -69,13 +128,15 @@ function projectForDisk(entry) {
  *
  * @returns {{ok:boolean, reason?:string}}
  */
-function appendAudit(workspaceDir, entry, { log = () => {} } = {}) {
+function appendAudit(workspaceDir, entry, { log = () => {}, maxBytes } = {}) {
   const projected = projectForDisk(entry);
   if (!projected) return { ok: false, reason: 'entry is not persistable' };
   if (typeof workspaceDir !== 'string' || !workspaceDir) return { ok: false, reason: 'no workspace dir' };
   try {
     const file = auditFilePath(workspaceDir);
     fs.mkdirSync(path.dirname(file), { recursive: true });
+    // 写入前先检查要不要轮转（按字节，O(1)）
+    rotateIfNeeded(file, { log, maxBytes });
     fs.appendFileSync(file, `${JSON.stringify(projected)}\n`, 'utf8');
     return { ok: true };
   } catch (err) {
@@ -115,6 +176,9 @@ function readAudit(workspaceDir, { limit = 50 } = {}) {
 module.exports = {
   PERSISTED_FIELDS,
   MAX_PERSISTED_ENTRIES,
+  MAX_FILE_BYTES,
+  ROTATION_KEEP,
+  rotateIfNeeded,
   AUDIT_FILE_REL,
   auditFilePath,
   projectForDisk,
