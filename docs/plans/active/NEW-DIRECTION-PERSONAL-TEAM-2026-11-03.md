@@ -253,6 +253,32 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
 
 ---
 
+## 6.9 新增模块的接线状态（诚实表）
+
+> 第一性原理：**库写好了 ≠ 功能接上了**。本项目已经有过"看起来接了、实际一条都没存"
+> 的教训（TaskRef 的 append 被 schema 静默 break，见 `ipc-mission.js` 注释）。
+> 所以这里逐条标注哪些模块真的被调用，哪些还只是库 —— 避免两周后有人
+> 以为"凭证已经能工作了"。
+
+| 模块 | 接入点 | 状态 |
+|---|---|---|
+| `src/mission/receipt.js` | `ipc-mission.js` 的 `workStatus` 返回 `receipt` | ✅ **已接线**（集成测试 2 条） |
+| `src/mission/reconcile.js` | `ipc-mission.js` 的 `storeFor` 加载时对账 | ✅ **已接线**（集成测试 3 条） |
+| `src/mission/intervention-audit.js` | 无 | ⚠️ **库就绪，未接线**：需要 S6 的干预 action 才能调用 |
+| `src/mission/dispatch-strategy.js` | 无 | ⚠️ **库就绪，未接线**：需要 S2 派发面板在选择策略时调用 |
+| `src/mission/approval-gate.js` | 无 | ⚠️ **库就绪，未接线**：需要 S5 的"需要你批准"UI 与 IPC action |
+
+**接线的前提**（都与待决策项相关）：
+- `dispatch-strategy` → 需要派发面板 UI（S7 视觉落地的一部分）
+- `approval-gate` → 需要"需要你批准"区块 + 批准交互（右栏 S7）
+- `intervention-audit` → 需要 S6 的干预动作入口（暂停/停止/发消息的按钮）
+
+**这三个不是没做完，而是"等 UI 定稿再接"** —— 先接线但没有 UI 调用点，
+会变成死代码 + 假测试。它们各自的纯逻辑与负向断言已完备，
+接线时应补集成测试（参照 receipt/reconcile 的做法）。
+
+---
+
 ## 7. 分阶段路线（给 DeepSeek 执行）
 
 > 每阶段独立可验收；前一阶段不过，不进入下一阶段。S0 是唯一必须真机完成的阶段，其余依赖它的结论。

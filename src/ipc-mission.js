@@ -32,6 +32,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createMissionStore } = require('./mission/store');
 const reconcileModule = require('./mission/reconcile');
+const receiptModule = require('./mission/receipt');
 const brief = require('./mission/brief');
 const deliverable = require('./mission/deliverable');
 const harnessReader = require('./mission/harness-reader');
@@ -1332,6 +1333,33 @@ function registerMissionIpc(ipcMain, ctx) {
         // 预览是有长度上限的（官方为窄栏卡片设计），所以**不是完整回复**
         lastPromptPreview: lastPrompt || null,
         lastResponsePreview: lastResponse || null,
+        // ---- 交付凭证（S5）-------------------------------------------------
+        //
+        // 第一性原理：用户看 workStatus 真正想问的是"我该不该信"，
+        // 而不是"跑了几轮"。turns/steps 只证明有人在动，不证明做完了。
+        //
+        // 凭证的坐标来自官方 workspace/changes 事件的 seq —— 但这个 action
+        // 只读投影，拿不到事件。所以这里**如实返回 claimed**：
+        // "团队有回复，但没有可复核的变更坐标"。
+        //
+        // 这比"看起来跑完了就显示已完成"诚实：一个 turn 正常结束，
+        // 完全可能什么都没改（只是回答了一个问题），也可能改了一堆东西
+        // 但没人验证过。凭证需要另一条读路径（/api/changes.summary），
+        // 那依赖事件订阅，属 S5 后续接线。
+        receipt: (() => {
+          const derived = receiptModule.buildReceiptCoordinate({
+            sessionRef: null, seq: null, turn: lastTurn, summary: null,
+          });
+          const state = receiptModule.deriveReceiptState({ receipt: derived, resolvable: false });
+          return {
+            state,
+            description: receiptModule.describeReceipt({ receipt: derived, resolvable: false }),
+            // 明确告诉 UI 为什么是 claimed：有回复 ≠ 有凭证
+            reason: lastResponse.length > 0
+              ? '团队已给出回复，但尚未绑定可复核的变更坐标'
+              : '团队尚未产出可复核的结果',
+          };
+        })(),
         observedAtMs: clock(),
       };
     },

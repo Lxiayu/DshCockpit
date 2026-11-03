@@ -132,3 +132,86 @@ test('receipt: degenerate input never throws', () => {
 test('receipt: the state vocabulary is closed and exported', () => {
   assert.deepEqual([...receipt.RECEIPT_STATES], ['claimed', 'verified', 'stale']);
 });
+
+// ---------------------------------------------------------------------------
+// 集成：workStatus 真的会带上凭证（不是只有纯函数对）
+// ---------------------------------------------------------------------------
+//
+// 第一性原理：用户看 workStatus 真正想问的是"我该不该信"，不是"跑了几轮"。
+// turns/steps 只证明有人在动，不证明做完了。
+// 而"有回复"和"有凭证"是两件事：一个 turn 正常结束，完全可能什么都没改。
+
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { createMissionStore } = require('../src/mission/store.js');
+const { registerMissionIpc } = require('../src/ipc-mission.js');
+
+function setupBoundMission({ turns = 3, response = '完成了' } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-receipt-int-'));
+  const s = createMissionStore({ workspaceDir: dir, now: () => 1000, log: () => {} });
+  s.append('mission.created', {
+    missionId: 'mis-a', title: 't', intent: 'i', status: 'active',
+    workspaceId: 'ws-1', createdAtMs: 1, updatedAtMs: 2,
+  });
+  fs.mkdirSync(path.join(dir, '.dsh'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, '.dsh', 'mission-sessions.json'),
+    JSON.stringify({ version: 1, sessions: { 'mis-a': { sessionId: 'session-x', boundAtMs: 1 } } }),
+  );
+  const handlers = new Map();
+  registerMissionIpc(
+    { handle: (c, f) => handlers.set(c, f), removeHandler: () => {} },
+    {
+      workspaceDirOf: () => dir,
+      clock: () => 2000,
+      log: () => {},
+      snapshotOf: () => null,
+      projectionsOf: async () => ({
+        ok: true,
+        value: { values: { sessionStats: { turns, steps: 9 }, turnOutline: [{ turn: turns, response }] } },
+      }),
+    },
+  );
+  return { dir, invoke: handlers.get('mission:invoke') };
+}
+
+test('integration: workStatus reports a receipt, and "has a reply" is NOT "verified"', async () => {
+  const { dir, invoke } = setupBoundMission({ turns: 3, response: '我把事做完了' });
+  try {
+    const r = await invoke(null, 'workStatus', { missionId: 'mis-a' });
+    assert.equal(r.ok, true);
+    assert.equal(r.turns, 3);
+    assert.equal(r.hasResponse, true, 'the team did reply');
+
+    assert.ok(r.receipt, 'workStatus must carry a receipt');
+    // 核心断言：有回复 ≠ 有凭证。没有可复核的变更坐标就只能叫 claimed。
+    assert.equal(r.receipt.state, 'claimed',
+      'a reply without a change coordinate is a claim, not a verification');
+    assert.match(r.receipt.reason, /尚未绑定可复核/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('integration: an unbound mission still answers honestly (no fake receipt)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-receipt-unbound-'));
+  try {
+    const s = createMissionStore({ workspaceDir: dir, now: () => 1000, log: () => {} });
+    s.append('mission.created', {
+      missionId: 'mis-z', title: 't', intent: 'i', status: 'active',
+      workspaceId: 'ws-1', createdAtMs: 1, updatedAtMs: 2,
+    });
+    const handlers = new Map();
+    registerMissionIpc(
+      { handle: (c, f) => handlers.set(c, f), removeHandler: () => {} },
+      { workspaceDirOf: () => dir, clock: () => 2000, log: () => {}, snapshotOf: () => null },
+    );
+    const r = await handlers.get('mission:invoke')(null, 'workStatus', { missionId: 'mis-z' });
+    assert.equal(r.ok, true);
+    assert.equal(r.bound, false);
+    assert.equal(r.receipt, undefined, 'nothing ran → no receipt at all (not a fake "claimed")');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
