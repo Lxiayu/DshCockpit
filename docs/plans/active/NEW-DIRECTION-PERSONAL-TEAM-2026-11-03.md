@@ -268,6 +268,7 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
 | `src/mission/dispatch-strategy.js` | 无 | ⚠️ **库就绪，未接线**：需要 S2 派发面板在选择策略时调用 |
 | `src/mission/approval-gate.js` | 无 | ⚠️ **库就绪，未接线**：需要 S5 的"需要你批准"UI 与 IPC action |
 | `src/mission/rail-order.js` | 无 | ⚠️ **库就绪，未接线**：右栏 `renderAttention` 改为调用它（S7） |
+| `src/mission/dispatch-confirm.js` | 无 | ⚠️ **库就绪，未接线**：`startWork` 返回后轮询投影确认（S2） |
 
 **接线的前提**（都与待决策项相关）：
 - `dispatch-strategy` → 需要派发面板 UI（S7 视觉落地的一部分）
@@ -381,8 +382,11 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
   - 测试：`test/mission-agent-team.test.js`（7 条），变异验证 DETECTED。
 
 **仍未完成（需要更多设计或真机）：**
-- ⬜ 派发后的**投影确认轮询**（prompt 被接受但超时未出现 → 显示"已下达，未确认"）。
-  需要接 `officeSessionProjections` + 轮询逻辑，属于 IPC/主进程层。
+- ✅ **派发确认的判定逻辑已完成**（`src/mission/dispatch-confirm.js`）：
+  四态 `pending / confirmed / unconfirmed / rejected`，判据是**投影里有没有我们那个 key**。
+  关键措辞约束：`unconfirmed` 绝不说成"失败"（那会让用户重复派发、凭空多出团队）；
+  只有运行时**明确拒绝**才算 `rejected`。测试 11 条，变异 DETECTED ×2。
+- ⬜ 把 `dispatch-confirm` 接到 `startWork` 的返回路径（需要轮询 + IPC 接线，属实现层）。
 - ⬜ 派发面板 UI（右栏结构化表单）。
 - ⬜ Grant 存储与 `grantId` 的实际创建/撤销流程。
 - ✅ **派发策略的确定性判定（2026-11-04 已完成）**：`src/mission/dispatch-strategy.js`
@@ -458,6 +462,12 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
 **测试**：`test/mission-reconcile.test.js`（15 条，含 3 条走真实 `registerMissionIpc`
 的集成测试 —— 防止"纯函数对了但没接上"，本项目有过 TaskRef 静默失效的教训）。
 变异验证 DETECTED ×3（active 加入中断列表 / 回退成 active / 摘掉接线钩子）。
+
+**✅ 团队状态的持久性已实测（2026-11-04 第六轮，U-9 9/9）**：
+杀掉运行时后用同一 DSH_HOME 重启，roster（含 `phase`）与任务板（含 subject/status/ready）
+**全部还在**，session 也仍在 `session/list` 里。
+→ 我们**不需要自建团队持久化**，官方 jsonl persistence 已覆盖。
+边界：同机同 HOME；跨机器迁移未验证；重启时正在跑的 turn 未验证。
 
 **仍未完成**：
 - ⬜ 守护进程形态（D4）本身：当前对账在 app 启动时执行；后台守护是独立工程。

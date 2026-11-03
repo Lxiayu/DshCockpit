@@ -459,3 +459,42 @@ RESULT: CAS ENFORCED
 
 **仍未验证**：`reassign`（重新分配 owner）的实际效果未单独测；
 `U-5`（teammate 发起提问）与 `U-9`（跨重启恢复）仍需真机交互。
+
+### 9.7 第六轮：U-9 团队状态跨重启恢复 —— 通过（9/9）
+
+**结论：团队 roster 与任务板真的能活过运行时重启。这是"常驻团队"的前提。**
+
+官方 README 说 roster 与 task board 是 durable 的（需要 `dsh-session-persistence-jsonl`），
+但本项目已经多次遇到"声明比实际宽"，所以实测。
+
+**方法**（`scripts/poc/s0-verify-restart.js`）：
+1. 启动 → 建团队（1 名 teammate）+ 1 个带随机标识的任务
+2. **杀掉运行时**（SIGTERM，必要时 SIGKILL）
+3. 用**同一个 DSH_HOME** 重启 → 读同一个 sessionId 的 `agentTeam`
+
+**实测**：
+
+```
+PASS  first boot
+PASS  session created — session-11280b…
+PASS  team created before restart — members=2 tasks=1
+PASS  runtime stopped — SIGTERM (then SIGKILL if needed)
+PASS  second boot (same DSH_HOME)
+PASS  session survives restart — session is in session/list
+PASS  agentTeam readable after restart — {members:[lead, restartprobe], ...}
+PASS  teammate survived restart — restartprobe still in roster
+PASS  task board survived restart — restart-task-3bcc still on board
+counts: {"pass":9}
+```
+
+**含义**：
+- Mission ↔ 团队映射可以**跨 app 重启**保持，不需要我们自建持久化。
+- roster 的 `phase`（active/provisioning/failed）也持久，不只是名字。
+- 任务板（含 subject/status/ready）持久。
+
+**边界（如实标注）**：
+- 只验证了**同一台机器、同一 DSH_HOME**。跨机器迁移未验证。
+- 未验证"重启时正在运行的 turn"会怎样（大概率变成 interrupted，
+  因为进程没了；这与我们 S4 的对账逻辑（把 dispatching 回退为 draft）方向一致）。
+- 未验证 teammate 的**对话历史**是否完整（roster 持久 ≠ 会话内容持久，
+  虽然 jsonl persistence 应该覆盖，但未单独测）。
