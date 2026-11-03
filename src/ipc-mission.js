@@ -1071,6 +1071,9 @@ function registerMissionIpc(ipcMain, ctx) {
           disk: {
             total: disk.total,
             badLines: disk.badLines,
+            // 有"更新格式"的记录时说明用户装过更高版本（或降级了）。
+            // 这不是错误，但用户该知道有记录没显示出来。
+            newerVersions: disk.newerVersions || 0,
             memoryRows: missionId
               ? interventionLog.forMission(missionId, 10000).length
               : interventionLog.stats().entries,

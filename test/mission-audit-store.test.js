@@ -211,3 +211,56 @@ test('rotation: a rotation failure does not block the audit write', () => {
     assert.equal(back.total, 1, 'the entry is still written');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------
+// 格式版本号（将来改格式时需要能识别旧文件）
+// ---------------------------------------------------------------------------
+//
+// 第一性原理：版本号为什么放在**每条记录**上，而不是文件头
+//
+//   直觉做法是文件第一行写 {"v":1} 当文件头。但审计文件有两个特性会毁掉它：
+//     · 轮转：.1/.2 是整文件改名，文件头跟着走但语义变了
+//     · 追加 + 部分损坏：某一行坏了，文件头可能正好在坏掉的那段
+//
+//   每行自带 v 则永远可用：读到哪一行就知道那一行是哪个版本。
+//   代价是每条多约 6 字节，对 512KB 上限可忽略。
+
+test('version: every persisted record carries the format version', () => {
+  const dir = tmpWs();
+  try {
+    store.appendAudit(dir, { action: 'mission.paused', atMs: 1 });
+    const raw = fs.readFileSync(path.join(dir, '.dsh', 'interventions.jsonl'), 'utf8').trim();
+    const rec = JSON.parse(raw);
+    assert.equal(rec.v, store.AUDIT_FORMAT_VERSION);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('version: a record from a NEWER format is counted, not silently treated as garbage', () => {
+  // 这意味着"用户装过更高版本的 app，或者降级了"——需要让人知道的事实。
+  const dir = tmpWs();
+  try {
+    store.appendAudit(dir, { action: 'mission.paused', atMs: 1 });
+    fs.appendFileSync(path.join(dir, '.dsh', 'interventions.jsonl'),
+      JSON.stringify({ v: 99, action: 'mission.paused', atMs: 2 }) + '\n', 'utf8');
+    const back = store.readAudit(dir);
+    assert.equal(back.entries.length, 1, 'the known-version record is still readable');
+    assert.equal(back.newerVersions, 1,
+      'a newer-format record must be counted separately from corrupt lines');
+    assert.equal(back.badLines, 0, 'it is NOT corruption — it is a newer format');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('version: a record WITHOUT a version field is treated as the current version', () => {
+  // 向后兼容：版本号是后加的，之前写下的记录没有 v。
+  // 把它们当垃圾会让用户已有的审计史全部消失。
+  const dir = tmpWs();
+  try {
+    fs.mkdirSync(path.join(dir, '.dsh'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.dsh', 'interventions.jsonl'),
+      JSON.stringify({ action: 'mission.paused', atMs: 7 }) + '\n', 'utf8');
+    const back = store.readAudit(dir);
+    assert.equal(back.entries.length, 1, 'legacy records without v must still be readable');
+    assert.equal(back.badLines, 0);
+    assert.equal(back.newerVersions, 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

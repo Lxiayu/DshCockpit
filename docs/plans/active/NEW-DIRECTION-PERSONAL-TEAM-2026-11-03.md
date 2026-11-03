@@ -425,7 +425,7 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
   集成测试 7 条，变异 DETECTED ×2。
   **不持久化 dispatchKey 的理由**：派发确认是"一次尝试的短期状态"，不是 Mission 长期事实；
   持久化要扩展 schema（TaskRef 还要求 workstreamId 必填），成本远大于收益。
-- ⬜ 右栏 UI 调用 `confirmDispatch`（S7）。
+- ✅ 右栏 `startWork` 已调用 `confirmDispatch`（2026-11-04 完成，见 `attachStartWorkActions`）。
 - ⬜ 派发面板 UI（右栏结构化表单）。
 - ⬜ Grant 存储与 `grantId` 的实际创建/撤销流程。
 - ✅ **派发策略的确定性判定（2026-11-04 已完成）**：`src/mission/dispatch-strategy.js`
@@ -660,7 +660,15 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
     为什么轮转不截断：截断**删掉**最老记录，用户翻上一轮工作时就找不到了；
     轮转把它们挪到 `.1`，代价有界。
     轮转失败不影响写入（维护动作不该让用户操作失败）。
-  - ⬜ 仍待：审计文件的格式版本号（将来改格式时需要能识别旧文件）。
+  - ✅ **格式版本号（2026-11-04）**：每条记录带 `v` 字段，**不是文件头**。
+    为什么不是文件头：轮转是整文件改名（.1/.2），追加时部分行损坏
+    也可能正好坏在文件头 —— 两种情况下文件头都不可靠。
+    每行自带 v 则永远可用，代价是每条多约 6 字节。
+    - 读到**更新**格式的记录 → 单独计数 `newerVersions`（不是 badLines）：
+      那意味着用户装过更高版本或降级了，是**需要让人知道**的事实，不是损坏。
+    - 没有 `v` 的旧记录 → 按当前版本解释（否则用户已有的审计史会全部消失）。
+    - `newerVersions` 已透传到 UI（`stats.disk.newerVersions`）。
+    测试 4 条，变异 DETECTED ×2。
 - 验收（未达成）：真机纠偏探针 + 审计记录可查。
 
 ### S7 右栏视觉落地【**数据层已备（2026-11-04）**】
@@ -728,7 +736,9 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
     放错会让人以为有 9 件事要决策。
   - `tone: 'unknown'`（数据源缺席）已有独立呈现"待办状态未知"，不渲染成"团队运行正常"。
   测试 4 条，变异 DETECTED ×2。
-- ⬜ `renderTeamTasks` 仍用自有结构（它渲染的是任务板，与 rail 分层无关，可不动）。
+- ✅ **`renderTeamTasks` 的判定**：它渲染的是**任务板**（subject/status/blockedBy/owner），
+  与 rail-order 的"待办分层"是两个不同的数据源，**不应强行统一**。
+  强行复用会让两个概念互相污染（任务 ≠ 待办）。保持独立是正确的。
 
 
 - 按 §6 实施：首屏结构、颜色语义、术语、派发面板、空态、未连接状态。

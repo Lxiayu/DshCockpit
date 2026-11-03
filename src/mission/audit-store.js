@@ -24,6 +24,24 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+/**
+ * 审计记录的格式版本。
+ *
+ * 第一性原理：为什么版本号放在**每条记录**上，而不是文件头
+ *
+ *   直觉做法是文件第一行写 `{"v":1}` 当文件头。但审计文件有两个特性会毁掉它：
+ *     · **轮转**：.1/.2 是整文件改名，文件头跟着走但语义变了
+ *     · **追加 + 部分损坏**：某一行坏了，文件头可能正好在坏掉的那段
+ *
+ *   每行自带 `v` 则永远可用：读到哪一行，就知道那一行是哪个版本。
+ *   代价是每条多约 6 字节 —— 对 512KB 上限来说可忽略。
+ *
+ * 变更规则：
+ *   · 加**可选**字段 → 版本不变（旧读者忽略未知字段即可）
+ *   · 改字段含义 / 删字段 / 加必填字段 → 版本 +1，并在读取时按版本解释
+ */
+const AUDIT_FORMAT_VERSION = 1;
+
 /** 落盘允许的字段。**白名单**：名单外的一律不写。 */
 const PERSISTED_FIELDS = Object.freeze([
   'action', 'reason', 'atMs', 'missionId', 'memberName', 'taskId',
@@ -110,7 +128,7 @@ function projectForDisk(entry) {
   if (!entry || typeof entry !== 'object') return null;
   if (typeof entry.action !== 'string' || !entry.action) return null;
   if (!Number.isFinite(entry.atMs)) return null;
-  const out = { action: entry.action, atMs: entry.atMs };
+  const out = { v: AUDIT_FORMAT_VERSION, action: entry.action, atMs: entry.atMs };
   if (typeof entry.reason === 'string' && entry.reason) out.reason = entry.reason;
   if (typeof entry.missionId === 'string' && entry.missionId) out.missionId = entry.missionId;
   if (typeof entry.memberName === 'string' && entry.memberName) out.memberName = entry.memberName;
@@ -153,16 +171,21 @@ function appendAudit(workspaceDir, entry, { log = () => {}, maxBytes } = {}) {
  * @returns {{entries:object[], badLines:number, total:number}}
  */
 function readAudit(workspaceDir, { limit = 50 } = {}) {
-  const empty = { entries: [], badLines: 0, total: 0 };
+  const empty = { entries: [], badLines: 0, total: 0, newerVersions: 0 };
   if (typeof workspaceDir !== 'string' || !workspaceDir) return empty;
   let raw;
   try { raw = fs.readFileSync(auditFilePath(workspaceDir), 'utf8'); } catch { return empty; }
   const lines = raw.split('\n').filter((l) => l.trim());
   const entries = [];
   let badLines = 0;
+  let newerVersions = 0;
   for (const line of lines) {
     let parsed;
     try { parsed = JSON.parse(line); } catch { badLines += 1; continue; }
+    // 版本识别：不认识**更新**的版本时要计数，而不是当垃圾丢掉。
+    // 那意味着"用户装过更高版本的 app，或者降级了" —— 这是需要让人知道的事实。
+    const v = Number.isFinite(parsed && parsed.v) ? parsed.v : AUDIT_FORMAT_VERSION;
+    if (v > AUDIT_FORMAT_VERSION) { newerVersions += 1; continue; }
     const projected = projectForDisk(parsed);
     if (!projected) { badLines += 1; continue; }
     entries.push(projected);
@@ -170,11 +193,17 @@ function readAudit(workspaceDir, { limit = 50 } = {}) {
   const capped = entries.length > MAX_PERSISTED_ENTRIES
     ? entries.slice(entries.length - MAX_PERSISTED_ENTRIES) : entries;
   const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, capped.length) : capped.length;
-  return { entries: capped.slice(capped.length - n), badLines, total: entries.length };
+  return {
+    entries: capped.slice(capped.length - n),
+    badLines,
+    total: entries.length,
+    newerVersions,
+  };
 }
 
 module.exports = {
   PERSISTED_FIELDS,
+  AUDIT_FORMAT_VERSION,
   MAX_PERSISTED_ENTRIES,
   MAX_FILE_BYTES,
   ROTATION_KEEP,
