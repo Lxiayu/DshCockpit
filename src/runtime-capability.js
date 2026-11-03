@@ -98,6 +98,29 @@ const CAPABILITIES = Object.freeze([
     evidence: 'POC 2026-11-01 实测：0.2.x 有 dsh-workspace-changes，0.1.5 无',
   }),
   Object.freeze({
+    id: 'permission.read',
+    required: false,
+    since: '0.2.1',
+    why: '右栏显示当前权限档位（"现在是不是完全权限"是用户最关心的风险信号之一）',
+    evidence: 'S0 第四轮实测：session/projections 的 values.permissions.currentValue；'
+      + 'permissionPresets/catalog 返回 options/defaultPreset',
+  }),
+  Object.freeze({
+    id: 'permission.write',
+    required: false,
+    since: null, // 从未存在过：不是"还没到版本"，是"官方不提供"
+    why: '是否能由壳层修改会话权限（D8 控件的可用性前提）',
+    evidence: 'S0 第四轮实测：不可用。权威依据 dsh-permission-presets/lib/typert.host.js '
+      + '只注册 permissionPresets/catalog（只读）；SessionCreateRequest 无权限字段；'
+      + '试 set/select/apply 全部 HTTP 404',
+    // 这条能力**故意**永远不满足。写在这里是为了让"为什么没有权限开关"
+    // 成为一条可查的、有证据的结论，而不是后人以为"忘了做"。
+    unavailable: {
+      reason: '官方不提供第三方写权限的接口',
+      consequence: 'D8 改为只读显示 + 跳转官方设置，不提供切换开关',
+    },
+  }),
+  Object.freeze({
     id: 'session.goal',
     required: false,
     since: '0.1.0',
@@ -133,7 +156,7 @@ const KNOWN_MATRIX = Object.freeze([
     // 新增一个 0.2.x 版本被验证后，在这里用 '||' 追加（semver 支持 disjunction）。
     range: '0.2.1-rc.5 || 0.2.2-alpha.2',
     satisfied: ['remote.mux', 'session.list', 'session.create', 'session.page',
-      'agent-team', 'workspace.changes', 'session.goal'],
+      'agent-team', 'workspace.changes', 'permission.read', 'session.goal'],
     missing: [],
     evidence: 'POC 2026-11-01（0.2.1-rc.5 与 0.2.2-alpha.2 各 16 pass / 0 fail）',
     verifiedAt: '2026-11-01',

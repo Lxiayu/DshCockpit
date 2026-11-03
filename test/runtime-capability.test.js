@@ -32,7 +32,19 @@ test('capability: every declared capability explains WHY and cites EVIDENCE', ()
       `capability ${c.id} must explain why the shell needs it`);
     assert.ok(c.evidence && c.evidence.length > 10,
       `capability ${c.id} must cite evidence (a claim without evidence is a guess)`);
-    assert.match(c.since, /^\d+\.\d+\.\d+/, `capability ${c.id} needs a since version`);
+    // 两种能力形态，判据不同：
+    //   · 版本能力：在某个版本出现 → 必须有 since
+    //   · 声明不可用：官方设计上不提供 → 没有 since，但必须有 unavailable 理由
+    // 后者存在是为了让"为什么没有这个功能"成为可查的事实，
+    // 而不是让后人以为漏做了。
+    if (c.unavailable) {
+      assert.equal(c.since, null,
+        `capability ${c.id} declares unavailable, so it must not pretend to have a since version`);
+      assert.ok(c.unavailable.reason && c.unavailable.reason.length > 5,
+        `capability ${c.id} must record WHY it is unavailable`);
+    } else {
+      assert.match(c.since, /^\d+\.\d+\.\d+/, `capability ${c.id} needs a since version`);
+    }
   }
 });
 
@@ -205,4 +217,37 @@ test('capability: activation evidence points at the probe that proved it', () =>
   const decl = cap.capabilityById('agent-team');
   assert.match(decl.activation.note, /默认关闭|仅安装/);
   assert.match(decl.activation.evidence, /harness-agent-team-probe-2026-11-04/);
+});
+
+// ------------------------------------------- 权限轴：能读不能写（S0 第四轮实测）
+
+test('capability: permission.read exists and permission.write is declared unavailable', () => {
+  // 第一性原理：为什么"不可用"要写成一条有证据的能力条目
+  //
+  //   D8 原本设计了一个权限下拉，条件是"验证通过后启用"。
+  //   验证结果是**官方不提供写接口**。如果只是把代码删掉、不留记录，
+  //   半年后会有人重新提"为什么不做权限切换"，然后再查一遍、再失望一次。
+  //
+  //   把结论写成能力条目 + unavailable 理由，是让它变成**可查的事实**。
+  const read = cap.capabilityById('permission.read');
+  assert.ok(read, 'permission.read must exist (we CAN read the current preset)');
+  assert.equal(read.evidence.includes('values.permissions.currentValue'), true);
+
+  const write = cap.capabilityById('permission.write');
+  assert.ok(write, 'permission.write must be declared even though it is unavailable');
+  assert.ok(write.unavailable, 'the unavailable reason must be recorded, not just omitted');
+  assert.match(write.unavailable.reason, /不提供/);
+  assert.match(write.unavailable.consequence, /只读展示|不提供切换/);
+});
+
+test('capability: permission.write is never satisfied by any version (not a version gap)', () => {
+  // 关键区分：这不是"0.2.1 还没有，等 0.3 就有了"。
+  // 它是"官方设计上不提供第三方写权限"。所以任何版本的 satisfied 列表都不许包含它。
+  for (const entry of cap.KNOWN_MATRIX) {
+    assert.equal(entry.satisfied.includes('permission.write'), false,
+      `matrix ${entry.range} must not claim permission.write`);
+  }
+  const entry02 = cap.KNOWN_MATRIX.find((e) => e.range.includes('0.2.1-rc.5'));
+  assert.ok(entry02.satisfied.includes('permission.read'),
+    'the 0.2.x matrix entry must list permission.read as satisfied');
 });

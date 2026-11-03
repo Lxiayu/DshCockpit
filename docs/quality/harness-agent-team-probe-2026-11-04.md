@@ -307,3 +307,129 @@ GET /api/changes.summary?sessionId=<id>&seq=29   →  200
   → 我们的 Deliverable 应消费 `present` 的声明 + `changes.summary` 的事实，两者互补。
 
 **探针脚本**：`/tmp/probe-changes.cjs`（本轮为快速验证写在临时目录；若要在 CI 复用需移入 `scripts/poc/`）。
+
+### 9.4 第三轮：P-0.8 Brief 跨会话已解决（#23 关闭）
+
+**这是整个 Mission 层价值的前提**：如果 Brief 不会被下次会话读到，
+"跨会话项目记忆"就只是一堆笔记，记录型功能全是花架子。
+
+**实测**（`scripts/acceptance/brief-cross-session-acceptance.js`，8/8 PASS）：
+
+```
+TOKEN: ZEBRA-0C759A4077
+PASS  the brief is written into <workspace>/AGENTS.md — sync=true action=appended
+PASS  the user's own content survives the brief write — ok
+PASS  the isolated runtime has a usable model provider configured — stepfun/step-5-preview
+PASS  the isolated dsh runtime boots — ok
+PASS  the runtime hands out a session cookie — ok
+PASS  a session can be created in the workspace — sessionId=session-535f41…
+PASS  the prompt is accepted by the runtime — ok
+PASS  the real model read the brief and answered with the secret token
+      — the model echoed the token — cross-session memory works
+ALL PASSED (8 checks)
+```
+
+**方法（为什么这个证据可信）**：暗号法。写一个**随机** token 进 `AGENTS.md` 的
+Brief 块，然后开一次全新会话问它"暗号是什么"。token 是随机的、不可能从别处
+推断，答对 ⇒ 它**真的读了那个文件**（排除了"猜对"和"从上下文蒙对"）。
+
+**结论**：
+- Brief 机制在 0.2.1-rc.5 + 真实模型下**生效**。
+- `AGENTS.md` §7 的"唯一未验证的 P1 项：Brief 是否真被下次会话读到"**可以关闭**。
+- 用户自己写的内容在 Brief 写入后**仍然保留**（不会被覆盖）。
+
+**限制（如实标注）**：
+- 前提是工作区是 git 仓库（脚本显式 `mkdir .git`）。非 git 目录下 AGENTS.md
+  是否被加载**未验证** —— 这是真实风险，UI 应在非 git 工作区提示。
+- 只验证了"启动时读到"，未验证"会话进行中修改 Brief 是否即时生效"（大概率不生效，
+  与 `startWork` 把上下文显式带上的做法一致）。
+
+### 9.5 第四轮：U-7 / P-0.11 / P-0.12 权限轴的最终结论
+
+**结论：能读，不能写。**
+
+#### 能读（实测 200）
+
+```json
+POST /api/permissionPresets/catalog  {}
+→ {"options":[{"value":"read-only"},{"value":"workspace-write"},{"value":"danger-full-access"}],
+   "defaultOptions":[...],"defaultPreset":"workspace-write"}
+```
+
+`session/projections` 的 `permissions` 投影（实测）：
+```json
+{"currentValue":"workspace-write"}
+```
+
+#### 不能写（权威证据）
+
+`dsh-permission-presets/lib/typert.host.js`（生成文件，唯一权威）里
+**只注册了一个 remote 方法**：
+
+```js
+const $remote = createTypertRemoteInfo({
+  methods: {
+    'permissionPresets/catalog': {
+      description: 'Read the complete process-level catalog exposed to current-session UI.',
+      invocation: { kind: 'direct' }, parameters: [],
+```
+
+实测 `permissionPresets/set` / `select` / `apply` / `current` **全部 HTTP 404**。
+
+`SessionCreateRequest` 的字段（`.d.ts` 逐字）：
+```ts
+{ workspaceId?, cwd?, sessionId?, agentPreset? }
+```
+**没有权限字段**。
+
+#### 三条硬事实
+
+| 问题 | 答案 |
+|---|---|
+| 能否在创建会话时指定权限？ | **不能**。`SessionCreateRequest` 无此字段 |
+| 能否通过 remote 修改已有会话的权限？ | **不能**。只有 catalog（只读） |
+| 能否读到当前权限？ | **能**。`values.permissions.currentValue` + catalog 的 label |
+
+#### 对 D8（右栏权限控件）的修订
+
+原计划：*"派发面板保留权限控件，但 S0 验证前置灰，写明待验证"*。
+
+**现在验证完了，结论是"不能写"，所以控件不能变成可用的下拉框。** 改为：
+
+| 做法 | 说明 |
+|---|---|
+| 显示当前权限（只读） | 从 `permissions` 投影读，用 catalog 的 `name`/`description` 渲染成人话 |
+| 显示目录选项（只读） | 从 catalog 读，让人知道系统支持哪几档、当前默认是哪档 |
+| **不提供切换** | 切换只能在官方 Plugins 页/设置页做。我们给一句说明："权限由 Harness 设置，此处只显示" |
+| 需要切换时 | 提供"打开 Harness 设置"的跳转，而不是自己造一个假开关 |
+
+**为什么不能造假开关**：这是本项目反复强调的底线。一个点了没反应的权限下拉，
+比没有这个控件更糟 —— 用户会以为自己把权限调低了，实际没有。
+
+#### 仍未验证
+
+- `permission/preset` 事件在真实 turn 中是否出现（第四轮探针在测，见下条）。
+- 若该事件可观测，我们能做到"权限变更时右栏即时反映"，这比轮询更好。
+
+#### 第四轮补充：`permissions` 投影是窄的，`permission/preset` 事件在普通 turn 不出现
+
+实测两次：
+
+```json
+// session/projections 的 values.permissions（完整内容，不是截断）
+{ "currentValue": "workspace-write" }
+```
+
+`.d.ts` 声明的 `PermissionProjectionState` 是 `{preset, sandbox, approval, seeded}`
+（`extends KnobState`），但 **wire 视图只有 `currentValue` 一个字段**。
+→ 又一个"声明比视图宽"的例子（和 `TeamMemberView` vs `TeamMemberProjection` 同型）。
+**结论：只能拿到"当前是哪一档"，拿不到 sandbox/approval 的拆分值。**
+
+`permission/preset` 事件：发一条普通 prompt 跑完一个 turn，**事件未出现**（探针超时返回 null）。
+依据官方注释，该事件是"Records the selected preset as durable, log-only user intent"——
+即**只在预设被选择/变更时**才写，不是每 turn 都写。
+→ 我们无法主动制造它（因为不能写预设），它只在用户在官方 UI 里切换时出现。
+
+**P-0.12 的最终判定**：事件机制存在但**常规运行中不产生**。
+因此"权限变更时右栏即时反映"这条**做不到**（我们既不触发也观测不到）。
+右栏只能用 `permissions.currentValue` 做**快照式**显示，并在用户回到面板时刷新。

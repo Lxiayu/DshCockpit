@@ -97,8 +97,10 @@ node --check <file>                        # 语法检查
 
 阶段交付明细、证据位置、已知问题见 `docs/product/delivery-status.md`（唯一来源，本文件不重复）。
 
-- **唯一未达成的 P0 条件**：`agentTeam` 字段形状需真实模型调用验证（#23，需 API key）。
-- **唯一未验证的 P1 项**：Brief 是否真被下次会话读到（同需 #23）。
+- **#23 已关闭（2026-11-04 真机验证）**：`agentTeam` 字段形状与 Brief 跨会话读取
+  均已在 0.2.1-rc.5 + 真实模型下实测通过 → `docs/quality/harness-agent-team-probe-2026-11-04.md`
+  （team 投影逐字段一致；暗号法证明 Brief 真被新会话读到）。
+  仍待验证的是**团队写路径**与**权限轴**，见该报告 U-4/U-5/U-7/U-9。
 - **已知偶发**：`test/runtime-mux.test.js` 的 reconnect 用例（并发时序，单独重跑通过）。
 - **仍存的债**：TD-01（main.js 过载）· TD-06/07（IPC payload 未冻结）。
 - **ADR-0001..0006 全部已接受**；ADR-0002 附退役硬约束 R0–R5（禁止直接删旧 Team Runtime）。
