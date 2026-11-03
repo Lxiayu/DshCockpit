@@ -99,6 +99,8 @@
 
 | 文档 | 状态 | 说明 |
 |------|------|------|
+| `docs/plans/active/NEW-DIRECTION-PERSONAL-TEAM-2026-11-03.md` | **已批准（新方向总计划）** | 个人团队的指挥台：借鉴执行语义、四层架构、右栏视觉规范、S0–S7 路线；D7–D9 已决定 |
+| `docs/plans/active/S0-PROBE-TASKS-2026-11-03.md` | **待执行（S0 探针任务清单）** | 交给 DeepSeek 的 T0–T12 真机探针任务，含前置条件、三态判定、用户需确认的图形会话步骤 |
 | `docs/plans/active/P0-AUDIT-AND-P1-MISSION-KICKOFF-2026-11-01.md` | **进行中** | P0 地基校准 → P1 Mission Core 启动；负责人 Lead，用户最终拍板 |
 | `docs/plans/active/P0-ENGINEERING-EXECUTION-2026-11-01.md` | **进行中（P0 唯一执行依据）** | P0 工程实施：#21→#10→#14→#9，并行 #22/#19；含完成条件与工程纪律 |
 | `docs/plans/active/P2-OFFICE-OBJECTS-2026-11-01.md` | **P2.3 执行计划** | 办公室交互物件（项目白板）的第一性原理分解与实施步骤 |
@@ -133,6 +135,7 @@
 
 | 文档 | 状态 | 说明 |
 |------|------|------|
+| `docs/quality/harness-agent-team-probe-2026-11-04.md` | **S0 真机探针报告（关键）** | 0.2.1-rc.5 真实模型下验证 agentTeam 投影、团队写入路径（无 remote 面）、9 项未验证清单 |
 | `docs/quality/2026-09-26-asset-provenance.md` | 参考（脚本配套） | 素材来源链说明；`scripts/asset-provenance.js` 输出 `docs/quality/2026-09-26-asset-provenance-index.json` |
 | `docs/quality/tech-debt-inventory.md` | 审计报告（2026-11-01） | 壳层技术债清单（编号/位置/证据/影响/优先级/是否阻塞新方向） |
 | `docs/quality/prompt-gap-analysis-2026-11-01.md` | **原始需求书差距分析** | 九大交付物逐条核对；最大缺口是 Shared Context 只做了 1/3 |

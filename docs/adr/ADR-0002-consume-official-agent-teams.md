@@ -153,6 +153,32 @@ DshCockpit 在 2026-10 自研了 Team Runtime v0（Job / Role / WorkerRun / Arti
 2. **确认官方 Agent Teams 在 desktop profile 中可用**（`~/.dsh/profiles/desktop/package.json` 已挂 `dsh-experimental-agent-team-profile`，需实测）。
 3. **确认 agentTeam 客户端视图的字段形状**（需在 0.2.x 上实测，本机 0.1.5 无此包 → **当前无法验证**）。
 
+### 9.1 回填结果（2026-11-04 真机探针）
+
+> 证据：`docs/quality/harness-agent-team-probe-2026-11-04.md`
+> 环境：隔离 POC，`@deepseek-ai/dsh@0.2.1-rc.5` + 真实模型（stepfun），未触碰生产 profile。
+
+| # | 状态 | 结论 |
+|---|---|---|
+| 1 | ✅ **已满足** | 0.2.1-rc.5 可安装、可启动、mux 通、`session/create` 可用；真实模型调用成功 |
+| 2 | ✅ **已满足（附条件）** | 但**仅"包已挂"不等于"功能已开"**：必须把 `@deepseek-ai/dsh-experimental-agent-team-profile` 加入 profile 的 `dsh.profile.bundles`，否则 `session/projections` 不含 `agentTeam`（实测 20 键 → 加 bundle 后 21 键） |
+| 3 | ✅ **已满足** | 真实模型下实测投影为 `{members:[{id,name,role,phase}], tasks:[{id,revision,subject,status,ready,blockedBy,writeScopeWarnings,...}], failure?}`，与 `.d.ts` 声明逐字段一致 |
+
+### 9.2 由探针新增的关键约束（影响本决策的实施方式）
+
+**`dsh-experimental-agent-team` 没有 remote RPC 表面。** `TeamService` 的全部方法
+（`spawnTeammate`/`createTask`/`updateTask`/`interrupt`/`waitForChange`…）只存在于 Node 侧，
+不通过 `api/*` 暴露。因此：
+
+- **读**：`agentTeam` 随 `session/projections` 下发，壳可直接消费 —— 本 ADR 的"只读投影"主张成立。
+- **写**：壳无法直接调用团队服务，只能经 `session/prompt` 让 Lead 调用模型工具间接写入。
+  这意味着"写入"是**异步、非原子、需投影确认**的，详见主计划 D11
+  （`docs/plans/active/NEW-DIRECTION-PERSONAL-TEAM-2026-11-03.md` §5.2）。
+
+`TeamMemberProjection` 只有 `id/name/role/phase`，**不含"正在做什么"**；运行时富化的
+`TeamMemberView`（含 `running|inactive|provisioning|failed`）不下发到客户端。名册的"当前任务"
+必须由任务板 `ownerName` 与会话状态推导。
+
 ## 10. 后续重新评估的触发条件
 
 1. 官方 Agent Teams 提供 artifact 一等公民概念（则自研 artifact 层也可退场）。
@@ -161,5 +187,23 @@ DshCockpit 在 2026-10 自研了 Team Runtime v0（Job / Role / WorkerRun / Arti
 
 ## 11. 未验证声明（诚实标注）
 
-> ⚠️ 本 ADR 对官方 Agent Teams 的能力描述**全部来自官方 0.2.1-rc.5 的 README 文档**，**未经过运行验证**。本机安装的是 0.1.5-rc.2，不含该包。
-> 在实施前必须在 0.2.x 上完成实测，并将结果回填至本 ADR §9。
+> ~~⚠️ 本 ADR 对官方 Agent Teams 的能力描述**全部来自官方 0.2.1-rc.5 的 README 文档**，**未经过运行验证**。本机安装的是 0.1.5-rc.2，不含该包。
+> 在实施前必须在 0.2.x 上完成实测，并将结果回填至本 ADR §9。~~
+
+**2026-11-04 更新：上述声明已部分失效。** 已完成第一轮真机实测（§9.1/§9.2，证据
+`docs/quality/harness-agent-team-probe-2026-11-04.md`）。当前仍**未验证**的项：
+
+| # | 未验证项 | 影响 |
+|---|---|---|
+| U-1 | `sendMessage` 向成员发消息 | S6 纠偏 |
+| U-2 | `interrupt` 停止成员 | S6 停止 |
+| U-3 | 带依赖的 `blockedBy`/`ready` 语义 | 右栏阻塞显示 |
+| U-4 | `updateTask` 的 CAS 与重分配 | S3 |
+| U-5 | teammate 发起 `userQuestions` 的行为 | 右栏"需要你" |
+| U-6 | `workspace/changes` 事件 payload | S5 凭证 |
+| U-7 | `permission/preset` 事件与权限预设 | D8 |
+| U-8 | `session/page` 在 turn 后返回 0 条记录（原因未明） | S5 结果回写 |
+| U-9 | 跨重启的团队恢复 | S4 |
+
+**已从"未验证"升级为"已验证"**：`agentTeam` 字段形状、members/tasks 的产生、`ready` 直接下发、
+无 remote 写入表面、团队功能需 bundle 启用的条件。
