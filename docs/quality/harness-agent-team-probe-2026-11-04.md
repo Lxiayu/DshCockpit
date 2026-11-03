@@ -433,3 +433,29 @@ const $remote = createTypertRemoteInfo({
 **P-0.12 的最终判定**：事件机制存在但**常规运行中不产生**。
 因此"权限变更时右栏即时反映"这条**做不到**（我们既不触发也观测不到）。
 右栏只能用 `permissions.currentValue` 做**快照式**显示，并在用户回到面板时刷新。
+
+### 9.6 第五轮：U-4 的 CAS 语义已验证
+
+**结论：任务更新用过期 revision 会被拒绝，状态完全不变。**
+
+`UpdateTeamTaskRequest` 带 `expectedRevision`，8 种 action
+（claim / release / edit / set_dependencies / complete / reopen / reassign / delete）。
+
+实测（`scripts/poc/s0-verify-cas.js`）：
+
+```
+task created                    revision=1
+after update (complete)         revision=3  status=completed
+after stale revision=1 attempt  revision=3  status=completed   ← 未改变
+RESULT: CAS ENFORCED
+```
+
+**含义**：
+- 我们不需要自己实现乐观锁 —— 官方 CAS 已经生效。
+- 可以把 `revision` 原样透传给 UI，"改任务"时携带它；
+  过期就自然失败，不会覆盖别人的改动。
+- 右栏显示"任务被改过"时，用 revision 变化作为**事实信号**
+  （不需要检测"内容变了"，revision 变了就是变了）。
+
+**仍未验证**：`reassign`（重新分配 owner）的实际效果未单独测；
+`U-5`（teammate 发起提问）与 `U-9`（跨重启恢复）仍需真机交互。

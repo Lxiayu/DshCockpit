@@ -298,7 +298,7 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
 | P-0.2 `agentTeam` 字段形状 | ✅ **PASS** | 与声明逐字段一致；`TeamMemberProjection` 只有 id/name/role/phase，**无"正在做什么"** |
 | P-0.3 readiness / blockedBy | ⚠️ **部分** | 拿到 `ready:true`/空 `blockedBy`；有依赖的 DAG 未测 |
 | P-0.4 成员 inbox 消息 | ⬜ 未验证 | 需要运行中的 teammate（U-1） |
-| P-0.5 任务修改/重分配 | ⬜ 未验证 | 需要 revision 冲突场景（U-4） |
+| P-0.5 任务修改/重分配 | ✅ **CAS 已验证（第五轮）** | 过期 revision 更新被拒绝，状态完全不变（revision 1→3 后仍为 3）。8 种 action 存在；reassign 的实际效果未单独测 |
 | P-0.6 停止成员 | ⬜ 未验证 | `interrupt` 需长任务 teammate（U-2） |
 | P-0.7 提问回流 | ⬜ 未验证 | 需要模型主动提问（U-5） |
 | P-0.8 Brief 跨会话（#23） | ✅ **PASS（第三轮，8/8）** | 暗号法：随机 token 写入 AGENTS.md -> 新会话问暗号 -> 模型答对，证明真的读了文件。**#23 可关闭**。限制：需 git 仓库；仅验证启动时读到 |
