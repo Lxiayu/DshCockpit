@@ -188,7 +188,8 @@ test('integration: workStatus reports a receipt, and "has a reply" is NOT "verif
     // 核心断言：有回复 ≠ 有凭证。没有可复核的变更坐标就只能叫 claimed。
     assert.equal(r.receipt.state, 'claimed',
       'a reply without a change coordinate is a claim, not a verification');
-    assert.match(r.receipt.reason, /尚未绑定可复核/);
+    // S5 之后文案更精确：能区分"没观测到变更事件"，而不是笼统的"尚未绑定"
+    assert.match(r.receipt.reason, /还没有观测到这一轮的变更事件|尚未绑定可复核/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -214,4 +215,108 @@ test('integration: an unbound mission still answers honestly (no fake receipt)',
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// S5：凭证走真实两步读取（seq → 变更清单）
+// ---------------------------------------------------------------------------
+//
+// 第一性原理：凭证的价值在于"可复核"，不在于"看起来完成了"
+//
+//   上一版把 resolvable 写死 false，所以永远只能 claimed —— 用户等不到 verified。
+//   现在走两步：取 seq，再按 seq 读官方变更清单。
+//
+//   这里锁的是**降级路径的诚实性**：两步任何一步失败都不能变成 verified，
+//   也不能假装"没有变更"。
+
+function setupWithReceiptWiring({ seq = null, summary = null, readError = null } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-receipt-s5-'));
+  const s = createMissionStore({ workspaceDir: dir, now: () => 1000, log: () => {} });
+  s.append('mission.created', {
+    missionId: 'mis-a', title: 't', intent: 'i', status: 'active',
+    workspaceId: 'ws-1', createdAtMs: 1, updatedAtMs: 2,
+  });
+  fs.mkdirSync(path.join(dir, '.dsh'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, '.dsh', 'mission-sessions.json'),
+    JSON.stringify({ version: 1, sessions: { 'mis-a': { sessionId: 'session-x', boundAtMs: 1 } } }),
+  );
+  const handlers = new Map();
+  registerMissionIpc(
+    { handle: (c, f) => handlers.set(c, f), removeHandler: () => {} },
+    {
+      workspaceDirOf: () => dir,
+      clock: () => 2000,
+      log: () => {},
+      snapshotOf: () => null,
+      projectionsOf: async () => ({
+        ok: true,
+        value: { values: { sessionStats: { turns: 3, steps: 9 }, turnOutline: [{ turn: 3, response: '做完了' }] } },
+      }),
+      seqOfTurn: () => seq,
+      changesSummaryOf: async () => {
+        if (readError) return { ok: false, reason: readError };
+        return { ok: true, value: summary };
+      },
+    },
+  );
+  return { dir, invoke: handlers.get('mission:invoke') };
+}
+
+test('S5: a readable change list makes the receipt VERIFIED (the whole point)', async () => {
+  const { dir, invoke } = setupWithReceiptWiring({
+    seq: 29,
+    summary: { turn: 1, total: 2, added: 15, deleted: 3, files: [{ path: 'a.js', added: 15, deleted: 3 }] },
+  });
+  try {
+    const r = await invoke(null, 'workStatus', { missionId: 'mis-a' });
+    assert.equal(r.receipt.state, 'verified');
+    assert.equal(r.receipt.total, 2);
+    assert.match(r.receipt.reason, /已复核/);
+    assert.doesNotMatch(r.receipt.reason, /尚未|读不到/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('S5: zero files changed is still VERIFIED (a question was answered, nothing edited)', async () => {
+  // 关键区分：total=0 是"复核过且确实没变"，不是"没能复核"。
+  // 把这两者混起来会让用户以为出了问题。
+  const { dir, invoke } = setupWithReceiptWiring({
+    seq: 30, summary: { turn: 1, total: 0, added: 0, deleted: 0, files: [] },
+  });
+  try {
+    const r = await invoke(null, 'workStatus', { missionId: 'mis-a' });
+    assert.equal(r.receipt.state, 'verified');
+    assert.match(r.receipt.reason, /没有文件变更/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('S5: no seq yet → claimed, and the wording says we did not OBSERVE it', async () => {
+  // "没观测到" ≠ "没变更"。前者是我们的观测缺口，后者是事实。
+  const { dir, invoke } = setupWithReceiptWiring({ seq: null });
+  try {
+    const r = await invoke(null, 'workStatus', { missionId: 'mis-a' });
+    assert.equal(r.receipt.state, 'claimed');
+    assert.match(r.receipt.reason, /还没有观测到/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('S5: a seq that cannot be read → claimed, and the reason names the read failure', async () => {
+  // 官方清单只在 Session 存活期间可用。Session dispose 后 404 是正常情况，
+  // 但我们必须说清楚"是读取失败"，而不是"没有变更"。
+  const { dir, invoke } = setupWithReceiptWiring({ seq: 29, readError: 'HTTP 404' });
+  try {
+    const r = await invoke(null, 'workStatus', { missionId: 'mis-a' });
+    assert.equal(r.receipt.state, 'claimed');
+    assert.match(r.receipt.reason, /读取失败/);
+    assert.match(r.receipt.reason, /404/);
+    assert.equal(r.receipt.total, undefined, 'no invented file count when the read failed');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('S5: a non-numeric seq is treated as absent, not coerced', async () => {
+  const { dir, invoke } = setupWithReceiptWiring({ seq: '29' });
+  try {
+    const r = await invoke(null, 'workStatus', { missionId: 'mis-a' });
+    assert.equal(r.receipt.state, 'claimed');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

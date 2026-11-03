@@ -68,6 +68,7 @@ const { registerRemoteIpc } = require('./ipc-remote');
 const { registerMiscDomainsIpc } = require('./ipc-misc-domains');
 const { registerMissionIpc } = require('./ipc-mission');
 const presentedCollectorModule = require('./mission/presented-collector');
+const turnSeqTrackerModule = require('./mission/turn-seq-tracker');
 const { buildMissionBoard } = require('./office/mission-board');
 const { deriveCompanionState, companionSummary } = require('./companion-state');
 const { registerCapabilityPacksIpc } = require('./ipc-capability-packs');
@@ -3264,6 +3265,13 @@ function registerIpc() {
     // 而不是谎报 running=false）。
     snapshotOf: () => runtimeSnapshotForMission(),
     projectionsOf: (sessionId) => officeSessionProjections(sessionId),
+    // S5 凭证的两条数据通道：
+    //   seqOfTurn        —— 官方 workspace/changes 事件的 seq（已在事件流里记下）
+    //   changesSummaryOf —— 按 seq 读那份变更清单（GET /api/changes.summary）
+    // 分开注入而不是合成一个，是为了让 Mission 层能分别处理两种不同失败：
+    // "没记到 seq" 与 "记到了但读不到清单"。
+    seqOfTurn: (sessionId, turn) => seqForMissionSession(sessionId, turn),
+    changesSummaryOf: (sessionId, seq) => readWorkspaceChanges(sessionId, seq),
     // 「启动工作」的两个原语：这是把 Mission 从记录器变成发生器的关键
     ensureSession: () => missionEnsureSession(),
     promptSession: (sessionId, text) => missionPromptSession(sessionId, text),
@@ -5747,6 +5755,28 @@ async function readWorkspaceChanges(sessionId, seq) {
 // ---------------------------------------------------------------------------
 const presentedCollector = presentedCollectorModule.createPresentedCollector();
 
+/**
+ * 取某个会话某个 turn 的 workspace/changes seq。
+ *
+ * 诚实边界：tracker 是**进程级**的，不按 sessionId 分区。
+ * 一个进程通常只跟一个有团队的主会话打交道，turn 号在会话内单调，所以够用。
+ * 若将来支持多会话并行团队，这里必须改成分区 Map ——
+ * 在那之前不要假装它是分区的（那会让我们误以为已经隔离好了）。
+ */
+function seqForMissionSession(sessionId, turn) {
+  const t = turnSeqTracker.latest();
+  if (!t) return null;
+  if (Number.isFinite(turn)) return turnSeqTracker.seqForTurn(turn);
+  return t.seq;
+}
+
+// turn → seq 映射（S5 凭证的最后一环）。
+//
+// 为什么需要它：官方 workspace/changes 事件的 payload 只有 {turn}，
+// 文件清单按**事件的 seq** 索引，而 seq 在事件信封上（不在 payload 里）。
+// 不记这个映射，workStatus 就永远只能说 claimed —— 用户等不到"可复核"。
+const turnSeqTracker = turnSeqTrackerModule.createTurnSeqTracker();
+
 /** 当前工作区绝对路径（与 mission IPC 用的是同一来源）。 */
 function missionWorkspaceDir() {
   try {
@@ -6023,6 +6053,14 @@ function ingestOfficeJournalEvent(sessionId, event) {
       log(`[office] presented ingest failed: ${err.message}`);
     }
     return;
+  }
+
+  // workspace/changes 的 seq 必须记下来，否则变更清单无法被复核（S5）。
+  // 这一句只依赖事件信封，与 office module 在不在无关，所以放在 mod 检查之前。
+  if (event && event.type === 'workspace/changes') {
+    try { turnSeqTracker.ingest(event); } catch (err) {
+      log(`[office] turn-seq ingest failed: ${err.message}`);
+    }
   }
 
   if (!mod || !event || typeof event !== 'object' || typeof event.type !== 'string') return;

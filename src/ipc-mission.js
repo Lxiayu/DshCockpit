@@ -394,6 +394,94 @@ function renderMemberIntervention({ kind, memberName, message, reason } = {}) {
   return lines.join('\n');
 }
 
+/**
+ * 构造一次执行的凭证（S5）。
+ *
+ * 第一性原理：为什么凭证必须"两步都成功"才算 verified
+ *
+ *   用户问的是"我能不能信这件事做完了"。回答它需要一条**可复核的坐标**：
+ *   去官方那里按坐标取回变更清单，看到了才叫复核过。
+ *
+ *   少任何一步都只能叫 claimed：
+ *     · 没有 seq   → 不知道去哪取（不是"没变更"）
+ *     · 有 seq 但读不到 → 可能是 Session 已 dispose（官方清单不持久）
+ *   把这两种都说成"没变更"是在撒谎；说成"已复核"更是。
+ *
+ * @param {object} input
+ * @param {object|null} input.bound      绑定信息 {sessionId}
+ * @param {number|null} input.lastTurn
+ * @param {string} input.lastResponse
+ * @returns {Promise<{state:string, description:string, reason:string, turn?:number|null, total?:number|null}>}
+ */
+async function buildReceiptFor({ bound, lastTurn, lastResponse, deps = {} } = {}) {
+  // 依赖显式传入，不靠闭包。
+  // 教训：这个函数原本是模块级的，却直接引用了 registerMissionIpc 参数里的
+  // seqOfTurn/changesSummaryOf —— 那是**闭包外**的标识符，永远是 undefined，
+  // 于是凭证永远停在 claimed，而且不报错（静默失效）。
+  // 现在把依赖作为参数传，谁调用谁负责提供。
+  const { seqOfTurn, changesSummaryOf } = deps;
+  const claimReason = (lastResponse && String(lastResponse).length > 0)
+    ? '团队已给出回复，但尚未绑定可复核的变更坐标'
+    : '团队尚未产出可复核的结果';
+
+  // 未绑定会话 → 没有执行，不伪造凭证
+  if (!bound || !bound.sessionId) {
+    return { state: 'claimed', description: '尚未开始执行，没有可复核的内容', reason: '这个 Mission 还没有绑定执行会话' };
+  }
+
+  // ① 取 seq
+  let seq = null;
+  if (typeof seqOfTurn === 'function') {
+    try { seq = seqOfTurn(bound.sessionId, lastTurn); } catch { seq = null; }
+  }
+  if (!Number.isFinite(seq)) {
+    return {
+      state: 'claimed',
+      description: '团队已给出回复，但尚未绑定可复核的变更坐标',
+      reason: '还没有观测到这一轮的变更事件（可能刚结束，或运行时未连接）',
+    };
+  }
+
+  // ② 按 seq 读清单
+  let summary = null;
+  let readFailed = null;
+  if (typeof changesSummaryOf === 'function') {
+    try {
+      const res = await changesSummaryOf(bound.sessionId, seq);
+      if (res && res.ok) summary = res.value;
+      else readFailed = (res && res.reason) || 'unknown';
+    } catch (err) {
+      readFailed = err.message;
+    }
+  } else {
+    readFailed = 'changesSummaryOf is not wired';
+  }
+
+  if (!summary) {
+    return {
+      state: 'claimed',
+      description: '团队已给出回复，但变更清单读不到',
+      reason: `有变更坐标（seq=${seq}）但读取失败：${readFailed || '未知原因'}`,
+      turn: lastTurn,
+    };
+  }
+
+  // 拿到了真实清单 → 可复核
+  const derived = receiptModule.buildReceiptCoordinate({
+    sessionRef: 'bound', seq, turn: lastTurn, summary,
+  });
+  const state = receiptModule.deriveReceiptState({ receipt: derived, resolvable: true });
+  return {
+    state,
+    description: receiptModule.describeReceipt({ receipt: derived, resolvable: true }),
+    reason: summary.total === 0
+      ? '已复核：这一轮没有文件变更（团队可能只是回答了一个问题）'
+      : `已复核：这一轮变更了 ${summary.total} 个文件`,
+    turn: lastTurn,
+    total: Number.isFinite(summary.total) ? summary.total : null,
+  };
+}
+
 /** 从一段指令文本里取出幂等键；没有则 null。 */
 function parseDispatchKey(text) {
   if (typeof text !== 'string') return null;
@@ -531,6 +619,8 @@ function registerMissionIpc(ipcMain, ctx) {
     ensureSession = null,   // (missionId) => Promise<{ok, sessionId}>
     promptSession = null,   // (sessionId, text) => Promise<{ok, reason?}>
     cancelSession = null,   // (sessionId) => Promise<{ok, reason?}>  停止执行（S6）
+    seqOfTurn = null,       // (sessionId, turn) => seq|null   变更清单的坐标（S5）
+    changesSummaryOf = null, // (sessionId, seq) => Promise<{ok, value?}>  读变更清单（S5）
     log = () => {},
   } = ctx;
 
@@ -1605,23 +1695,17 @@ function registerMissionIpc(ipcMain, ctx) {
         // "团队有回复，但没有可复核的变更坐标"。
         //
         // 这比"看起来跑完了就显示已完成"诚实：一个 turn 正常结束，
-        // 完全可能什么都没改（只是回答了一个问题），也可能改了一堆东西
-        // 但没人验证过。凭证需要另一条读路径（/api/changes.summary），
-        // 那依赖事件订阅，属 S5 后续接线。
-        receipt: (() => {
-          const derived = receiptModule.buildReceiptCoordinate({
-            sessionRef: null, seq: null, turn: lastTurn, summary: null,
-          });
-          const state = receiptModule.deriveReceiptState({ receipt: derived, resolvable: false });
-          return {
-            state,
-            description: receiptModule.describeReceipt({ receipt: derived, resolvable: false }),
-            // 明确告诉 UI 为什么是 claimed：有回复 ≠ 有凭证
-            reason: lastResponse.length > 0
-              ? '团队已给出回复，但尚未绑定可复核的变更坐标'
-              : '团队尚未产出可复核的结果',
-          };
-        })(),
+        // 完全可能什么都没改（只是回答了一个问题），也可能改了一堆东西。
+        //
+        // S5（2026-11-04）：凭证不再写死 resolvable:false。
+        // 现在走两步真实读取：
+        //   ① seqOfTurn  —— 官方 workspace/changes 事件的 seq（事件流已记录）
+        //   ② changesSummaryOf —— 按 seq 读那份变更清单
+        // 两步任何一步失败都如实降级，**不猜**（读不到 ≠ 没变更）。
+        receipt: await buildReceiptFor({
+          bound, lastTurn, lastResponse,
+          deps: { seqOfTurn, changesSummaryOf },
+        }),
         observedAtMs: clock(),
       };
     },

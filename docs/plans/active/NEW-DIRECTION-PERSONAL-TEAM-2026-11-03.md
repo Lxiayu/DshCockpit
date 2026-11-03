@@ -262,7 +262,7 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
 
 | 模块 | 接入点 | 状态 |
 |---|---|---|
-| `src/mission/receipt.js` | `ipc-mission.js` 的 `workStatus` 返回 `receipt` | ✅ **已接线**（集成测试 2 条） |
+| `src/mission/receipt.js` | `workStatus` 的 `buildReceiptFor`：真实两步读取（seq → 变更清单） | ✅ **已接线**（集成测试 5 条，能产出 verified） |
 | `src/mission/reconcile.js` | `ipc-mission.js` 的 `storeFor` 加载时对账 | ✅ **已接线**（集成测试 3 条） |
 | `src/mission/intervention-audit.js` | `updateStatus` 记录 + `interventionHistory` action + 右栏「最近的干预」 | ✅ **已接线** |
 | `src/mission/dispatch-strategy.js` | `ipc-mission.js` 的 `renderDispatchInstruction` | ✅ **已接线**：派发指令里带【执行规模】段 |
@@ -553,7 +553,16 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
   - 本模块**不执行**任何动作 —— 执行是 Harness 的事。
   - 测试：`test/mission-approval-gate.test.js`（13 条），
     变异验证 DETECTED ×2（摘掉 hash 校验 / 摘掉过期校验）。
-- ⬜ 凭证落盘与失效检测（依赖 turn 事件订阅）。
+- ✅ **凭证走真实两步读取（2026-11-04 完成）**：
+  在此之前 `resolvable` 写死 `false`，凭证**永远只能 claimed** —— 用户等不到 verified。
+  现在：① `seqOfTurn` 取官方 `workspace/changes` 事件的 seq（事件流已记录）
+  ② 按 seq 读 `/api/changes.summary` 得到真实清单。
+  两步都成功才 `verified`；任何一步失败如实降级并说明原因
+  （"没有观测到" vs "读取失败"是两件不同的事）。
+  **`total=0` 也仍是 verified** —— "复核过且确实没变"≠"没能复核"。
+  新增 `src/mission/turn-seq-tracker.js`（7 条测试），变异 DETECTED ×3。
+- ⬜ 凭证落盘（当前只在 workStatus 时即时读取；Host 清单不持久，
+  所以需要 turn 结束时立刻落盘才能在重启后复核）。
 - ✅ **`present` 声明与变更事实的合并逻辑（2026-11-04 已完成）**：
   `src/mission/deliverable-signal.js` —— 官方 `deliverables/presented` 事件
   payload 为 `{turn, callId, files:[{path, description?}]}`（读 `.d.ts` 确认）。
