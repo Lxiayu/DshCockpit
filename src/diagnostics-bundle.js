@@ -132,7 +132,8 @@ function readmeText(ctx) {
     '== 包内字段清单 / WHAT IS INSIDE (whitelist, each file enumerated) ==',
     '- manifest.json         包清单：schema 版本、生成时间、每个文件与字节数',
     '- environment.json      环境：壳版本、运行时版本、electron/node/chrome 版本、',
-    '                        平台 (darwin/win32/linux)、系统类型与内核版本、CPU 架构、locale、进程运行时长',
+    '                        平台 (darwin/win32/linux)、系统类型与内核版本、CPU 架构、locale、进程运行时长、',
+    '                        teamActivation（团队能力状态：enabled/not-activated/unknown + 投影键数，无 id 无路径）',
     '- runtime-summary.json  渲染态：mode / diagnosticCode / recoveryAttempts / fps / renderProfile；',
     '                        同步态：sync（healthy/stale/resyncing 枚举）、paused；',
     '                        绑定会话：只有「数量 + 角色名 + 活动枚举 + 队列长度」；',
@@ -236,6 +237,19 @@ function createDiagnosticsBundle(deps) {
       chrome: process.versions.chrome || null,
       locale: String(d.locale ? d.locale() : ''),
       uptimeSeconds: Math.round(process.uptime()),
+      // 团队能力是否真的启用（S1）。"包已安装"与"功能已开启"是两件事：
+      // 前者只需升级运行时，后者要去 profile 里打开 bundle。
+      // 未探测过时如实为 null（unknown），不猜成 not-activated。
+      // 只含枚举与计数，无 session id / 路径。
+      teamActivation: (() => {
+        const a = d.officeTeamActivation ? d.officeTeamActivation() : null;
+        if (!a || typeof a !== 'object') return null;
+        return {
+          state: typeof a.state === 'string' ? a.state : 'unknown',
+          projectionKeys: Number.isFinite(a.projectionKeys) ? a.projectionKeys : null,
+          reason: typeof a.reason === 'string' ? a.reason : null,
+        };
+      })(),
       // Deliberately ABSENT: hostname, username, home path, cwd, env, settings
       // paths (see README.txt).
     };

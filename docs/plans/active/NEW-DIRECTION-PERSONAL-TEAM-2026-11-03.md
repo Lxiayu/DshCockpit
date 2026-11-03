@@ -314,7 +314,16 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
   （上限 32 行，`MAX_UNMAPPED_EVENT_ROWS`），README 字段清单同步更新。
   用途：升级后判断"workspace/changes / permission/preset 到底发没发事件"，
   而不是靠猜。测试：`test/diagnostics-bundle.test.js`（4 条），变异验证 DETECTED。
-- ⬜ **能力矩阵补 `activation` 之外的运行时探测**：`agentTeam` 是否真的出现在投影里（仍未做）。
+- ✅ **运行时激活探测（2026-11-04 已完成）**：
+  `src/main.js` 新增 `probeOfficeTeamActivation()` —— 读一次 followed session 的
+  `session/projections`，看 `values` 里有没有 `agentTeam`，返回
+  `enabled | not-activated | runtime-offline | unknown` 四态（结果缓存，
+  mux ready 时失效重探）。
+  **为什么不猜**：没有 followed session 时返回 `unknown` 而不是
+  `not-activated` —— 什么都没跑的时点报"未启用"，会让用户去翻一个没问题的设置。
+  结论进入诊断包 `environment.json` 的 `teamActivation`
+  （只有 state / projectionKeys / reason，无 session id、无路径）。
+  测试：`test/diagnostics-bundle.test.js`（3 条），变异验证 DETECTED。
 - 验收：CI `upstream-compat` 绿；`CI=1 npm test` 全绿（当前基线 **3009 passed / 0 failed / 1 skipped**）。
 
 ### S2 合同化派发（D3）【**部分完成（2026-11-04）**】

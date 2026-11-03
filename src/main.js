@@ -2617,6 +2617,85 @@ async function officeSessionProjections(sessionId) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 团队能力"是否真的启用"的运行时探测（S1，2026-11-04）
+//
+// 第一性原理：为什么"包在"与"能用"必须分开上报
+//
+//   S0 实测发现：0.2.1 安装了 dsh-experimental-agent-team，但
+//   session/projections 里**没有** agentTeam —— 因为 profile 的 bundles
+//   没挂 team-profile 层（实测 20 键 → 加 bundle 后 21 键）。
+//
+//   这两种情况对用户的含义完全不同：
+//     · 包缺失     → 要升级运行时
+//     · 未启用     → 去设置里打开一个开关
+//
+//   如果把后者报成"团队不支持"，用户会去做没必要的大升级，
+//   而真正该做的动作（打开开关）永远不会被发现。
+//
+//   探测方式：读一次当前 followed session 的投影，看 values 里有没有 agentTeam。
+//   成本很低（一次 unary RPC），但**不在每次诊断时都跑** —— 结果缓存，
+//   由 mux ready / 会话切换时失效。
+// ---------------------------------------------------------------------------
+/** null=未探测；对象=最近一次探测结论。 */
+let officeTeamActivationCache = null;
+
+/** mux 重新 ready 或切换会话时清缓存（团队开关可能刚被打开）。 */
+function invalidateOfficeTeamActivation() {
+  officeTeamActivationCache = null;
+}
+
+/**
+ * 探测 agentTeam 是否真的出现在投影里。
+ *
+ * @returns {Promise<{state:'enabled'|'not-activated'|'runtime-offline'|'unknown',
+ *   projectionKeys:number|null, reason:string|null}>}
+ */
+async function probeOfficeTeamActivation() {
+  if (officeTeamActivationCache) return officeTeamActivationCache;
+  const mux = runtimeMux;
+  if (!mux || mux.state !== 'live') {
+    officeTeamActivationCache = {
+      state: 'runtime-offline', projectionKeys: null, reason: 'runtime mux is not live',
+    };
+    return officeTeamActivationCache;
+  }
+  const keys = [...officeFollowStreams.keys()];
+  if (keys.length === 0) {
+    // 没有 followed session 就无法读投影。**如实说"未知"**，
+    // 不猜成"未启用" —— 那会让用户在什么都没跑的时候去翻设置。
+    officeTeamActivationCache = {
+      state: 'unknown', projectionKeys: null, reason: 'no followed session to probe',
+    };
+    return officeTeamActivationCache;
+  }
+  const target = keys[keys.length - 1];
+  try {
+    const res = await mux.call('session/projections', { request: { sessionId: target } });
+    const value = res && res.ok ? res.value : null;
+    const values = value && value.values ? value.values : null;
+    if (!values) {
+      officeTeamActivationCache = {
+        state: 'unknown', projectionKeys: null, reason: 'projection payload has no values',
+      };
+      return officeTeamActivationCache;
+    }
+    const hasTeam = Object.prototype.hasOwnProperty.call(values, 'agentTeam');
+    officeTeamActivationCache = {
+      state: hasTeam ? 'enabled' : 'not-activated',
+      projectionKeys: Object.keys(values).length,
+      reason: hasTeam ? null
+        : 'agentTeam absent from projections — the team bundle is installed but not enabled '
+          + 'in this profile (add @deepseek-ai/dsh-experimental-agent-team-profile to bundles)',
+    };
+  } catch (err) {
+    officeTeamActivationCache = {
+      state: 'unknown', projectionKeys: null, reason: `probe failed: ${err.message}`,
+    };
+  }
+  return officeTeamActivationCache;
+}
+
 /**
  * 日志用的短会话 id。
  *
@@ -4917,6 +4996,9 @@ const diagnosticsBundle = createDiagnosticsBundle({
   // noteOfficeUnmappedEvent 的第一性原理注释）。用途：升级后判断
   // "某个上游能力到底有没有发事件"，而不是靠猜。
   officeUnmappedEvents: () => officeUnmappedEventSnapshot(),
+  // 团队能力是否**真的启用**（S1）。同步返回缓存结论；未探测过时为 null，
+  // 由 collectEnvironment 如实上报 unknown，而不是猜。
+  officeTeamActivation: () => officeTeamActivationCache,
   home: () => os.homedir(),
   log,
 });
@@ -5275,6 +5357,8 @@ function startMuxEventsFeed(ru) {
   runtimeMux.onReady(() => {
     eventsFeedFailStreak = 0; // a ready frame proves the feed is healthy again
     runtimeHealth.noteFeedLive();
+    // 团队激活状态可能在运行时重启/切换 profile 后变化，重连即失效重探。
+    invalidateOfficeTeamActivation();
     if (!eventsFeedLiveLogged) {
       eventsFeedLiveLogged = true;
       log('[shell] events feed live (mux ready)');

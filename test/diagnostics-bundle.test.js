@@ -331,3 +331,50 @@ test('diagnostics: unmapped events alone still report even when the office is st
   assert.equal(out.employeeCount, null, 'office fields stay honestly null, not 0');
   assert.equal(out.unmappedJournalEvents.length, 1);
 });
+
+// --- 团队能力激活状态（S1：区分"包在"与"已启用"）----------------------------
+
+test('diagnostics: team activation reports enabled/not-activated distinctly', () => {
+  // 第一性原理：这两种状态对用户的含义完全不同。
+  //   not-activated → 去 profile 里打开 bundle（一个开关）
+  //   enabled       → 什么都不用做
+  // 若都报成"不可用"，用户会误以为要升级运行时。
+  const enabled = createDiagnosticsBundle(makeDeps({
+    deps: { officeTeamActivation: () => ({ state: 'enabled', projectionKeys: 21, reason: null }) },
+  })).collectEnvironment();
+  assert.equal(enabled.teamActivation.state, 'enabled');
+  assert.equal(enabled.teamActivation.projectionKeys, 21);
+
+  const notActivated = createDiagnosticsBundle(makeDeps({
+    deps: {
+      officeTeamActivation: () => ({
+        state: 'not-activated', projectionKeys: 20,
+        reason: 'agentTeam absent from projections',
+      }),
+    },
+  })).collectEnvironment();
+  assert.equal(notActivated.teamActivation.state, 'not-activated');
+  assert.equal(notActivated.teamActivation.projectionKeys, 20);
+  assert.match(notActivated.teamActivation.reason, /absent/);
+});
+
+test('diagnostics: an unprobed team activation stays null (unknown, never guessed)', () => {
+  // 没探测过 ≠ 未启用。在什么都没跑的时候报"未启用"，
+  // 会让用户去翻一个其实没问题的设置。
+  const out = createDiagnosticsBundle(makeDeps({})).collectEnvironment();
+  assert.equal(out.teamActivation, null);
+});
+
+test('diagnostics: team activation carries no session ids or paths', () => {
+  const out = createDiagnosticsBundle(makeDeps({
+    deps: {
+      officeTeamActivation: () => ({
+        state: 'enabled', projectionKeys: 21, reason: null,
+        // 即使依赖方多塞了字段，白名单也不允许它进包
+        sessionId: 'session-secret', cwd: '/Users/someone/private',
+      }),
+    },
+  })).collectEnvironment();
+  assert.deepEqual(Object.keys(out.teamActivation).sort(),
+    ['projectionKeys', 'reason', 'state']);
+});
