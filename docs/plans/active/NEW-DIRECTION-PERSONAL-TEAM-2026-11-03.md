@@ -461,13 +461,23 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
 - ⬜ `present` 声明与 Deliverable 登记的对接。
 - 验收（未达成）：修改一个文件后，旧凭证自动降级为 stale。
 
-### S6 纠偏与干预
+### S6 纠偏与干预【**审计层已完成（2026-11-04）**】
 
-- 对具体成员发消息（依 S0 P-0.4）。
-- 暂停 / 恢复 Mission；停止成员（依 S0 P-0.6）。
-- 改写任务描述或重新分配（依 S0 P-0.5）。
-- 所有干预写入审计记录（借鉴 AgentTeams 干预历史）。
-- 验收：真机纠偏探针；审计记录可查。
+- ✅ **干预审计**（`src/mission/intervention-audit.js`，纯函数 + 有界环形缓冲）：
+  - 动作闭集 9 种：`mission.paused/resumed/stopped`、`member.messaged/interrupted`、
+    `task.reassigned/rewritten`、`contract.dispatched/revoked`。
+  - 原因闭集 7 种（`user-request` / `drift-suspected` / `conflict` /
+    `budget-exceeded` / `blocked` / `correctness` / `other`）。
+  - **故意没有自由文本字段**：一旦有 `note`，迟早有人把 prompt/任务描述塞进去，
+    审计日志本身就成了泄露面。闭集牺牲表达力，换来"审计永不泄露正文"的硬保证。
+  - 环形缓冲 200 条，超出计数 `dropped`（不静默丢弃）。
+  - 测试：`test/mission-intervention-audit.test.js`（11 条，含"自由文本不得被存下"
+    和"reason 不接受任意字符串"两条负向断言），变异验证 DETECTED ×2。
+- ⬜ 对具体成员发消息（U-1 已验接口可读层面，但发消息的**产品动作**未接 UI）。
+- ⬜ 暂停 / 恢复 Mission；停止成员（U-2 已验证 `interrupt_agent` 接口存在）。
+- ⬜ 改写任务描述或重新分配（U-4 未验 CAS 冲突）。
+- ⬜ 审计落盘（当前是内存缓冲；落盘涉及格式版本/轮转/隐私扫描，属独立工程）。
+- 验收（未达成）：真机纠偏探针 + 审计记录可查。
 
 ### S7 右栏视觉落地
 
