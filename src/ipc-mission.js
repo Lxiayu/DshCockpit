@@ -33,6 +33,7 @@ const path = require('node:path');
 const { createMissionStore } = require('./mission/store');
 const reconcileModule = require('./mission/reconcile');
 const receiptModule = require('./mission/receipt');
+const railOrder = require('./mission/rail-order');
 const brief = require('./mission/brief');
 const deliverable = require('./mission/deliverable');
 const harnessReader = require('./mission/harness-reader');
@@ -1488,19 +1489,31 @@ function registerMissionIpc(ipcMain, ctx) {
     attention() {
       let raw = null;
       try { raw = snapshotOf(); } catch { raw = null; }
+      // 没有快照 ≠ 没有待办。
+      //
+      // 这是最危险的空态：运行时没连上时告诉用户"没有需要你处理的事"，
+      // 用户会以为一切安好，而真相是我们什么都没看到。
+      // 所以 available:false 一路传下去，由 UI 渲染"未连接"。
       if (!raw) {
-        return { ok: true, available: false, reason: 'no office snapshot', items: [], counts: { approval: 0, question: 0 } };
+        return {
+          ok: true, available: false, reason: 'no office snapshot',
+          items: [], counts: { approval: 0, question: 0 },
+          // rail-order 的 unknown tone 会沿用它；不给 empty 文案
+          rail: { header: { decisionCount: 0, reminderCount: 0, tone: 'unknown' },
+            visible: { decisions: [], reminders: [] }, overflow: { decisions: 0 }, empty: null },
+        };
       }
       const items = Array.isArray(raw.pendingItems) ? raw.pendingItems : [];
-      // 排序：高风险优先，然后久的优先。与 office 的 pendingSnapshot 同规则。
-      const RISK_ORDER = { high: 0, medium: 1, low: 2 };
-      const sorted = [...items].sort((a, b) => {
-        const byRisk = (RISK_ORDER[a.risk] ?? 1) - (RISK_ORDER[b.risk] ?? 1);
-        if (byRisk !== 0) return byRisk;
-        const at = Number.isFinite(a.createdAtMs) ? a.createdAtMs : Infinity;
-        const bt = Number.isFinite(b.createdAtMs) ? b.createdAtMs : Infinity;
-        return at - bt;
-      });
+      // 分级 + 排序抽到 src/mission/rail-order.js（可离线测试）。
+      //
+      // 为什么不用原来那段内联排序：它只区分 approval/question 两类，
+      // 且"哪几项进首屏 2-3 格"这个决定无法被测试。而 380px 首屏放几项
+      // 恰恰就是产品本身——放错了用户会错过真正阻塞团队的事。
+      const rail = railOrder.assembleRailAttention({ items, nowMs: clock() });
+      // 老 UI 用的顺序：决策层在前、提醒层在后，但**不截断**。
+      const ordered = railOrder.orderAttentionItems(items, clock());
+      const orderedForCompat = [...ordered.decisions, ...ordered.reminders, ...ordered.dropped];
+
       const counts = { approval: 0, question: 0 };
       for (const it of items) {
         if (it.kind === 'approval') counts.approval += 1;
@@ -1510,10 +1523,17 @@ function registerMissionIpc(ipcMain, ctx) {
         ok: true,
         available: true,
         observedAtMs: Number.isFinite(raw.observedAtMs) ? raw.observedAtMs : clock(),
-        items: sorted,
+        // 向后兼容：老 UI 按 items（**全量**）与 total 渲染。
+        //
+        // 关键：这里必须是全量，不能是 rail.visible（那是截断到首屏几项的）。
+        // 老 UI 用 total 做计数、用 items 做列表；一旦 items 被截断而 total 没变，
+        // 就会出现"说有三条、只显示一条"的不一致。
+        // 截断只发生在 rail.visible，供 S7 的新 UI 使用。
+        items: orderedForCompat,
         counts,
-        // 零待办本身是有价值的信号（"团队运行正常"），UI 据此显示空状态
         total: items.length,
+        // 新增：分层结果。S7 的 UI 直接消费它。
+        rail,
       };
     },
 

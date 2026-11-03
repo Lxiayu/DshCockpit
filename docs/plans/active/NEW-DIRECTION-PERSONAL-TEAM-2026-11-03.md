@@ -267,7 +267,7 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
 | `src/mission/intervention-audit.js` | 无 | ⚠️ **库就绪，未接线**：需要 S6 的干预 action 才能调用 |
 | `src/mission/dispatch-strategy.js` | 无 | ⚠️ **库就绪，未接线**：需要 S2 派发面板在选择策略时调用 |
 | `src/mission/approval-gate.js` | 无 | ⚠️ **库就绪，未接线**：需要 S5 的"需要你批准"UI 与 IPC action |
-| `src/mission/rail-order.js` | 无 | ⚠️ **库就绪，未接线**：右栏 `renderAttention` 改为调用它（S7） |
+| `src/mission/rail-order.js` | `ipc-mission.js` 的 `attention()` 返回 `rail` | ✅ **已接线**（集成测试 7 条）：`items` 保持全量给老 UI，`rail` 分层+截断给新 UI |
 | `src/mission/dispatch-confirm.js` | 无 | ⚠️ **库就绪，未接线**：`startWork` 返回后轮询投影确认（S2） |
 
 **接线的前提**（都与待决策项相关）：
