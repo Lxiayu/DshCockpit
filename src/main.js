@@ -67,6 +67,7 @@ const { registerMcpIpc } = require('./ipc-mcp');
 const { registerRemoteIpc } = require('./ipc-remote');
 const { registerMiscDomainsIpc } = require('./ipc-misc-domains');
 const { registerMissionIpc } = require('./ipc-mission');
+const presentedCollectorModule = require('./mission/presented-collector');
 const { buildMissionBoard } = require('./office/mission-board');
 const { deriveCompanionState, companionSummary } = require('./companion-state');
 const { registerCapabilityPacksIpc } = require('./ipc-capability-packs');
@@ -5698,6 +5699,25 @@ const OFFICE_ASSISTANT_STREAM_LOG_EVERY = 40; // chunks between log lines
 const officeAssistantStreamStats = new Map(); // sessionId -> {chunks, attempts, ended, lastLogAt}
 
 // ---------------------------------------------------------------------------
+// 交付声明收集器（S5）
+//
+// 唯一职责：把 deliverables/presented 事件里的**绝对路径**削成工作区相对路径，
+// 且只保留工作区内的文件。绝对路径永远不离开 presented-collector 模块
+// （AGENTS.md §2.4：绝对路径不进事实链）。
+// ---------------------------------------------------------------------------
+const presentedCollector = presentedCollectorModule.createPresentedCollector();
+
+/** 当前工作区绝对路径（与 mission IPC 用的是同一来源）。 */
+function missionWorkspaceDir() {
+  try {
+    const ws = settings.effective().workspace;
+    return typeof ws === 'string' && ws ? ws : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 未映射 journal 事件的观测计数（S1：不让新能力静默流失）
 //
 // 第一性原理：为什么"透传但没映射"必须被计数
@@ -5941,6 +5961,30 @@ function noteOfficeFollowJournalRecord(sessionId, event) {
 function ingestOfficeJournalEvent(sessionId, event) {
   const mod = officeModuleInstance;
   noteOfficeFollowJournalRecord(sessionId, event);
+
+  // ---- deliverables/presented：只进交付收集器，**不进办公室** ----------------
+  //
+  // 第一性原理：为什么这个事件必须在这里被截住
+  //
+  //   官方 present 记录的是**绝对路径**，而 AGENTS.md §2.4 禁止绝对路径
+  //   进 Office 快照与事实链。若让它像其它事件一样透传给 office module，
+  //   绝对路径就会经 adapter 落进事实链 —— 那时已经删不掉了。
+  //
+  //   所以在**这一层**就分叉：交给 presentedCollector（它会削成相对路径），
+  //   然后直接 return，永远不到达 mod.ingestHarnessEvent。
+  //
+  //   这也顺带修正了可观测性：它不再被计成"unmapped event"。
+  if (event && event.type === 'deliverables/presented') {
+    try {
+      const ws = missionWorkspaceDir();
+      if (ws) presentedCollector.ingest(event.data, ws);
+      else noteOfficeUnmappedEvent('deliverables/presented(no-workspace)', event.time);
+    } catch (err) {
+      log(`[office] presented ingest failed: ${err.message}`);
+    }
+    return;
+  }
+
   if (!mod || !event || typeof event !== 'object' || typeof event.type !== 'string') return;
   const data = event.data && typeof event.data === 'object' ? event.data : {};
   // P2 turn/usage helpers: only non-negative integers ever enter the office

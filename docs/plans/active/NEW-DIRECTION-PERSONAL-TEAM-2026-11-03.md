@@ -270,7 +270,7 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
 | `src/mission/rail-order.js` | `ipc-mission.js` 的 `attention()` 返回 `rail` | ✅ **已接线**（集成测试 7 条）：`items` 保持全量给老 UI，`rail` 分层+截断给新 UI |
 | `src/mission/dispatch-confirm.js` | `ipc-mission.js` 的 `confirmDispatch` action；`startWork` 返回 `dispatchKey` | ✅ **已接线**（集成测试 7 条） |
 | `src/mission/deliverable-signal.js` | 无 | ⚠️ **库就绪，待接线**：需要有人喂它 presented + changes 两路数据 |
-| `src/mission/presented-collector.js` | 无 | ⚠️ **库就绪，待接线**：需在 `ingestOfficeJournalEvent` 里消费 `deliverables/presented` |
+| `src/mission/presented-collector.js` | `main.js` 的 `ingestOfficeJournalEvent` 早期分叉（不进办公室） | ✅ **已接线**（源级边界断言 1 条） |
 
 ### ⚠️ 关于 `approval-gate`：为什么决定**不接线**
 
@@ -569,7 +569,12 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
   它已经写进不可篡改的事件日志 —— 删不掉。所以闸门设在**事件被消费的那一刻**：
   绝对路径削成工作区相对路径，越界/穿越一律拒绝并计数。
   测试 15 条，变异 DETECTED ×2（边界 / 穿越）。
-  ⬜ 仍待接线：在 `ingestOfficeJournalEvent` 里消费该事件。
+- ✅ **`deliverables/presented` 已接线（2026-11-04）**：
+  `ingestOfficeJournalEvent` 开头分叉 → `presentedCollector.ingest()` → **立即 return**，
+  事件永远不到达 office module。
+  `test/office-runtime-boundary.test.js` 用源级断言钉住"分支必须在 office ingest 之前
+  且必须 return"，变异 DETECTED（去掉 return）。
+  ⬜ 仍待：把收集器的结果与 `workspace/changes` 合并成 Mission 交付物（需要 changes 侧接线）。
 - 验收（未达成）：修改一个文件后，旧凭证自动降级为 stale。
 
 ### S6 纠偏与干预【**审计层已完成（2026-11-04）**】

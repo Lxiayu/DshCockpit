@@ -562,3 +562,62 @@ test('boundary: the old Team ingress name is gone for good (projection semantics
   // 主进程也不得引用旧名（接线层与内核同口径）。
   assert.equal(/ingestTeamFact\b/.test(stripComments(read(path.join(SRC, 'main.js')))), false);
 });
+
+test('boundary: deliverables/presented is intercepted BEFORE it can reach the office', () => {
+  // 第一性原理：这条断言守的是隐私铁律 §2.4 的**执行顺序**
+  //
+  //   官方 present 记录的是绝对路径。如果这个事件像别的事件一样流进
+  //   office module，绝对路径就会经 adapter 落进事实链 —— 那时删不掉。
+  //
+  //   所以它必须在 ingestOfficeJournalEvent 的**前段**被分叉出去，
+  //   并在交给 mod 之前 return。下面同时钉住三件事：
+  //     1. 有 present 专用的分叉分支
+  //     2. 该分支在 mod 调用之前（用 indexOf 位置比较）
+  //     3. 分叉后立即 return，不会继续往下走到 mod
+  const main = read(path.join(SRC, 'main.js'));
+  const fnAt = main.indexOf('function ingestOfficeJournalEvent');
+  assert.ok(fnAt !== -1, 'ingestOfficeJournalEvent must exist');
+  const fnBody = main.slice(fnAt, fnAt + 4000);
+
+  const branchAt = fnBody.indexOf("event.type === 'deliverables/presented'");
+  assert.ok(branchAt !== -1,
+    'deliverables/presented must have its own branch (otherwise absolute paths reach the office)');
+
+  // 必须交给收集器（它会削掉绝对路径）
+  assert.match(fnBody, /presentedCollector\.ingest\(/,
+    'the branch must feed presentedCollector (which strips absolute paths)');
+
+  // 分支必须在"交给 mod"之前。
+  //
+  // 注意：不能直接 indexOf('mod.ingestHarnessEvent') —— 上面那段解释性注释里
+  // 也出现了这个名字，会匹配到注释而不是真实调用。所以找**调用形式**（带左括号）。
+  const modAt = fnBody.indexOf('mod.ingestHarnessEvent(');
+  assert.ok(modAt !== -1, 'the office ingest call must still exist somewhere in the function');
+  assert.ok(branchAt < modAt,
+    'the presented branch must come BEFORE the office ingest call');
+
+  // 分支内必须 return（不能 fallthrough 到办公室）。
+  //
+  // 窗口要精确到**这一个 if 块**为止：早期版本取 700 字符固定窗口，
+  // 结果把后面别处的 `return;` 也算了进来，于是"去掉这个 return"的变异
+  // 不会被发现 —— 测试看起来在守，其实什么都没守。
+  // 现在按花括号配平截出块体，只在这个块里找 return。
+  const blockEnd = (start) => {
+    let depth = 0;
+    for (let i = start; i < fnBody.length; i += 1) {
+      const ch = fnBody[i];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) return i + 1;
+      }
+    }
+    return fnBody.length;
+  };
+  const openBrace = fnBody.indexOf('{', branchAt);
+  assert.ok(openBrace !== -1, 'the presented branch must have a block');
+  const branchBlock = fnBody.slice(openBrace, blockEnd(openBrace));
+  assert.ok(branchBlock.length > 10, 'the branch block must be non-trivial');
+  assert.match(branchBlock, /\breturn\s*;/,
+    'the presented branch must return early so the event never reaches the office');
+});
