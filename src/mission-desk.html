@@ -298,6 +298,48 @@
   .team-task-subject { font-size: 12.5px; color: var(--text-1); line-height: 1.5;
     overflow-wrap: anywhere; }
   .team-task-meta { font-size: 10.5px; color: var(--text-3); margin-top: 3px; padding-left: 2px; }
+  /* ---- 团队成员名册（S6）----
+     名册在这里的意义不是"再看一遍成员"，而是**让我能对某个人做点什么**。
+     所以操作按钮与名字同行，不藏在二级菜单里。 */
+  .members-section .members-count { font-size: 10.5px; color: var(--text-3); margin-left: auto; }
+  .member-row { padding: 6px 0; border-top: 1px solid var(--border-1); }
+  .member-row:first-of-type { border-top: 0; }
+  .member-line { display: flex; align-items: center; gap: 6px; }
+  .member-name { font-size: 12.5px; color: var(--text-1); }
+  .member-phase { font-size: 10px; padding: 1px 5px; border-radius: 4px;
+    background: var(--bg-input); color: var(--text-3); }
+  /* phase 是**生命周期**，不是"在不在跑" —— 用中性色，不用绿色假装在工作 */
+  .member-phase[data-phase="failed"] { color: var(--att-warn-fg); }
+  .member-role { font-size: 10px; color: var(--text-3); }
+  .member-ops { display: flex; gap: 6px; margin-top: 5px; padding-left: 0; }
+  .member-op { font-size: 11px; padding: 3px 8px; border-radius: 5px; cursor: pointer;
+    background: transparent; color: var(--text-2);
+    border: 1px solid var(--border-1); }
+  .member-op:hover { color: var(--text-1); border-color: var(--text-3); }
+  .member-op.danger { color: var(--att-warn-fg); border-color: var(--att-warn-fg); }
+  .member-op:disabled { opacity: .5; cursor: default; }
+  .member-msg-wrap { padding-top: 4px; }
+  .member-msg-form { padding: 8px 0; }
+  .member-msg-title { font-size: 11.5px; color: var(--text-2); margin-bottom: 5px; }
+  .member-msg-input, .member-msg-why { width: 100%; box-sizing: border-box;
+    background: var(--bg-input); color: var(--text-1);
+    border: 1px solid var(--border-1); border-radius: 6px;
+    padding: 5px 7px; font-size: 12px; font-family: inherit; }
+  .member-msg-input { resize: vertical; min-height: 54px; }
+  .member-msg-why { margin-top: 5px; }
+  .member-msg-actions { display: flex; gap: 6px; margin-top: 6px; }
+  .member-msg-result { font-size: 11px; margin-top: 5px; line-height: 1.5; }
+  .member-msg-result.ok { color: var(--text-2); }
+  .member-msg-result.err { color: var(--att-warn-fg); }
+  /* ---- 干预历史（S6）---- */
+  .iv-toggle { font-size: 11px; padding: 2px 8px; border-radius: 5px; cursor: pointer;
+    background: transparent; color: var(--text-3); border: 1px solid var(--border-1); }
+  .iv-list { margin-top: 6px; }
+  .iv-row { display: flex; justify-content: space-between; gap: 8px;
+    padding: 4px 0; border-top: 1px solid var(--border-1); font-size: 11.5px; }
+  .iv-row:first-child { border-top: 0; }
+  .iv-desc { color: var(--text-1); }
+  .iv-meta { color: var(--text-3); font-size: 10.5px; white-space: nowrap; }
   /* 被阻塞：用琥珀色，与"待办红"区分——它不是要你处理，是在等人 */
   .team-blocked { margin-top: 4px; padding: 5px 8px; border-radius: 6px;
     background: var(--att-warn-bg); }
@@ -2210,8 +2252,144 @@ function renderDetail() {
   // --- Brief / 诊断 ---
   box.append(renderBriefAndDiagnostics(v, m));
 
+  // --- 团队成员 + 干预（S6）---
+  box.append(renderTeamMembers(m));
+
   // --- 最近的干预（S6 审计）---
   box.append(renderInterventionHistory(m));
+}
+
+/**
+ * 团队成员名册 + 干预操作（S6）。
+ *
+ * 第一性原理：为什么名册必须带操作，而不是只列名字
+ *
+ *   右栏放一个"只读的成员列表"是没有价值的 —— office 里已经能看到成员在走动。
+ *   名册在这里的唯一意义是：**让我能对某个人做点什么**
+ *   （叫它停下、给它补一句话）。
+ *
+ * 诚实约束（来自 S0 实测 D11）：
+ *   我们没有对成员直连的写表面，干预指令要经 Lead 转达。
+ *   所以按钮文案写"请 Lead 转达"，并在成功后明确说
+ *   "指令已发出，不代表对方已处理" —— 不假装是直连。
+ */
+function renderTeamMembers(m) {
+  const proj = state.projections;
+  const team = proj && proj.agentTeam;
+  if (!team) return el('div', { class: 'members-empty', text: '' });
+
+  const members = Array.isArray(team.members) ? team.members : [];
+  if (members.length === 0) return el('div', { class: 'members-empty', text: '' });
+
+  const box = el('section', { class: 'entity-section members-section' });
+  const head = el('div', { class: 'entity-head' });
+  head.append(el('h3', { text: '团队成员' }));
+  head.append(el('span', { class: 'members-count', text: String(members.length) }));
+  box.append(head);
+
+  for (const mem of members) {
+    const row = el('div', { class: 'member-row' });
+
+    const line = el('div', { class: 'member-line' });
+    line.append(el('span', { class: 'member-name', text: mem.name || mem.id }));
+    // phase 是**生命周期**（provisioning/active/failed），不是"在不在跑"。
+    // 不能把它显示成"工作中"——那是在 phase 上编造 turn 级事实。
+    line.append(el('span', {
+      class: 'member-phase',
+      'data-phase': mem.phase || 'active',
+      text: PHASE_LABEL[mem.phase] || mem.phase || 'active',
+    }));
+    if (mem.role === 'lead') line.append(el('span', { class: 'member-role', text: 'Lead' }));
+    row.append(line);
+
+    // 干预操作：只对非 lead 成员显示（对 Lead 的"中断"没有意义，
+    // 它自己就是执行入口；要停整支团队用状态切换）
+    if (mem.role !== 'lead' && mem.name) {
+      const ops = el('div', { class: 'member-ops' });
+
+      const msgBtn = el('button', { class: 'member-op', text: '转达消息' });
+      msgBtn.addEventListener('click', () => openMemberMessage(m, mem.name));
+      ops.append(msgBtn);
+
+      const stopBtn = el('button', { class: 'member-op danger', text: '中断它' });
+      stopBtn.addEventListener('click', () => interruptMember(m, mem.name, stopBtn));
+      ops.append(stopBtn);
+
+      row.append(ops);
+    }
+    box.append(row);
+  }
+  return box;
+}
+
+const PHASE_LABEL = {
+  active: '在册',
+  provisioning: '创建中',
+  failed: '创建失败',
+};
+
+/** 打开一个小的"转达消息"表单（内联，不弹窗——右栏内弹窗会遮住上下文）。 */
+function openMemberMessage(m, memberName) {
+  const existing = document.querySelector('.member-msg-form');
+  if (existing) existing.remove();
+
+  const form = el('div', { class: 'member-msg-form' });
+  form.append(el('div', { class: 'member-msg-title', text: '转达给 ' + memberName }));
+  const input = el('textarea', { class: 'member-msg-input', rows: '3',
+    placeholder: '要转达的原话（会原样发给 Lead，由它转达）' });
+  form.append(input);
+  const why = el('input', { class: 'member-msg-why', placeholder: '原因（可选，如：它跑偏了）' });
+  form.append(why);
+  const row = el('div', { class: 'member-msg-actions' });
+  const send = el('button', { class: 'member-op', text: '请 Lead 转达' });
+  const cancel = el('button', { class: 'member-op', text: '取消' });
+  row.append(send, cancel);
+  form.append(row);
+  const msg = el('div', { class: 'member-msg-result' });
+  form.append(msg);
+  cancel.addEventListener('click', () => form.remove());
+  send.addEventListener('click', async () => {
+    const text = input.value.trim();
+    if (!text) { msg.textContent = '消息不能为空。'; msg.classList.add('err'); return; }
+    send.disabled = true;
+    let r;
+    try {
+      r = await api('interveneMember', {
+        missionId: m.missionId, kind: 'message', memberName,
+        message: text, reason: why.value.trim() || undefined,
+      });
+    } catch (e) { r = { ok: false, reason: e.message }; }
+    send.disabled = false;
+    if (!r || !r.ok) {
+      msg.textContent = '未发出：' + ((r && r.reason) || '未知原因');
+      msg.classList.add('err');
+      return;
+    }
+    msg.textContent = r.note || '已下达。';
+    msg.classList.add('ok');
+    input.value = '';
+    if (typeof refresh === 'function') await refresh();
+  });
+  // 用 section 包一层便于定位
+  const wrap = el('div', { class: 'entity-section member-msg-wrap' });
+  wrap.append(form);
+  const host = document.querySelector('#detail');
+  if (host) host.append(wrap);
+}
+
+/** 中断某成员（经 Lead）。成功后如实说明"不代表已经停下"。 */
+async function interruptMember(m, memberName, btn) {
+  btn.disabled = true;
+  let r;
+  try {
+    r = await api('interveneMember', {
+      missionId: m.missionId, kind: 'interrupt', memberName,
+    });
+  } catch (e) { r = { ok: false, reason: e.message }; }
+  btn.disabled = false;
+  if (!r || !r.ok) { alert('未发出：' + ((r && r.reason) || '未知原因')); return; }
+  alert(r.note || '已下达。');
+  if (typeof refresh === 'function') await refresh();
 }
 
 /**

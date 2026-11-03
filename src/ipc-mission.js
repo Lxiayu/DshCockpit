@@ -86,6 +86,7 @@ const ACTIONS = Object.freeze([
   'harvestDeliverables',  // 从 Agent 回复里找**真实存在**的产物，登记成 Deliverable
   'confirmDispatch',      // 只读：派发后轮询"投影里有没有出现对应任务"（S2）
   'interventionHistory',  // 只读：最近的干预记录（S6，闭集字段，无内容）
+  'interveneMember',      // S6：对成员转达消息 / 中断（经 Lead，非直连）
 ]);
 
 function nowMs() { return Date.now(); }
@@ -335,6 +336,61 @@ function renderDispatchInstruction({ mission, task, dispatchKey } = {}) {
     }
   }
 
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// 成员干预指令（S6 纠偏）—— 纯函数
+//
+// 第一性原理：为什么"对成员说话"必须经 Lead，而不是直接发给成员
+//
+//   协议层的硬约束（S0 实测，D11）：agent-team 没有 remote 写表面。
+//   send_message / interrupt_agent 只存在于**模型侧工具**里。
+//   也就是说：壳层没有"直接对某个 teammate 说话"的能力。
+//
+//   这看起来是限制，但它和官方的团队语义是一致的：Lead 是协调者，
+//   所有对成员的干预都应经它转达 —— 否则成员会收到两个来源的指令
+//   （用户的 + Lead 的），而它无法判断谁优先。
+//
+//   所以我们的产品动作是：把用户的意图**渲染成给 Lead 的指令**，
+//   由 Lead 决定怎么转达。这既符合协议，也避免了"越过 Lead 指挥成员"
+//   导致的状态不一致。
+//
+//   关键：**用户的原文必须原样传下去**，我们只加必要的框架
+//   （目标成员、要做什么），不改写、不概括。改写会让用户的话失真。
+// ---------------------------------------------------------------------------
+
+/**
+ * 渲染"对某个成员采取干预"的指令。
+ *
+ * @param {object} input
+ * @param {'message'|'interrupt'} input.kind
+ * @param {string} input.memberName   目标成员名（协议层的 target）
+ * @param {string} [input.message]    kind=message 时的原文（**不改写**）
+ * @param {string} [input.reason]     用户给出的原因（可选，用于审计与上下文）
+ * @returns {string}
+ */
+function renderMemberIntervention({ kind, memberName, message, reason } = {}) {
+  const lines = [];
+  const name = typeof memberName === 'string' ? memberName.trim() : '';
+
+  if (kind === 'interrupt') {
+    lines.push(`【干预】请用 interrupt_agent 中断成员 "${name}" 当前这一轮。`);
+    lines.push('只中断它正在做的事，不要停掉整个团队，也不要删除它的任务。');
+    if (reason) lines.push(`原因：${reason}`);
+    lines.push('中断后一句话汇报：它当时在做什么、停在了哪里。');
+    return lines.join('\n');
+  }
+
+  // kind === 'message'
+  lines.push(`【干预】请用 send_message 把下面这段话转达给成员 "${name}"。`);
+  lines.push('不要改写、不要概括、不要替它执行。原样转达即可。');
+  if (reason) lines.push(`这么说的原因：${reason}`);
+  lines.push('');
+  lines.push('【要转达的原话】');
+  lines.push(typeof message === 'string' ? message : '');
+  lines.push('');
+  lines.push('转达后一句话说明：消息已发出（不代表对方已处理）。');
   return lines.join('\n');
 }
 
@@ -625,6 +681,86 @@ function registerMissionIpc(ipcMain, ctx) {
       const out = r.store.append('mission.created', entity);
       if (!out.ok) return fail(out.reason, 'MISSION_APPEND_FAILED');
       return { ok: true, missionId: id, event: out.event };
+    },
+
+    /**
+     * 对某个团队成员采取干预（S6）：转达消息，或中断它当前的 turn。
+     *
+     * 第一性原理：为什么这里是"下令"而不是"执行"
+     *
+     *   D11 的硬约束：agent-team 没有 remote 写表面，send_message /
+     *   interrupt_agent 只存在于模型侧工具。壳层不能直接对成员说话。
+     *
+     *   所以这个 action 的语义是**下达干预意图**，不是"已完成干预"。
+     *   它把指令发给 Lead，由 Lead 转达。我们无法确认 Lead 是否照做 ——
+     *   这一点必须如实回报（delivered: true 只表示 prompt 被接受）。
+     *
+     *   如果假装"已中断成功"，用户会以为团队停了，而实际还在跑。
+     */
+    async interveneMember(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = argString(payload && payload.missionId);
+      if (!isId(missionId)) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const kind = argString(payload && payload.kind);
+      if (kind !== 'message' && kind !== 'interrupt') {
+        return fail('kind must be "message" or "interrupt"', 'INTERVENTION_KIND_INVALID');
+      }
+      const memberName = argString(payload && payload.memberName);
+      if (!memberName) return fail('memberName is required', 'MEMBER_NAME_REQUIRED');
+      const message = argString(payload && payload.message);
+      if (kind === 'message' && !message) {
+        return fail('message is required when kind=message', 'MESSAGE_REQUIRED');
+      }
+      if (kind === 'message' && message.length > 4000) {
+        return fail('message is too long (4000 chars max)', 'MESSAGE_TOO_LONG');
+      }
+      const why = argString(payload && payload.reason);
+
+      // 必须已绑定会话：没有会话就没有团队，也就没有成员可干预。
+      const bound = readBindMap(r.workspaceDir)[missionId];
+      if (!bound || !bound.sessionId) {
+        return fail('this mission has no bound session yet', 'SESSION_NOT_BOUND');
+      }
+      if (typeof promptSession !== 'function') {
+        return fail('runtime session wiring is not available', 'RUNTIME_NOT_WIRED');
+      }
+
+      const text = renderMemberIntervention({
+        kind, memberName, message, reason: why,
+      });
+      let sent;
+      try {
+        sent = await promptSession(bound.sessionId, text);
+      } catch (err) {
+        return fail(`cannot reach the team: ${err.message}`, 'PROMPT_FAILED');
+      }
+      if (!sent || !sent.ok) {
+        return fail((sent && sent.reason) || 'the runtime rejected the instruction', 'PROMPT_FAILED');
+      }
+
+      // 审计：只记动作与目标，**不记消息正文**（隐私铁律 §2.4）
+      const auditResult = interventionLog.record({
+        action: kind === 'message' ? 'member.messaged' : 'member.interrupted',
+        // 干预由用户发起，所以 reason 恒为 user-request。
+        // 用户的自由文本原因**不进审计**（闭集设计：审计里不出现任何用户内容），
+        // 它只出现在发给 Lead 的指令里，用于让团队理解上下文。
+        reason: 'user-request',
+        missionId,
+        memberName,
+        atMs: clock(),
+      });
+
+      return {
+        ok: true,
+        // 措辞故意保守：只表示指令已发出，不表示成员已收到/已照做。
+        delivered: true,
+        audited: auditResult.ok === true,
+        // 用户必须知道这是间接路径
+        note: kind === 'interrupt'
+          ? '已请 Lead 中断该成员。Lead 是否执行、成员何时停下，以团队状态为准。'
+          : '已请 Lead 转达。这代表指令已发出，不代表对方已处理。',
+      };
     },
 
     /**
