@@ -427,7 +427,22 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
   持久化要扩展 schema（TaskRef 还要求 workstreamId 必填），成本远大于收益。
 - ✅ 右栏 `startWork` 已调用 `confirmDispatch`（2026-11-04 完成，见 `attachStartWorkActions`）。
 - ⬜ 派发面板 UI（右栏结构化表单）。
-- ⬜ Grant 存储与 `grantId` 的实际创建/撤销流程。
+- ✅ **Grant 核心模型与持久化（2026-11-04 完成）**：`src/mission/grant.js`
+  + `test/mission-grant.test.js`（15 条）+ `test/mission-grant-store.test.js`（8 条）。
+  - **规则全部按 §5.1 实现**：只有 `user` 可授予；access 只有 `read|write`
+    （"完全权限"**不是** Grant 的取值，D10 明确规定它是独立全局模式）；
+    撤销单向不可复活；撤销原因闭集（安全动作不携带用户内容）。
+  - **目录边界**：`checkAccess` 用 `base + '/'` 比较，
+    防止 `/proj-evil` 被天真 startsWith 判成 `/proj` 子目录。
+  - **独立文件** `<ws>/.dsh/grants.json`，不进 Mission 的 events.jsonl：
+    Grant 是**工作区级**授权，一个 Grant 可被多个 Mission 使用；
+    混进 Mission 日志会制造"这条 Grant 属于哪个 Mission"的伪问题。
+  - **原子写**（temp + rename）：崩溃时磁盘上要么旧表要么新表，不会是半个 JSON。
+  - **单条坏数据不让整张表失效**：逐条校验、丢弃并计数 ——
+    否则用户要重新授权所有目录。
+  - 派发快照只含 `grantId + access`，**不含目录**（隐私 §2.4）。
+  变异 DETECTED ×3（任何人可授予 / 天真前缀 / 非原子写）。
+  ⬜ 仍待：IPC action（create/revoke/list）与右栏 Grant 面板 UI。
 - ✅ **派发策略的确定性判定（2026-11-04 已完成）**：`src/mission/dispatch-strategy.js`
   - 五条规则，**约束优先、机会最后**：
     ① 预算只允许 1 人 → 单成员（硬约束最高优先）
