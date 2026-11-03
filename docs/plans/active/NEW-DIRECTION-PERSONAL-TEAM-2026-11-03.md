@@ -379,12 +379,42 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
 - 自研 Team Runtime 按 ADR-0002 R0–R4 处理（映射表、数据归档、等价性对照、测试重定位、标记 legacy）。
 - 验收：办公室与 Harness 两侧团队状态一致（对照截图 + 投影快照）。
 
-### S4 耐久恢复（借鉴 OpenMuse 租约）
+### S4 耐久恢复【**纯逻辑层已完成（2026-11-04）**】
 
-- Mission 恢复循环：持有租约（`leaseId` + `leaseUntil`），心跳续租；过期则重新挂接团队并对账。
-- 不重跑已执行动作：对账时以 Harness 任务状态为准，提案状态以本地记录为准。
-- 守护进程形态（D4）：可选，只负责租约与对账，不负责展示。
-- 验收：关闭 app 后重开，团队任务仍可见、可接管；模拟租约过期，不产生重复任务。
+> **结论：不采用 OpenMuse 的 lease 模型 —— 我们的场景里没有抢占。**
+
+**为什么不照搬租约（第一性原理）**：
+
+OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具体问题：
+**多个 worker 进程抢同一个任务**，所以必须保证同一时刻只有一个执行者。
+
+我们的场景不成立：
+- 执行者是 Harness（官方），我们不调度、不重试、不重跑。
+- 没有两方抢任务，就不会有"被接管的旧 worker 继续写"的窗口。
+- 照搬 lease 只会引入一堆永远走不到的分支（心跳、续租、接管、LostLease 处理）。
+
+**真实问题只有一个**：进程在中间态崩溃后，那个中间态永远卡住。
+例如合同 `status='dispatching'`（正在派发确认）时进程被杀 ——
+它既没成功（没有 taskRef），也不会继续（等待循环在内存里，已随进程消失）。
+
+**已实现**（`src/mission/reconcile.js`，纯函数 + 一处接线）：
+- `reconcileContract()`：把**唯一**不可能再推进的状态 `dispatching` 回退为 `draft`，
+  并写入 `interruptedAtMs` / `interruptedReason`（没有这行痕迹，用户会以为是自己改的）。
+- **`active` 永不降级**：合同进入 active 后推进责任在 Harness；重启只让我们失去观测，
+  不等于工作停了。因为自己看不见就宣布失败，是拿失明当别人的过错。
+- `dispatchProgress()`：运行期兜底 —— 派发超时返回 `unconfirmed` 而**不是 failed**
+  （说"失败"会让用户重复派发、制造重复任务）。
+- 接线：`ipc-mission.js` 的 `storeFor()` 在 store 刚建好时跑一次（进程生命周期里唯一
+  确定"上个进程已死"的时点）；失败不阻断（对账是修复，不是使用前提）。
+
+**测试**：`test/mission-reconcile.test.js`（15 条，含 3 条走真实 `registerMissionIpc`
+的集成测试 —— 防止"纯函数对了但没接上"，本项目有过 TaskRef 静默失效的教训）。
+变异验证 DETECTED ×3（active 加入中断列表 / 回退成 active / 摘掉接线钩子）。
+
+**仍未完成**：
+- ⬜ 守护进程形态（D4）本身：当前对账在 app 启动时执行；后台守护是独立工程。
+- ⬜ 团队侧对账（把 Mission 合同与 Harness `agentTeam` 状态比对）依赖 S3。
+- 验收（部分达成）：模拟卡住的 dispatching → 重载后自动回退为 draft 且内容不丢。
 
 ### S5 凭证与审批闸门【**部分完成（2026-11-04）**】
 

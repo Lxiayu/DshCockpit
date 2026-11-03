@@ -31,6 +31,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { createMissionStore } = require('./mission/store');
+const reconcileModule = require('./mission/reconcile');
 const brief = require('./mission/brief');
 const deliverable = require('./mission/deliverable');
 const harnessReader = require('./mission/harness-reader');
@@ -442,8 +443,53 @@ function registerMissionIpc(ipcMain, ctx) {
     if (cachedKey !== key) {
       cachedStore = createMissionStore({ workspaceDir: key, now: clock, log });
       cachedKey = key;
+      // 重启对账（S4）：把上次进程留下的、肯定不可能再推进的中间态纠正掉。
+      //
+      // 为什么放在"store 刚建好"这一刻：这是进程生命周期里唯一确定
+      // "之前那个进程已经死了"的时点。放在别处（比如每次读取时）会重复对账，
+      // 而且无法区分"重启"和"运行中"。
+      //
+      // 为什么失败不阻断：对账是修复动作，不是使用前提。
+      // 一份卡住的合同不该让整个 Mission 面板打不开。
+      try { reconcileOnLoad(cachedStore); } catch (err) {
+        log(`[mission] reconcile on load failed: ${err.message}`);
+      }
     }
     return cachedStore;
+  }
+
+  /**
+   * 执行一次性重启对账。**只在 store 刚创建时调用**。
+   *
+   * 写盘走 store.append 的单写者通道；对账逻辑本身是纯函数
+   * （src/mission/reconcile.js），这里只负责把它的结论落地。
+   *
+   * @param {object} store createMissionStore 的返回值
+   */
+  function reconcileOnLoad(store) {
+    let missions;
+    try { missions = store.listMissions(); } catch { return; }
+    if (!Array.isArray(missions)) return;
+    let fixed = 0;
+    for (const row of missions) {
+      const missionId = row && row.missionId;
+      if (!isId(missionId)) continue;
+      let view;
+      try { view = store.missionView(missionId); } catch { continue; }
+      if (!view) continue;
+      const result = reconcileModule.reconcileMissionView(view, clock());
+      for (const event of result.events) {
+        try {
+          const appended = store.append(event.type, event.payload, { atMs: clock() });
+          if (appended) fixed += 1;
+          else log(`[mission] reconcile append rejected for ${missionId}`);
+        } catch (err) {
+          log(`[mission] reconcile append threw for ${missionId}: ${err.message}`);
+        }
+      }
+      for (const reason of result.reasons) log(`[mission] reconciled ${missionId}: ${reason}`);
+    }
+    if (fixed > 0) log(`[mission] reconcile on load fixed ${fixed} stuck contract state(s)`);
   }
 
   /** 统一的错误包装：任何异常都不泄露给 renderer。 */
