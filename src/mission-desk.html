@@ -2180,7 +2180,11 @@ function attachStartWorkActions(m, box, input) {
 }
 
 
-function renderTeamTasks() {
+function renderTeamTasks(m) {
+  // ⚠️ m（Mission）必须传进来：任务行的「改写/转交」按钮需要它来调 rewriteTask。
+  // 早期这里没接参数，而按钮回调里引用了 m —— 表现为**按钮存在、点了抛
+  // ReferenceError**，而静态截图完全看不出来（渲染时不执行回调）。
+  // 这类缺陷只有"真的点一下"的探针能发现。
   const proj = state.projections;
   const team = proj && proj.agentTeam;
   if (!team) return null;   // 没有 key → 不显示（不是显示空的）
@@ -2537,11 +2541,31 @@ function renderMissionHead(m, v) {
     });
     menu.append(opt);
   }
+  // 状态菜单的开关与"点外部关闭"。
+  //
+  // 第一性原理：为什么用一个标记而不是 document 监听
+  //
+  //   早期写法 `document.addEventListener('click', () => menu.hidden)` 有两个问题：
+  //     ① 每次渲染都新增一个永不清理的监听器（右栏刷新频繁 → 泄漏）
+  //     ② 所有旧监听器都去操作已被丢弃的旧 menu 节点
+  //   更糟的是它们会抢在真正的选项 handler 之前把菜单关掉，
+  //   导致"点了没反应"—— 而这个探针正是发现它的地方。
+  //
+  //   现在：菜单开关只靠 badge 自己的 click 处理；
+  //   "点外部关闭"用一个**每次渲染只注册一次**的 document 监听，
+  //   并在里面先判断该事件是否落在菜单内部。
+  menu.addEventListener('click', (ev) => ev.stopPropagation());
   badge.addEventListener('click', (ev) => {
     ev.stopPropagation();
     menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
   });
-  document.addEventListener('click', () => { menu.style.display = 'none'; });
+  if (!window.__mheadCloserInstalled) {
+    window.__mheadCloserInstalled = true;
+    document.addEventListener('click', () => {
+      const open = document.querySelectorAll('.mhead-status-menu');
+      for (const el2 of open) el2.style.display = 'none';
+    });
+  }
   line1.append(badge);
   head.append(line1);
   head.append(menu);
@@ -2816,7 +2840,7 @@ function renderDetail() {
 
 
   // --- 团队任务（只有启用 team 投影时才显示）---
-  const teamBlock = renderTeamTasks();
+  const teamBlock = renderTeamTasks(m);
   if (teamBlock) box.append(teamBlock);
 
   // --- 合同 ↔ 任务板对账（只有两边都有数据时才有意义）---
