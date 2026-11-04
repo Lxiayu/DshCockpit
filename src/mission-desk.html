@@ -4138,6 +4138,29 @@ function teamSignature(proj) {
   return `${members}|${tasks}`;
 }
 
+/**
+ * 「你离开期间」的内容签名。
+ *
+ * 只取**会变的部分**：条目数 + 团队快照的计数。
+ * entries 是历史事件（不变），teamSnapshot 是当前状态（会变）。
+ * 两者都要进签名：万一 entries 也变了（用户期间做了事），同样要重绘。
+ */
+function sinceSignature(si) {
+  if (!si || !si.ok) return 'none';
+  const n = Array.isArray(si.entries) ? si.entries.length : 0;
+  const ts = si.teamSnapshot;
+  if (!ts) return `${si.available ? 1 : 0}|${n}|no-team`;
+  return [
+    si.available ? 1 : 0,
+    n,
+    Number.isFinite(ts.total) ? ts.total : 0,
+    Array.isArray(ts.done) ? ts.done.length : 0,
+    Array.isArray(ts.active) ? ts.active.length : 0,
+    Array.isArray(ts.blocked) ? ts.blocked.length : 0,
+    Number.isFinite(ts.memberCount) ? ts.memberCount : 0,
+  ].join('|');
+}
+
 function attentionSignature(a) {
   if (!a || !a.ok) return 'none';
   const items = Array.isArray(a.items) ? a.items : [];
@@ -4148,6 +4171,27 @@ function attentionSignature(a) {
   return `${total}|${tone}|${ids}`;
 }
 
+/**
+ * 轮询应该刷新什么、**不应该**刷新什么 —— 这份清单是判定过的，不是随意的。
+ *
+ * ✅ 刷新（都是「会变的当前事实」）：
+ *     workStatus        —— 跑了几轮几步
+ *     attention         —— 我需要拍板什么（第 42/43 轮修的）
+ *     sessionProjections—— 谁在做什么（第 44 轮修的）
+ *     sinceLastSeen     —— 离开期间团队的样子（第 45 轮修的）
+ *
+ * ❌ 刻意不刷新：
+ *     get              —— Mission 自身的记录由用户的动作改变；
+ *                         用户改了会走 loadDetail，轮询重复拉是浪费。
+ *     getBoundSession  —— 会话绑定只在派发时改变；变了会触发 loadDetail。
+ *     getBrief         —— Brief 是「写给团队看的说明书」，只在编辑时变。
+ *     briefSyncState   —— 同上，从属 Brief。
+ *     markSeen         —— **绝对不能进轮询**。
+ *                         它的语义是"用户看到了"。如果每 4 秒自动标记一次，
+ *                         「你离开期间」会永远是空的 ——
+ *                         因为"上次查看"被不断刷新成"刚刚"。
+ *                         这个功能的全部价值就在于**用户没看的时候发生的事**。
+ */
 async function pollProgressOnce() {
   {
     // 页面隐藏 → 不刷
@@ -4251,6 +4295,40 @@ async function pollProgressOnce() {
         }
       }
     } catch { /* 投影取不到不该影响进度轮询 */ }
+
+    // ---- 同时刷新「你离开期间」（2026-11-04 修）----
+    //
+    // 第一性原理：这是同一个根因的第四处
+    //
+    //   前三处（attention / 团队投影 / 任务板）都修了，但 sinceLastSeen
+    //   仍然只在 loadDetail 时取一次。而它从上一轮开始**也带团队快照** ——
+    //   所以它同样会过期：团队从"没开始"变成"在跑"，这块还显示旧样子。
+    //
+    //   实测确认：sinceCalls 在 14 秒里只有 1 次，
+    //   而「1 个在进行」永远不出现。
+    //
+    // 诚实边界：
+    //   这块的 entries 是**历史事件**（不会变），但 teamSnapshot 是**当前状态**
+    //   （会变）。刷新它不会伪造历史 —— 变的只是"现在的样子"那部分。
+    try {
+      const freshSince = await api('sinceLastSeen', { missionId: id });
+      if (state.selectedId === id && freshSince && freshSince.ok) {
+        const beforeSigS = sinceSignature(state.since);
+        const afterSigS = sinceSignature(freshSince);
+        if (beforeSigS !== afterSigS) {
+          state.since = freshSince;
+          const oldSince = document.querySelector('.tl');
+          const freshNode = renderSince();
+          if (oldSince && freshNode) oldSince.replaceWith(freshNode);
+          else if (oldSince && !freshNode) oldSince.remove();
+          else if (!oldSince && freshNode) {
+            // 之前没有这块、现在有了 —— 插在「交代任务」之后
+            const sw = document.querySelector('.start-work');
+            if (sw && sw.parentNode) sw.parentNode.insertBefore(freshNode, sw.nextSibling);
+          }
+        }
+      }
+    } catch { /* 离开期间取不到不该影响进度轮询 */ }
 
     if (changed) {
       progressIdleTicks = 0;
