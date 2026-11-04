@@ -32,7 +32,7 @@ Harness owns execution.  DshCockpit owns experience, continuity, capability orch
 ## 3. 目录地图
 
 ```
-src/main.js                   壳组合根（IPC、runtime 监督）——6041 行 / 60 handler（原 6385/107）
+src/main.js                   壳组合根（IPC、runtime 监督）——7019 行 / 60 handler（已知债 TD-01）
 src/runtime-capability.js     能力矩阵：判定 runtime 是否可用（S1，替代版本号门禁）
 src/window-hardening.js       统一窗口加固 + 权限默认全 deny（TD-08/09）
 src/ipc-*.js                  已提取 IPC 域（features/mcp/remote/misc/mission/skills/models/scheduled/memory-compact/channels）
@@ -42,12 +42,12 @@ src/harness-rpc.js            Harness RPC 表面
 src/team/runtime/             Team 内核（纯 Node、门禁保护）。⚠ 按 ADR-0002 将退为适配层
 src/office/runtime/           办公室纯内核（状态机/调度/布局/词表）
 src/office/render/            PixiJS 渲染器（flat 代码化 2.5D / iso 预览）
-src/office/office-module.js   办公室组合根——4726 行，上限 4800（余量 74 行）
+src/office/office-module.js   办公室组合根——4798 行，预算 4850（`test/file-size-budget.test.js` 守着）
 src/work/                     单次 Team 执行面（⚠ 不是 Mission 存储层，见 domain-model §5.2）
 src/mission/                  Mission Core 纯逻辑层（P1，8 模块 + IPC + UI 已完成）
 src/ipc-mission.js             Mission IPC（单通道 mission:invoke + 18 action）
 src/mission-desk.html          Mission Desk 窗口（P1 首个用户可见界面）
-test/                         离线测试（node:test，cwd 必须是仓库根；199 套件 / 2721 项）
+test/                         离线测试（node:test，cwd 必须是仓库根；254 套件 / 3400 项）
 scripts/acceptance/           真机验收探针（需图形会话，不在 CI 跑）
 docs/                         文档，唯一索引 docs/README.md
 archive/ + docs/archive/      本地保险箱（git 忽略）
@@ -69,13 +69,14 @@ archive/ + docs/archive/      本地保险箱（git 忽略）
 ## 5. 命令与坑
 
 ```bash
-npm test                                   # 全量（约 2 分钟，2721 项）
+npm test                                   # 全量（约 2 分钟，3400 项）
 node --test test/docs-index.test.js        # 文档索引（毫秒级，改文档后必跑）
 node --check <file>                        # 语法检查
 ```
 
 - **cwd 坑**：Bash 默认 cwd 可能是仓库父目录。一律用绝对路径或 `zsh -c 'cd <repo> && ...'`。
-- **基线**：`CI=1 npm test` → **2721 passed / 0 failed / 1 skipped**（唯一有效基线）。
+- **基线**：`CI=1 npm test` → **3400 passed / 0 failed / 1 skipped**（唯一有效基线）。
+  这几个数字会被时间淘汰 —— 改动后以**实际输出**为准，本行只用来判断"是不是掉了"。
   唯一 skip 是 E5a-R1 真机探针（需图形会话）——**Skip 不计作 Pass**，
   由 `scripts/ci-gate.js` 四态报告保证，见 `docs/quality/test-tiers-and-baseline.md`。
 - **pure Node 门禁**：`src/team/runtime/**` 与 `src/office/runtime/**` 禁止 Electron/DOM/fs/网络；
