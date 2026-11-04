@@ -2625,7 +2625,7 @@ function registerMissionIpc(ipcMain, ctx) {
      * 关键约束：**只从真实事件派生，不调用模型生成摘要。**
      * 用户要的是"发生了什么"，不是"模型猜测发生了什么"。
      */
-    sinceLastSeen(payload) {
+    async sinceLastSeen(payload) {
       const r = requireStore();
       if (!r.ok) return r;
       const missionId = payload && payload.missionId;
@@ -2639,6 +2639,48 @@ function registerMissionIpc(ipcMain, ctx) {
       }
 
       const entries = [];
+
+      // ---- 团队实际做的事（2026-11-04 补）----
+      //
+      // 第一性原理：这是右栏三大问题之一「我离开后团队发生了什么」的直接答案。
+      //
+      //   早期这里只统计 Mission 自己记录的东西（决策/问题/工作流/交付物）。
+      //   但用户真正想看的是**团队做了什么** —— 而团队的任务在 Harness 那边。
+      //
+      //   实际后果（实测确认）：团队完成了一个任务，
+      //   右栏「离开期间」显示的是**空**。用户会以为团队什么都没干。
+      //
+      //   数据来源：官方 agentTeam 投影。它只给**当前状态**（status），
+      //   不给"何时变成这个状态"的时间戳。所以这里必须诚实：
+      //   只能用 mission.updatedAtMs 作为"可能的时间"是错的（那是伪造）。
+      //
+      //   折中方案：把**当前**任务状态如实列出，并明确告诉用户
+      //   "这是团队现在的样子，具体何时完成我们不知道"。
+      //   宁可说不知道，也不能编一个时间。
+      let teamSnapshot = null;
+      if (typeof projectionsOf === 'function') {
+        try {
+          const bound = readBindMap(r.workspaceDir)[missionId];
+          if (bound && bound.sessionId) {
+            const pr = await projectionsOf(bound.sessionId);
+            if (pr && pr.ok && pr.value && pr.value.values) {
+              const team = normalizeAgentTeam(pr.value.values.agentTeam);
+              const tasks = team && Array.isArray(team.tasks) ? team.tasks : [];
+              const members = team && Array.isArray(team.members) ? team.members : [];
+              if (tasks.length > 0) {
+                teamSnapshot = {
+                  // 只统计"有进展"的状态：pending 的任务不构成"发生了什么"
+                  active: tasks.filter((x) => x.status === 'in_progress'),
+                  done: tasks.filter((x) => x.status === 'completed'),
+                  blocked: tasks.filter((x) => x.ready === false),
+                  total: tasks.length,
+                  memberCount: members.length,
+                };
+              }
+            }
+          }
+        } catch { teamSnapshot = null; }
+      }
       const push = (atMs, kind, text, tone) => {
         if (Number.isFinite(atMs) && atMs > seenAt) entries.push({ atMs, kind, text, tone });
       };
@@ -2676,6 +2718,8 @@ function registerMissionIpc(ipcMain, ctx) {
         entries: shown,
         truncated,
         dropped: truncated ? entries.length - LIMIT : 0,
+        // 团队当前状态（不是"期间变化"——投影没有时间戳，我们不编）
+        teamSnapshot,
       };
     },
 

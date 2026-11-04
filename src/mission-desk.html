@@ -405,6 +405,17 @@
     background: var(--bg-input); color: var(--text-1);
     border: 1px solid var(--border-1); border-radius: 6px;
     padding: 5px 7px; font-size: 12px; font-family: inherit; }
+  /* ---- 团队当前状态（离开期间那块）---- */
+  .tl-team { margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--border-1); }
+  .tl-team-head { font-size: 10.5px; color: var(--text-3); margin-bottom: 4px; }
+  .tl-team-row { display: flex; align-items: baseline; gap: 6px; padding: 1px 0; }
+  .tl-team-icon { flex: none; font-size: 10px; color: var(--text-3); width: 10px; }
+  .tl-team-row[data-tone="ok"] .tl-team-icon { color: var(--att-ok-fg); }
+  .tl-team-row[data-tone="warn"] .tl-team-icon { color: var(--att-warn-fg); }
+  .tl-team-text { flex: 1; font-size: 11px; color: var(--text-2);
+    overflow-wrap: anywhere; }
+  .tl-team-note { font-size: 10px; color: var(--text-3); margin-top: 5px;
+    line-height: 1.5; }
   /* ---- 小操作按钮（打开交付物等）----
      做得小是故意的：它是「顺手看一眼」，不该和主操作抢注意力。 */
   .tiny-btn { font-size: 10.5px; padding: 1px 7px; border-radius: 5px;
@@ -2746,7 +2757,18 @@ function renderSince() {
     if (si.reason === 'never-seen') return null;
     return null;
   }
-  if (!si.entries || si.entries.length === 0) return null;
+  // ⚠️ 不能因为"没有记录变化"就整块不显示（2026-11-04 修正）。
+  //
+  //   早期写的是 `if (!entries.length) return null;` —— 于是：
+  //   团队完成了一个任务，但 Mission 自己没有新增决策/交付物，
+  //   这块就**整块消失**，用户以为团队什么都没干。
+  //
+  //   而"团队做了什么"正是右栏三大问题之一。现在：
+  //   即使没有 Mission 侧的变化，只要有团队状态，就把它说出来。
+  const ts = si.teamSnapshot;
+  const hasMissionEntries = Array.isArray(si.entries) && si.entries.length > 0;
+  const hasTeam = ts && Number.isFinite(ts.total) && ts.total > 0;
+  if (!hasMissionEntries && !hasTeam) return null;
 
   const box = el('div', { class: 'tl' });
   const head = el('div', { class: 'tl-head' }, [
@@ -2759,17 +2781,62 @@ function renderSince() {
   }
   box.append(head);
 
-  const ul = el('ul', { class: 'tl-list' });
-  for (const e of si.entries) {
-    const li = el('li', { 'data-tone': e.tone || 'info' });
-    li.append(el('span', { class: 'tl-tag', text: SINCE_TAG[e.kind] || e.kind }));
-    li.append(document.createTextNode(e.text || ''));
-    ul.append(li);
+  if (hasMissionEntries) {
+    const ul = el('ul', { class: 'tl-list' });
+    for (const e of si.entries) {
+      const li = el('li', { 'data-tone': e.tone || 'info' });
+      li.append(el('span', { class: 'tl-tag', text: SINCE_TAG[e.kind] || e.kind }));
+      li.append(document.createTextNode(e.text || ''));
+      ul.append(li);
+    }
+    box.append(ul);
+    if (si.truncated) {
+      box.append(el('div', { class: 'tl-more', text: `另有 ${si.dropped} 条更早的变化未显示` }));
+    }
   }
-  box.append(ul);
-  if (si.truncated) {
-    box.append(el('div', { class: 'tl-more', text: `另有 ${si.dropped} 条更早的变化未显示` }));
+
+  // ---- 团队当前状态 ----
+  //
+  // 诚实边界：官方 agentTeam 投影只给**当前状态**，不给"何时变成这个状态"。
+  //   所以这里不说"团队完成了 X"，而说"团队现在的样子是 X"。
+  //   宁可说不知道什么时候，也不能编一个时间。
+  if (hasTeam) {
+    const teamBox = el('div', { class: 'tl-team' });
+    teamBox.append(el('div', { class: 'tl-team-head', text: '团队当前状态' }));
+    const line = (icon, text, tone) => {
+      const row = el('div', { class: 'tl-team-row', 'data-tone': tone || 'info' });
+      row.append(el('span', { class: 'tl-team-icon', text: icon }));
+      row.append(el('span', { class: 'tl-team-text', text }));
+      return row;
+    };
+    if (ts.done.length > 0) {
+      teamBox.append(line('✓', `${ts.done.length} 个任务已完成`, 'ok'));
+      // 只列前 3 个标题，多了会变成流水账
+      for (const x of ts.done.slice(0, 3)) {
+        teamBox.append(line('·', x.subject || x.id, 'ok'));
+      }
+      if (ts.done.length > 3) {
+        teamBox.append(line('·', `另有 ${ts.done.length - 3} 个`, 'ok'));
+      }
+    }
+    if (ts.active.length > 0) {
+      teamBox.append(line('▸', `${ts.active.length} 个在进行`, 'info'));
+      for (const x of ts.active.slice(0, 3)) {
+        teamBox.append(line('·', x.subject || x.id, 'info'));
+      }
+    }
+    if (ts.blocked.length > 0) {
+      teamBox.append(line('!', `${ts.blocked.length} 个被阻塞`, 'warn'));
+    }
+    if (ts.done.length === 0 && ts.active.length === 0) {
+      teamBox.append(line('·', `${ts.total} 个任务，都还没开始`, 'info'));
+    }
+    // 时间不可知的说明：这句话必须存在，否则用户会以为"刚才完成的"
+    teamBox.append(el('div', { class: 'tl-team-note',
+      text: '这是团队现在的样子。具体是什么时候变成这样的，Harness 没有给时间戳，我们不猜。' }));
+    box.append(teamBox);
   }
+
   return box;
 }
 
