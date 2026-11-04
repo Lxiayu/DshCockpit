@@ -39,7 +39,7 @@
 | TD-17 | `workStatusPayload()` 无异常保护，索引损坏会导致工作台空白且无错误出口 | 健壮性 | P1 | ✅ 是 |
 | TD-18 | `scanManifest` 在主进程同步递归遍历最多 5000 个文件 | 性能 | P2 | ✅ 是 |
 | TD-19 | `registerIpc()` 单函数 627 行 / 106 个 handler，无声明式注册表 | 结构 | P1 | ✅ 是 |
-| TD-20 | 无 preload↔main 通道一致性测试（preload 暴露的 invoke 可能无 handler） | 测试 | P1 | ✅ 是 |
+| TD-20 | ~~无 preload↔main 通道一致性测试~~ | 测试 | — | ✅ **已修 2026-11-04**（`test/preload-channel-parity.test.js`，137 通道全对上） |
 | TD-21 | `workbench:*` 有 `CHANNELS` 常量但无测试，且常量与实际注册不同步 | IPC | P2 | ⬜ 否 |
 | TD-22 | 变异测试纪律真实但无工具，无法回归 | 测试 | P1 | ⬜ 否 |
 | TD-23 | `tdz-guard` 只覆盖 `createXxx({...})` 工厂块，不覆盖 `registerIpc()` 内部 | 测试 | P2 | ⬜ 否 |
@@ -712,19 +712,27 @@ walk(rootPath);
 
 ---
 
-### TD-20 · 无 preload↔main 通道一致性测试
+### TD-20 · 无 preload↔main 通道一致性测试 —— **已修（2026-11-04）**
 
-**位置**：测试体系缺失
+**为什么这条重要**：preload 把 `invoke('xxx')` 通过 contextBridge 暴露给渲染进程。
+若主进程没注册对应 `ipcMain.handle('xxx')`：
+- 加载时不报错（preload 只是闭包，不校验目标）
+- UI 不提示（Promise reject 成 "No handler registered"）
+- 表现就是**按钮点了没反应**，而控制台之外没有线索
 
-**证据**：`grep -rn "preload" test/*.test.js | grep -c "invoke.*handle"` → 0。存在 11 个 preload（`preload/cockpit/settings/quickask/search/loading/office-rail/office/work/workbench` + office 的 office-preload），暴露约 **170 个 invoke/send 调用点**（实测：settings-preload 单文件 95 个）。**没有任何测试断言"preload 暴露的每个通道在 main 侧有 handler"**。
+**门禁**：`test/preload-channel-parity.test.js`（4 条）
+- 每个 preload 暴露的通道都有主进程 handler（**137 个，全部对上**）
+- 域前缀必须被主进程服务过
+- 扫描自检（防止解析方式变化导致假绿）
 
-**影响**：改名/删除 handler 后，preload 仍会暴露一个永远 reject 的 API。UI 表现为"点了没反应"，测试全绿。这是最容易发生的静默回归类型。
+**过程中差点得出错误结论**：第一版只扫 `src/`，于是 76 个 `studio:*` 通道
+全部"没有 handler"，看着像整个 workbench 都废了。
+实际上 `studio/` 是**独立子项目**（有自己的 AGENTS.md / bin / 测试），
+那些 handler 在 `studio/main.js` 里。
+教训与 TD-38 后记同一条：**扫描范围本身就是断言的一部分**，
+范围错了会得到"很吓人但完全错误"的结论。
 
-**建议**：加一个纯静态测试：解析所有 preload 的 `invoke('x')` 集合 + 解析所有 `ipcMain.handle('x')` 集合，断言前者 ⊆ 后者。
-
-**优先级**：P1 · **阻塞新方向 = 是**（Mission 的 IPC 面要继续扩张）
-
----
+变异 DETECTED：把某个 preload 通道改成不存在的名字 -> 红，且报出通道名。
 
 ### TD-21 · `workbench:*` 有常量无测试且已漂移
 
