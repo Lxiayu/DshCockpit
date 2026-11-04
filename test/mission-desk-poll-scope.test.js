@@ -16,6 +16,7 @@
 'use strict';
 
 const { test } = require('node:test');
+const { stripComments } = require('./helpers/source-scan.js');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -25,8 +26,9 @@ const HTML = fs.readFileSync(path.join(__dirname, '..', 'src', 'mission-desk.htm
 function pollCode() {
   const i = HTML.indexOf('async function pollProgressOnce()');
   const j = HTML.indexOf('// 页面重新可见时');
-  return HTML.slice(i, j === -1 ? i + 12000 : j)
-    .split('\n').filter((ln) => !ln.trim().startsWith('//')).join('\n');
+  // 用共享实现：它同时剔行注释、**行尾注释、块注释**，并跳过字符串里的 //。
+  // 各文件自己写的版本只剔整行 //，块注释里提到的名字会被当成代码（第 50 轮实测）。
+  return stripComments(HTML.slice(i, j === -1 ? i + 12000 : j));
 }
 
 const SHOULD_REFRESH = ['workStatus', 'attention', 'sessionProjections', 'sinceLastSeen'];

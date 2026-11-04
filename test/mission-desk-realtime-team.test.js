@@ -15,6 +15,7 @@
 'use strict';
 
 const { test } = require('node:test');
+const { stripComments } = require('./helpers/source-scan.js');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -28,7 +29,7 @@ function pollBody() {
 
 test('realtime team: the poll refreshes sessionProjections (not only workStatus)', () => {
   const body = pollBody();
-  const code = body.split('\n').filter((ln) => !ln.trim().startsWith('//')).join('\n');
+  const code = stripComments(body);
   assert.match(code, /await api\('sessionProjections'\)/,
     'the poll must refresh the team projection — otherwise the rail shows a stale roster');
 });
@@ -77,7 +78,7 @@ test('realtime team: the signature covers what the user can actually see', () =>
 
 test('realtime team: a failing projection fetch does not break the poll', () => {
   const body = pollBody();
-  const code = body.split('\n').filter((ln) => !ln.trim().startsWith('//')).join('\n');
+  const code = stripComments(body);
   const idx = code.indexOf("await api('sessionProjections')");
   assert.ok(idx !== -1);
   const around = code.slice(idx, idx + 900);
@@ -88,7 +89,7 @@ test('realtime team: a failing projection fetch does not break the poll', () => 
 test('realtime team: the whole rail is NOT rebuilt by the poll', () => {
   // 整页重建会抢焦点、丢滚动位置（第 33-35 轮的教训）。
   const body = pollBody();
-  const code = body.split('\n').filter((ln) => !ln.trim().startsWith('//')).join('\n');
+  const code = stripComments(body);
   assert.doesNotMatch(code, /loadDetail\(/,
     'the poll must not reload the whole detail');
 });

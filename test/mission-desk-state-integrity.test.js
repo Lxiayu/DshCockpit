@@ -17,6 +17,7 @@
 'use strict';
 
 const { test } = require('node:test');
+const { stripComments } = require('./helpers/source-scan.js');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -27,7 +28,8 @@ const RAW = fs.readFileSync(path.join(__dirname, '..', 'src', 'mission-desk.html
 //   本次清理的那段注释里**正好写着** `state.linkSessionId`（解释它为何是幽灵字段），
 //   不剥的话会把那段说明当成"还在用" —— 我第一版就是这样误报的。
 //   （这已经是本项目第四次因为"注释里提到某个词"导致断言误判。）
-const HTML = RAW.split('\n').filter((ln) => !ln.trim().startsWith('//')).join('\n');
+// 用共享实现（行注释 / 行尾注释 / 块注释 全剔）
+const HTML = stripComments(RAW);
 
 /**
  * 允许存在"只读不写"的字段 —— 必须写理由。

@@ -19,6 +19,7 @@
 'use strict';
 
 const { test } = require('node:test');
+const { stripComments } = require('./helpers/source-scan.js');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -29,7 +30,8 @@ const MAIN = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
 
 /** 去掉整行注释（注释会大量提到依赖名，不剥会误判"已注入"）。 */
 function stripLineComments(s) {
-  return s.split('\n').filter((ln) => !ln.trim().startsWith('//')).join('\n');
+  // 委托给共享实现（行注释 / 行尾注释 / 块注释 全剔）
+  return stripComments(s);
 }
 
 /** diagnostics-bundle 里访问的所有依赖名（`d.xxx` 形式）。 */

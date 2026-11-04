@@ -20,6 +20,7 @@
 'use strict';
 
 const { test } = require('node:test');
+const { stripComments } = require('./helpers/source-scan.js');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -34,7 +35,7 @@ test('backoff: idling does NOT stop the poll (it only slows down)', () => {
   const poll = HTML.slice(HTML.indexOf('async function pollProgressOnce()'));
   const body = poll.slice(0, 6000);
   // 剥掉注释：注释里会提到 stopProgressPoll，干扰判断
-  const code = body.split('\n').filter((ln) => !ln.trim().startsWith('//')).join('\n');
+  const code = stripComments(body);
 
   // 退避分支里**不允许**出现 stopProgressPoll() —— 只能降频
   const backoffIdx = code.indexOf('IDLE_BACKOFF_TICKS &&');
@@ -73,7 +74,7 @@ test('backoff: no path in the poll can stop it when a session is bound', () => {
   // 任何基于"空闲"的 stop 都会让审批失明。
   const poll = HTML.slice(HTML.indexOf('async function pollProgressOnce()'));
   const body = poll.slice(0, 6000);
-  const code = body.split('\n').filter((ln) => !ln.trim().startsWith('//')).join('\n');
+  const code = stripComments(body);
   const stops = [...code.matchAll(/stopProgressPoll\(\)/g)];
   // 允许的 stop：!id、!bound && !bound.bound 这两处（在函数开头）
   assert.ok(stops.length <= 2,
