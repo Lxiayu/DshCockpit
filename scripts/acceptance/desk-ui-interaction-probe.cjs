@@ -226,7 +226,7 @@ function check(name, cond, detail) {
   // ⚠️ 必须用**唯一**的锚点：`state.missions.length === 0` 在 renderDockPicker 里也出现一次，
   //    用 indexOf 会命中错的那处（那处的后续 900 字符里根本没有空态文案）。
   //    这里用空态分支独有的 'empty-lead' + '还没有 Mission' 组合定位。
-  const idx = src.indexOf("text: '还没有 Mission'");
+  const idx = src.indexOf("text: '还没有选中任何 Mission'");
   const block = idx === -1 ? '' : src.slice(Math.max(0, idx - 300), idx + 700);
   // 关键：只检查 **dock 分支**（三元表达式 ? 之后、: 之前那段）。
   //   双栏模式下"左侧列表"是**正确**的说法，不该被判为问题。
