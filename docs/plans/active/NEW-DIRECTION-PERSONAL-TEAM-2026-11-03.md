@@ -718,6 +718,16 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
   - 测试 7 条，变异 DETECTED ×2（原文被丢弃 / 正文泄露进审计）。
 - ✅ **暂停 / 恢复 / 终止 Mission（2026-11-04 已完成，见上）**：
   `updateStatus` 现在真的会 cancel 正在执行的会话。
+- ✅ **`main.js` 运行时对接层真机验证（2026-11-04，8/8 通过）**：
+  `scripts/acceptance/mission-real-runtime-probe.cjs`。
+  三个直接对接真实运行时的函数此前**只被 mock 测过** ——
+  而 mock 只能证明"我按我以为的协议写了一版"。
+  真机确认三条关键假设：
+  - `workspace/changes` 的 seq 确实在**事件信封**上（payload 只有 `{turn}`）
+  - `/api/changes.summary` 返回**相对路径**（我们的 sanitizer 假设它相对）
+  - `session/cancel` 被真实运行时接受（第 8 轮"暂停刹车"的基础）
+  证据见 `docs/quality/harness-agent-team-probe-2026-11-04.md` §9.9。
+  限制：只验证 cancel **被接受**，未验证"模型真的停了"（模型行为不可控）。
 - ✅ **停止成员的效果观测（2026-11-04 完成）**：`intervention-observation.js`
   + `observeIntervention` action + 中断后 5 秒自动观测。
   - **协议事实**：`TeamMemberPhase` 只有 `provisioning|active|failed`（读 `.d.ts` 确认），

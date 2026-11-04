@@ -523,3 +523,50 @@ counts: {"pass":9}
 **对 S7 的影响**：右栏提问卡片不需要标注"来自哪个成员"来区分能力——
 所有提问都来自 Lead；如果将来要显示"这是谁的疑问"，那信息应由 Lead 在提问文本里带出，
 而不是靠协议层的 agent 归属。
+
+### 9.9 第七轮：main.js 运行时对接层真机验证（8/8 通过）
+
+**为什么需要这一轮**：`main.js` 里有三个函数直接对接真实运行时，
+它们此前**只被 mock 测过**。而 mock 只能证明"我按我以为的协议写了一版"，
+不能证明"真实运行时是这个协议"。本项目已有先例（声明比视图宽）。
+
+**方法**（`scripts/acceptance/mission-real-runtime-probe.cjs`）：
+
+| 被测函数 | 底层协议 | 验证什么 |
+|---|---|---|
+| `missionCancelSession` | `session/cancel` | 暂停是不是真的刹车 |
+| `seqForMissionSession` | `workspace/changes` 事件 | seq 真的在事件信封上吗 |
+| `readWorkspaceChanges` | `GET /api/changes.summary` | 凭证能不能读到文件清单 |
+
+**实测结果**：
+
+```
+PASS  runtime boots + mux ready
+PASS  session created — session-2d666f…
+PASS  session/cancel accepted by real runtime
+PASS  workspace/changes event observed — {"seq":29,"turn":1}
+PASS  GET /api/changes.summary returns 200 — status=200
+PASS  changes.summary has files[]/total — total=1 files=1
+PASS  the probe file appears in the change list
+      — [{"path":"probe-1505c6.txt","display":"probe-1505c6.txt","added":1,"deleted":0}]
+PASS  paths are RELATIVE (our sanitizer assumes this) — relative ok
+=== 8/8 passed ===
+```
+
+**三条被真机确认的关键假设**：
+
+1. **`workspace/changes` 事件的 seq 确实在事件信封上**（`seq: 29`），
+   payload 只有 `{turn: 1}`。这与读 `.d.ts` 的判断一致 —— 我们的
+   `turn-seq-tracker` 记 `event.seq` 是对的。
+2. **`/api/changes.summary` 返回的路径是相对路径**（`probe-1505c6.txt`，
+   不是绝对路径）。我们的 `sanitizeChangesSummary` 假设它相对；
+   若官方某天改成绝对路径，那条 sanitizer 会拦下来（并有测试锁住），
+   而本探针会在更早的地方先红。
+3. **`session/cancel` 被真实运行时接受**。这是"暂停真的刹车"的基础 ——
+   第 8 轮修的缺陷（状态改了但团队还在跑）依赖这个协议存在。
+
+**限制（如实标注）**：
+- `session/cancel` 只验证了**被接受**，没有验证"模型真的停了"。
+  后者需要观察 turn 是否终止，而模型行为不可控（它可能刚好已经答完）。
+- 未验证多会话并发下的 seq 正确性（我们的 tracker 是进程级、不分区，
+  见 `seqForMissionSession` 的注释）。
