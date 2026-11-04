@@ -37,7 +37,12 @@ const ROOT = path.join(__dirname, '..');
  */
 const BUDGET = {
   'src/main.js': 7100,              // 实测 7018；是已知债 TD-01，目标是拆分
-  'src/office/office-module.js': 4850, // 实测 4798；文档原写"上限 4800"，已逼近
+  // ⚠️ 这里必须与 test/office-runtime-boundary.test.js 的 4800 硬上限**完全一致**。
+  //   第 47 轮我在这里写了 4850，而那边一直是 4800 —— 同一个文件两套约束，
+  //   宽松的那条会让严格的那条被绕过（改到 4820 时这边绿、那边红，
+  //   下一个人只会去改那边）。门禁之间互相矛盾比没有门禁更糟：
+  //   它让人以为"已经被守着"，同时把真正的约束变成了可以商量的东西。
+  'src/office/office-module.js': 4800, // 与 office-runtime-boundary 的硬上限一致；现状正好 4800、零余量
   'src/mission-desk.html': 4450,    // 实测 4381；近几轮每轮 +40 左右，需盯住
   'src/ipc-mission.js': 2950,       // 实测 2871
 };
@@ -77,6 +82,27 @@ test('size budget: the budget does not drift stale (it must stay close to realit
   }
   assert.deepEqual(slack, [],
     `the budget has too much slack — tighten it so it actually guards something:\n  ${slack.join('\n  ')}`);
+});
+
+test('size budget: no two gates disagree about the same ceiling', () => {
+  // 第一性原理：互相矛盾的门禁比没有门禁更糟
+  //
+  //   第 47 轮我在这个文件里给 office-module 写了 4850，
+  //   而 office-runtime-boundary.test.js 一直是 4800 硬上限。
+  //   同一个文件两套约束 —— 宽松的那条会让严格的那条被绕过：
+  //   改到 4820 时这边绿、那边红，下一个人只会去改那边。
+  //
+  //   更糟的是它制造了一种错觉："这件事已经被守着了"，
+  //   同时把真正的约束变成了可以商量的东西。
+  //
+  //   这条断言强制：本文件的预算必须与那个硬上限逐字相同。
+  const boundary = fs.readFileSync(path.join(ROOT, 'test', 'office-runtime-boundary.test.js'), 'utf8');
+  const m = boundary.match(/office-module\.js is \$\{lines\} lines \(ceiling (\d+)\)/);
+  assert.ok(m, 'the boundary gate must state its ceiling in a machine-readable way');
+  const hardCeiling = Number(m[1]);
+  assert.equal(BUDGET['src/office/office-module.js'], hardCeiling,
+    `this file budgets ${BUDGET['src/office/office-module.js']} lines but `
+    + `office-runtime-boundary.test.js enforces ${hardCeiling} — the looser one silently wins`);
 });
 
 test('size budget: the biggest file is acknowledged as known debt', () => {

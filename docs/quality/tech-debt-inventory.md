@@ -2,7 +2,7 @@
 
 > 状态：**审计报告（2026-11-01）** · 审计范围：除 `src/office`、`src/workbench`、`src/runtime-*` 协议细节、`src/team/**` 之外的壳层
 > 配套文档：`docs/architecture/architecture-overview.md`（现状）、`docs/quality/testing-strategy.md`（测试体系）
-> 本清单共 **33 条**（2026-11-01 追加 TD-33：兼容账本陈旧）。每条含：编号 / 位置 / 证据 / 影响 / 建议优先级（P0-P3）/ 是否阻塞新方向
+> 本清单共 **34 条**（2026-11-04 追加 TD-34：office-module 零余量）。每条含：编号 / 位置 / 证据 / 影响 / 建议优先级（P0-P3）/ 是否阻塞新方向
 > 「阻塞新方向」= 是否阻塞 `docs/product/product-vision.md` 的 Mission Core / Capability Platform 落地
 
 ## 优先级定义
@@ -52,6 +52,7 @@
 | TD-30 | `before-quit` 同步执行备份，无超时保护，退出可能变慢 | 健壮性 | P2 | ⬜ 否 |
 | TD-31 | `settings.html` 5895 行（4409 行内联 `<script>`），17 个页面挤一个文件 | 结构 | P2 | ⬜ 否 |
 | TD-32 | ~~IM 通道 `allowFrom: ['*']` 全开放~~ + ~~`pbbp2` 无恶意输入测试~~ | 安全 | — | ✅ **已修 2026-11-01** |
+| TD-34 | `office-module.js` 正好 4800 行、**零余量**（4800 是硬上限）——下次任何改动都必须先拆分 | 结构 | P1 | ✅ 是 |
 | **TD-33** | **兼容账本陈旧三个月**：CI 每日双平台验证 `0.2.1-rc.5` 全绿，但 `docs/compat/compat-status.json` 停在 `0.1.5-rc.2`（2026-09-16），PR #7 自 2026-09-17 OPEN；`compat-status.js:78-81` 的 `current===latestVerified` 恰好因「锁定版本=陈旧账本」而显示「已是最新」 | 信息链 | **P0** | ✅ 是 |
 
 ---
@@ -68,6 +69,36 @@
 **Phase 0 立刻抓到一个真实 bug**：`src/ipc-features.js` 的 `weekly:open-dir` 用了 `path.join`，但该文件**从未 require('node:path')** —— 一旦调用必然 ReferenceError。因为 main.js 顶层没有测试，handler 注册成功、调用才炸，所以这个缺陷一直存在。已修复并加回归测试。
 
 这正是「先给已抽出模块建测试」的价值：不是搬代码，而是先让「搬了有没有错」可被机械判定。
+
+### TD-34 · `office-module.js` 零余量：下次改动必须先拆分
+
+**现状（2026-11-04）**：`src/office/office-module.js` 正好 **4800 行**，
+而 `test/office-runtime-boundary.test.js` 的硬上限也是 4800（`<= 4800`）。
+**余量为 0**：加一行就红。
+
+**这是上限在按设计生效，不是意外**。那条门禁的原话是"阻止它继续按
+『每轮 +100 行』的速度膨胀；超限 = 需要拆分而不是继续堆"。
+第 55 轮我给 `artifacts` 加白名单时，就是为了塞进去而压掉了几行注释 ——
+那已经是"贴着墙走"的信号。
+
+**为什么不现在就拆**：唯一自然的切点是"snapshot assembly（白名单 + 脱敏）"
+（约 3123–3523 行，401 行），但它依赖闭包里的 `employees` / `registry` /
+`redactor` / `adapter` / `clock` / `log` 六个对象，拆出去需要把它们改成显式传参。
+那是**高风险纯重构**，且正好触到本项目的隐私闸门 —— 在没有真机验证的情况下
+深夜独自做，风险大于收益。
+
+**建议的拆分路径**（给下一个人）：
+1. 先把 `snapshot assembly` 抽成 `src/office/snapshot-assembly.js`，
+   入参 `{ employees, registry, redactor, adapter, clock, log }`，
+   导出 `{ PRESENTATION_ALLOWLIST, PENDING_ALLOWLIST, redactSnapshot }`
+2. 它已经有 `test/office-presentation-allowlist.test.js`（6 条）+
+   `office-privacy*.test.js` 覆盖，可作为等价性对照
+3. 拆完把 4800 上限**下调**到实测值 + 少量余量（棘轮原则：
+   上限跟不上实际值就成了愿望）
+
+**同时注意**：`test/file-size-budget.test.js` 的预算表里这项必须与
+4800 硬上限**逐字相同** —— 第 47 轮曾写成 4850，两个门禁互相矛盾，
+宽松的那个会让严格的被绕过（已加断言防复发）。
 
 ### TD-01 · `main.js` 已经不可测试地过载
 
