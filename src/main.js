@@ -5755,6 +5755,17 @@ async function readWorkspaceChanges(sessionId, seq) {
 // ---------------------------------------------------------------------------
 const presentedCollector = presentedCollectorModule.createPresentedCollector();
 
+// turn → seq 映射（S5 凭证的最后一环）。
+//
+// 为什么需要它：官方 workspace/changes 事件的 payload 只有 {turn}，
+// 文件清单按**事件的 seq** 索引，而 seq 在事件信封上（不在 payload 里）。
+// 不记这个映射，workStatus 就永远只能说 claimed —— 用户等不到"可复核"。
+//
+// ⚠️ 声明必须在 seqForMissionSession 之前：那个函数体引用了本常量。
+//    函数声明会提升，const 不会 —— 虽然实际调用发生在事件回调里（那时已初始化），
+//    但"靠时序巧合能跑"和"顺序正确"是两件事，前者会在重构时炸掉。
+const turnSeqTracker = turnSeqTrackerModule.createTurnSeqTracker();
+
 /**
  * 取某个会话某个 turn 的 workspace/changes seq。
  *
@@ -5769,13 +5780,6 @@ function seqForMissionSession(sessionId, turn) {
   if (Number.isFinite(turn)) return turnSeqTracker.seqForTurn(turn);
   return t.seq;
 }
-
-// turn → seq 映射（S5 凭证的最后一环）。
-//
-// 为什么需要它：官方 workspace/changes 事件的 payload 只有 {turn}，
-// 文件清单按**事件的 seq** 索引，而 seq 在事件信封上（不在 payload 里）。
-// 不记这个映射，workStatus 就永远只能说 claimed —— 用户等不到"可复核"。
-const turnSeqTracker = turnSeqTrackerModule.createTurnSeqTracker();
 
 /** 当前工作区绝对路径（与 mission IPC 用的是同一来源）。 */
 function missionWorkspaceDir() {

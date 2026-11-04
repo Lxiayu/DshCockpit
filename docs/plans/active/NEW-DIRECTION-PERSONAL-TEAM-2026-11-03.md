@@ -451,6 +451,20 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
   合起来静默失效"——presented-collector 产出 `{relPath}` 而 deliverable-signal
   消费 `{rawPath}`；projection 对数组判断 `.ok`；指令只读了一个约束来源。
   三者单测都是绿的，发现它们靠的都是真的跑一遍链路看输出。
+- ✅ **组合根注入完整性门禁（2026-11-04）**：`test/mission-composition-root.test.js`。
+  **为什么需要它**：`main.js` 依赖 Electron、无法单测，而它是最容易**静默失效**的地方 ——
+  `registerMissionIpc` 的六个可选注入都是 `= null` 默认值，忘了注入**不会报错**，
+  功能只是安静地降级成 "not wired"。
+  实际踩过的两个例子：`cancelSession` 没注入 → 点暂停界面显示 paused、团队还在跑；
+  `seqOfTurn` 没注入 → 凭证永远停在 claimed。两者当时都表现成"功能没做完"，
+  根因只是少了一行。
+  门禁做源级断言：每个注入点都必须在 `main.js` 里真的接上；另钉住
+  `deliverables/presented` 必须在 office ingest **之前**分叉（隐私）。
+  变异 DETECTED ×2（分别去掉 cancelSession / seqOfTurn）。
+- ✅ **`main.js` 声明顺序修正（2026-11-04）**：
+  `seqForMissionSession` 原本定义在 `const turnSeqTracker` **之前**。
+  函数声明会提升、const 不会 —— 虽然实际调用发生在事件回调里（那时已初始化），
+  但"靠时序巧合能跑"和"顺序正确"是两件事，前者会在重构时炸掉。已调序。
 - ✅ **Grant 目录的隐私边界已明确并测试（2026-11-04）**：
   Grant 是**唯一**合法携带绝对路径的实体（用户必须看见授权了哪个目录，
   否则不知道该撤销哪一条）。但路径**绝不进** Mission 事实链、派发指令、审计。
