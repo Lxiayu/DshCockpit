@@ -4049,38 +4049,60 @@ $('newForm').addEventListener('submit', async (e) => {
 // 只刷「交给团队」那一块的数字，**不整页重绘**——
 // 整页重绘会让用户正在输入的文本框失焦。
 
+// 轮询间隔：活跃期 4 秒；安静 60 秒后降到 15 秒。
+//
+// ⚠️ 注意是**降频**不是停止。原因见 pollProgressOnce 里退避那段的长注释：
+//   "团队安静"恰恰是最可能突然发来审批的时刻。
 const PROGRESS_POLL_MS = 4000;
+const IDLE_INTERVAL_MS = 15000;
+const IDLE_BACKOFF_TICKS = 15;   // 15 次 × 4 秒 ≈ 60 秒
+
 let progressTimer = null;
 let progressIdleTicks = 0;
-// 防止 setInterval + async 重入（见 startProgressPoll 里的说明）
+let progressIntervalMs = PROGRESS_POLL_MS;
+// 本轮里 attention 是否变化过（变了就不算 idle）
+let attentionChangedThisTick = false;
+// 防止 setInterval + async 重入（见 tickProgressPoll 里的说明）
 let progressBusy = false;
 
 function stopProgressPoll() {
   if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
   progressIdleTicks = 0;
+  progressIntervalMs = PROGRESS_POLL_MS;
+}
+
+/** 用当前间隔重建定时器（降频/升频时用）。没在跑就不擅自启动。 */
+function restartProgressPoll() {
+  if (!progressTimer) return;
+  clearInterval(progressTimer);
+  progressTimer = setInterval(tickProgressPoll, progressIntervalMs);
+}
+
+/**
+ * 定时器回调。
+ *
+ * ⚠️ 防重入（2026-11-02 复查发现）：
+ *   setInterval + async 有天然缺陷 —— **如果一次请求比间隔慢，
+ *   下一次会照常启动**，于是多个请求并发堆积。
+ *   实测在 120ms 的慢请求 + 50ms 间隔下最大并发能到 3。
+ *   在真机上这意味着 IPC 排队、内存峰值，以及"看到先后乱序的结果"
+ *   （后发的请求先回来 → 进度回退）。
+ *
+ *   加一个 in-flight 标记：上一次没回来就跳过这一跳。
+ */
+async function tickProgressPoll() {
+  if (progressBusy) return;
+  progressBusy = true;
+  try {
+    await pollProgressOnce();
+  } finally {
+    progressBusy = false;
+  }
 }
 
 function startProgressPoll() {
   stopProgressPoll();
-  progressTimer = setInterval(async () => {
-    // ⚠️ 防重入（2026-11-02 复查发现）。
-    //
-    //   setInterval + async 有天然缺陷：**如果一次请求比间隔慢，
-    //   下一次会照常启动**，于是多个请求并发堆积。
-    //   实测在 120ms 的慢请求 + 50ms 间隔下最大并发能到 3。
-    //
-    //   在真机上这意味着 IPC 排队、内存峰值、以及"看到先后乱序的结果"
-    //   （后发的请求先回来 → 进度回退）。
-    //
-    //   加一个 in-flight 标记：上一次没回来就跳过这一跳。
-    if (progressBusy) return;
-    progressBusy = true;
-    try {
-      await pollProgressOnce();
-    } finally {
-      progressBusy = false;
-    }
-  }, PROGRESS_POLL_MS);
+  progressTimer = setInterval(tickProgressPoll, progressIntervalMs);
 }
 
 /** 单次轮询。抽出来是为了让 startProgressPoll 里的防重入逻辑保持简单。 */
@@ -4165,6 +4187,12 @@ async function pollProgressOnce() {
         const afterSig = attentionSignature(fresh);
         if (before !== afterSig) {
           state.attention = fresh;
+          // 待办变化也算"有变化" —— 否则会出现这种情况：
+          //   团队安静了 60 秒（进度没动）→ 轮询停止 →
+          //   然后团队发来一个审批 → **永远不会自动显示**。
+          // 这正是本轮修掉的那个缺陷的第二半。
+          progressIdleTicks = 0;
+          attentionChangedThisTick = true;
           const oldAtt = document.querySelector('.att');
           if (oldAtt) oldAtt.replaceWith(renderAttention());
         }
@@ -4179,11 +4207,31 @@ async function pollProgressOnce() {
         const fresh = renderStartWork(state.detail.mission);
         oldBox.replaceWith(fresh);
       }
-    } else {
+    } else if (!attentionChangedThisTick) {
       progressIdleTicks += 1;
-      // 连续 15 次（≈60 秒）没变化 → 退避到停止，
-      // 等用户下次交互再重启。避免长时间空转。
-      if (progressIdleTicks >= 15) stopProgressPoll();
+    }
+
+    // 退避策略（2026-11-04 改）。
+    //
+    // 第一性原理：为什么**不能**完全停止轮询
+    //
+    //   原来的逻辑是"连续 60 秒没变化就 stop"，为了省电/省资源。
+    //   那是纯进度轮询时代的合理设计。
+    //
+    //   但现在这个循环还承担着「我要拍板什么」的实时刷新 ——
+    //   而**团队安静的时刻，恰恰是最可能突然发来审批的时刻**。
+    //   如果此时停止轮询，审批会卡在后台无人知，界面上却写着
+    //   "团队运行正常"。这比不刷新更糟：用户以为一切正常。
+    //
+    //   所以改成**降频而不是停止**：
+    //     活跃期 4 秒一次；安静 60 秒后降到 15 秒一次。
+    //   代价是安静时每分钟 4 次轻量 IPC —— 相比"漏掉一个审批"
+    //   让团队卡住，这个代价完全值得。
+    const IDLE_BACKOFF_TICKS = 15;   // ≈60 秒
+    const IDLE_INTERVAL_MS = 15000;  // 降频到 15 秒
+    if (progressIdleTicks >= IDLE_BACKOFF_TICKS && progressIntervalMs !== IDLE_INTERVAL_MS) {
+      progressIntervalMs = IDLE_INTERVAL_MS;
+      restartProgressPoll();
     }
   }
 }
