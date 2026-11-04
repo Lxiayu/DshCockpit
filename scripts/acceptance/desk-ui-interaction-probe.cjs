@@ -264,6 +264,36 @@ function check(name, cond, detail) {
   const gf = grantFormBlock === -1 ? '' : src2.slice(grantFormBlock, grantFormBlock + 1500);
   check('17. the inline grant form calls createGrant', gf.includes("api('createGrant'"), '');
 
+  // 18) 保存任务书后，派发面板不能自己消失
+  //
+  // 这是本轮抓到的真实缺陷：保存成功后调了 refresh()，整页重建 →
+  //   ① 面板被折叠回初始状态（用户刚填的内容从视野消失）
+  //   ② "任务书已保存"提示被冲掉
+  //   ③ 「交给团队」按钮随之消失 —— 用户卡在"保存成功但没法继续"
+  //
+  // 这与 renderStartWork 里注释过的"先显示提示再刷新"是同一个坑，在新代码里复发了。
+  const fs3 = require('node:fs');
+  const src3 = fs3.readFileSync(path.join(REPO, 'src', 'mission-desk.html'), 'utf8');
+  const saveIdx = src3.indexOf("msg.textContent = '任务书已保存");
+  const saveBlock = saveIdx === -1 ? '' : src3.slice(saveIdx, saveIdx + 900);
+  // 先剥掉注释再判断 —— 注释里恰好写着 "不能 await refresh()"，
+  // 直接正则会把它也算成违规（测试自己的误判）。
+  const saveCode = saveBlock.split('\n').filter((ln) => !ln.trim().startsWith('//')).join('\n');
+  const callsRefresh = /await\s+refresh\(\)/.test(saveCode);
+  check('18. saving the task book does NOT wipe the panel (no refresh right after)', !callsRefresh,
+    callsRefresh ? 'a refresh() here would fold the panel and hide the button' : '');
+
+  // 19) 派发结果必须留在界面上（不能只靠一次 alert）
+  const hasPersistBar = src3.includes("id: 'last-dispatch'") || src3.includes("id: 'last-dispatch',");
+  const usesAlertAsOnlyFeedback = /else\s*\{[\s\S]{0,80}alert\(dispatchLine\)/.test(src3);
+  check('19. dispatch result persists in the UI', hasPersistBar && !usesAlertAsOnlyFeedback,
+    JSON.stringify({ hasPersistBar, usesAlertAsOnlyFeedback }));
+
+  // 20) 任务书形态下 input 可能为 null，必须防护
+  const hasNullGuard = /if \(input\) input\.value = ''/.test(src3);
+  check('20. null input is guarded (task-book mode has no chat box)', hasNullGuard,
+    hasNullGuard ? '' : 'input.value = \'\' without a guard throws in task-book mode');
+
   const failed = results.filter((r) => !r.ok);
   console.log(`\n=== ${results.length - failed.length}/${results.length} passed ===`);
   if (failed.length) { console.log('FAILED:'); for (const f of failed) console.log('  - ' + f.name + (f.detail ? ': ' + f.detail : '')); }

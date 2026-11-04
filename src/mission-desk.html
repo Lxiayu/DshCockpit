@@ -340,6 +340,17 @@
   .rec-sub { font-size: 10.5px; color: var(--text-3); margin-top: 6px; }
   .rec-warn { font-size: 10.5px; color: var(--att-warn-fg); margin-top: 8px;
     line-height: 1.5; }
+  /* ---- 派发结果持久条 ----
+     派发是最重要的动作，结果必须留得住（alert 关掉就没了）。
+     用中性色而不是绿色：绿色会被读成"成功了"，而 unconfirmed 不是成功。 */
+  .last-dispatch { display: flex; align-items: baseline; gap: 8px;
+    margin: 8px 0; padding: 7px 10px; border-radius: 8px;
+    background: var(--bg-input); border: 1px solid var(--border-1); }
+  .last-dispatch-text { flex: 1; font-size: 11.5px; color: var(--text-2);
+    line-height: 1.5; overflow-wrap: anywhere; }
+  .last-dispatch-when { flex: none; font-size: 10px; color: var(--text-3); }
+  .last-dispatch-err { border-color: var(--att-warn-fg); background: var(--att-warn-bg); }
+  .last-dispatch-err .last-dispatch-text { color: var(--att-warn-fg); }
   /* ---- 派发面板（D3 结构化任务书）----
      与 .mhead 同样的坑：站内通用规则会让容器变成 flex，
      显式写 block 才能让标签在输入框上方而不是压在一起。 */
@@ -1972,10 +1983,48 @@ function renderDispatchPanel(m) {
     void goal;
     msg.textContent = '任务书已保存。可以交给团队了。';
     msg.classList.add('ok');
-    if (typeof refresh === 'function') await refresh();
+
+    // ⚠️ 这里**不能** await refresh()。
+    //
+    //   refresh() 会重建整个详情区 DOM，于是：
+    //     ① 派发面板被折叠回初始状态（用户刚填的内容从视野里消失）
+    //     ② 刚写进去的"任务书已保存"提示被冲掉
+    //     ③ 「交给团队」按钮随之消失 —— 用户被卡在"保存成功但没法继续"
+    //
+    //   这是本项目踩过的同一个坑（见 renderStartWork 里"先显示提示再刷新"
+    //   的注释）：改完要**局部更新**，不能整页重建。
+    //
+    //   保存后唯一需要更新的外部状态是"合同已存在"，而那不影响本面板的可用性；
+    //   用户点「交给团队」时会自然走完整流程并刷新。
+    void refresh;
   });
 
   return box;
+}
+
+/**
+ * 派发结果的持久提示条。
+ *
+ * 为什么不用 alert：alert 关掉就没了。派发是产品最重要的动作，
+ * 用户需要能随时回头确认"我确实交出去过"。
+ *
+ * @param {string} missionId
+ */
+function renderLastDispatch(missionId) {
+  const host = document.getElementById('detail');
+  if (!host) return;
+  const prev = document.getElementById('last-dispatch');
+  if (prev) prev.remove();
+  const d = state.lastDispatch;
+  if (!d || d.missionId !== missionId) return;
+
+  const bar = el('div', { id: 'last-dispatch', class: 'last-dispatch' + (d.ok ? '' : ' last-dispatch-err') });
+  bar.append(el('span', { class: 'last-dispatch-text', text: d.text }));
+  bar.append(el('span', { class: 'last-dispatch-when', text: relativeTime(d.atMs) || '刚刚' }));
+  // 插在派发入口之后，视觉上紧跟着它
+  const startWork = host.querySelector('.start-work');
+  if (startWork && startWork.nextSibling) host.insertBefore(bar, startWork.nextSibling);
+  else host.append(bar);
 }
 
 function renderStartWork(m) {
@@ -2071,7 +2120,9 @@ function attachStartWorkActions(m, box, input) {
       msg.classList.add('err');
       return;
     }
-    input.value = '';
+    // input 可能为 null（任务书形态下没有聊天输入框）——
+    // 早期直接 input.value = '' 会抛 TypeError，导致**派发已成功但后续提示全断**。
+    if (input) input.value = '';
     // ★ 关键：先刷新再显示反馈。
     //
     // 第一版是「先显示成功提示，再 loadDetail()」——但 loadDetail 会
@@ -2114,15 +2165,29 @@ function attachStartWorkActions(m, box, input) {
       }
     }
 
+    // 派发结果必须**留在界面上**，不能只靠一次 alert。
+    //
+    // 第一性原理：为什么
+    //   派发是本产品最重要的动作（把任务交给团队）。用户点完最想知道
+    //   "到底发出去了没"。一个转瞬即逝的 alert 关掉之后，界面上若没有
+    //   任何痕迹，他只能靠记忆 —— 而记忆不可靠，尤其当它和"团队还没动"
+    //   同时出现时，他会怀疑自己没点。
+    //
+    //   所以：把结果写进 state，刷新后由派发入口那一块重新渲染出来。
+    state.lastDispatch = {
+      text: dispatchLine,
+      ok: dispatchOk,
+      atMs: Date.now(),
+      missionId: m.missionId,
+    };
     // 刷新后重新拿节点（旧节点已经不在 DOM 里）
     const freshMsg = document.querySelector('.start-work-msg');
     if (freshMsg) {
       freshMsg.textContent = dispatchLine;
       freshMsg.classList.add(dispatchOk ? 'ok' : 'err');
-    } else {
-      // 极端情况：刷新后区块没渲染出来，退回到 alert（不能静默）
-      alert(dispatchLine);
     }
+    // 再渲染一块持久的结果条（不依赖刚被重建的那个节点）
+    renderLastDispatch(m.missionId);
   });
 
   // 已绑定会话 → 显示**真实进度** + "去看执行"入口
