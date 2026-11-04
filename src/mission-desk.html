@@ -3299,7 +3299,7 @@ function openMemberMessage(m, memberName) {
   if (host) host.append(wrap);
 }
 
-/** 中断某成员（经 Lead）。成功后如实说明"不代表已经停下"。 */
+/** 中断某成员（经 Lead）。成功后如实说明"不代表已经停下"，并观测几秒。 */
 async function interruptMember(m, memberName, btn) {
   btn.disabled = true;
   let r;
@@ -3311,6 +3311,30 @@ async function interruptMember(m, memberName, btn) {
   btn.disabled = false;
   if (!r || !r.ok) { alert('未发出：' + ((r && r.reason) || '未知原因')); return; }
   alert(r.note || '已下达。');
+
+  // 观测：几秒后重拍任务快照，看它还在不在动（S6）。
+  //
+  // 第一性原理：为什么不直接报"已中断"
+  //   官方 interrupt_agent 不改变 phase，"它停了吗"协议层没有答案。
+  //   能拿到的只有"任务 revision 还在变吗"。而这个信号只能支持
+  //   "确定还在动" 或 "看起来停了"，**不支持"已停止"**。
+  //
+  //   延迟 5 秒是有意的：立刻检查几乎必然显示"还在动"（指令还没被处理完）。
+  if (r.beforeSnapshot) {
+    setTimeout(async () => {
+      let o;
+      try {
+        o = await api('observeIntervention', {
+          missionId: m.missionId, memberName, before: r.beforeSnapshot,
+        });
+      } catch (e) { o = null; }
+      if (!o || !o.ok) return;
+      // 只在"看起来停了"或"还在动"时提示；unknown 不打扰用户
+      if (o.state === 'quiet' || o.state === 'still-moving') {
+        alert(o.description);
+      }
+    }, 5000);
+  }
   if (typeof refresh === 'function') await refresh();
 }
 

@@ -39,6 +39,7 @@ const dispatchStrategy = require('./mission/dispatch-strategy');
 const interventionAudit = require('./mission/intervention-audit');
 const auditStore = require('./mission/audit-store');
 const grantModule = require('./mission/grant');
+const observationModule = require('./mission/intervention-observation');
 const brief = require('./mission/brief');
 const deliverable = require('./mission/deliverable');
 const harnessReader = require('./mission/harness-reader');
@@ -89,6 +90,7 @@ const ACTIONS = Object.freeze([
   'confirmDispatch',      // 只读：派发后轮询"投影里有没有出现对应任务"（S2）
   'interventionHistory',  // 只读：最近的干预记录（S6，闭集字段，无内容）
   'interveneMember',      // S6：对成员转达消息 / 中断（经 Lead，非直连）
+  'observeIntervention',  // S6：观测干预是否生效（三态，无"已停止"）
   'rewriteTask',          // S6：改写 / 重分配团队任务（带 CAS，经 Lead）
   'saveContract',         // D3：保存派发合同（结构化任务书）
   'listGrants',           // D10：列出工作区授权记录
@@ -938,6 +940,37 @@ function registerMissionIpc(ipcMain, ctx) {
         return fail('runtime session wiring is not available', 'RUNTIME_NOT_WIRED');
       }
 
+      // ---- 干预前快照（用于事后观测"到底生效没有"）----
+      //
+      // 第一性原理：为什么必须留一个可观测信号
+      //
+      //   协议层的 `interrupt_agent` **不改变 `phase`** ——
+      //   phase 是生命周期（provisioning/active/failed），不是"在不在跑"。
+      //   所以"中断生效了吗"这个问题，官方没有直接答案。
+      //
+      //   能观测的只有**间接信号**：该成员负责任务的 revision 是否停止变化。
+      //   干预前拍一张快照，之后对比 —— 变了说明它还在动，没变说明可能停了。
+      //
+      //   注意措辞：**"可能停了"不等于"已停止"**。任务不动也可能是它在思考，
+      //   或者已经结束了。所以这个信号只能作为**提示**，不能作为结论。
+      let beforeSnapshot = null;
+      if (kind === 'interrupt' && typeof projectionsOf === 'function') {
+        try {
+          const pr = await projectionsOf(bound.sessionId);
+          if (pr && pr.ok && pr.value && pr.value.values) {
+            const team = normalizeAgentTeam(pr.value.values.agentTeam);
+            const tasks = team && Array.isArray(team.tasks) ? team.tasks : [];
+            beforeSnapshot = {
+              atMs: clock(),
+              // 只记 id + revision + status：这些是判断"有没有在变"的最小充分集
+              tasks: tasks
+                .filter((x) => x && x.ownerName === memberName && x.status !== 'deleted')
+                .map((x) => ({ id: x.id, revision: x.revision, status: x.status })),
+            };
+          }
+        } catch { beforeSnapshot = null; }
+      }
+
       const text = renderMemberIntervention({
         kind, memberName, message, reason: why,
       });
@@ -972,6 +1005,8 @@ function registerMissionIpc(ipcMain, ctx) {
         note: kind === 'interrupt'
           ? '已请 Lead 中断该成员。Lead 是否执行、成员何时停下，以团队状态为准。'
           : '已请 Lead 转达。这代表指令已发出，不代表对方已处理。',
+        // 干预前快照：UI 可据此在几秒后对比"任务还在动吗"
+        beforeSnapshot,
       };
     },
 
@@ -1277,6 +1312,66 @@ function registerMissionIpc(ipcMain, ctx) {
         delivered: true,
         audited: auditResult.ok === true,
         note: '已请 Lead 改写。任务板是否真的变了，以团队状态为准（过期 revision 会被拒绝）。',
+      };
+    },
+
+    /**
+     * 观测一次干预是否生效（S6）。
+     *
+     * 第一性原理：为什么这个 action 是"只读观测"而不是"确认已停止"
+     *
+     *   官方 `interrupt_agent` 不改变 `phase`，"它停了吗"协议层没有答案。
+     *   能拿到的只有间接信号：该成员任务的 revision 还在变吗。
+     *
+     *   而这个信号只能支持两种结论：
+     *     · 还在变 → **确定没停**（可以据此提醒用户再等一下）
+     *     · 没变   → **只能说"看起来停了"**（它也可能在思考或等审批）
+     *
+     *   所以这里返回三态，**没有 stopped**。把"看起来停了"说成"已停止"，
+     *   会让用户以为安全了 —— 那正是本项目反复守的底线。
+     */
+    async observeIntervention(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = argString(payload && payload.missionId);
+      if (!isId(missionId)) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const memberName = argString(payload && payload.memberName);
+      if (!memberName) return fail('memberName is required', 'MEMBER_NAME_REQUIRED');
+      const before = payload && payload.before && typeof payload.before === 'object'
+        ? payload.before : null;
+
+      const bound = readBindMap(r.workspaceDir)[missionId];
+      if (!bound || !bound.sessionId) {
+        return fail('this mission has no bound session yet', 'SESSION_NOT_BOUND');
+      }
+
+      // 重拍快照：只取该成员负责的任务（与干预前快照同口径）
+      let after = null;
+      if (typeof projectionsOf === 'function') {
+        try {
+          const pr = await projectionsOf(bound.sessionId);
+          if (pr && pr.ok && pr.value && pr.value.values) {
+            const team = normalizeAgentTeam(pr.value.values.agentTeam);
+            const tasks = team && Array.isArray(team.tasks) ? team.tasks : [];
+            after = {
+              atMs: clock(),
+              tasks: tasks
+                .filter((x) => x && x.ownerName === memberName && x.status !== 'deleted')
+                .map((x) => ({ id: x.id, revision: x.revision, status: x.status })),
+            };
+          }
+        } catch { after = null; }
+      }
+
+      const out = observationModule.observeIntervention({ before, after });
+      return {
+        ok: true,
+        state: out.state,
+        description: observationModule.describeObservation(out),
+        reason: out.reason,
+        changed: out.changed.map((c) => ({ id: c.id, reason: c.reason })),
+        unchanged: out.unchanged,
+        observedAtMs: clock(),
       };
     },
 

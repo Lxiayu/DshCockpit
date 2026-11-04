@@ -718,7 +718,19 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
   - 测试 7 条，变异 DETECTED ×2（原文被丢弃 / 正文泄露进审计）。
 - ✅ **暂停 / 恢复 / 终止 Mission（2026-11-04 已完成，见上）**：
   `updateStatus` 现在真的会 cancel 正在执行的会话。
-- ⬜ 停止成员的**效果**仍需观察（`interrupt_agent` 不改变 `phase`，只能从团队状态侧面验证）。
+- ✅ **停止成员的效果观测（2026-11-04 完成）**：`intervention-observation.js`
+  + `observeIntervention` action + 中断后 5 秒自动观测。
+  - **协议事实**：`TeamMemberPhase` 只有 `provisioning|active|failed`（读 `.d.ts` 确认），
+    是**生命周期**不是运行状态。所以"它停了吗"协议层没有答案。
+  - **能用的间接信号**：该成员负责任务的 `revision` / `status` 是否还在变。
+  - **三态，且故意没有 `stopped`**：
+    `still-moving`（变了 → **确定没停**）/ `quiet`（没变 → **只能说"看起来停了"**）/
+    `unknown`（没快照或该成员本来没任务 → 什么都不能说）。
+  - **为什么不给 `stopped`**：那是我们验证不了的断言。把"看起来停了"说成"已停止"
+    会让用户以为安全了 —— 与 `receipt.js` 里"verified 是人的判断"同一条底线。
+  - 措辞严格：`quiet` 的文案是"看起来停了…但这不是确认，它也可能在思考或等待审批"。
+  - 新出现的任务**不算**"它在动"（可能是别的成员建的）。
+  测试 10 条，变异 DETECTED ×2。
 - ✅ **改写/重分配团队任务（2026-11-04 完成）**：
   `rewriteTask` action + 右栏任务行上的「改写」「转交」按钮（内联表单）。
   - **协议复核**：`dsh-experimental-agent-team` 包只有 `index.js` + `types`，
@@ -730,7 +742,6 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
   - 已完成的任务不显示改按钮（改它是无意义的动作）。
   - 审计记 `task.rewritten` / `task.reassigned`，**不记新旧文本**。
   测试 8 条，变异 DETECTED ×2。
-- ⬜ 停止成员的**效果**仍需真机观察（`interrupt_agent` 不改变 `phase`）。
 - ✅ **审计落盘（2026-11-04 完成）**：`src/mission/audit-store.js` + `interventions.jsonl`。
   - **为什么独立文件**：审计不是 Mission 状态。混进 `events.jsonl` 会让 projection
     为它写 no-op 分支，还会污染日志的"永不删除"承诺；两者的保留策略与隐私规则都不同。
