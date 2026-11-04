@@ -5036,6 +5036,7 @@ const diagnosticsBundle = createDiagnosticsBundle({
       }));
     } catch { return []; }
   },
+
   locale: () => app.getLocale(),
   // 未映射 journal 事件的计数（只有事件名与次数，无 payload —— 见
   // noteOfficeUnmappedEvent 的第一性原理注释）。用途：升级后判断
@@ -5044,12 +5045,35 @@ const diagnosticsBundle = createDiagnosticsBundle({
   // 团队能力是否**真的启用**（S1）。同步返回缓存结论；未探测过时为 null，
   // 由 collectEnvironment 如实上报 unknown，而不是猜。
   officeTeamActivation: () => officeTeamActivationCache,
+  // 时钟：diagnostics-bundle 有 `new Date()` 兜底，但注入后
+  // 「诊断包里的时间」与「宿主进程的时钟」才是同一个来源。
+  now: () => new Date(),
   home: () => os.homedir(),
   log,
 });
 
 /** Shared by the interactive export and the one-shot probe. */
 async function writeDiagnosticsBundleInto(targetDir) {
+  // 先把团队激活状态探测一次，再打包。
+  //
+  // 第一性原理：为什么必须在这里触发
+  //
+  //   diagnostics-bundle 读的是 d.officeTeamActivation()，那是个**同步读缓存**
+  //   的函数（返回 officeTeamActivationCache）。而缓存的填充者是
+  //   probeOfficeTeamActivation()，它**从来没有被任何地方调用过**。
+  //
+  //   结果：诊断包里的 teamActivation 永远是 null —— 功能写完就没生效过。
+  //   （第 4172574 提交加了探测与注入，但漏了"谁来调用探测"这一步。）
+  //
+  //   放在这里的原因：诊断包是唯一消费这个字段的地方，
+  //   在它构建前探测一次最直接，也不给正常路径增加开销。
+  //   探测失败不影响打包 —— 打包本身比这一项诊断重要得多。
+  try {
+    await probeOfficeTeamActivation();
+  } catch (err) {
+    log(`[shell] team activation probe failed (diagnostics continues): ${err.message}`);
+  }
+
   const result = await diagnosticsBundle.build(targetDir);
   log(`[shell] diagnostics bundle export: ${result.ok
     ? `${result.path} (${result.bytesHuman}, ${result.files.length} files)`
