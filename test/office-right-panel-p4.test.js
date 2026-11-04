@@ -257,7 +257,15 @@ test('record: the projection keeps the module privacy boundary (no ids, no paylo
   // P1 English pass: `chatPhase` joins the allowlist — a fixed 'walking' |
   // 'seated' | null vocabulary (the panel's chat-phase label key), never
   // runtime text.
-  assert.match(raw, /'taskSeq', 'record', 'chatPhase'\]\)/, 'record/chatPhase are on the presentation allowlist (whitelist, not a bypass)');
+  // 断言的是**意图**：这些字段必须显式在白名单里。
+  // 不钉死相邻顺序 —— 后来 artifacts 也加进了白名单，
+  // 而 `['taskSeq', 'record', 'chatPhase']` 这个连续序列因此不再成立。
+  // 意图没变（逐个都要在白名单），锁实现的写法却会误报。
+  const allow = (raw.match(/const PRESENTATION_ALLOWLIST = Object\.freeze\(\[([\s\S]*?)\]\)/) || [])[1] || '';
+  for (const field of ['record', 'chatPhase', 'taskSeq']) {
+    assert.ok(allow.includes(`'${field}'`),
+      `${field} must be on the presentation allowlist (whitelist, not a bypass)`);
+  }
 });
 
 // ---------------------------------------------------------------------------

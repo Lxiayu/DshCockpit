@@ -3159,7 +3159,8 @@ function createOfficeModule(options = {}) {
   // items: the fixed office.staff.currentTool.* key behind `summary`, so the
   // panel can render the summary in the current language without re-deriving
   // anything from the raw tool name.
-  const PRESENTATION_ALLOWLIST = Object.freeze(['displayName', 'role', 'taskLabel', 'marker', 'bubble', 'toolPhrase', 'toolPhraseKey', 'taskSeq', 'record', 'chatPhase']);
+  // 员工卡透传字段。**漏一个前端就读到 undefined**（不是报错，是永远显示 0 这类"永远正确的错误数字"）。artifacts 曾漏在这里：构造完整却被白名单丢弃。
+  const PRESENTATION_ALLOWLIST = Object.freeze(['displayName', 'role', 'taskLabel', 'marker', 'bubble', 'toolPhrase', 'toolPhraseKey', 'taskSeq', 'artifacts', 'record', 'chatPhase']);
 
   // P1 pending items (spec §4). Every field is either app-controlled
   // vocabulary (kind / risk / toolName / summary / detailRef / employeeId), a
