@@ -386,6 +386,26 @@ function check(name, cond, detail) {
   check('24. failure copy does not reference a non-existent "left sidebar"', leftRefs.length === 0,
     leftRefs.length ? leftRefs.map((m) => m[0]).join(' | ') : '');
 
+  // 25) 不得把原始 JSON 直接弹给用户
+  //
+  // 第一性原理：用户点"诊断"是因为他觉得出了问题。这时他要的是"哪里不对"，
+  // 不是一段需要自己解析的 JSON。原文仍然保留（排查有用），
+  // 但必须放在人话之后、且默认收起。
+  //
+  // 这是一**类**问题，不只是诊断按钮 —— 所以做成通用规则。
+  const fs5 = require('node:fs');
+  const src5 = fs5.readFileSync(path.join(REPO, 'src', 'mission-desk.html'), 'utf8');
+  const code5 = src5.split('\n').filter((ln) => !ln.trim().startsWith('//')).join('\n');
+  const rawJsonAlerts = [...code5.matchAll(/alert\(\s*JSON\.stringify/g)];
+  check('25. no raw JSON popup is shown to the user', rawJsonAlerts.length === 0,
+    rawJsonAlerts.length ? `found ${rawJsonAlerts.length} alert(JSON.stringify(...))` : '');
+
+  // 26) 诊断信息必须有人话总结 + 可折叠的原始数据
+  const hasDiagSummary = src5.includes('showDiagnostics') && src5.includes('diag-line');
+  const hasDiagRaw = src5.includes('diag-raw');
+  check('26. diagnostics shows a human summary before raw data',
+    hasDiagSummary && hasDiagRaw, JSON.stringify({ hasDiagSummary, hasDiagRaw }));
+
   const failed = results.filter((r) => !r.ok);
   console.log(`\n=== ${results.length - failed.length}/${results.length} passed ===`);
   if (failed.length) { console.log('FAILED:'); for (const f of failed) console.log('  - ' + f.name + (f.detail ? ': ' + f.detail : '')); }

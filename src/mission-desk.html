@@ -405,6 +405,24 @@
     background: var(--bg-input); color: var(--text-1);
     border: 1px solid var(--border-1); border-radius: 6px;
     padding: 5px 7px; font-size: 12px; font-family: inherit; }
+  /* ---- 诊断面板 ----
+     人话在前、原始数据在后并默认收起。
+     直接弹 JSON 等于让用户在排查问题时先做一次解析工作。 */
+  .diag-panel { margin-top: 10px; padding: 9px 11px; border-radius: 9px;
+    background: var(--bg-input); border: 1px solid var(--border-1); }
+  .diag-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .diag-head span:first-child { flex: 1; font-size: 11.5px; font-weight: 600;
+    color: var(--text-2); }
+  .diag-close, .diag-toggle { font-size: 10.5px; padding: 2px 8px; border-radius: 5px;
+    cursor: pointer; font-family: inherit;
+    background: transparent; color: var(--text-3); border: 1px solid var(--border-1); }
+  .diag-line { font-size: 11.5px; color: var(--text-1); line-height: 1.6;
+    overflow-wrap: anywhere; }
+  .diag-toggle { margin-top: 6px; }
+  .diag-raw { margin: 6px 0 0; padding: 8px; border-radius: 6px;
+    background: var(--bg-panel); color: var(--text-2);
+    font-size: 10.5px; line-height: 1.5; overflow: auto; max-height: 240px;
+    white-space: pre-wrap; overflow-wrap: anywhere; }
   /* ---- 折叠区（§6.2 第 6 块）----
      查阅型内容默认关掉，把首屏留给"需要你 / 进展 / 团队"。
      标题带数量，让用户知道值不值得点开。 */
@@ -1290,10 +1308,61 @@ function renderBriefAndDiagnostics(v, m) {
     diagBtn.addEventListener('click', async () => {
       const r = await api('diagnostics');
       if (!r.ok) { alert(explainFailure(r)); return; }
-      alert(JSON.stringify(r, null, 2));
+      // 不再把原始 JSON 甩给用户（2026-11-04）。
+      //
+      // 第一性原理：诊断信息是给"排查问题"用的，而用户排查问题时
+      // 需要的是"哪里不对"，不是一段需要自己解析的 JSON。
+      // 现在：先用人话总结，原始数据折叠在下面供需要时查看。
+      showDiagnostics(r);
     });
     box.append(diagBtn);
   return box;
+}
+
+/**
+ * 诊断结果的展示：人话在前，原始数据在后。
+ *
+ * 第一性原理：为什么不能直接把 JSON 弹出来
+ *
+ *   用户点"诊断"是因为**他觉得出了问题**。这时他要的是"哪里不对"，
+ *   而不是一段需要自己解析的 JSON。原文仍然保留（排查时有用），
+ *   但必须放在人话之后、且默认收起。
+ */
+function showDiagnostics(r) {
+  const d = r && r.report ? r.report : r;
+  const wrap = el('div', { class: 'diag-panel' });
+
+  const head = el('div', { class: 'diag-head' });
+  head.append(el('span', { text: '诊断结果' }));
+  const close = el('button', { class: 'diag-close', text: '关闭' });
+  close.addEventListener('click', () => wrap.remove());
+  head.append(close);
+  wrap.append(head);
+
+  // 人话总结：只挑几个用户能理解的信号
+  const healthy = d && d.healthy;
+  const lines = [];
+  if (healthy === true) lines.push('✓ 事件日志健康');
+  else if (healthy === false) lines.push('✗ 事件日志有问题（见下方原始数据）');
+  if (d && Number.isFinite(d.eventCount)) lines.push('事件数：' + d.eventCount);
+  if (d && Array.isArray(d.badLines) && d.badLines.length) lines.push('损坏行：' + d.badLines.length);
+  if (d && Array.isArray(d.gaps) && d.gaps.length) lines.push('缺口：' + d.gaps.length);
+  if (lines.length === 0) lines.push('（没有可读的健康信号，见原始数据）');
+  for (const ln of lines) wrap.append(el('div', { class: 'diag-line', text: ln }));
+
+  // 原始数据：默认收起
+  const toggle = el('button', { class: 'diag-toggle', text: '查看原始数据' });
+  const raw = el('pre', { class: 'diag-raw', text: JSON.stringify(r, null, 2) });
+  raw.style.display = 'none';
+  toggle.addEventListener('click', () => {
+    const open = raw.style.display !== 'none';
+    raw.style.display = open ? 'none' : 'block';
+    toggle.textContent = open ? '查看原始数据' : '收起原始数据';
+  });
+  wrap.append(toggle, raw);
+
+  const host = document.getElementById('detail');
+  if (host) host.append(wrap);
 }
 
 function renderDecisions(decisions, m) {
