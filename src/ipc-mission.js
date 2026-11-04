@@ -851,6 +851,10 @@ function registerMissionIpc(ipcMain, ctx) {
 
   // ---------------------------------------------------------------- actions
 
+  // 运行时投影的短期缓存（见 _projectionsCached 的说明）
+  const PROJECTIONS_TTL_MS = 1500;
+  const projectionsCache = new Map();
+
   const handlers = {
     list() {
       const r = requireStore();
@@ -1988,13 +1992,26 @@ function registerMissionIpc(ipcMain, ctx) {
     async sessionProjections(payload) {
       // sessionId 可选：不传时由注入方选择"当前被 follow 的会话"。
       // 原因是 Mission 按隐私规则不存 raw sessionId，右栏拿不到它。
-      const sessionId = argString(payload && payload.sessionId);
+      const explicitId = argString(payload && payload.sessionId);
       if (typeof projectionsOf !== 'function') {
         return { ok: true, available: false, reason: 'runtime projections are not wired' };
       }
+      // 归一化到"绑定会话"：不这样做的话，同一份投影会以两个缓存键
+      // （空串 / 会话 id）各请求一次运行时 —— 实测就是这样多出一次请求的。
+      const sessionId = explicitId || (() => {
+        try {
+          const r2 = requireStore();
+          if (!r2.ok) return '';
+          const id2 = argString(payload && payload.missionId);
+          if (!isId(id2)) return '';
+          const b2 = readBindMap(r2.workspaceDir)[id2];
+          return b2 && b2.sessionId ? b2.sessionId : '';
+        } catch { return ''; }
+      })();
       let res;
       try {
-        res = await projectionsOf(sessionId);
+        // 走缓存：轮询里 sinceLastSeen 也要同一份投影，不缓存就请求两次
+        res = await handlers._projectionsCached(sessionId);
       } catch (err) {
         return { ok: true, available: false, reason: `projections failed: ${err.message}` };
       }
@@ -2128,7 +2145,8 @@ function registerMissionIpc(ipcMain, ctx) {
 
       let res;
       try {
-        res = await projectionsOf(bound.sessionId);
+        // 走缓存：轮询里 workStatus 也读同一份投影，不缓存就一轮请求多次
+        res = await handlers._projectionsCached(bound.sessionId);
       } catch (err) {
         return fail(`cannot read projections: ${err.message}`, 'PROJECTION_FAILED');
       }
@@ -2261,7 +2279,9 @@ function registerMissionIpc(ipcMain, ctx) {
       }
       let res;
       try {
-        res = await projectionsOf(bound.sessionId);
+        // 走缓存：轮询里 workStatus 与 attention/since 读同一份投影，
+        // 不缓存就是一轮请求多次运行时。
+        res = await handlers._projectionsCached(bound.sessionId);
       } catch (err) {
         return { ok: true, bound: true, available: false, reason: err.message };
       }
@@ -2535,7 +2555,8 @@ function registerMissionIpc(ipcMain, ctx) {
       const bound = readBindMap(r.workspaceDir)[missionId];
       if (bound && bound.sessionId && typeof projectionsOf === 'function') {
         try {
-          const res = await projectionsOf(bound.sessionId);
+          // 走缓存：轮询里 attention 与其它 action 读同一份投影
+          const res = await handlers._projectionsCached(bound.sessionId);
           if (res && res.ok && res.value && res.value.values) {
             // 复用同一份归一化：右栏与确认逻辑必须看到完全一样的团队形状
             team = normalizeAgentTeam(res.value.values.agentTeam);
@@ -2625,6 +2646,51 @@ function registerMissionIpc(ipcMain, ctx) {
      * 关键约束：**只从真实事件派生，不调用模型生成摘要。**
      * 用户要的是"发生了什么"，不是"模型猜测发生了什么"。
      */
+    /**
+     * 取一次运行时投影（带短期缓存）。
+     *
+     * 第一性原理：为什么需要缓存
+     *
+     *   右栏轮询每 4 秒一次，每轮同时调用 sessionProjections 和 sinceLastSeen。
+     *   两者**都需要团队投影**，于是同一份数据被向运行时请求了两次。
+     *   实测：一轮轮询导致 projectionsOf 被调用 2 次 —— 每分钟 15 次纯浪费。
+     *
+     *   缓存窗口取 1500ms 是刻意的：
+     *     · 比轮询间隔（4s）短得多 → 不会让数据变陈旧
+     *     · 但足以覆盖"同一轮里的两次调用"（几乎同时发出）
+     *   换句话说，它消掉的是**同一时刻的重复**，不是"延后读到的数据"。
+     *
+     *   不缓存跨轮：如果下一轮（4 秒后）还用旧值，那就是让界面变迟钝，
+     *   与本项目"不让界面显示过期状态"的原则冲突。
+     */
+    _projectionsCached(sessionId) {
+      if (typeof projectionsOf !== 'function') return null;
+      const now = clock();
+      // 缓存键归一化：sessionProjections 允许不传 sessionId（由注入方选当前会话），
+      // workStatus/attention/since 传的是绑定会话的 id。
+      // 若不归一化，同一份投影会因为"传了 id"与"没传 id"被请求两次 ——
+      // 实测就是这样多出一次运行时请求的。
+      // 归一化：空 id 与"当前绑定会话"是**同一份数据**，必须共用一个缓存键。
+      //   实测：sessionProjections 不传 id（由注入方选当前会话），
+      //   而 workStatus/attention 传绑定会话的 id —— 不归一化就会请求两次。
+      //   （调用方 sessionProjections 已在下面把空 id 填成绑定会话，这里兜底。）
+      const key = sessionId || '__current__';
+      const hit = projectionsCache.get(key);
+      if (hit && now - hit.atMs < PROJECTIONS_TTL_MS) return hit.promise;
+      const promise = (async () => {
+        try { return await projectionsOf(sessionId); }
+        catch (err) { return { ok: false, reason: err && err.message ? err.message : String(err) }; }
+      })();
+      projectionsCache.set(key, { atMs: now, promise });
+      // 顺手清理过期项，避免无限增长（进程级 Map，长时间运行会积累）
+      if (projectionsCache.size > 8) {
+        for (const [k, v] of projectionsCache) {
+          if (now - v.atMs >= PROJECTIONS_TTL_MS) projectionsCache.delete(k);
+        }
+      }
+      return promise;
+    },
+
     async sinceLastSeen(payload) {
       const r = requireStore();
       if (!r.ok) return r;
@@ -2662,7 +2728,7 @@ function registerMissionIpc(ipcMain, ctx) {
         try {
           const bound = readBindMap(r.workspaceDir)[missionId];
           if (bound && bound.sessionId) {
-            const pr = await projectionsOf(bound.sessionId);
+            const pr = await handlers._projectionsCached(bound.sessionId);
             if (pr && pr.ok && pr.value && pr.value.values) {
               const team = normalizeAgentTeam(pr.value.values.agentTeam);
               const tasks = team && Array.isArray(team.tasks) ? team.tasks : [];
