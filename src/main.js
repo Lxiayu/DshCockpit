@@ -1791,7 +1791,7 @@ const {
   buildCockpitSnapshot, invalidateCockpitSnapshot, broadcastCockpitSnapshot,
   closeSettingsWindow, returnToCockpit, setCockpitMode, moveCockpitOffset,
   reloadMainWindow, toggleMainDevTools, pickDialogParent, isMainWindowPending,
-  setMainWindowPending, getMainWindowWebContents, hasVisibleMainWindow,
+  setMainWindowPending, getMainWindowWebContents, hasVisibleMainWindow, hasLiveMainWindow,
   onRuntimeHealthy,
 } = windowManager;
 
@@ -7028,7 +7028,15 @@ if (!gotLock) {
   // if it was actually destroyed.
   app.on('activate', () => {
     if (quitting) return;
-    if (hasVisibleMainWindow()) {
+    // 判断口径：**有没有活着的窗口**，而不是"有没有可见的窗口"。
+    //
+    // 原来的 `if (hasVisibleMainWindow())` 把"隐藏/最小化"也算成"没有窗口"。
+    // 而 trayOnClose=true（默认）时，关窗就是**隐藏** ——
+    // 于是点 Dock 图标会走进 else 分支去 createWindow()，
+    // 造出**第二个主窗口**（用户看到"程序坞里两个窗口"，其中一个发白）。
+    //
+    // 这是历史遗留（window-manager 提取时就存在），不是某次改动引入的。
+    if (hasLiveMainWindow()) {
       showMain();
     } else if (getRuntimeUrl()) {
       createWindow(runtimeAuthUrlOf());

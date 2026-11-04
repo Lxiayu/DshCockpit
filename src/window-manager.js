@@ -430,7 +430,36 @@ function createWindowManager(deps) {
   }
 
   // ------------------------------------------------------------- main window
+  /**
+   * 是否存在一个**还活着**的主窗口（不管可见、隐藏还是最小化）。
+   *
+   * 第一性原理：为什么需要区分"活着"和"可见"
+   *
+   *   `hasVisibleMainWindow()` 把"隐藏/最小化"也算作"没有窗口"。
+   *   而"关闭窗口但留在托盘"正是**隐藏**（trayOnClose=true 时的设计行为）——
+   *   于是 macOS 上点 Dock 图标，`activate` 会认为没有窗口、去 createWindow()，
+   *   而 createWindow() 不做去重，直接 `new BrowserWindow()` →
+   *   **第二个主窗口出现**，用户看到"程序坞里两个窗口"。
+   *
+   *   这不是"创建窗口"本身的问题，而是**判断口径错了**：
+   *   "我要不要新建一个窗口"应该看"有没有活着的窗口"，
+   *   而不是"有没有可见的窗口"。可见性该由 showMain() 负责。
+   */
+  function hasLiveMainWindow() {
+    return !!mainWindow && !mainWindow.isDestroyed();
+  }
+
   function createWindow(url) {
+    // 幂等：已经有一个活着的主窗口时，**不新建**，唤醒它并返回。
+    //
+    // 这是上面那个"两个窗口"缺陷的根修 —— 即使某个调用方判断错了，
+    // 这里也不会真的造出第二个主窗口。防御放在真正产生副作用的地方。
+    if (hasLiveMainWindow()) {
+      log('[shell] createWindow: a live main window already exists; showing it instead of creating another');
+      showMain();
+      return mainWindow;
+    }
+
     // ★ 关键：url 可能被调用方传成 undefined（例如 companion:expand 的兜底路径
     //   `wm.createWindow(undefined)`，它只想"重建主窗口"，不知道该填什么 URL）。
     //
@@ -1109,6 +1138,7 @@ function createWindowManager(deps) {
     createWindow, showMain, reloadMainWindow, toggleMainDevTools, pickDialogParent,
     isMainWindowPending, setMainWindowPending, getMainWindowWebContents, getSettingsWindowWebContents,
     hasVisibleMainWindow,
+    hasLiveMainWindow,
     createCockpitWindow, showCockpitInactive, hideCockpit,
     prepareCockpitForAuxWindow, restoreCockpitRail, syncCockpitBounds, scheduleCockpitSync,
     cockpitNavigate,
