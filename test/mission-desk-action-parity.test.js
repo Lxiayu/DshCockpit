@@ -85,7 +85,9 @@ test('parity: update does NOT offer a status field (status has its own action)',
   const idx = deskCode.indexOf("api('update'");
   assert.ok(idx !== -1);
   // 从"目标"区块开头到 update 调用之后，整段都不能出现 status
-  const blockStart = deskCode.indexOf("text: '目标'");
+  // 锚点：这个区块的标题（2026-11-04 从 '目标' 改为 '编辑标题与目标'，
+  // 因为头部已经有"目标"展示，重复标题会让用户以为页面上有两个目标）。
+  const blockStart = deskCode.indexOf("text: '编辑标题与目标'");
   assert.ok(blockStart !== -1 && blockStart < idx);
   const body = deskCode.slice(blockStart, idx + 300);
   assert.doesNotMatch(body, /\.status\s*=|status\s*:/,

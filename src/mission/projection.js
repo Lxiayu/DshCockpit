@@ -44,6 +44,8 @@ const EVENT_TYPES = Object.freeze([
   'evidence.recorded',
   // S5：凭证坐标（可复核的交付指针）
   'receipt.recorded',
+  // D3：派发合同（结构化任务书）
+  'mission.contractSaved',
 ]);
 
 function emptyProjection() {
@@ -271,6 +273,25 @@ function applyEvent(projection, event) {
       if (!schema.validateTaskRef(payload).ok) break;
       next.taskRefs[payload.taskRefId] = { ...payload };
       ensureMissionIndex(next, payload.missionId).taskRefIds.push(payload.taskRefId);
+      applied = true;
+      break;
+    }
+    case 'mission.contractSaved': {
+      // 合同是 Mission 的**可替换**属性（草稿会多次修改）。
+      // 每次保存都覆盖前一份：用户改的是"这次要做什么"，
+      // 不是要保留一串历史草稿。
+      const cur = next.missions[payload.missionId];
+      if (!cur) break;
+      // validateContract 返回**错误数组**。早期写成 `if (!v.ok) break;` ——
+      // 数组上 .ok 是 undefined，`!undefined` 为真，于是**永远 break**，
+      // 合同一条都存不进去（这是本项目反复出现的"静默失效"模式）。
+      const errs = schema.validateContract(payload.contract);
+      if (Array.isArray(errs) && errs.length > 0) break;
+      next.missions[payload.missionId] = {
+        ...cur,
+        contract: { ...payload.contract },
+        updatedAtMs: at || cur.updatedAtMs,
+      };
       applied = true;
       break;
     }

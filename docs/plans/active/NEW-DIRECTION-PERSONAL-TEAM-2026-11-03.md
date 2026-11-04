@@ -426,7 +426,18 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
   **不持久化 dispatchKey 的理由**：派发确认是"一次尝试的短期状态"，不是 Mission 长期事实；
   持久化要扩展 schema（TaskRef 还要求 workstreamId 必填），成本远大于收益。
 - ✅ 右栏 `startWork` 已调用 `confirmDispatch`（2026-11-04 完成，见 `attachStartWorkActions`）。
-- ⬜ 派发面板 UI（右栏结构化表单）。
+- ✅ **派发面板 UI（2026-11-04 完成）**：按 §6.5 五字段结构实现。
+  - `saveContract` action + `mission.contractSaved` 事件 + projection 分支。
+  - 面板五字段：目标（必填）/ 验收条件（可多条，每条选验证方式）/ 约束 / 预算 / 授权目录。
+  - **没有有效 Grant 时明确提示、不让派发**：派发到未授权目录，
+    团队要么失败要么在错误地方写 —— 这不是障碍，是诚实。
+  - **验收条件至少一条**：没有它无法判定"做完了"，那是 receipt 与契约存在的前提。
+  - 聊天式输入框被移除（D3：用户要交的是任务书，不是聊天）。
+  - 合同**只存 grantId 引用，不存目录路径**（隐私 §2.4）。
+  - projection 里一个真实 bug：`if (!v.ok) break;` —— `validateContract` 返回
+    错误**数组**，数组上 `.ok` 是 undefined，`!undefined` 为真 → **永远 break**，
+    合同一条都存不进去。这是本项目反复出现的静默失效模式，已修。
+  测试 10 条，变异 DETECTED ×2。
 - ✅ **Grant 核心模型与持久化（2026-11-04 完成）**：`src/mission/grant.js`
   + `test/mission-grant.test.js`（15 条）+ `test/mission-grant-store.test.js`（8 条）。
   - **规则全部按 §5.1 实现**：只有 `user` 可授予；access 只有 `read|write`

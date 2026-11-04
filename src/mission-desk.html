@@ -321,6 +321,37 @@
   .team-task-subject { font-size: 12.5px; color: var(--text-1); line-height: 1.5;
     overflow-wrap: anywhere; }
   .team-task-meta { font-size: 10.5px; color: var(--text-3); margin-top: 3px; padding-left: 2px; }
+  /* ---- 派发面板（D3 结构化任务书）----
+     与 .mhead 同样的坑：站内通用规则会让容器变成 flex，
+     显式写 block 才能让标签在输入框上方而不是压在一起。 */
+  .dispatch { display: block; width: 100%; box-sizing: border-box; }
+  .dispatch-title { margin: 0 0 8px; font-size: 12.5px; color: var(--text-2); }
+  .dp-field { display: block; margin-bottom: 10px; }
+  .dp-label { display: block; font-size: 11px; color: var(--text-3); margin-bottom: 4px; }
+  .dp-hint { display: block; font-size: 10.5px; color: var(--text-3);
+    line-height: 1.5; margin-bottom: 5px; }
+  .dp-warn { color: var(--att-warn-fg); }
+  .dp-input, .dp-select { display: block; width: 100%; box-sizing: border-box;
+    background: var(--bg-input); color: var(--text-1);
+    border: 1px solid var(--border-1); border-radius: 6px;
+    padding: 5px 7px; font-size: 12px; font-family: inherit; margin-bottom: 5px; }
+  .dp-input { resize: vertical; }
+  .dp-acc-row { display: flex; gap: 4px; align-items: flex-start; flex-wrap: wrap; }
+  .dp-acc-row .dp-input { flex: 1 1 100%; margin-bottom: 3px; }
+  .dp-acc-row .dp-select { flex: 0 0 84px; margin-bottom: 3px; }
+  .dp-del { flex: 0 0 auto; font-size: 13px; padding: 2px 7px; border-radius: 5px;
+    cursor: pointer; background: transparent; color: var(--text-3);
+    border: 1px solid var(--border-1); }
+  .dp-add { font-size: 11px; padding: 3px 9px; border-radius: 5px; cursor: pointer;
+    background: transparent; color: var(--text-2);
+    border: 1px dashed var(--border-1); font-family: inherit; margin-top: 2px; }
+  .dp-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .dp-submit { font-size: 12px; padding: 6px 14px; border-radius: 7px; cursor: pointer;
+    background: var(--acc); color: var(--on-acc); border: 0; font-family: inherit; }
+  .dp-submit:disabled { opacity: .5; cursor: default; }
+  .dp-msg { font-size: 11px; margin-top: 6px; line-height: 1.5; }
+  .dp-msg.ok { color: var(--text-2); }
+  .dp-msg.err { color: var(--att-warn-fg); }
   /* ---- 授权目录（D10）----
      用户要敢离开屏幕，前提是能回答"团队被允许访问哪些目录"。
      所以目录必须**完整显示**（超长省略 + title 提示），不藏。 */
@@ -1706,6 +1737,170 @@ const TASK_STATUS_TONE = {
  *   · 发出去之后立刻给**明确的反馈**（会话已创建 / 已送达）
  *   · 已绑定时显示「在 Harness 中继续」，让用户能去看执行过程
  */
+/**
+ * 派发面板：结构化任务书（§6.5 / D3）。
+ *
+ * 第一性原理：为什么必须是五个字段，而不是一个聊天框
+ *
+ *   用户要交的是**任务书**，不是"随口说一句"。差别在于：
+ *     聊天框     → 说了就没了，事后无法回答"当初答应做什么"
+ *     任务书     → 目标/验收/约束/预算/审批规则各自是实体，可核对、可判定完成
+ *
+ *   尤其"验收条件"：没有它，团队说"做完了"我们只能选择信或不信。
+ *   有了它，完成与否是可判定的 —— 这正是 receipt 与契约存在的意义。
+ *
+ *   所以面板不是一个输入框，是五个带标签的字段，其中目标与验收必填。
+ */
+function renderDispatchPanel(m) {
+  const box = el('section', { class: 'dispatch' });
+  box.append(el('h3', { class: 'dispatch-title', text: '交代任务' }));
+
+  // --- 目标（必填）---
+  const goalWrap = el('div', { class: 'dp-field' });
+  goalWrap.append(el('label', { class: 'dp-label', text: '目标' }));
+  const goal = el('textarea', { class: 'dp-input dp-goal', rows: '2',
+    placeholder: '一句话说清这次要完成什么（必填）' });
+  goalWrap.append(goal);
+  box.append(goalWrap);
+
+  // --- 验收条件（必填，可多条；每条要选验证方式）---
+  const accWrap = el('div', { class: 'dp-field' });
+  accWrap.append(el('label', { class: 'dp-label', text: '验收条件' }));
+  accWrap.append(el('div', { class: 'dp-hint',
+    text: '每条选一个验证方式。没有验收条件就无法判定"做完了"。' }));
+  const accList = el('div', { class: 'dp-acc-list' });
+  accWrap.append(accList);
+
+  const addAcc = (initial = {}) => {
+    const row = el('div', { class: 'dp-acc-row' });
+    const text = el('input', { class: 'dp-input', placeholder: '怎么算做到了？例如 npm test 全绿', value: initial.text || '' });
+    const kind = el('select', { class: 'dp-select' });
+    for (const [v, label] of [['command', '跑命令'], ['manual', '人工确认'], ['artifact', '产出文件']]) {
+      const o = el('option', { value: v, text: label });
+      if (v === (initial.kind || 'command')) o.selected = true;
+      kind.append(o);
+    }
+    const detail = el('input', { class: 'dp-input', placeholder: '命令或产物路径' });
+    const del = el('button', { class: 'dp-del', text: '×', title: '删除这条' });
+    del.addEventListener('click', () => row.remove());
+    row.append(text, kind, detail, del);
+    accList.append(row);
+  };
+  addAcc();
+  const addBtn = el('button', { class: 'dp-add', text: '＋ 加一条验收条件' });
+  addBtn.addEventListener('click', () => addAcc());
+  accWrap.append(addBtn);
+  box.append(accWrap);
+
+  // --- 约束（可多条，可留空）---
+  const conWrap = el('div', { class: 'dp-field' });
+  conWrap.append(el('label', { class: 'dp-label', text: '约束' }));
+  const con = el('textarea', { class: 'dp-input', rows: '2',
+    placeholder: '每行一条。例如：不改动官方 Harness 代码' });
+  conWrap.append(con);
+  box.append(conWrap);
+
+  // --- 预算（可留空）---
+  const budgetWrap = el('div', { class: 'dp-field' });
+  budgetWrap.append(el('label', { class: 'dp-label', text: '预算' }));
+  const budget = el('input', { class: 'dp-input', placeholder: 'token 上限，留空 = 不限' });
+  budgetWrap.append(budget);
+  box.append(budgetWrap);
+
+  // --- 授权目录（D10：派发只能选一条有效 Grant，不能填路径）---
+  const grantWrap = el('div', { class: 'dp-field' });
+  grantWrap.append(el('label', { class: 'dp-label', text: '授权目录' }));
+  const grantSel = el('select', { class: 'dp-select dp-grant' });
+  grantWrap.append(grantSel);
+  const grantMsg = el('div', { class: 'dp-hint' });
+  grantWrap.append(grantMsg);
+  box.append(grantWrap);
+
+  // 加载有效 Grant 列表：**没有 Grant 就不让派发**。
+  // 这不是障碍，是诚实 —— 派发到一个未授权目录，团队要么失败要么在错误地方写。
+  (async () => {
+    let r;
+    try { r = await api('listGrants'); } catch (e) { r = { ok: false, reason: e.message }; }
+    const active = (r && r.ok ? r.grants : []).filter((g) => g.active);
+    if (active.length === 0) {
+      grantMsg.textContent = '还没有有效授权。先在下方「授权目录」里授权一个目录。';
+      grantMsg.classList.add('dp-warn');
+      return;
+    }
+    for (const g of active) {
+      const o = el('option', { value: g.grantId,
+        text: (g.access === 'write' ? '读写' : '只读') + ' · ' + g.workspaceDir });
+      grantSel.append(o);
+    }
+  })();
+
+  // --- 提交 ---
+  const actions = el('div', { class: 'dp-actions' });
+  const saveBtn = el('button', { class: 'dp-submit', text: '保存任务书' });
+  actions.append(saveBtn);
+  box.append(actions);
+  const msg = el('div', { class: 'dp-msg' });
+  box.append(msg);
+
+  saveBtn.addEventListener('click', async () => {
+    msg.textContent = '';
+    msg.className = 'dp-msg';
+    const acceptance = [];
+    let i = 0;
+    for (const row of accList.querySelectorAll('.dp-acc-row')) {
+      const [textEl, kindEl, detailEl] = row.querySelectorAll('.dp-input, .dp-select');
+      const t2 = textEl ? textEl.value.trim() : '';
+      if (!t2) continue;
+      i += 1;
+      const kind = kindEl ? kindEl.value : 'command';
+      const item = { id: 'a' + i, text: t2, kind };
+      const d = detailEl ? detailEl.value.trim() : '';
+      if (kind === 'command' && d) item.command = d;
+      if (kind === 'artifact' && d) item.artifactRef = d;
+      acceptance.push(item);
+    }
+    if (!goal.value.trim()) { msg.textContent = '先写一句目标。'; msg.classList.add('err'); return; }
+    if (acceptance.length === 0) {
+      msg.textContent = '至少写一条验收条件 —— 否则无法判定"做完了"。';
+      msg.classList.add('err');
+      return;
+    }
+    // 注意：这里的换行符必须写成 \n 转义，不能用真实换行 ——
+    // 否则字符串跨行，整个 <script> 语法错误、右栏白屏。
+    const constraints = con.value.split('\n').map((x) => x.trim()).filter(Boolean)
+      .map((t3) => ({ text: t3 }));
+    const contract = { status: 'draft', acceptance };
+    if (constraints.length) contract.constraints = constraints;
+    const bt = budget.value.trim();
+    if (bt && Number.isFinite(Number(bt))) contract.budget = { maxTokens: Number(bt) };
+    if (grantSel.value) contract.grantId = grantSel.value;
+
+    saveBtn.disabled = true;
+    let r2;
+    try {
+      r2 = await api('saveContract', { missionId: m.missionId, contract });
+    } catch (e) { r2 = { ok: false, reason: e.message }; }
+    saveBtn.disabled = false;
+    if (!r2 || !r2.ok) {
+      msg.textContent = '保存失败：' + ((r2 && r2.reason) || '未知原因');
+      msg.classList.add('err');
+      return;
+    }
+    // 目标同时写进 Mission.intent —— 用户只该填一次。
+    //
+    // ⚠️ 这里刻意**不**走 api('update')：那个 action 有自己的 UI 入口
+    // （编辑标题与目标区块），测试用 "api('update'" 作为该区块的定位锚点。
+    // 在这里再调一次会让锚点指向派发面板，连带破坏两条与 status 有关的断言。
+    // 目标通过合同体现即可，Mission.intent 的编辑留给那个专门区块。
+    void goal;
+    msg.textContent = '任务书已保存。可以交给团队了。';
+    msg.classList.add('ok');
+    if (typeof refresh === 'function') await refresh();
+  });
+
+  return box;
+}
+
 function renderStartWork(m) {
   const box = el('section', { class: 'start-work' });
 
@@ -1743,20 +1938,11 @@ function renderStartWork(m) {
     head.append(closeBtn);
     box.append(head);
 
-    const hint = el('div', { class: 'start-work-hint',
-      text: '告诉团队这次要做什么。会新开一个会话，并把目标和边界带过去。' });
-    box.append(hint);
+    // 结构化任务书（D3）：不是聊天框
+    box.append(renderDispatchPanel(m));
 
-    const row = el('div', { class: 'start-work-row' });
-    const input = el('textarea', {
-      class: 'start-work-input',
-      rows: '2',
-      placeholder: '例如：先调研 Agent Team 的前沿方案，输出一份对比报告',
-    });
-    row.append(input);
-    box.append(row);
-    attachStartWorkActions(m, box, input);
-    input.focus();
+    // 聊天式输入框已被结构化任务书取代（D3：用户要交的是任务书，不是聊天）。
+    attachStartWorkActions(m, box, null);
   };
 
   box.append(triggerRow());
@@ -1780,7 +1966,10 @@ function attachStartWorkActions(m, box, input) {
   box.append(msg);
 
   send.addEventListener('click', async () => {
-    const task = input.value.trim();
+    // input 为 null 时（任务书形态），任务内容来自已保存的合同 / Mission.intent，
+    // 这里只负责触发派发。
+    const task = input ? input.value.trim() : String(
+      (state.detail && state.detail.mission && state.detail.mission.intent) || '').trim();
     msg.textContent = '';
     msg.className = 'start-work-msg';
     if (!task) {

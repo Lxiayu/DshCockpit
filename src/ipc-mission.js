@@ -90,6 +90,7 @@ const ACTIONS = Object.freeze([
   'interventionHistory',  // 只读：最近的干预记录（S6，闭集字段，无内容）
   'interveneMember',      // S6：对成员转达消息 / 中断（经 Lead，非直连）
   'rewriteTask',          // S6：改写 / 重分配团队任务（带 CAS，经 Lead）
+  'saveContract',         // D3：保存派发合同（结构化任务书）
   'listGrants',           // D10：列出工作区授权记录
   'createGrant',          // D10：创建授权（只能由用户发起）
   'revokeGrant',          // D10：撤销授权（标记而非删除）
@@ -950,6 +951,71 @@ function registerMissionIpc(ipcMain, ctx) {
           ? '已请 Lead 中断该成员。Lead 是否执行、成员何时停下，以团队状态为准。'
           : '已请 Lead 转达。这代表指令已发出，不代表对方已处理。',
       };
+    },
+
+    /**
+     * 保存派发合同（D3 派发面板的后端）。
+     *
+     * 第一性原理：为什么合同要**先存再派**
+     *
+     *   直觉做法：面板填完直接发 prompt。但那样"这次到底要求做到什么"
+     *   只存在于 prompt 文本里 —— 而 prompt 不进事实链（隐私规则），
+     *   于是事后无法回答"当初答应做什么"。
+     *
+     *   所以：合同先作为一个**实体**存进 Mission，派发时再从它渲染指令。
+     *   验收标准也从合同来，而不是从 Agent 的自述来。
+     *
+     * 与 Grant 的关系（D10）：合同只存 `grantId` 引用，**永远不存目录路径**。
+     *   否则 Mission 事实链里会出现绝对路径。
+     */
+    saveContract(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const missionId = argString(payload && payload.missionId);
+      if (!isId(missionId)) return fail('missionId is required', 'MISSION_ID_REQUIRED');
+      const view = r.store.missionView(missionId);
+      if (!view || !view.mission) return fail('mission not found', 'MISSION_NOT_FOUND');
+
+      const input = payload && payload.contract && typeof payload.contract === 'object'
+        ? payload.contract : null;
+      if (!input) return fail('contract is required', 'CONTRACT_REQUIRED');
+
+      // 只接受已知字段：面板之外的字段一律忽略，避免把 UI 的内部状态存进事实链。
+      //
+      // ⚠️ status 必须有值：validateContract 要求它是闭集之一。
+      // 早期实现给它 'draft' 以外什么都不填时会报错——现在默认 'draft'。
+      const contract = {
+        status: schema.CONTRACT_STATUSES.includes(input.status) ? input.status : 'draft',
+        acceptance: Array.isArray(input.acceptance) ? input.acceptance : [],
+      };
+      if (Array.isArray(input.constraints)) contract.constraints = input.constraints;
+      if (input.budget && typeof input.budget === 'object') contract.budget = input.budget;
+      if (typeof input.grantId === 'string' && input.grantId) contract.grantId = input.grantId;
+      if (typeof input.strategy === 'string' && input.strategy) contract.strategy = input.strategy;
+      if (Number.isFinite(input.maxMembers)) contract.maxMembers = input.maxMembers;
+      if (Number.isFinite(input.sharedWriteScopes)) contract.sharedWriteScopes = input.sharedWriteScopes;
+
+      // Grant 必须**真实存在且有效** —— 否则合同指向一个不存在的授权，
+      // 派发时才发现就太晚了（那时用户已经以为一切就绪）。
+      if (contract.grantId) {
+        const loaded = grantModule.loadGrants(r.workspaceDir);
+        const g = loaded.grants.find((x) => x.grantId === contract.grantId);
+        if (!g) return fail('the referenced grant does not exist', 'GRANT_NOT_FOUND');
+        if (!grantModule.isGrantActive(g)) {
+          return fail('the referenced grant has been revoked', 'GRANT_REVOKED');
+        }
+      }
+
+      // validateContract 返回**错误数组**（不是 {ok, errors} 对象）
+      const contractErrors = schema.validateContract(contract);
+      if (Array.isArray(contractErrors) && contractErrors.length > 0) {
+        return fail(contractErrors.join('; '), 'CONTRACT_INVALID');
+      }
+
+      const out = r.store.append('mission.contractSaved',
+        { missionId, contract }, { missionId });
+      if (!out.ok) return fail(out.reason, 'MISSION_APPEND_FAILED');
+      return { ok: true, contract };
     },
 
     // ------------------------------------------------------------------
