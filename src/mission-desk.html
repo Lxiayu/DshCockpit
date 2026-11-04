@@ -4118,6 +4118,26 @@ function startProgressPoll() {
  * 不用 JSON.stringify 整个对象 —— 时间戳之类的字段每轮都可能微小变化，
  * 会导致每 4 秒重绘一次，反而更糟。
  */
+/**
+ * 团队投影的内容签名：用于判断「进展 / 团队成员」是否需要重绘。
+ *
+ * 取什么进签名很重要：
+ *   成员：id + phase（phase 变了说明成员状态变了）
+ *   任务：id + revision + status + ownerName（这几项变了，用户看到的信息就变了）
+ *
+ * 刻意**不取** description 之类的长文本 —— 它对"进展"的呈现没影响，
+ * 但会让签名频繁变化，导致每 4 秒重绘一次。
+ */
+function teamSignature(proj) {
+  const team = proj && proj.agentTeam;
+  if (!team) return 'none';
+  const members = (Array.isArray(team.members) ? team.members : [])
+    .map((m) => `${m.id}:${m.phase}`).sort().join(',');
+  const tasks = (Array.isArray(team.tasks) ? team.tasks : [])
+    .map((x) => `${x.id}:${x.revision}:${x.status}:${x.ownerName || ''}`).sort().join(',');
+  return `${members}|${tasks}`;
+}
+
 function attentionSignature(a) {
   if (!a || !a.ok) return 'none';
   const items = Array.isArray(a.items) ? a.items : [];
@@ -4198,6 +4218,39 @@ async function pollProgressOnce() {
         }
       }
     } catch { /* 待办取不到不该影响进度轮询 */ }
+
+    // ---- 同时刷新团队投影（进展 / 团队成员）（2026-11-04 修）----
+    //
+    // 第一性原理：为什么这两块必须也实时
+    //
+    //   右栏说「进展 1/4」「团队成员 coder」—— 用户信这句话去做判断。
+    //   但实测发现（这就是本轮发现的缺陷）：sessionProjections 在整个会话里
+    //   只被调用**一次**（loadDetails 时）。之后团队新增成员、任务状态
+    //   从 pending 变 in_progress，界面**永远显示旧数据**。
+    //
+    //   这比"少显示一块"更糟：它显示的是**看起来真实但其实过期**的状态。
+    //   用户会基于"coder 还没开始"去决定要不要催，而 coder 可能已经做完了。
+    //
+    //   所以这里同样按"内容签名"判断，只在真的变了时局部重绘。
+    try {
+      const freshProj = await api('sessionProjections');
+      if (state.selectedId === id && freshProj && freshProj.ok) {
+        const beforeSig = teamSignature(state.projections);
+        const afterSigP = teamSignature(freshProj);
+        if (beforeSig !== afterSigP) {
+          state.projections = freshProj;
+          // 局部重绘「进展」与「团队成员」两块
+          // 选择器必须用真实的根 class：
+          //   renderTeamTasks   -> section.team
+          //   renderTeamMembers -> section.members-section
+          // （第一版我猜了 .team-tasks / .members，都不存在 —— 重绘静默失效）
+          const oldTasks = document.querySelector('section.team');
+          if (oldTasks) oldTasks.replaceWith(renderTeamTasks(state.detail.mission));
+          const oldMembers = document.querySelector('section.members-section');
+          if (oldMembers) oldMembers.replaceWith(renderTeamMembers(state.detail.mission));
+        }
+      }
+    } catch { /* 投影取不到不该影响进度轮询 */ }
 
     if (changed) {
       progressIdleTicks = 0;
