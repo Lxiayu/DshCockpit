@@ -715,6 +715,17 @@ const api = (action, payload) => window.dshShell.mission(action, payload);
 //
 // 关键是**不能丢掉 code**——那是排查的唯一线索。所以格式是
 // 「人话（代码 XXX）」，而不是二选一。
+// 所有用户可见的错误都必须经 explainFailure —— 不要直接 alert(r.reason)。
+//
+// 第一性原理：为什么
+//   r.reason 是**给开发者看的**（可能含 code、字段名、内部术语）。
+//   explainFailure 做两件事：
+//     ① 查 ERROR_HINTS 给一句人话 + 一条**可执行**的建议
+//     ② 兜底时也保证不是一串技术黑话
+//
+//   本项目已经踩过"错误提示只给 code"的坑（P4 的错误分级就是为此加的）。
+//   但代码里仍有 5 处直接 alert(r.reason) 绕过了它 —— 那些地方用户
+//   看到的是技术原文，而且 alert 一关就没了。
 const ERROR_HINTS = {
   MISSION_ID_REQUIRED: '没有选中 Mission',
   WORKSTREAM_ID_REQUIRED: '先创建一个工作流',
@@ -1176,7 +1187,7 @@ function renderDeliverables(v, m) {
       const verifyBtn = el('button', { text: '校验产物是否仍是当时那一版' });
       verifyBtn.addEventListener('click', async () => {
         const r = await api('verifyDeliverables', { missionId: m.missionId });
-        if (!r.ok) { alert(r.reason); return; }
+        if (!r.ok) { alert(explainFailure(r)); return; }
         state.verified = r;
         renderDetail();
       });
@@ -1250,7 +1261,7 @@ function renderBriefAndDiagnostics(v, m) {
         const unBtn = el('button', { text: '撤销同步' });
         unBtn.addEventListener('click', async () => {
           const r = await api('unsyncBrief');
-          if (!r.ok) { alert(r.reason); return; }
+          if (!r.ok) { alert(explainFailure(r)); return; }
           state.syncState = { synced: false };
           renderDetail();
         });
@@ -1259,7 +1270,7 @@ function renderBriefAndDiagnostics(v, m) {
         const btn = el('button', { class: 'primary', text: '同步到 AGENTS.md' });
         btn.addEventListener('click', async () => {
           const r = await api('syncBrief', { missionId: m.missionId });
-          if (!r.ok) { alert(r.reason); return; }
+          if (!r.ok) { alert(explainFailure(r)); return; }
           const st = await api('briefSyncState');
           state.syncState = st.ok ? st : { synced: false };
           renderDetail();
@@ -1278,7 +1289,7 @@ function renderBriefAndDiagnostics(v, m) {
     diagBtn.style.marginTop = '18px';
     diagBtn.addEventListener('click', async () => {
       const r = await api('diagnostics');
-      if (!r.ok) { alert(r.reason); return; }
+      if (!r.ok) { alert(explainFailure(r)); return; }
       alert(JSON.stringify(r, null, 2));
     });
     box.append(diagBtn);
@@ -2324,14 +2335,25 @@ function attachStartWorkActions(m, box, input) {
       text: '在 Harness 中查看这个 Mission 的执行 →' });
     go.addEventListener('click', () => {
       // 复用已有的视图切换通道（rail 用它切 harness 视图）
+      //
+      // ⚠️ 失败时不能再说"请在左侧栏"（2026-11-04 修正）：
+      //   dock 模式是单栏，没有左侧栏。而且 alert 关掉就没信息了。
+      //   改成**内联提示**，按布局说不同的路。
+      const fail = () => {
+        const hint = el('div', { class: 'tiny muted', style: 'margin-top:4px',
+          text: DOCK_MODE
+            ? '这个窗口没法自动切换。请回到主界面，在那边的 Harness 视图查看执行过程。'
+            : '请在上方切换到 Harness 视图查看执行过程。' });
+        go.after(hint);
+      };
       try {
         if (window.dshShell && typeof window.dshShell.showView === 'function') {
           window.dshShell.showView('harness');
         } else {
-          alert('请在左侧栏切换到 Harness 视图查看执行过程。');
+          fail();
         }
       } catch {
-        alert('请在左侧栏切换到 Harness 视图查看执行过程。');
+        fail();
       }
     });
     box.append(go);
@@ -2688,7 +2710,7 @@ function renderMissionHead(m, v) {
     opt.addEventListener('click', async () => {
       menu.style.display = 'none';
       const r = await api('updateStatus', { missionId: m.missionId, to: s });
-      if (!r || !r.ok) { alert((r && r.reason) || '切换失败'); return; }
+      if (!r || !r.ok) { alert(explainFailure(r || { code: 'UNKNOWN' })); return; }
       // 状态字段不能替代刹车：取消失败必须说出来，否则用户以为已经停了。
       if (r.stopped === 'cancel-failed') {
         alert('状态已改为 ' + (STATUS_TEXT[r.status] || r.status) + '，但**未能停止正在执行的会话**。'

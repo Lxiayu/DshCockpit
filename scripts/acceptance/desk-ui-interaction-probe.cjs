@@ -369,6 +369,23 @@ function check(name, cond, detail) {
     fc.skipped ? false : (fc.formStillOpen && fc.textPreserved === '用户正在输入的内容'),
     String(formCheck));
 
+  // 23) 所有用户可见的错误都必须经 explainFailure，不得直接透出 r.reason
+  //
+  // 第一性原理：r.reason 是**给开发者看的**（可能含 code、字段名、内部术语）。
+  // explainFailure 才会给出人话 + 可执行建议。绕过它 = 用户看到技术黑话，
+  // 而且 alert 一关就没了。
+  const fs4 = require('node:fs');
+  const src4 = fs4.readFileSync(path.join(REPO, 'src', 'mission-desk.html'), 'utf8');
+  const code4 = src4.split('\n').filter((ln) => !ln.trim().startsWith('//')).join('\n');
+  const rawAlerts = [...code4.matchAll(/alert\(\s*\(?\s*r\s*(?:&&\s*r\.reason|&&\s*r\.reason\s*\|\||\.reason)/g)];
+  check('23. no user-facing error bypasses explainFailure', rawAlerts.length === 0,
+    rawAlerts.length ? `found ${rawAlerts.length} raw alert(r.reason)` : '');
+
+  // 24) 失败提示不得再引用 dock 模式下不存在的"左侧栏"
+  const leftRefs = [...code4.matchAll(/['"][^'"]*左侧栏[^'"]*['"]/g)];
+  check('24. failure copy does not reference a non-existent "left sidebar"', leftRefs.length === 0,
+    leftRefs.length ? leftRefs.map((m) => m[0]).join(' | ') : '');
+
   const failed = results.filter((r) => !r.ok);
   console.log(`\n=== ${results.length - failed.length}/${results.length} passed ===`);
   if (failed.length) { console.log('FAILED:'); for (const f of failed) console.log('  - ' + f.name + (f.detail ? ': ' + f.detail : '')); }
