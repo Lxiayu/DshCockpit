@@ -37,12 +37,11 @@ const ROOT = path.join(__dirname, '..');
  */
 const BUDGET = {
   'src/main.js': 7100,              // 实测 7018；是已知债 TD-01，目标是拆分
-  // ⚠️ 这里必须与 test/office-runtime-boundary.test.js 的 4800 硬上限**完全一致**。
-  //   第 47 轮我在这里写了 4850，而那边一直是 4800 —— 同一个文件两套约束，
-  //   宽松的那条会让严格的那条被绕过（改到 4820 时这边绿、那边红，
-  //   下一个人只会去改那边）。门禁之间互相矛盾比没有门禁更糟：
-  //   它让人以为"已经被守着"，同时把真正的约束变成了可以商量的东西。
-  'src/office/office-module.js': 4800, // 与 office-runtime-boundary 的硬上限一致；现状正好 4800、零余量
+  // ⚠️ 必须与 test/office-runtime-boundary.test.js 的**总行兜底**一致。
+  //   第 47 轮我在这里写了 4850、那边是 4800 —— 同一文件两套约束，
+  //   宽松的会让严格的被绕过。第 57 轮起那边的**主判据改成代码行**
+  //   （去注释去空行），总行只作可读性兜底。
+  'src/office/office-module.js': 5200, // 与 boundary 的总行兜底一致；代码行判据在那边（3400）
   'src/mission-desk.html': 4450,    // 实测 4381；近几轮每轮 +40 左右，需盯住
   'src/ipc-mission.js': 2950,       // 实测 2871
 };
@@ -74,8 +73,15 @@ test('size budget: no file exceeds its recorded budget', () => {
 test('size budget: the budget does not drift stale (it must stay close to reality)', () => {
   // 预算离实际太远，它就失去了"看守"的意义 —— 从 7100 到 8000 之间有 900 行
   // 的增长是"合法"的，而那时门禁已经形同虚设。
+  // 例外：office-module 的总行兜底**故意留宽**。
+  //   它的主判据是"代码行"（在 office-runtime-boundary 里守着，3400 硬线），
+  //   总行只用于"别膨胀到读不动"。
+  //   把兜底也压紧会导致：想加一行注释就红 —— 那正是在惩罚解释，
+  //   与第 57 轮改判据的理由直接冲突。
+  const INTENTIONALLY_LOOSE = new Set(['src/office/office-module.js']);
   const slack = [];
   for (const [rel, limit] of Object.entries(BUDGET)) {
+    if (INTENTIONALLY_LOOSE.has(rel)) continue;
     const n = lineCount(rel);
     const gap = limit - n;
     if (gap > 200) slack.push(`${rel}: ${gap} lines of unused budget`);
@@ -97,8 +103,9 @@ test('size budget: no two gates disagree about the same ceiling', () => {
   //
   //   这条断言强制：本文件的预算必须与那个硬上限逐字相同。
   const boundary = fs.readFileSync(path.join(ROOT, 'test', 'office-runtime-boundary.test.js'), 'utf8');
-  const m = boundary.match(/office-module\.js is \$\{lines\} lines \(ceiling (\d+)\)/);
-  assert.ok(m, 'the boundary gate must state its ceiling in a machine-readable way');
+  // 读的是**总行兜底**那条（代码行判据由 boundary 自己守，本表不重复）
+  const m = boundary.match(/office-module\.js is \$\{lines\} total lines \(ceiling (\d+)\)/);
+  assert.ok(m, 'the boundary gate must state its total-line ceiling in a machine-readable way');
   const hardCeiling = Number(m[1]);
   assert.equal(BUDGET['src/office/office-module.js'], hardCeiling,
     `this file budgets ${BUDGET['src/office/office-module.js']} lines but `
