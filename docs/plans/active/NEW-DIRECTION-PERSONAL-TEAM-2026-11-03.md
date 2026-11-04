@@ -444,6 +444,18 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
     **被静默丢弃**。他以为"不改官方代码"已生效，实际指令里没有。
     已合并两处来源并按文本去重（同一句写在两边不该出现两次）。
   - 端到端链路已实测：面板保存合同 → startWork → 指令含验收条件 + 约束。
+- ✅ **全链路端到端探针（2026-11-04 新增）**：
+  `scripts/acceptance/mission-full-chain-probe.cjs`（29 项断言，全绿）。
+  覆盖：建 Mission → 授权 → 存合同 → 派发 → 确认 → 凭证 → 持久化 → 审计 → 隐私 → 暂停。
+  **为什么需要它，尽管每个模块都有单测**：本项目反复出现"模块各自全绿、
+  合起来静默失效"——presented-collector 产出 `{relPath}` 而 deliverable-signal
+  消费 `{rawPath}`；projection 对数组判断 `.ok`；指令只读了一个约束来源。
+  三者单测都是绿的，发现它们靠的都是真的跑一遍链路看输出。
+- ✅ **Grant 目录的隐私边界已明确并测试（2026-11-04）**：
+  Grant 是**唯一**合法携带绝对路径的实体（用户必须看见授权了哪个目录，
+  否则不知道该撤销哪一条）。但路径**绝不进** Mission 事实链、派发指令、审计。
+  三种边界分别钉住：`events.jsonl` 无路径但**有** grantId；
+  指令无路径；Grant IPC 返回值**有**路径（这是必须存在的断言，不是必须不存在）。
 - ✅ **Grant 核心模型与持久化（2026-11-04 完成）**：`src/mission/grant.js`
   + `test/mission-grant.test.js`（15 条）+ `test/mission-grant-store.test.js`（8 条）。
   - **规则全部按 §5.1 实现**：只有 `user` 可授予；access 只有 `read|write`
