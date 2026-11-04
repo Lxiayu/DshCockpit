@@ -1983,20 +1983,43 @@
         finally { teamEls.resume.disabled = false; refreshTeamStatus(); }
       });
       refreshTeamStatus();
+      // 逐块渲染，谁坏了只让那一块空着 —— 不让它吃掉后面的所有内容。
+      //
+      // 第一性原理：为什么这里必须有 try/catch
+      //
+      //   这 9 个渲染调用原来是**裸串联**的。任何一个抛错，
+      //   后面的全部不执行 —— 表现是"面板莫名少了几块"，
+      //   而控制台之外没有任何提示。
+      //
+      //   右栏（mission-desk）第 38 轮修过一模一样的问题：
+      //   一个 `writeScopeWarnings.length` 的裸读让整段右栏空白。
+      //   办公室这边一直没修 —— 同样的缺陷在两处代码里存在了不同时长。
+      //
+      //   注意：这里**不吞掉错误**。写进控制台，并且如果真的全崩了，
+      //   用户至少能看到其余部分。静默失败比空白更糟。
       function renderAll() {
         const snapshot = latestSnapshot;
+        const safeRender = (name, fn) => {
+          try {
+            fn();
+          } catch (err) {
+            // 保留可诊断性：出错的块名 + 错误信息
+            // eslint-disable-next-line no-console
+            console.error('[office] render block failed:', name, err);
+          }
+        };
         if (!snapshot) {
-          renderDetails();
-          renderPendingBlock(null);
+          safeRender('details', () => renderDetails());
+          safeRender('pending', () => renderPendingBlock(null));
           return;
         }
-        renderOverview(snapshot);
-        renderEmployeeList(snapshot);
-        renderDetails();
-        renderActivity(snapshot);
-        renderMissionBoard(snapshot);
-        renderUsageBlock(snapshot);
-        renderPendingBlock(snapshot);
+        safeRender('overview', () => renderOverview(snapshot));
+        safeRender('employeeList', () => renderEmployeeList(snapshot));
+        safeRender('details', () => renderDetails());
+        safeRender('activity', () => renderActivity(snapshot));
+        safeRender('missionBoard', () => renderMissionBoard(snapshot));
+        safeRender('usage', () => renderUsageBlock(snapshot));
+        safeRender('pending', () => renderPendingBlock(snapshot));
       }
       function setLanguage(value) {
         if (value !== 'zh' && value !== 'en') return;

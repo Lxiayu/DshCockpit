@@ -67,8 +67,15 @@ test('board ui: renderMissionBoard is called on the REAL snapshot path', () => {
 test('board ui: the board is ALSO refreshed by renderAll (language switch)', () => {
   const renderAllStart = html.indexOf('function renderAll()');
   assert.ok(renderAllStart !== -1);
-  const block = html.slice(renderAllStart, renderAllStart + 800);
-  assert.match(block, /renderMissionBoard\(snapshot\)/, 'switching language must re-render the board');
+  const block = html.slice(renderAllStart, renderAllStart + 2000);
+  // 断言的是**意图**：看板必须由 renderAll 重绘。
+  // 不钉死裸调用 —— renderAll 后来给每个块加了容错包裹
+  // （`safeRender('missionBoard', () => renderMissionBoard(snapshot))`），
+  // 意图没变但裸调用消失了。锁实现的测试会在正确的重构上误报。
+  assert.match(block, /renderMissionBoard\(snapshot\)/,
+    'switching language must re-render the board');
+  assert.match(block, /safeRender\([^)]*renderMissionBoard|renderMissionBoard\(snapshot\)/,
+    'and it must still be reachable from renderAll');
 });
 
 // ============================================ 四种状态（不出现空白）
