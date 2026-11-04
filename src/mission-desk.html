@@ -405,6 +405,13 @@
     background: var(--bg-input); color: var(--text-1);
     border: 1px solid var(--border-1); border-radius: 6px;
     padding: 5px 7px; font-size: 12px; font-family: inherit; }
+  /* ---- 小操作按钮（打开交付物等）----
+     做得小是故意的：它是「顺手看一眼」，不该和主操作抢注意力。 */
+  .tiny-btn { font-size: 10.5px; padding: 1px 7px; border-radius: 5px;
+    cursor: pointer; font-family: inherit; flex: none;
+    background: transparent; color: var(--text-3); border: 1px solid var(--border-1); }
+  .tiny-btn:hover { background: var(--bg-overlay); color: var(--text-1); }
+  .tiny-btn:disabled { opacity: .5; cursor: default; }
   /* ---- 区块渲染失败提示 ----
      一块坏了只显示这一行，其余照常 —— 不能让整页白屏。
      用琥珀不用红：红是"出事了"，琥珀是"这块没能显示"。 */
@@ -1200,7 +1207,22 @@ function renderDeliverables(v, m) {
         row.append(el('span', { text: d.label }));
         row.append(el('span', { class: 'status st-' + status, text: status }));
         box2.append(row);
-        box2.append(el('div', { class: 'muted tiny', text: d.relPath + ' · sha256:' + String(d.digest).slice(0, 12) + '…' }));
+        const metaRow = el('div', { class: 'row' });
+        metaRow.append(el('span', { class: 'muted tiny',
+          text: d.relPath + ' · sha256:' + String(d.digest).slice(0, 12) + '…' }));
+        // 能打开才叫「可复核」。
+        // 校验只能证明「文件没变」，证明不了「它是不是你要的」——后者只能看一眼。
+        const openBtn = el('button', { class: 'tiny-btn', text: '打开' });
+        openBtn.addEventListener('click', async () => {
+          openBtn.disabled = true;
+          let rr;
+          try { rr = await api('openDeliverable', { relPath: d.relPath }); }
+          catch (e) { rr = { ok: false, reason: e.message }; }
+          openBtn.disabled = false;
+          if (!rr || !rr.ok) alert(explainFailure(rr || { code: 'UNKNOWN' }));
+        });
+        metaRow.append(openBtn);
+        box2.append(metaRow);
         if (res && res.status === 'modified') {
           box2.append(el('div', { class: 'tiny', text: '内容已变化（登记时 ' + String(res.expected).slice(0, 8) + '… → 现在 ' + String(res.actual).slice(0, 8) + '…）' }));
         }

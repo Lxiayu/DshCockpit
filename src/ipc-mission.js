@@ -91,6 +91,7 @@ const ACTIONS = Object.freeze([
   'interventionHistory',  // 只读：最近的干预记录（S6，闭集字段，无内容）
   'interveneMember',      // S6：对成员转达消息 / 中断（经 Lead，非直连）
   'observeIntervention',  // S6：观测干预是否生效（三态，无"已停止"）
+  'openDeliverable',      // S5：打开交付物文件（只接受工作区内相对路径）
   'rewriteTask',          // S6：改写 / 重分配团队任务（带 CAS，经 Lead）
   'saveContract',         // D3：保存派发合同（结构化任务书）
   'listGrants',           // D10：列出工作区授权记录
@@ -723,6 +724,7 @@ function registerMissionIpc(ipcMain, ctx) {
     ensureSession = null,   // (missionId) => Promise<{ok, sessionId}>
     promptSession = null,   // (sessionId, text) => Promise<{ok, reason?}>
     cancelSession = null,   // (sessionId) => Promise<{ok, reason?}>  停止执行（S6）
+    shellOpen = null,      // (absPath) => Promise<string|void>  打开文件（返回错误串）
     seqOfTurn = null,       // (sessionId, turn) => seq|null   变更清单的坐标（S5）
     changesSummaryOf = null, // (sessionId, seq) => Promise<{ok, value?}>  读变更清单（S5）
     log = () => {},
@@ -1313,6 +1315,74 @@ function registerMissionIpc(ipcMain, ctx) {
         audited: auditResult.ok === true,
         note: '已请 Lead 改写。任务板是否真的变了，以团队状态为准（过期 revision 会被拒绝）。',
       };
+    },
+
+    /**
+     * 打开一个交付物文件（S5 的最后一环）。
+     *
+     * 第一性原理：为什么"能打开"是"能信任"的前提
+     *
+     *   右栏一直在告诉用户"团队产出了 X 文件，sha256 是 abc…"。
+     *   但如果他打不开它，"可复核"就只是我们自说自话 ——
+     *   用户凭什么相信这个文件就是他要的那个？
+     *
+     *   verifyDeliverables 能证明"文件没变过"，却证明不了"它是不是你要的"。
+     *   后者只能靠人看一眼。所以必须能打开。
+     *
+     * 安全边界（AGENTS.md §2.4 + §6.9）：
+     *   · 只接受**工作区相对路径**（不接受绝对路径、不接受 ../ 逃逸）
+     *   · 解析后必须仍在工作区内（realpath 比较，防符号链接逃逸）
+     *   · 路径**不进入**任何返回值或事实链 —— 只是本次调用内部使用
+     */
+    async openDeliverable(payload) {
+      const r = requireStore();
+      if (!r.ok) return r;
+      const relPath = argString(payload && payload.relPath);
+      if (!relPath) return fail('relPath is required', 'DELIVERABLE_INVALID');
+
+      // 绝不接受绝对路径：右栏只该拿到相对路径
+      if (relPath.startsWith('/') || relPath.startsWith('~') || /^[a-zA-Z]:[\\/]/.test(relPath)) {
+        return fail('deliverable path must be workspace-relative', 'DELIVERABLE_INVALID');
+      }
+      // 拒绝任何形式的向上逃逸
+      const norm = path.normalize(relPath).replace(/\\/g, '/');
+      if (norm.startsWith('..') || norm.includes('/../')) {
+        return fail('deliverable path must stay inside the workspace', 'DELIVERABLE_INVALID');
+      }
+
+      if (typeof shellOpen !== 'function') {
+        return fail('this environment cannot open files', 'DESK_UNAVAILABLE');
+      }
+
+      let wsDir;
+      try { wsDir = workspaceDirOf(); } catch { wsDir = null; }
+      if (!wsDir) return fail('no workspace is open', 'WORKSPACE_UNAVAILABLE');
+
+      const abs = path.resolve(wsDir, norm);
+      // realpath 比较：符号链接可能指到工作区外
+      let realAbs = null;
+      let realWs = null;
+      try {
+        realAbs = fs.realpathSync(abs);
+        realWs = fs.realpathSync(wsDir);
+      } catch {
+        return fail('file does not exist (or cannot be resolved)', 'DELIVERABLE_NOT_FOUND');
+      }
+      if (realAbs !== realWs && !realAbs.startsWith(realWs + path.sep)) {
+        return fail('deliverable path must stay inside the workspace', 'DELIVERABLE_INVALID');
+      }
+
+      try {
+        const err = await shellOpen(realAbs);
+        // Electron 的 openPath 返回**错误字符串**（成功时为空串）
+        if (typeof err === 'string' && err.length > 0) {
+          return fail(`could not open the file: ${err}`, 'OPEN_FAILED');
+        }
+      } catch (e) {
+        return fail(`could not open the file: ${e.message}`, 'OPEN_FAILED');
+      }
+      // 刻意不返回路径：调用方已经知道它（就是它传进来的）
+      return { ok: true };
     },
 
     /**

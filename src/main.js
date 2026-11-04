@@ -3272,6 +3272,9 @@ function registerIpc() {
     // "没记到 seq" 与 "记到了但读不到清单"。
     seqOfTurn: (sessionId, turn) => seqForMissionSession(sessionId, turn),
     changesSummaryOf: (sessionId, seq) => readWorkspaceChanges(sessionId, seq),
+    // 打开交付物文件（S5）：右栏只传工作区相对路径，安全边界在 IPC 里做。
+    // 用系统默认程序打开是本意，所以注入 shell.openPath 而不是自己拼命令。
+    shellOpen: (absPath) => shell.openPath(absPath),
     // 「启动工作」的两个原语：这是把 Mission 从记录器变成发生器的关键
     ensureSession: () => missionEnsureSession(),
     promptSession: (sessionId, text) => missionPromptSession(sessionId, text),
