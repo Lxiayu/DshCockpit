@@ -41,7 +41,10 @@ const view = { mission, decisions: [], findings: [], assumptions: [], evidence: 
 const mocks = {
   list: { ok: true, missions: [{ ...mission, live: { available: true } }], activeCount: 1 },
   get: { ok: true, view, live: { available: true, hasRunningAgent: false, pendingApprovals: 0, pendingQuestions: 0, observedAtMs: now } },
-  attention: { ok: true, available: true, total: 0, items: [], rail: { header: { decisionCount: 0, reminderCount: 0, tone: 'calm' }, visible: { decisions: [], reminders: [] }, overflow: { decisions: 0 }, empty: { text: '团队运行正常，没有需要你处理的事。' } } },
+  attention: { ok: true, available: true, total: 2, items: [
+    { kind: 'approval', id: 'ap1', summary: '执行 shell：npm test', toolName: 'shell', risk: 'high', createdAtMs: now - 60000 },
+    { kind: 'question', id: 'q1', summary: '用哪个方案？', risk: 'medium', createdAtMs: now - 30000 },
+  ], rail: { header: { decisionCount: 2, reminderCount: 0, tone: 'blocked' }, visible: { decisions: [], reminders: [] }, overflow: { decisions: 0 }, empty: null } },
   sinceLastSeen: { ok: true, available: true, entries: [] },
   sessionProjections: { ok: true, available: true, agentTeam: { members: [{ id: 'm0', name: 'lead', role: 'lead', phase: 'active' }, { id: 'm1', name: 'coder', role: 'teammate', phase: 'active' }], tasks: [{ id: 't1', revision: 2, subject: '测试任务', status: 'in_progress', ready: true, blockedBy: [], ownerName: 'coder' }] } },
   getBoundSession: { ok: true, bound: true },
@@ -94,11 +97,21 @@ function check(name, cond, detail) {
     source: `window.__ipcCalls = []; window.__errs = [];
       window.addEventListener('unhandledrejection', (e) => window.__errs.push('REJ:' + String(e.reason && (e.reason.message || e.reason))));
       window.onerror = (m, s, l) => window.__errs.push('ERR:' + m + '@' + l);
-      window.dshShell = { mission: async (action, payload) => {
-        window.__ipcCalls.push({ action, payload });
-        const m = ${JSON.stringify(mocks)};
-        return m[action] ?? { ok: true };
-      } };`,
+      window.dshShell = {
+        mission: async (action, payload) => {
+          window.__ipcCalls.push({ action, payload });
+          const m = ${JSON.stringify(mocks)};
+          return m[action] ?? { ok: true };
+        },
+        // 审批/回答走**独立通道**（office:pending），不是 mission IPC。
+        // 早期探针只 mock 了 mission，于是审批按钮一点就抛
+        // "answerPending is not a function" —— 那是探针缺件，不是产品缺陷。
+        answerPending: async (payload) => {
+          window.__ipcCalls.push({ action: 'answerPending', payload });
+          return { ok: true };
+        },
+        showView: () => {},
+      };`,
   });
   await c.send('Page.navigate', { url: `file://${HTML}` });
   await sleep(1500);
@@ -156,6 +169,38 @@ function check(name, cond, detail) {
   // 11) 全程无 JS 错误
   const errs2 = await evalIn('JSON.stringify(window.__errs || [])');
   check('11. still no JS errors after interactions', errs2 === '[]', errs2);
+
+  // 12) 审批按钮（允许/拒绝）真的发 IPC —— 这是用户最高频的动作
+  const beforeApprove = await evalIn('(window.__ipcCalls||[]).length');
+  const approveClicked = await evalIn(`(() => {
+    const btns = [...document.querySelectorAll('.att-btn')];
+    const allow = btns.find(b => b.textContent === '允许');
+    if (!allow) return 'no allow button';
+    allow.click();
+    return 'clicked allow';
+  })()`);
+  await sleep(800);
+  // 用累计列表：answerPending 之后会触发 refresh()，slice 会把挤出窗口
+  const afterApprove = await evalIn('JSON.stringify((window.__ipcCalls||[]).map(c=>c.action))');
+  check('12. approval "allow" button calls IPC', String(approveClicked) === 'clicked allow' && afterApprove.includes('answerPending'),
+    String(approveClicked) + ' | ' + afterApprove);
+
+  // 13) 提问的回答按钮真的发 IPC
+  const answerClicked = await evalIn(`(() => {
+    const btns = [...document.querySelectorAll('.att-btn')];
+    const ans = btns.find(b => b.textContent === '回答' || b.textContent === '发送');
+    if (!ans) return 'no answer button';
+    ans.click();
+    return 'clicked ' + ans.textContent;
+  })()`);
+  await sleep(800);
+  const afterAnswer = await evalIn('JSON.stringify((window.__ipcCalls||[]).map(c=>c.action))');
+  check('13. question answer button calls IPC', String(answerClicked).startsWith('clicked') && afterAnswer.includes('answerPending'),
+    String(answerClicked));
+
+  // 14) 全程仍然无 JS 错误
+  const errs3 = await evalIn('JSON.stringify(window.__errs || [])');
+  check('14. still no JS errors after all interactions', errs3 === '[]', errs3);
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n=== ${results.length - failed.length}/${results.length} passed ===`);

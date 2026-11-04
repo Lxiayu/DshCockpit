@@ -827,9 +827,13 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
      点击抛 `ReferenceError`（按钮看着有，点了就崩）。
   2. 状态菜单的 `document` 监听器每次渲染都新增且永不清理，
      累积后点击处理器顺序不可预测。
-  验证 11 项：加载无错 / 初始数据 / 折叠区展开 / 派发面板五字段 /
+  验证 **14 项**：加载无错 / 初始数据 / 折叠区展开 / 派发面板五字段 /
   验收条件加行 / 状态菜单开关 / 状态项触发 IPC / 任务改写表单 /
-  表单提交触发 IPC / 成员转达表单 / 全程无 JS 错误。
+  表单提交触发 IPC / 成员转达表单 / 审批"允许"按钮 / 提问"回答"按钮 /
+  全程无 JS 错误。
+  **审批与回答走独立通道**（`window.dshShell.answerPending` → `office:pending`），
+  不是 mission IPC —— 探针早期只 mock 了 mission，于是审批一点就抛
+  "answerPending is not a function"。那是探针缺件，不是产品缺陷。
 - ✅ **切片 3 已落地（2026-11-04）**：折叠区（§6.2 第 6 块）。
   - 新增通用 `collapsibleSection({title, count, render, open})`：
     **懒渲染**（不点开不构造 DOM）+ **局部容错**（一块出错不让整页崩）。
