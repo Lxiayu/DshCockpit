@@ -818,6 +818,18 @@ OpenMuse 的 `leaseId` + `leaseUntil` + `LostLeaseError` 解决的是一个具�
   已加 `Array.isArray` 保护，并新增 `test/mission-desk-render-safety.test.js`
   做**源级门禁**，把 `writeScopeWarnings` / `blockedBy` / `writeScopes`
   三个可选数组字段的裸读全部挡掉。变异 DETECTED ×2。
+- ✅ **右栏交互探针（2026-11-04）**：`scripts/acceptance/desk-ui-interaction-probe.cjs`（11/11）。
+  **为什么需要它**：右栏有 50+ 个事件监听器，此前一个都没被自动化验证过。
+  截图能证明布局/配色/文案正确，但**渲染时不执行任何回调** ——
+  所以"按钮存在但点了抛错"这类缺陷，截图完全看不出来。
+  它抓到两个真实问题：
+  1. `renderTeamTasks` 没接 `m` 参数，任务行按钮回调引用 `m` →
+     点击抛 `ReferenceError`（按钮看着有，点了就崩）。
+  2. 状态菜单的 `document` 监听器每次渲染都新增且永不清理，
+     累积后点击处理器顺序不可预测。
+  验证 11 项：加载无错 / 初始数据 / 折叠区展开 / 派发面板五字段 /
+  验收条件加行 / 状态菜单开关 / 状态项触发 IPC / 任务改写表单 /
+  表单提交触发 IPC / 成员转达表单 / 全程无 JS 错误。
 - ✅ **切片 3 已落地（2026-11-04）**：折叠区（§6.2 第 6 块）。
   - 新增通用 `collapsibleSection({title, count, render, open})`：
     **懒渲染**（不点开不构造 DOM）+ **局部容错**（一块出错不让整页崩）。
