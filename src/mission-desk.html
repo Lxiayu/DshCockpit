@@ -4084,6 +4084,28 @@ function startProgressPoll() {
 }
 
 /** 单次轮询。抽出来是为了让 startProgressPoll 里的防重入逻辑保持简单。 */
+/**
+ * 待办内容签名：用于判断"是否需要重绘"。
+ *
+ * 为什么需要它而不是每次直接重绘：
+ *   轮询每 4 秒一次。直接重绘会**打断用户正在做的事**
+ *   （输入框失焦、刚点开的菜单合上、滚动位置跳动）。
+ *   只有内容真的变了才重绘，是"实时"与"不打扰"之间的平衡。
+ *
+ * 签名只取"对用户有意义"的部分：待办项的 id 与种类。
+ * 不用 JSON.stringify 整个对象 —— 时间戳之类的字段每轮都可能微小变化，
+ * 会导致每 4 秒重绘一次，反而更糟。
+ */
+function attentionSignature(a) {
+  if (!a || !a.ok) return 'none';
+  const items = Array.isArray(a.items) ? a.items : [];
+  const ids = items.map((x) => `${x.kind}:${x.id}`).sort().join(',');
+  const total = Number.isFinite(a.total) ? a.total : items.length;
+  // header 的 tone 也要算：阻塞与平静是两种不同的状态
+  const tone = a.rail && a.rail.header ? String(a.rail.header.tone || '') : '';
+  return `${total}|${tone}|${ids}`;
+}
+
 async function pollProgressOnce() {
   {
     // 页面隐藏 → 不刷
@@ -4119,6 +4141,35 @@ async function pollProgressOnce() {
       || prev.hasResponse !== ws.hasResponse;
 
     state.workStatus = ws;
+
+    // ---- 同时刷新"我要拍板什么"（2026-11-04 修）----
+    //
+    // 第一性原理：为什么这一路必须也在轮询里
+    //
+    //   右栏第一大问题是「我要拍板什么」。团队在后台跑着，随时可能
+    //   发起一个新的审批或提问 —— 那正是用户最需要**立刻**知道的事。
+    //
+    //   而实测发现（这就是本轮发现的缺陷）：attention 在整个会话里
+    //   只被调用**一次**（页面加载时）。之后无论团队发起什么，
+    //   界面都不会变 —— 用户必须手动刷新或点别的按钮才看得到。
+    //
+    //   后果很直接：审批卡在后台没人处理，团队一直等着，
+    //   而界面上写着"团队运行正常"。
+    //
+    //   所以这里每一轮都取一次 attention，且**只在内容真的变了时**重绘
+    //   （避免每 4 秒重建一次 DOM 抢走用户的点击/焦点）。
+    try {
+      const fresh = await api('attention');
+      if (state.selectedId === id && fresh && fresh.ok) {
+        const before = attentionSignature(state.attention);
+        const afterSig = attentionSignature(fresh);
+        if (before !== afterSig) {
+          state.attention = fresh;
+          const oldAtt = document.querySelector('.att');
+          if (oldAtt) oldAtt.replaceWith(renderAttention());
+        }
+      }
+    } catch { /* 待办取不到不该影响进度轮询 */ }
 
     if (changed) {
       progressIdleTicks = 0;
