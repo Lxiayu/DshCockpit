@@ -294,6 +294,49 @@ function check(name, cond, detail) {
   check('20. null input is guarded (task-book mode has no chat box)', hasNullGuard,
     hasNullGuard ? '' : 'input.value = \'\' without a guard throws in task-book mode');
 
+  // 21) 折叠状态必须跨刷新保留
+  //
+  // 用户展开「交付物」看内容 → 随手记一条决策（会触发 refresh）→
+  // 交付物自动合上，而他甚至不知道是谁合上的。
+  // 折叠状态是**用户的意图**，不是渲染产物，不该被刷新抹掉。
+  const persistCheck = await evalIn(`(async () => {
+    const heads = [...document.querySelectorAll('.coll-head')];
+    const target = heads.find(h => {
+      const body = h.nextElementSibling;
+      return body && body.style.display === 'none';
+    });
+    if (!target) return JSON.stringify({ skipped: 'no collapsed section' });
+    const title = target.querySelector('.coll-title').textContent;
+    target.click();
+    const openedNow = target.nextElementSibling.style.display;
+
+    // 用**真实**的刷新触发点：提交一条决策（它会 await refresh()）
+    const decisionBtn = [...document.querySelectorAll('button')]
+      .find(b => b.textContent === '记录决策');
+    let refreshed = false;
+    if (decisionBtn) {
+      const inputs = [...document.querySelectorAll('input')];
+      const txt = inputs.find(i => (i.placeholder || '').includes('决定了什么'));
+      const why = inputs.find(i => (i.placeholder || '').includes('为什么'));
+      if (txt && why) {
+        txt.value = 'e2e 测试决策';
+        why.value = 'e2e 测试理由';
+        decisionBtn.click();
+        refreshed = true;
+      }
+    }
+    await new Promise(r => setTimeout(r, 900));
+
+    const again = [...document.querySelectorAll('.coll-head')]
+      .find(h => h.querySelector('.coll-title').textContent === title);
+    const stillOpen = again ? again.nextElementSibling.style.display : 'gone';
+    return JSON.stringify({ title, openedNow, stillOpen, refreshed });
+  })()`);
+  const pc = JSON.parse(persistCheck);
+  check('21. collapse state survives a real refresh',
+    pc.skipped ? false : (pc.openedNow === 'block' && pc.stillOpen === 'block'),
+    String(persistCheck));
+
   const failed = results.filter((r) => !r.ok);
   console.log(`\n=== ${results.length - failed.length}/${results.length} passed ===`);
   if (failed.length) { console.log('FAILED:'); for (const f of failed) console.log('  - ' + f.name + (f.detail ? ': ' + f.detail : '')); }

@@ -744,6 +744,20 @@ function explainFailure(r) {
 }
 
 const state = {
+  // 折叠区的展开状态，按标题记住。
+  //
+  // 第一性原理：为什么折叠状态必须跨刷新保留
+  //
+  //   右栏刷新很频繁（任何表单提交都会触发）。如果折叠状态是纯局部的，
+  //   那么用户展开「交付物」查看内容 → 随手记一条决策 → 交付物**自动合上**。
+  //   他必须重新展开 —— 而他甚至不知道是谁合上的。
+  //
+  //   折叠状态是**用户的意图**（"我现在想看这个"），不是渲染产物。
+  //   用户的意图不该被刷新抹掉。
+  //
+  //   注意：这是**会话内**记忆，不落盘。理由是它属于"此刻的浏览状态"，
+  //   重启后从头开始是合理的。
+  collapsed: {},
   missions: [],
   selectedId: null,
   detail: null,
@@ -1298,12 +1312,20 @@ function renderDecisions(decisions, m) {
   formToggle.append(el('span', { class: 'coll-title', text: '记录一条决策' }));
   box.append(formToggle);
 
+  // 这个折叠用的是 'flex' 而非 block，所以它不能直接套 collapsibleSection。
+  // 但**状态记忆必须一致**（2026-11-04 由探针发现）：
+  //   用户展开"记录一条决策"→ 提交 → 刷新 → 表单又合上了。
+  //   与其它折叠区行为不一致，用户会觉得"这里坏了"。
+  const COLLAPSE_KEY = '决策表单';
+  const remembered = state.collapsed[COLLAPSE_KEY];
   const wrap = el('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:6px' });
-  wrap.style.display = decisions.length ? 'flex' : 'none';
+  wrap.style.display = (remembered === undefined ? decisions.length > 0 : remembered) ? 'flex' : 'none';
+  formToggle.querySelector('.coll-caret').textContent = wrap.style.display === 'none' ? '▸' : '▾';
   formToggle.addEventListener('click', () => {
     const open = wrap.style.display !== 'none';
     wrap.style.display = open ? 'none' : 'flex';
     formToggle.querySelector('.coll-caret').textContent = open ? '▸' : '▾';
+    state.collapsed[COLLAPSE_KEY] = !open;
   });
   const txt = el('input', { placeholder: '决定了什么…', style: 'flex:1;min-width:150px' });
   const why = el('input', { placeholder: '为什么（必填）…', style: 'flex:1;min-width:150px' });
@@ -2737,7 +2759,14 @@ function collapsibleSection({ title, count = null, render, open = false }) {
   const wrap = el('section', { class: 'coll' });
   const head = el('button', { class: 'coll-head' });
 
-  const caret = el('span', { class: 'coll-caret', text: open ? '▾' : '▸' });
+  // 用户上次的展开选择优先于默认值。
+  // state.collapsed[title] === true  → 展开
+  // state.collapsed[title] === false → 收起
+  // undefined                        → 用调用方给的默认值
+  const remember = state.collapsed[title];
+  const isOpen = remember === undefined ? open : remember;
+
+  const caret = el('span', { class: 'coll-caret', text: isOpen ? '▾' : '▸' });
   head.append(caret);
   head.append(el('span', { class: 'coll-title', text: title }));
   if (Number.isFinite(count) && count > 0) {
@@ -2748,7 +2777,8 @@ function collapsibleSection({ title, count = null, render, open = false }) {
   wrap.append(head);
 
   const body = el('div', { class: 'coll-body' });
-  body.style.display = open ? 'block' : 'none';
+  // 用 isOpen（用户的记忆优先），不是 open（调用方的默认值）
+  body.style.display = isOpen ? 'block' : 'none';
   wrap.append(body);
 
   let rendered = false;
@@ -2765,12 +2795,14 @@ function collapsibleSection({ title, count = null, render, open = false }) {
     }
   };
 
-  if (open) ensure();
+  if (isOpen) ensure();
   head.addEventListener('click', () => {
-    const isOpen = body.style.display !== 'none';
-    body.style.display = isOpen ? 'none' : 'block';
-    caret.textContent = isOpen ? '▸' : '▾';
-    if (!isOpen) ensure();
+    const nowOpen = body.style.display !== 'none';
+    body.style.display = nowOpen ? 'none' : 'block';
+    caret.textContent = nowOpen ? '▸' : '▾';
+    // 记住用户的选择，下次刷新（以及下次打开右栏）沿用
+    state.collapsed[title] = !nowOpen;
+    if (!nowOpen) ensure();
   });
   return wrap;
 }
