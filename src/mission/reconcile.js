@@ -122,9 +122,144 @@ function dispatchProgress({ contract, nowMs, dispatchedAtMs, timeoutMs = 120000 
   return (nowMs - start) > timeoutMs ? 'unconfirmed' : 'dispatching';
 }
 
+// ---------------------------------------------------------------------------
+// 团队侧对账（S3 中**不依赖架构切换**的那部分）
+//
+// 第一性原理：为什么需要它，尽管两侧各自都"有数据"
+//
+//   合同说"要做 A、B、C 三条验收"，团队任务板上可能只有 1 条任务。
+//   两边都不报错 —— 但合起来意味着**团队只承诺了一件、漏了两件**。
+//   用户看到的是一支"在忙"的团队，而没人告诉他承诺与执行对不上。
+//
+//   所以这里做的是**把两个事实源摆在一起**，只陈述差异，不判定对错：
+//     · 合同有 3 条验收，任务板只有 1 条 → 陈述"2 条验收没有对应任务"
+//     · 任务板有任务但合同没验收        → 陈述"有 1 个任务不在合同里"
+//
+//   为什么只陈述不判定：验收条件是否"已覆盖"需要语义理解，
+//   而我们能做的是**字面可核对的匹配**。假装能判定对错会误导用户。
+//   （这也是 receipt.js 里"verified 是人的判断"的同一条原则。）
+// ---------------------------------------------------------------------------
+
+/** 验收条件与任务的匹配强度。 */
+const COVERAGE = Object.freeze([
+  'covered',    // 任务的 subject/description 里能找到这条验收的文本片段
+  'missing',    // 找不到
+]);
+
+/** 把文本归一化用于字面匹配：去空白、小写。 */
+function normText(s) {
+  return typeof s === 'string' ? s.replace(/\s+/g, '').toLowerCase() : '';
+}
+
+/**
+ * 判断一条验收条件是否被某个任务"字面覆盖"。
+ *
+ * 判据刻意保守：验收文本（归一化后）必须作为子串出现在任务的
+ * subject 或 description 里。不用模糊匹配 —— 模糊匹配会产生
+ * "看起来覆盖了"的假阳性，那比漏报更糟（用户会以为有保护）。
+ */
+function acceptanceCoveredByTask(acceptanceText, task) {
+  if (!task || typeof task !== 'object') return false;
+  const needle = normText(acceptanceText);
+  if (!needle) return false;
+  const hay = normText(task.subject) + '|' + normText(task.description);
+  return hay.includes(needle);
+}
+
+/**
+ * 合同与团队任务板对账。
+ *
+ * @param {object} input
+ * @param {object|null} input.contract  Mission 合同
+ * @param {object|null} input.team      agentTeam 投影
+ * @returns {{
+ *   available:boolean,
+ *   reason?:string,
+ *   acceptance:{total:number, covered:number, missing:Array<{text:string}>},
+ *   orphanTasks:Array<{id:string, subject:string, status:string}>,
+ *   taskCount:number,
+ *   memberCount:number|null
+ * }}
+ */
+function reconcileTeam({ contract, team } = {}) {
+  const empty = {
+    available: false,
+    acceptance: { total: 0, covered: 0, missing: [] },
+    orphanTasks: [],
+    taskCount: 0,
+    memberCount: null,
+  };
+
+  // 读不到团队投影 ≠ 没有团队。两者的区别必须保留 ——
+  // 把"读不到"说成"没有任务"会让用户以为团队什么都没做。
+  if (!team || typeof team !== 'object') {
+    return { ...empty, reason: '读不到团队投影（不是"没有任务"）' };
+  }
+  const tasks = (Array.isArray(team.tasks) ? team.tasks : [])
+    .filter((x) => x && typeof x === 'object' && x.status !== 'deleted');
+  const members = Array.isArray(team.members) ? team.members : [];
+  const memberCount = members.length;
+
+  const acceptances = contract && Array.isArray(contract.acceptance)
+    ? contract.acceptance.filter((a) => a && typeof a.text === 'string' && a.text.trim())
+    : [];
+
+  // 每条验收：找一个覆盖它的任务（找到即止）
+  const coveredTaskIds = new Set();
+  const missing = [];
+  let covered = 0;
+  for (const a of acceptances) {
+    const hit = tasks.find((t2) => acceptanceCoveredByTask(a.text, t2));
+    if (hit) {
+      covered += 1;
+      coveredTaskIds.add(hit.id);
+    } else {
+      missing.push({ text: a.text });
+    }
+  }
+
+  // 不在任何验收覆盖范围内的任务：不判定它"多余"，
+  // 只是陈述"它不在合同的验收里"——可能是探索性工作，也可能是跑偏了。
+  const orphanTasks = tasks
+    .filter((t3) => t3.id && !coveredTaskIds.has(t3.id))
+    .map((t4) => ({ id: t4.id, subject: t4.subject || '', status: t4.status || '' }));
+
+  return {
+    available: true,
+    acceptance: { total: acceptances.length, covered, missing },
+    orphanTasks,
+    taskCount: tasks.length,
+    memberCount,
+  };
+}
+
+/**
+ * 把对账结果变成一句人话。**不允许把 missing 说成"已完成"。**
+ *
+ * @param {object} r reconcileTeam 的结果
+ * @returns {string}
+ */
+function describeTeamReconcile(r) {
+  if (!r || !r.available) return (r && r.reason) || '无法对账';
+  const { total, covered, missing } = r.acceptance;
+  if (total === 0) {
+    return `合同还没有验收条件，团队任务板上有 ${r.taskCount} 个任务。`;
+  }
+  if (missing.length === 0) {
+    return `合同的 ${total} 条验收都能在任务板上找到对应任务。`;
+  }
+  return `合同的 ${total} 条验收里，${covered} 条能在任务板上找到，`
+    + `${missing.length} 条没有对应任务（不是"已完成"）。`;
+}
+
 module.exports = {
   INTERRUPTED_CONTRACT_STATES,
   reconcileContract,
   reconcileMissionView,
   dispatchProgress,
+  COVERAGE,
+  normText,
+  acceptanceCoveredByTask,
+  reconcileTeam,
+  describeTeamReconcile,
 };

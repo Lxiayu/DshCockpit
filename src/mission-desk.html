@@ -321,6 +321,25 @@
   .team-task-subject { font-size: 12.5px; color: var(--text-1); line-height: 1.5;
     overflow-wrap: anywhere; }
   .team-task-meta { font-size: 10.5px; color: var(--text-3); margin-top: 3px; padding-left: 2px; }
+  /* ---- 承诺与实际（对账）----
+     这一块的语气必须中性：它陈述差异，不指控团队。
+     所以不用红色，用琥珀 —— 红是"出事了"，琥珀是"值得你看一眼"。 */
+  .rec { display: block; margin-top: 10px; padding: 9px 11px; border-radius: 9px;
+    background: var(--att-warn-bg); border: 1px solid var(--att-warn-fg); }
+  .rec-head { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+  .rec-head span:first-child { flex: 1; font-size: 11.5px; font-weight: 600;
+    color: var(--att-warn-fg); }
+  .rec-count { font-size: 10px; font-weight: 600; padding: 0 6px; border-radius: 999px;
+    background: var(--att-idle-bg); color: var(--att-idle-fg); }
+  .rec-count-warn { background: var(--att-warn-bg); color: var(--att-warn-fg); }
+  .rec-row { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; }
+  .rec-mark { flex: none; font-size: 9px; color: var(--text-3); }
+  .rec-text { flex: 1; font-size: 11.5px; color: var(--text-1);
+    overflow-wrap: anywhere; }
+  .rec-tag { flex: none; font-size: 10px; color: var(--text-3); }
+  .rec-sub { font-size: 10.5px; color: var(--text-3); margin-top: 6px; }
+  .rec-warn { font-size: 10.5px; color: var(--att-warn-fg); margin-top: 8px;
+    line-height: 1.5; }
   /* ---- 派发面板（D3 结构化任务书）----
      与 .mhead 同样的坑：站内通用规则会让容器变成 flex，
      显式写 block 才能让标签在输入框上方而不是压在一起。 */
@@ -2686,6 +2705,61 @@ function openTaskRewrite(m, task, kind) {
   if (subjectInput) subjectInput.focus(); else if (ownerInput) ownerInput.focus();
 }
 
+/**
+ * 合同 ↔ 团队任务板对账（S3 中不依赖架构切换的部分）。
+ *
+ * 第一性原理：为什么只陈述差异、不判定对错
+ *
+ *   验收条件是否"已被覆盖"需要语义理解，而底层只能做**字面匹配**。
+ *   假装能判定对错会误导用户 —— 他可能因此停止检查一件其实没做的事。
+ *
+ *   所以文案一律是"X 条没有对应任务"，而不是"X 条没做"。
+ */
+function renderTeamReconcile() {
+  const ws = state.workStatus;
+  const r = ws && ws.teamReconcile;
+  if (!r) return null;
+  // 读不到投影：明说是读不到，不是"没有任务"
+  if (!r.available) {
+    if (!r.reason) return null;
+    const warn = el('div', { class: 'rec-warn', text: '无法核对承诺与实际：' + r.reason });
+    return warn;
+  }
+  // 合同没有验收条件时，这块没有对比基准，不显示（噪音）
+  if (!r.acceptance || r.acceptance.total === 0) return null;
+
+  const box = el('section', { class: 'rec' });
+  const head = el('div', { class: 'rec-head' });
+  head.append(el('span', { text: '承诺与实际' }));
+  const okCount = r.acceptance.covered;
+  const totalCount = r.acceptance.total;
+  head.append(el('span', {
+    class: 'rec-count' + (r.acceptance.missing.length ? ' rec-count-warn' : ''),
+    text: `${okCount}/${totalCount}`,
+  }));
+  box.append(head);
+
+  for (const a of r.acceptance.missing) {
+    const row = el('div', { class: 'rec-row rec-row-missing' });
+    row.append(el('span', { class: 'rec-mark', text: '○' }));
+    row.append(el('span', { class: 'rec-text', text: a.text }));
+    row.append(el('span', { class: 'rec-tag', text: '无对应任务' }));
+    box.append(row);
+  }
+
+  if (r.orphanTasks && r.orphanTasks.length > 0) {
+    box.append(el('div', { class: 'rec-sub', text: '不在合同验收里的任务' }));
+    for (const t2 of r.orphanTasks.slice(0, 5)) {
+      const row = el('div', { class: 'rec-row' });
+      row.append(el('span', { class: 'rec-mark', text: '·' }));
+      row.append(el('span', { class: 'rec-text', text: t2.subject || t2.id }));
+      row.append(el('span', { class: 'rec-tag', text: TASK_STATUS_LABEL[t2.status] || t2.status }));
+      box.append(row);
+    }
+  }
+  return box;
+}
+
 function renderDetail() {
   const box = $('detail');
   box.textContent = '';
@@ -2744,6 +2818,16 @@ function renderDetail() {
   // --- 团队任务（只有启用 team 投影时才显示）---
   const teamBlock = renderTeamTasks();
   if (teamBlock) box.append(teamBlock);
+
+  // --- 合同 ↔ 任务板对账（只有两边都有数据时才有意义）---
+  //
+  // 第一性原理：这一块回答的是"团队做的事，和你要它做的事，对得上吗"。
+  //
+  //   上面那块说"团队有 3 个任务在跑"，听起来很努力。
+  //   但如果合同要求 3 条验收、任务板只有 1 条对应 ——
+  //   团队在忙，只是忙的不是你要的东西。而这个差异**没有任何一处会告诉你**。
+  const recBlock = renderTeamReconcile();
+  if (recBlock) box.append(recBlock);
 
 
   // --- 实时（Harness 的事实）---

@@ -2156,6 +2156,32 @@ function registerMissionIpc(ipcMain, ctx) {
         //   ① seqOfTurn  —— 官方 workspace/changes 事件的 seq（事件流已记录）
         //   ② changesSummaryOf —— 按 seq 读那份变更清单
         // 两步任何一步失败都如实降级，**不猜**（读不到 ≠ 没变更）。
+        // 合同 ↔ 团队任务板对账：只陈述差异，不判定对错。
+        // 放在 workStatus 里因为这是用户"看执行到哪了"时最自然的位置 ——
+        // 他会同时看到"团队有多少任务"和"承诺了几条验收、几条有对应任务"。
+        teamReconcile: (() => {
+          try {
+            const mission = (r.store.missionView(missionId) || {}).mission || null;
+            // 复用 workStatus 已经读到的那份投影（不再多调一次运行时）
+            const team = normalizeAgentTeam(values.agentTeam);
+            const out = reconcileModule.reconcileTeam({
+              contract: mission && mission.contract ? mission.contract : null,
+              team,
+            });
+            return {
+              available: out.available,
+              reason: out.reason || null,
+              acceptance: out.acceptance,
+              orphanTasks: out.orphanTasks,
+              taskCount: out.taskCount,
+              memberCount: out.memberCount,
+              description: reconcileModule.describeTeamReconcile(out),
+            };
+          } catch (err) {
+            // 对账失败不该让 workStatus 失败：它是附加信息，不是核心事实
+            return { available: false, reason: `对账失败：${err.message}` };
+          }
+        })(),
         receipt: await (async () => {
           const built = await buildReceiptFor({
             bound, lastTurn, lastResponse,
