@@ -266,13 +266,35 @@ function renderDispatchInstruction({ mission, task, dispatchKey } = {}) {
   // 2) 任务书主体
   lines.push('【Mission】' + (m.title || m.missionId || '(未命名)'));
   if (m.intent) lines.push('目标：' + m.intent);
-  const constraints = Array.isArray(m.constraints) ? m.constraints.filter((c) => c && c.text) : [];
+
+  const contract = m.contract && typeof m.contract === 'object' ? m.contract : null;
+
+  // 约束有两个来源：Mission 顶层的 `constraints`，和派发面板合同里的
+  // `contract.constraints`。
+  //
+  // ⚠️ 早期只读顶层那一个 —— 于是用户在面板里填的约束**被静默丢弃**
+  //    （2026-11-04 端到端验证发现：合同里有"不改官方代码"，指令里没有）。
+  //    这属于"用户填了、系统没记"，比报错更糟：他以为约束已生效。
+  //
+  //    现在合并两处，并按文本去重（同一句写在两边不该出现两次）。
+  const rawConstraints = [
+    ...(Array.isArray(m.constraints) ? m.constraints : []),
+    ...(contract && Array.isArray(contract.constraints) ? contract.constraints : []),
+  ];
+  const seenText = new Set();
+  const constraints = [];
+  for (const c of rawConstraints) {
+    if (!c || typeof c.text !== 'string') continue;
+    const text = c.text.trim();
+    if (!text || seenText.has(text)) continue;
+    seenText.add(text);
+    constraints.push({ text });
+  }
   for (const c of constraints) lines.push('约束：' + c.text);
 
   // 3) 合同：验收条件逐条列出，并明确要求 Agent 把它们落到任务板上。
   //    为什么逐条列而不是概括：Agent 只有「看见」某条验收才能为它负责；
   //    概括成"按合同验收"等于什么都没说。
-  const contract = m.contract && typeof m.contract === 'object' ? m.contract : null;
   if (contract && Array.isArray(contract.acceptance) && contract.acceptance.length > 0) {
     lines.push('');
     lines.push('【验收条件】以下每一条都必须被验证，未通过不算完成：');

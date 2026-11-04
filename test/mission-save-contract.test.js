@@ -194,3 +194,80 @@ test('contract: a missing mission fails clearly', async () => {
     assert.equal(r.code, 'MISSION_NOT_FOUND');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------
+// 端到端：合同里的约束必须真的进入派发指令
+// ---------------------------------------------------------------------------
+//
+// 第一性原理：这是本轮抓到的一个真实缺陷
+//
+//   renderDispatchInstruction 早期只读 Mission 顶层的 m.constraints，
+//   **不读合同里的 contract.constraints**。
+//   于是用户在派发面板里填的约束被静默丢弃 ——
+//   他以为"不改官方代码"这条已经生效，实际指令里根本没有。
+//
+//   这比报错更糟：没有报错，他能做的只有事后发现团队改了不该改的东西。
+
+test('e2e: a constraint typed in the dispatch panel reaches the instruction', async () => {
+  const { registerMissionIpc: reg } = require('../src/ipc-mission.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-constraint-'));
+  const handlers = new Map();
+  const prompts = [];
+  reg(
+    { handle: (c, f) => handlers.set(c, f), removeHandler: () => {} },
+    {
+      workspaceDirOf: () => dir, clock: () => 5000, log: () => {},
+      snapshotOf: () => null,
+      ensureSession: async () => ({ ok: true, sessionId: 'session-x' }),
+      promptSession: async (sid, text) => { prompts.push(text); return { ok: true }; },
+    },
+  );
+  const invoke = handlers.get('mission:invoke');
+  try {
+    const created = await invoke(null, 'create', { title: 't', intent: 'i' });
+    const mid = created.missionId;
+    await invoke(null, 'saveContract', {
+      missionId: mid,
+      contract: {
+        acceptance: [{ id: 'a1', text: '通过', kind: 'command', command: 'npm test' }],
+        constraints: [{ text: '不改动官方 Harness 代码' }],
+      },
+    });
+    await invoke(null, 'startWork', { missionId: mid, task: '做' });
+    assert.equal(prompts.length, 1);
+    assert.match(prompts[0], /约束：不改动官方 Harness 代码/,
+      'a constraint entered in the panel must appear in the dispatch instruction');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('e2e: the same constraint written twice appears only once', async () => {
+  // 顶层与合同两处写同一句时，不该在指令里出现两次（那会让 Agent 以为是两条要求）。
+  const { registerMissionIpc: reg } = require('../src/ipc-mission.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-constraint2-'));
+  const handlers = new Map();
+  const prompts = [];
+  reg(
+    { handle: (c, f) => handlers.set(c, f), removeHandler: () => {} },
+    {
+      workspaceDirOf: () => dir, clock: () => 5000, log: () => {},
+      snapshotOf: () => null,
+      ensureSession: async () => ({ ok: true, sessionId: 'session-x' }),
+      promptSession: async (sid, text) => { prompts.push(text); return { ok: true }; },
+    },
+  );
+  const invoke = handlers.get('mission:invoke');
+  try {
+    const created = await invoke(null, 'create', { title: 't', intent: 'i' });
+    const mid = created.missionId;
+    await invoke(null, 'saveContract', {
+      missionId: mid,
+      contract: {
+        acceptance: [{ id: 'a1', text: '通过', kind: 'command', command: 'npm test' }],
+        constraints: [{ text: '不改官方代码' }],
+      },
+    });
+    await invoke(null, 'startWork', { missionId: mid, task: '做' });
+    const occurrences = (prompts[0].match(/约束：不改官方代码/g) || []).length;
+    assert.equal(occurrences, 1, 'duplicate constraint text must be de-duplicated');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

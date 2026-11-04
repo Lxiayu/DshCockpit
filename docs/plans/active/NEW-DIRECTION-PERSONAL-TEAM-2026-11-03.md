@@ -437,7 +437,13 @@ ADR-0002 规定 R0–R5 六阶段，**R0–R3 未完成前不得删除 `src/team
   - projection 里一个真实 bug：`if (!v.ok) break;` —— `validateContract` 返回
     错误**数组**，数组上 `.ok` 是 undefined，`!undefined` 为真 → **永远 break**，
     合同一条都存不进去。这是本项目反复出现的静默失效模式，已修。
-  测试 10 条，变异 DETECTED ×2。
+  测试 12 条，变异 DETECTED ×3。
+  - ✅ **端到端验证时发现并修一个静默丢弃**（2026-11-04）：
+    `renderDispatchInstruction` 早期**只读 Mission 顶层的 `m.constraints`**，
+    不读合同里的 `contract.constraints` —— 用户在派发面板里填的约束
+    **被静默丢弃**。他以为"不改官方代码"已生效，实际指令里没有。
+    已合并两处来源并按文本去重（同一句写在两边不该出现两次）。
+  - 端到端链路已实测：面板保存合同 → startWork → 指令含验收条件 + 约束。
 - ✅ **Grant 核心模型与持久化（2026-11-04 完成）**：`src/mission/grant.js`
   + `test/mission-grant.test.js`（15 条）+ `test/mission-grant-store.test.js`（8 条）。
   - **规则全部按 §5.1 实现**：只有 `user` 可授予；access 只有 `read|write`
