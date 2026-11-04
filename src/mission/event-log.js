@@ -23,6 +23,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { ensureSelfIgnore } = require('./workspace-dir');
 
 /** 归档阈值。超过后由 store.js 触发 compaction（本模块只提供判断）。 */
 const MAX_BYTES = 20 * 1024 * 1024;   // 20MB
@@ -136,6 +137,12 @@ function appendEvents(file, events) {
   if (list.length === 0) return { appended: 0, bytes: 0 };
 
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  // 顺手让 .dsh/ 在自己的 .gitignore 里自我忽略 —— 否则用户的 git status
+  // 会看到一堆我们写入的未跟踪文件（详见 workspace-dir.js 的第一性原理）。
+  // 从 file 路径反推 .dsh 根，而不是依赖外层作用域的 workspaceDir ——
+  // appendEvents 是独立函数，拿不到那个变量（第一版就是这么错的：
+  // path.join(undefined, '.dsh') 抛错后被 catch 吞掉，.gitignore 一直没写出来）。
+  ensureSelfIgnore(path.dirname(path.dirname(file)));
   // 每条事件一行；用 \n 连接并补末尾换行，保证下次追加时不会粘到上一行
   const payload = `${list.map(encodeEvent).join('\n')}\n`;
   fs.appendFileSync(file, payload, { encoding: 'utf8' });

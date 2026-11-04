@@ -245,6 +245,7 @@ function loadGrants(workspaceDir) {
 function saveGrants(workspaceDir, grants, { log = () => {} } = {}) {
   const fs = require('node:fs');
   const path = require('node:path');
+const { ensureSelfIgnore } = require('./workspace-dir');
   if (typeof workspaceDir !== 'string' || !workspaceDir) return { ok: false, reason: 'no workspace dir' };
   if (!Array.isArray(grants)) return { ok: false, reason: 'grants must be an array' };
   if (grants.length > MAX_GRANTS) {
@@ -257,6 +258,9 @@ function saveGrants(workspaceDir, grants, { log = () => {} } = {}) {
   try {
     const file = grantsFilePath(workspaceDir);
     fs.mkdirSync(path.dirname(file), { recursive: true });
+    // 顺手让 .dsh/ 在自己的 .gitignore 里自我忽略 —— 否则用户的 git status
+    // 会看到一堆我们写入的未跟踪文件（详见 workspace-dir.js 的第一性原理）。
+    ensureSelfIgnore(path.join(workspaceDir, '.dsh'));
     // 先写临时文件再改名：避免写到一半崩溃导致整张表损坏。
     const tmp = `${file}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify({ version: 1, grants }, null, 2), 'utf8');

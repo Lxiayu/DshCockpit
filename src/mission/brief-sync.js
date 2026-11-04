@@ -36,6 +36,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { ensureSelfIgnore } = require('./workspace-dir');
 
 const BEGIN_MARK = '<!-- dsh-cockpit:mission-brief:begin -->';
 const END_MARK = '<!-- dsh-cockpit:mission-brief:end -->';
@@ -229,6 +230,9 @@ function syncToWorkspace({ workspaceDir, briefText, meta = {} }) {
   try {
     const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
     fs.mkdirSync(path.dirname(file), { recursive: true });
+    // 顺手让 .dsh/ 在自己的 .gitignore 里自我忽略 —— 否则用户的 git status
+    // 会看到一堆我们写入的未跟踪文件（详见 workspace-dir.js 的第一性原理）。
+    ensureSelfIgnore(path.join(workspaceDir, '.dsh'));
     fs.writeFileSync(tmp, merged.content, 'utf8');
     fs.renameSync(tmp, file);
   } catch (err) {

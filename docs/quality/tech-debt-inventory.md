@@ -33,7 +33,7 @@
 | TD-11 | 原子写代码在 15 个文件里各写一遍，质量参差（3 处固定 `.tmp` 会并发互踩） | 重复 | P1 | ✅ 是 |
 | TD-12 | safeStorage 加密仓 3 套重复实现（KeyVault / TokenStore / ChannelSecrets） | 重复 | P2 | ⬜ 否 |
 | TD-13 | 两套互不重叠的 i18n 字典（`i18n.js` 638 keys + `workbench/i18n.js` 1008 keys） | 重复 | P2 | ⬜ 否 |
-| TD-14 | `.dsh/` 不写 `.gitignore`，污染用户工作区仓库 | 数据 | P1 | ✅ 是 |
+| TD-14 | ~~`.dsh/` 不写 `.gitignore`，污染用户工作区仓库~~ | 数据 | — | ✅ **已修 2026-11-04**（`src/mission/workspace-dir.js`） |
 | TD-15 | ~~`src/work` 单活动项约束与 Mission 多并行语义对立~~ | 架构 | — | ⬜ 否（2026-11-01 复核：**已不成立**，两者是不同层级并发） |
 | TD-16 | `work-controller.templateId` 是死字段：main.js 从不传入，无模板注册表 | 假接口 | P1 | ✅ 是 |
 | TD-17 | `workStatusPayload()` 无异常保护，索引损坏会导致工作台空白且无错误出口 | 健壮性 | P1 | ✅ 是 |

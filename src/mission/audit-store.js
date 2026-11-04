@@ -23,6 +23,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { ensureSelfIgnore } = require('./workspace-dir');
 
 /**
  * 审计记录的格式版本。
@@ -153,6 +154,9 @@ function appendAudit(workspaceDir, entry, { log = () => {}, maxBytes } = {}) {
   try {
     const file = auditFilePath(workspaceDir);
     fs.mkdirSync(path.dirname(file), { recursive: true });
+    // 顺手让 .dsh/ 在自己的 .gitignore 里自我忽略 —— 否则用户的 git status
+    // 会看到一堆我们写入的未跟踪文件（详见 workspace-dir.js 的第一性原理）。
+    ensureSelfIgnore(path.join(workspaceDir, '.dsh'));
     // 写入前先检查要不要轮转（按字节，O(1)）
     rotateIfNeeded(file, { log, maxBytes });
     fs.appendFileSync(file, `${JSON.stringify(projected)}\n`, 'utf8');
