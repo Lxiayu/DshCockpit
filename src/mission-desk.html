@@ -1181,10 +1181,17 @@ function renderTaskRefs(v, m) {
           r = await api('linkTaskRef', {
             missionId: m.missionId,
             workstreamId,
-            // 这里本来该由 Harness 提供真实 sessionId；离线/无 runtime 时
-            // 用一个明确的占位值，并让用户在摘要里写清楚。
-            // 绝不伪造一个"看起来像真的" sessionId —— 那会让人以为能反查。
-            sessionId: state.linkSessionId || 'manual-link',
+            // 手工登记的执行**没有**真实 sessionId 可填。
+            //
+            // ⚠️ 原来这里写的是 `state.linkSessionId || 'manual-link'` ——
+            //   而 state.linkSessionId 从未被赋值过（永远 undefined）。
+            //   结果：读代码的人会以为"有个字段还没接上"，
+            //   于是去找它、去猜它该怎么填，浪费判断力。
+            //
+            //   现在直接写常量并说清楚：这就是**手工登记**的标记，
+            //   不是"本该有 id 但没拿到"。
+            //   绝不伪造一个"看起来像真的" sessionId —— 那会让人以为能反查。
+            sessionId: 'manual-link',
             summary: summary.value.trim(),
           });
         } catch (e) { r = { ok: false, reason: e.message }; }
