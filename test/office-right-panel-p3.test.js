@@ -457,8 +457,17 @@ test('office.html carries the P3 inbox actions and the danger modal', () => {
   // input blocking while the modal is open (spec §5 / cross-tool memo)
   assert.ok(html.includes('setPanelActionsBlocked(true)'), 'opening the modal blocks the panel action surface');
   assert.ok(html.includes('setPanelActionsBlocked(false)'), 'closing the modal unblocks it');
-  assert.ok(html.includes("for (const id of ['btn-dispatch', 'btn-cancel', 'btn-interrupt'])"),
-    '追加任务/请求取消/请求中断 are the blocked surface');
+  // 断言的是**意图**：这三个按钮属于被阻塞的动作面。
+  // 不钉死"用一个 for 循环统一设 disabled" —— 那样做会把
+  // "未绑定会话 / 能力不可用"这些本来就该禁用的情形一并覆盖掉。
+  // 现在可用性统一由 applyActionAvailability() 算（它同时考虑 blocked 与 capability），
+  // 所以这里改为：三个按钮都被那处统一逻辑覆盖，且都会因 blocked 而禁用。
+  const availabilityFn = html.slice(html.indexOf('function applyActionAvailability()'));
+  const fnBody = availabilityFn.slice(0, availabilityFn.indexOf('\n      }') + 8);
+  for (const id of ['btn-dispatch', 'btn-cancel', 'btn-interrupt']) {
+    assert.ok(fnBody.includes(id), `${id} must be part of the blocked surface`);
+  }
+  assert.ok(fnBody.includes('blocked'), 'and the blocked flag must feed into it');
   assert.ok(html.includes("disabled = state === 'sending' || !!pendingModalItem"),
     'other cards cannot be answered while the modal is open');
   // approvals never time out: Escape closes the modal without answering
