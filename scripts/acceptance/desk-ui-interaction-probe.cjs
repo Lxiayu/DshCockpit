@@ -240,6 +240,30 @@ function check(name, cond, detail) {
   check('15b. empty-state source does not say "left side"',
     idx !== -1 && badCopy.length === 0, JSON.stringify({ found: idx !== -1, badCopy }));
 
+  // 16) 没有授权时，派发面板必须**就地**提供授权入口
+  //
+  // 这条守的是新用户会卡住的地方：早期文案写"先在下方「授权目录」里授权一个目录"，
+  // 而那个折叠区在页面很下面（要滚过进展、团队、一堆折叠区）。
+  // 用户此刻正在派发面板里，而指引把他送到一个要找很久的地方。
+  // 正确做法：**"去哪里做"变成"就在这里做"**。
+  // 本探针的 listGrants mock 返回了 1 条有效 Grant，所以看不到这个分支；
+  // 这里直接查源码，确认兜底分支存在且指向就地授权。
+  const fs2 = require('node:fs');
+  const src2 = fs2.readFileSync(path.join(REPO, 'src', 'mission-desk.html'), 'utf8');
+  const grantBlockStart = src2.indexOf('const refreshGrantOptions');
+  const grantBlock = grantBlockStart === -1 ? '' : src2.slice(grantBlockStart, grantBlockStart + 2000);
+  const hasInline = grantBlock.includes('buildInlineGrant()');
+  const saysInPlace = grantBlock.includes('可以直接在这里授权');
+  const hasOldBadHint = grantBlock.includes('先在下方「授权目录」');
+  check('16. no-grant case offers an IN-PLACE authorization form',
+    hasInline && saysInPlace && !hasOldBadHint,
+    JSON.stringify({ hasInline, saysInPlace, hasOldBadHint }));
+
+  // 17) 就地授权的表单真的会调 createGrant
+  const grantFormBlock = src2.indexOf('const buildInlineGrant');
+  const gf = grantFormBlock === -1 ? '' : src2.slice(grantFormBlock, grantFormBlock + 1500);
+  check('17. the inline grant form calls createGrant', gf.includes("api('createGrant'"), '');
+
   const failed = results.filter((r) => !r.ok);
   console.log(`\n=== ${results.length - failed.length}/${results.length} passed ===`);
   if (failed.length) { console.log('FAILED:'); for (const f of failed) console.log('  - ' + f.name + (f.detail ? ': ' + f.detail : '')); }

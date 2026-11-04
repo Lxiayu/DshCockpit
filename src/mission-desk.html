@@ -1837,21 +1837,79 @@ function renderDispatchPanel(m) {
 
   // 加载有效 Grant 列表：**没有 Grant 就不让派发**。
   // 这不是障碍，是诚实 —— 派发到一个未授权目录，团队要么失败要么在错误地方写。
-  (async () => {
+  //
+  // ⚠️ 关键修正（2026-11-04，走新用户路径时发现）：
+  //   早期这里写"先在下方「授权目录」里授权一个目录" —— 但那个折叠区在页面
+  //   很下面（要滚过进展、团队、一堆折叠区）。用户此刻正在派发面板里，
+  //   而指引把他送到一个要找很久的地方。**新用户会在这里卡住。**
+  //
+  //   现在：没有授权时，**就地在面板内提供授权入口**。
+  //   "去哪里做"变成"就在这里做"。
+  const inlineGrant = el('div', { class: 'dp-inline-grant' });
+  inlineGrant.style.display = 'none';
+  grantWrap.append(inlineGrant);
+
+  const refreshGrantOptions = async () => {
     let r;
     try { r = await api('listGrants'); } catch (e) { r = { ok: false, reason: e.message }; }
     const active = (r && r.ok ? r.grants : []).filter((g) => g.active);
+    grantSel.textContent = '';
     if (active.length === 0) {
-      grantMsg.textContent = '还没有有效授权。先在下方「授权目录」里授权一个目录。';
+      const o = el('option', { value: '', text: '（还没有可用授权）' });
+      grantSel.append(o);
+      grantMsg.textContent = '派发前需要先授权一个目录。可以直接在这里授权：';
       grantMsg.classList.add('dp-warn');
+      buildInlineGrant();
+      inlineGrant.style.display = 'block';
       return;
     }
+    grantMsg.textContent = '';
+    grantMsg.classList.remove('dp-warn');
+    inlineGrant.style.display = 'none';
+    inlineGrant.textContent = '';
     for (const g of active) {
       const o = el('option', { value: g.grantId,
         text: (g.access === 'write' ? '读写' : '只读') + ' · ' + g.workspaceDir });
       grantSel.append(o);
     }
-  })();
+  };
+
+  // 就地授权表单（复用 createGrant，不重复实现）
+  const buildInlineGrant = () => {
+    if (inlineGrant.childNodes.length > 0) return;
+    const sub = el('input', { class: 'dp-input',
+      placeholder: '子目录（留空 = 工作区根）。例如 work/login-refactor' });
+    const acc = el('select', { class: 'dp-select' });
+    for (const [v, label] of [['write', '读写（要改代码就选这个）'], ['read', '只读']]) {
+      const o = el('option', { value: v, text: label });
+      acc.append(o);
+    }
+    const go = el('button', { class: 'dp-submit', text: '授权并继续' });
+    const m2 = el('div', { class: 'dp-msg' });
+    go.addEventListener('click', async () => {
+      go.disabled = true;
+      m2.className = 'dp-msg';
+      m2.textContent = '';
+      let rr;
+      try {
+        rr = await api('createGrant', { subdir: sub.value.trim() || undefined, access: acc.value });
+      } catch (e) { rr = { ok: false, reason: e.message }; }
+      go.disabled = false;
+      if (!rr || !rr.ok) {
+        m2.textContent = '授权失败：' + ((rr && rr.reason) || '未知原因');
+        m2.classList.add('err');
+        return;
+      }
+      m2.textContent = '已授权。现在可以交给团队了。';
+      m2.classList.add('ok');
+      await refreshGrantOptions();
+      // 自动选中刚建的那条
+      if (rr.grant && rr.grant.grantId) grantSel.value = rr.grant.grantId;
+    });
+    inlineGrant.append(sub, acc, go, m2);
+  };
+
+  refreshGrantOptions();
 
   // --- 提交 ---
   const actions = el('div', { class: 'dp-actions' });
