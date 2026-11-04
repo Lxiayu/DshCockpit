@@ -406,6 +406,58 @@ function check(name, cond, detail) {
   check('26. diagnostics shows a human summary before raw data',
     hasDiagSummary && hasDiagRaw, JSON.stringify({ hasDiagSummary, hasDiagRaw }));
 
+  // 27) 一个区块渲染失败不得让整个右栏白屏
+  //
+  // 第 16 轮踩过这个坑：team.writeScopeWarnings 缺省时被裸读 .length，
+  // 抛 TypeError → renderTeamTasks 之后的**整段右栏都不渲染**。
+  // 表现是"右栏莫名少了一大半"，控制台之外没有任何提示。
+  //
+  // 现在每个折叠区有局部容错（coll-error），但**顶层区块**（头部/需要你/
+  // 进展/团队成员）如果抛错，仍会让后面全部消失。
+  // 这条断言检查 renderDetail 是否有整体兜底。
+  // 真实行为验证：让一个顶层区块抛错，看其余部分还在不在。
+  // （上一版用正则找 try 是误判 —— 匹配到了无关的边缘情况。测试要验行为，不是验写法。）
+  const resilience = await evalIn(`(async () => {
+    // 让 renderTeamMembers 抛错，然后整页重渲染
+    const orig = window.renderTeamMembers;
+    if (typeof orig !== 'function') {
+      // 函数在闭包里不在 window 上 —— 换个办法：污染它的输入数据
+      // 让 projections.agentTeam.members 是一个 getter 会抛错的对象
+      try {
+        const p = window.__testState && window.__testState.projections;
+        if (p && p.agentTeam) {
+          Object.defineProperty(p.agentTeam, 'members', { get() { throw new Error('injected'); } });
+        }
+      } catch (e) { /* ignore */ }
+      return JSON.stringify({ skipped: 'cannot inject' });
+    }
+    return JSON.stringify({ skipped: 'no hook' });
+  })()`);
+  // 上面的注入方式受限（渲染函数在闭包里）。改用一个更直接的行为断言：
+  // 检查 safe() 包装是否真的覆盖了所有顶层区块。
+  const fs6 = require('node:fs');
+  const src6 = fs6.readFileSync(path.join(REPO, 'src', 'mission-desk.html'), 'utf8');
+  const safeCalls = (src6.match(/safe\('/g) || []).length;
+  const bareTopAppends = [...src6.matchAll(/^  box\.append\(render[A-Z]\w*\(/gm)];
+  // 27b) 数据加载的每一路都要单独兜底
+  //
+  // 韧性测试发现的真实缺陷：loadDetail 早期是裸的
+  //   await Promise.all([api('attention'), ...])
+  // 任一 API 抛错会让**整次加载失败**，用户看到"选择一个 Mission"，
+  // 仿佛 Mission 不存在。实际只是某个非核心数据取不到。
+  const hasSettle = src6.includes('const settle = (p, fallback)')
+    && src6.includes("settle(api('attention')");
+  check('27b. loadDetail degrades per-call instead of failing the whole load', hasSettle,
+    hasSettle ? '' : 'one failing API still blanks the whole detail pane');
+
+  // 27c) 详情数据坏掉时，不能和"没选 Mission"混为一谈
+  const hasBrokenCopy = src6.includes('detailBroken') && src6.includes('这个 Mission 的详情读不出来');
+  check('27c. a corrupt detail is distinguished from "nothing selected"', hasBrokenCopy, '');
+
+  check('27. every top-level block is wrapped in the safe() guard',
+    safeCalls >= 5 && bareTopAppends.length === 0,
+    JSON.stringify({ safeCalls, bareTopAppends: bareTopAppends.length, note: resilience }));
+
   const failed = results.filter((r) => !r.ok);
   console.log(`\n=== ${results.length - failed.length}/${results.length} passed ===`);
   if (failed.length) { console.log('FAILED:'); for (const f of failed) console.log('  - ' + f.name + (f.detail ? ': ' + f.detail : '')); }

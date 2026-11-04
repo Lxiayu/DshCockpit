@@ -118,8 +118,12 @@ test('collapse: 未决问题 opens by DEFAULT when there are questions', () => {
 
 test('collapse: the team roster is NOT collapsed (it answers "who is doing what")', () => {
   // 团队成员属于用户三大问题之一，不能被收进折叠区。
-  assert.match(HTML, /box\.append\(renderTeamMembers\(m\)\);/,
-    'the roster must stay visible, not live inside a collapsible');
+  // ⚠️ 断言的是**意图**（顶层渲染、不在折叠区里），不是具体写法。
+  //    早期钉死 `box.append(renderTeamMembers(m));`，后来为加渲染兜底
+  //    改成 `safe('团队成员', () => renderTeamMembers(m));` ——
+  //    意图没变，但测试红了。测试锁实现细节会在正确的重构上误报。
+  assert.match(HTML, /(box\.append\(|safe\('[^']*', \(\) => )renderTeamMembers\(m\)/,
+    'the roster must be rendered at the top level (not inside a collapsible)');
   assert.doesNotMatch(HTML, /title: '团队成员',[\s\S]{0,120}render: \(\) => renderTeamMembers/,
     'the roster must not be wrapped in a collapsible');
 });

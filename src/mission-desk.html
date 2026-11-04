@@ -405,6 +405,13 @@
     background: var(--bg-input); color: var(--text-1);
     border: 1px solid var(--border-1); border-radius: 6px;
     padding: 5px 7px; font-size: 12px; font-family: inherit; }
+  /* ---- 区块渲染失败提示 ----
+     一块坏了只显示这一行，其余照常 —— 不能让整页白屏。
+     用琥珀不用红：红是"出事了"，琥珀是"这块没能显示"。 */
+  .block-error { margin: 8px 0; padding: 7px 10px; border-radius: 8px;
+    background: var(--att-warn-bg); border: 1px solid var(--att-warn-fg);
+    color: var(--att-warn-fg); font-size: 11px; line-height: 1.5;
+    overflow-wrap: anywhere; }
   /* ---- 诊断面板 ----
      人话在前、原始数据在后并默认收起。
      直接弹 JSON 等于让用户在排查问题时先做一次解析工作。 */
@@ -3081,6 +3088,15 @@ function renderDetail() {
   box.className = '';
   if (!state.detail) {
     box.className = 'empty';
+    // 详情数据坏了（不是"没选 Mission"，也不是"一个都没有"）——
+    // 三者必须分开说，否则用户会去做完全无用的事。
+    if (state.detailBroken) {
+      box.append(el('div', { class: 'empty-lead', text: '这个 Mission 的详情读不出来' }));
+      box.append(el('div', { class: 'empty-body',
+        text: '数据可能损坏，或者某个字段格式不对。刷新页面或到 Harness 视图查看执行过程。'
+          + '（技术细节：' + state.detailBroken + '）' }));
+      return;
+    }
     // 分两种情况给不同的路标，否则用户会卡在一个无解的指令上。
     //
     // ⚠️ 文案必须**按当前布局**说（2026-11-04 修正）：
@@ -3108,6 +3124,32 @@ function renderDetail() {
   const v = state.detail;
   const m = v.mission;
 
+  // 整体兜底：任何**顶层区块**渲染失败，不能让后面全部消失。
+  //
+  // 第一性原理：第 16 轮踩过的坑
+  //   `team.writeScopeWarnings` 缺省时被裸读 `.length`，抛 TypeError →
+  //   renderTeamTasks 之后的**整段右栏都不渲染**。
+  //   表现是"右栏莫名少了一大半"，控制台之外没有任何提示 —— 比报错更迷惑。
+  //
+  //   折叠区内部已有局部容错（coll-error），但顶层区块（头部/需要你/进展/
+  //   团队成员/对账）没有。一个抛错就吃掉了它后面的所有内容。
+  //
+  //   这里做的是**最后一个安全网**：逐块渲染，谁出错就换成一行提示，
+  //   其余照常。用户看到的是"某一块坏了"，不是"整个右栏空了"。
+  const safe = (name, fn) => {
+    try {
+      const out = fn();
+      if (out) box.append(out);
+    } catch (err) {
+      box.append(el('div', { class: 'block-error',
+        text: '「' + name + '」这块没能显示：' + (err && err.message ? err.message : String(err))
+          + '（其余部分不受影响）' }));
+      // 同时留一条控制台日志，方便排查
+      // eslint-disable-next-line no-console
+      console.error('[desk] block render failed:', name, err);
+    }
+  };
+
   // --- 头部：标题 + 状态 + 目标（§6.2 第 1 块）---
   //
   // 第一性原理：为什么头部必须置顶，且只放三样东西
@@ -3117,13 +3159,13 @@ function renderDetail() {
   //
   //   原实现把头部放在最下面（在"需要你"、"交给团队"、"团队任务"之后），
   //   于是首屏看不到"我在看哪个 Mission"——这正是用户抱怨的开头。
-  box.append(renderMissionHead(m, v));
+  safe('头部', () => renderMissionHead(m, v));
 
   // --- L1：需要你处理（最高优先级，永远置顶）---
   //
   // 注意 renderAttention 现在消费后端 rail-order 的分层结果（见该函数注释），
   // 前端不再自己判断"哪些算需要你" —— 两处各自判断会漂移。
-  box.append(renderAttention());
+  safe('需要你处理', () => renderAttention());
 
   // --- L2：你离开期间发生了什么 ---
   const sinceBlock = renderSince();
@@ -3138,7 +3180,7 @@ function renderDetail() {
   // 放在最顶部而不是底部：它是"下一步做什么"的答案，
   // 不该藏在十几屏表单之后。
   // ================================================================
-  box.append(renderStartWork(m));
+  safe('交代任务', () => renderStartWork(m));
 
 
   // --- 团队任务（只有启用 team 投影时才显示）---
@@ -3251,7 +3293,7 @@ function renderDetail() {
   }
 
   // --- 决策 ---
-  box.append(renderDecisions(v.decisions || [], m));
+  safe('决策', () => renderDecisions(v.decisions || [], m));
 
   // ================================================================
   // Shared Context：发现 / 假设 / 证据（2026-11-01）
@@ -3382,7 +3424,7 @@ function renderDetail() {
     render: () => renderDeliverables(v, m),
   }));
 
-  box.append(renderGrants());
+  safe('授权目录', () => renderGrants());
 
   box.append(collapsibleSection({
     title: 'Brief 与诊断',
@@ -3392,7 +3434,7 @@ function renderDetail() {
 
   // 团队成员留在明面上（不在折叠区）：它是"谁在做什么"，
   // 属于用户三大问题之一，不该藏起来。
-  box.append(renderTeamMembers(m));
+  safe('团队成员', () => renderTeamMembers(m));
 
   box.append(collapsibleSection({
     title: '最近的干预',
@@ -3809,15 +3851,33 @@ async function loadDetail(missionId) {
     renderDetail();
     return;
   }
-  state.detail = { ...r.view, live: r.live };
+  // 展开 view 时也可能抛错（字段是坏数据/getter 抛错）。
+  // 不能让它在**赋值**这一步就炸掉整个加载 —— 否则用户看到的是
+  // "选择一个 Mission"，仿佛 Mission 不存在。降级成"详情读不到"更诚实。
+  try {
+    state.detail = { ...r.view, live: r.live };
+  } catch (err) {
+    state.detail = null;
+    state.detailBroken = String((err && err.message) || err);
+    renderDetail();
+    return;
+  }
 
   // 待办 / 离开期间 / 运行时投影 并行取：三者互不依赖，
   // 串行会让右栏打开慢一拍。
+  //
+  // ⚠️ 每个都要单独兜底（2026-11-04 由韧性测试发现）：
+  //   早期是裸的 `await Promise.all([...])` —— 任一 API 抛错会让**整次加载失败**，
+  //   用户看到的是"选择一个 Mission 查看详情"，仿佛 Mission 不存在。
+  //   实际只是某个非核心数据取不到。
+  //
+  //   原则：**降级优于失败**。待办取不到不代表详情不能显示。
+  const settle = (p, fallback) => p.catch((e) => ({ ok: false, reason: e && e.message ? e.message : String(e), __fallback: fallback }));
   const [att, since, proj, bound] = await Promise.all([
-    api('attention'),
-    api('sinceLastSeen', { missionId }),
-    api('sessionProjections'),
-    api('getBoundSession', { missionId }),
+    settle(api('attention'), null),
+    settle(api('sinceLastSeen', { missionId }), null),
+    settle(api('sessionProjections'), null),
+    settle(api('getBoundSession', { missionId }), null),
   ]);
   state.boundSession = bound && bound.ok ? bound : null;
   // 已绑定会话时，顺手拿一次真实进度（只有绑定过才问，避免无谓调用）
