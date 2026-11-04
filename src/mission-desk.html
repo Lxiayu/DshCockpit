@@ -758,6 +758,21 @@ const state = {
   //   注意：这是**会话内**记忆，不落盘。理由是它属于"此刻的浏览状态"，
   //   重启后从头开始是合理的。
   collapsed: {},
+  // 内联表单的草稿（正在填但还没提交的内容）。
+  //
+  // 第一性原理：为什么必须保护它
+  //
+  //   refresh() 会重建整个详情区 DOM。如果用户正在「任务改写」表单里打字，
+  //   而此时任意一个操作触发了刷新，表单会消失、内容全丢——
+  //   他刚打的几十个字没了，而且没有任何提示。
+  //
+  //   这是**数据丢失**，比"要点两次"严重得多。用户会开始不信任这个界面。
+  //
+  //   结构：{ key: { kind, args, values: {...} } }
+  //     key 标识是哪个表单（不同任务/不同成员各自独立）
+  draft: {},
+  // 草稿对应的展开动作，刷新后用它把表单重新打开
+  draftRestore: null,
   missions: [],
   selectedId: null,
   detail: null,
@@ -2823,6 +2838,12 @@ function openTaskRewrite(m, task, kind) {
   const existing = document.querySelector('.task-rw-form');
   if (existing) existing.remove();
 
+  // 草稿键：同一个任务 + 同一种操作 = 同一份草稿
+  const draftKey = `task-rw:${task.id}:${kind}`;
+  const saved = state.draft[draftKey] || {};
+  // 记住"刷新后要重新打开哪个表单"（见 renderDetail 末尾的 restore 调用）
+  state.draftRestore = { kind: 'task-rw', missionId: m.missionId, taskId: task.id, mode: kind };
+
   const wrap = el('div', { class: 'task-rw-form' });
   wrap.append(el('div', { class: 'task-rw-title',
     text: (kind === 'reassign' ? '转交任务：' : '改写任务：') + (task.subject || task.id) }));
@@ -2831,16 +2852,40 @@ function openTaskRewrite(m, task, kind) {
   let descInput = null;
   let ownerInput = null;
 
+  // 回填草稿：用户上次填到一半的内容必须回来。
+  //
+  // keep 用惰性读取（在调用时才查 DOM），所以它可以在所有输入框创建**之前**定义。
+  // 这样每个输入框都能在创建时立刻挂上监听，不用管定义顺序。
+  const keep = () => {
+    state.draft[draftKey] = {
+      owner: (wrap.querySelector('.task-rw-owner') || {}).value || '',
+      subject: (wrap.querySelector('.task-rw-subject') || {}).value || '',
+      description: (wrap.querySelector('.task-rw-desc') || {}).value || '',
+      reason: (wrap.querySelector('.task-rw-why') || {}).value || '',
+    };
+  };
+  // 除了 input 事件，再在失焦/刷新前抓一次。
+  // 为什么：程序化赋值（.value = 'x'）不会触发 input 事件，
+  // 而某些场景（浏览器自动填充、IME 组合输入结束）也可能漏掉。
+  // 用捕获阶段监听更稳：任何 input/change 都会冒泡到 wrap。
+  wrap.addEventListener('input', keep, true);
+  wrap.addEventListener('change', keep, true);
+
   if (kind === 'reassign') {
-    ownerInput = el('input', { class: 'task-rw-input', placeholder: '新负责人（成员名）' });
+    ownerInput = el('input', { class: 'task-rw-input task-rw-owner', placeholder: '新负责人（成员名）', value: saved.owner || '' });
+    ownerInput.addEventListener('input', keep);
     wrap.append(ownerInput);
   } else {
-    subjectInput = el('input', { class: 'task-rw-input', value: task.subject || '', placeholder: '新标题' });
+    subjectInput = el('input', { class: 'task-rw-input task-rw-subject', value: saved.subject || task.subject || '', placeholder: '新标题' });
+    subjectInput.addEventListener('input', keep);
     descInput = el('textarea', { class: 'task-rw-input task-rw-desc', rows: '2',
       placeholder: '新描述（可留空，留空则只改标题）' });
+    descInput.value = saved.description || '';
+    descInput.addEventListener('input', keep);
     wrap.append(subjectInput, descInput);
   }
-  const why = el('input', { class: 'task-rw-input', placeholder: '原因（可选）' });
+  const why = el('input', { class: 'task-rw-input task-rw-why', placeholder: '原因（可选）', value: saved.reason || '' });
+  why.addEventListener('input', keep);
   wrap.append(why);
 
   const row = el('div', { class: 'task-rw-actions' });
@@ -3263,6 +3308,28 @@ function renderDetail() {
     count: null,
     render: () => renderInterventionHistory(m),
   }));
+
+  // ---- 恢复刷新前打开的内联表单（草稿保护）----
+  //
+  // 第一性原理：refresh() 重建 DOM 会关掉用户正在填的表单。
+  //   如果已经把内容打进输入框，那一瞬间会**全丢**，而且没有任何提示。
+  //   这是数据丢失，比"要多点一次"严重得多 —— 用户会开始不信任界面。
+  //
+  //   所以：打开表单时记下"是哪个表单"，渲染完成后重新打开它，
+  //   输入框的值从 state.draft 回填。
+  //
+  //   只在**同一个 Mission** 内恢复：切到别的 Mission 还强行打开一个
+  //   属于旧 Mission 的表单是没有意义的。
+  const rs = state.draftRestore;
+  if (rs && rs.missionId === m.missionId) {
+    if (rs.kind === 'task-rw') {
+      const proj = state.projections;
+      const team = proj && proj.agentTeam;
+      const tasks = team && Array.isArray(team.tasks) ? team.tasks : [];
+      const task = tasks.find((x) => x && x.id === rs.taskId);
+      if (task) openTaskRewrite(m, task, rs.mode);
+    }
+  }
 }
 
 /**
@@ -3591,7 +3658,29 @@ function renderInterventionHistory(m) {
 
 // ------------------------------------------------------------------ 数据
 
+/**
+ * 刷新前抓一次草稿。
+ *
+ * 为什么需要主动抓：用户可能刚打完字、还没来得及触发 input 事件
+ * （或者用的是程序化赋值），然后点了一个会刷新页面的按钮。
+ * 在 refresh 的最开始主动读一次所有已打开表单的值，最稳。
+ */
+function captureOpenDrafts() {
+  // 任务改写表单
+  const rw = document.querySelector('.task-rw-form');
+  if (rw && state.draftRestore && state.draftRestore.kind === 'task-rw') {
+    const key = `task-rw:${state.draftRestore.taskId}:${state.draftRestore.mode}`;
+    state.draft[key] = {
+      owner: (rw.querySelector('.task-rw-owner') || {}).value || '',
+      subject: (rw.querySelector('.task-rw-subject') || {}).value || '',
+      description: (rw.querySelector('.task-rw-desc') || {}).value || '',
+      reason: (rw.querySelector('.task-rw-why') || {}).value || '',
+    };
+  }
+}
+
 async function refresh() {
+  captureOpenDrafts();
   const list = await api('list');
   if (!list.ok) {
     $('list').textContent = '';

@@ -337,6 +337,38 @@ function check(name, cond, detail) {
     pc.skipped ? false : (pc.openedNow === 'block' && pc.stillOpen === 'block'),
     String(persistCheck));
 
+  // 22) 展开的表单在刷新后是否还存在（用户正在填的内容会不会被冲掉）
+  const formCheck = await evalIn(`(async () => {
+    // 打开任务改写表单并填入内容
+    const btn = [...document.querySelectorAll('.task-op')].find(b => b.textContent === '改写');
+    if (!btn) return JSON.stringify({ skipped: 'no rewrite button' });
+    btn.click();
+    await new Promise(r => setTimeout(r, 200));
+    const input = document.querySelector('.task-rw-input');
+    if (!input) return JSON.stringify({ skipped: 'form did not open' });
+    input.value = '用户正在输入的内容';
+
+    // 触发真实刷新
+    const decisionBtn = [...document.querySelectorAll('button')].find(b => b.textContent === '记录决策');
+    let refreshed = false;
+    if (decisionBtn) {
+      const inputs = [...document.querySelectorAll('input')];
+      const txt = inputs.find(i => (i.placeholder || '').includes('决定了什么'));
+      const why = inputs.find(i => (i.placeholder || '').includes('为什么'));
+      if (txt && why) { txt.value = 'x'; why.value = 'y'; decisionBtn.click(); refreshed = true; }
+    }
+    await new Promise(r => setTimeout(r, 900));
+    return JSON.stringify({
+      refreshed,
+      formStillOpen: !!document.querySelector('.task-rw-form'),
+      textPreserved: (document.querySelector('.task-rw-input') || {}).value || null,
+    });
+  })()`);
+  const fc = JSON.parse(formCheck);
+  check('22. an open inline form survives a refresh (with its input)',
+    fc.skipped ? false : (fc.formStillOpen && fc.textPreserved === '用户正在输入的内容'),
+    String(formCheck));
+
   const failed = results.filter((r) => !r.ok);
   console.log(`\n=== ${results.length - failed.length}/${results.length} passed ===`);
   if (failed.length) { console.log('FAILED:'); for (const f of failed) console.log('  - ' + f.name + (f.detail ? ': ' + f.detail : '')); }
