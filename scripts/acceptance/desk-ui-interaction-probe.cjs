@@ -202,6 +202,44 @@ function check(name, cond, detail) {
   const errs3 = await evalIn('JSON.stringify(window.__errs || [])');
   check('14. still no JS errors after all interactions', errs3 === '[]', errs3);
 
+  // 15) 文案不得指向 dock 模式下不存在的位置
+  //
+  // 这条守的是一个很具体的坑：早期空态文案写"先在左边创建"，
+  // 但 dock 模式（右栏 380px）是**单栏**，根本没有左边 ——
+  // 新用户第一眼看到的就是这句，而它指向一个不存在的地方。
+  //
+  // 这轮页面已选中 Mission，看不到空态分支，所以直接**读源码里渲染出来的字符串**
+  // 做断言（运行时的 innerText 检查已在空态截图里人工确认过）。
+  const copyCheck = await evalIn(`(() => {
+    const body = document.body.innerText;
+    const badHints = ['左边创建', '左侧列表'].filter(h => body.includes(h));
+    return JSON.stringify({ badHints });
+  })()`);
+  const copyParsed = JSON.parse(copyCheck);
+  check('15. runtime copy has no "left side" hints', copyParsed.badHints.length === 0, copyCheck);
+
+  // 15b) 直接对源码断言：空态分支里不许出现"左边/左侧"
+  //
+  // 为什么在 Node 侧读文件而不是页面里 fetch：file:// 的 fetch 被 CORS 挡住。
+  const fs = require('node:fs');
+  const src = fs.readFileSync(path.join(REPO, 'src', 'mission-desk.html'), 'utf8');
+  // ⚠️ 必须用**唯一**的锚点：`state.missions.length === 0` 在 renderDockPicker 里也出现一次，
+  //    用 indexOf 会命中错的那处（那处的后续 900 字符里根本没有空态文案）。
+  //    这里用空态分支独有的 'empty-lead' + '还没有 Mission' 组合定位。
+  const idx = src.indexOf("text: '还没有 Mission'");
+  const block = idx === -1 ? '' : src.slice(Math.max(0, idx - 300), idx + 700);
+  // 关键：只检查 **dock 分支**（三元表达式 ? 之后、: 之前那段）。
+  //   双栏模式下"左侧列表"是**正确**的说法，不该被判为问题。
+  //   早期版本对整个 block 做检查，于是把正确的双栏文案也误报了。
+  const dockBranches = [];
+  for (const m of block.matchAll(/DOCK_MODE\s*\n?\s*\?\s*'([^']*(?:\\'[^']*)*)'/g)) {
+    dockBranches.push(m[1]);
+  }
+  const dockText = dockBranches.join(' | ');
+  const badCopy = ['左边创建', '左侧列表', '左边'].filter((h) => dockText.includes(h));
+  check('15b. empty-state source does not say "left side"',
+    idx !== -1 && badCopy.length === 0, JSON.stringify({ found: idx !== -1, badCopy }));
+
   const failed = results.filter((r) => !r.ok);
   console.log(`\n=== ${results.length - failed.length}/${results.length} passed ===`);
   if (failed.length) { console.log('FAILED:'); for (const f of failed) console.log('  - ' + f.name + (f.detail ? ': ' + f.detail : '')); }

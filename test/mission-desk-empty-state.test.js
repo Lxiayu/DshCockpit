@@ -53,7 +53,13 @@ test('empty state: it gives exactly ONE primary action (five choices = no choice
 test('empty state: the detail pane distinguishes "no missions" from "none selected"', () => {
   // 原来只有一句"选择一个 Mission"——但如果一个都没有，这个指令无解。
   assert.match(js, /还没有选中任何 Mission/, 'the no-missions case needs its own copy');
-  assert.match(js, /先在左边创建你的第一个 Mission/, 'and a way out');
+  // 而且必须给出一条**可执行的**出路（2026-11-04 修正）：
+  //   早期这里写"先在左边创建你的第一个 Mission"，
+  //   但 dock 模式（右栏 380px）是**单栏**，根本没有左边 ——
+  //   新用户第一眼看到的就是这句，而它指向一个不存在的地方。
+  //   现在按布局分别给路标，dock 下指向真实存在的「新建 Mission」按钮。
+  assert.match(js, /点上面的「新建 Mission」/, 'dock mode must point at the real button');
+  assert.match(js, /点左上角的「新建 Mission」/, 'two-column mode keeps its own hint');
 });
 
 test('empty state: the detail pane explains what selecting gives you', () => {

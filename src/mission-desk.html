@@ -2790,16 +2790,27 @@ function renderDetail() {
   box.className = '';
   if (!state.detail) {
     box.className = 'empty';
-    // 下面这句原来只说"选择一个 Mission"——但列表里可能**一个都没有**。
     // 分两种情况给不同的路标，否则用户会卡在一个无解的指令上。
+    //
+    // ⚠️ 文案必须**按当前布局**说（2026-11-04 修正）：
+    //   早期写的是"先在左边创建" / "从左侧列表点一个" ——
+    //   但 dock 模式（右栏 380px）是**单栏**，根本没有左边。
+    //   新用户第一眼看到的就是这句，而它指向一个不存在的地方。
+    //   现在按 DOCK_MODE 给不同的路标，并直接说出**可点的那一个**。
     if (state.missions.length === 0) {
+      // 这句必须与下面的"选择一个 Mission"区分开：
+      // 一个是"一个都没有"，一个是"有但没选"，用户需要的下一步完全不同。
       box.append(el('div', { class: 'empty-lead', text: '还没有选中任何 Mission' }));
       box.append(el('div', { class: 'empty-body',
-        text: '先在左边创建你的第一个 Mission，或者从列表里点一个已有的。' }));
+        text: DOCK_MODE
+          ? '点上面的「新建 Mission」创建第一个。创建后，你会在这里看到目标、进展和需要你决定的事。'
+          : '点左上角的「新建 Mission」创建第一个，或从左侧列表里选一个已有的。' }));
     } else {
       box.append(el('div', { class: 'empty-lead', text: '选择一个 Mission' }));
       box.append(el('div', { class: 'empty-body',
-        text: '从左侧列表点一个，就能看到它的目标、决策、工作流和产物。' }));
+        text: DOCK_MODE
+          ? '用上面的下拉框选一个 Mission，就能看到它的目标、进展和需要你决定的事。'
+          : '从左侧列表点一个，就能看到它的目标、决策、工作流和产物。' }));
     }
     return;
   }
