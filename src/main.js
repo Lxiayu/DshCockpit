@@ -195,11 +195,44 @@ let officeStateStore = null;
 let missionBoardCache = null;      // { data, readAtMs }
 const MISSION_BOARD_TTL_MS = 30_000; // 与 mission-board.STALE_AFTER_MS 对齐
 
+/**
+ * "数据算过期"的阈值。
+ *
+ * 刻意从 mission-board.js 取而不是在这里再写一个 30_000 ——
+ * 两处硬编码迟早会漂移，而漂移的表现是"看板说过期但实际没过期"，
+ * 这种不一致比单一阈值更难查。
+ */
+function missionBoardStaleAfterMs() {
+  try {
+    const { STALE_AFTER_MS } = require('./office/mission-board.js');
+    return Number.isFinite(STALE_AFTER_MS) ? STALE_AFTER_MS : MISSION_BOARD_TTL_MS;
+  } catch {
+    return MISSION_BOARD_TTL_MS;
+  }
+}
+
 function currentMissionBoard() {
   const now = Date.now();
-  // 缓存命中：直接返回（并重算 stale，因为"现在几点"变了）
+  // 缓存命中：直接返回，但要**重算 stale** —— 因为"现在几点"变了，
+  // 同一份数据在 5 秒前是新鲜的、在 40 秒后就是过期的。
+  //
+  // ⚠️ 这里原来有个逻辑错误（2026-11-04 修）：
+  //   命中条件是  age < TTL，而 stale 写成 age > TTL ——
+  //   两个条件互斥，于是**命中时 stale 永远是 false**。
+  //   而 office.html 直接用它决定要不要显示"可能已过期"提示，
+  //   结果那个提示**永远不会出现**：用户看到的是一份可能很旧的数据，
+  //   界面却笃定地当作新鲜数据展示。
+  //
+  //   正确判据是**数据自身的年龄**（与 mission-board.js 的 STALE_AFTER_MS 一致），
+  //   与"缓存是否命中"无关。两者回答的是不同问题：
+  //     TTL   —— 多久重新读一次盘
+  //     stale —— 这份数据对用户来说还新不新
   if (missionBoardCache && (now - missionBoardCache.readAtMs) < MISSION_BOARD_TTL_MS) {
-    return { ...missionBoardCache.data, stale: (now - missionBoardCache.readAtMs) > MISSION_BOARD_TTL_MS };
+    const age = now - (missionBoardCache.data.observedAtMs || missionBoardCache.readAtMs);
+    return {
+      ...missionBoardCache.data,
+      stale: Number.isFinite(age) ? age > missionBoardStaleAfterMs() : false,
+    };
   }
   try {
     const workspaceDir = settings.effective().workspace || os.homedir();
