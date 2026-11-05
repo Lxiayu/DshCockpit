@@ -15,7 +15,7 @@
 | AgentMemory | 0.9.32 | Apache-2.0 | 4432 通过 / 5 失败 / 6 跳过（失败全部是引擎二进制真实下载用例，属沙箱网络限制）；引擎手动安装后服务可用 | ✅ **作为设计参考**（不作为依赖引入） |
 | @deepseek-ai/dsh-sdk-client | 0.2.1-rc.5 搭 0.0.1-rc.1 | MIT | 握手 + 完整任务执行 + 工具调用循环真机验证通过 | ✅ **Phase 1 桥接采用** |
 | @deepseek-ai/dsh-acp | 0.2.1-rc.5 搭 0.0.1-rc.1 | MIT | 依赖 `@deepseek-ai/dsh-type-meta` 不存在于 npm registry，无法导入 | ❌ 该版本不可用（0.2.2 已修复，见 §4.5） |
-| @deepseek-ai/dsh 全家 | **0.2.2-rc.1**（next tag） | MIT | ACP 依赖闭包完整；ACP 协议握手/建会话冒烟通过；SDK 握手通过；**Node ≥24.9 硬要求** | ✅ 可用但需 Node 24 运行时（见 §4.5） |
+| @deepseek-ai/dsh 全家 | **0.2.2-rc.1**（next tag） | MIT | ACP 依赖闭包完整；ACP 协议握手/建会话冒烟通过；SDK 握手通过；**真机任务执行通过（问答 + 工具循环 + 文件写入）**；**Node ≥24.9 硬要求** | ✅ 可用但需 Node 24 运行时（见 §4.5、§4.6） |
 
 用户拍板（2026-11-05）：**记忆层自研 Mission Memory**（参考 projectmem 与 AgentMemory 的设计，不闭门造车）；**运行时桥接采用 SDK Client 替换 + journal 只读**。
 
@@ -76,7 +76,7 @@
 
 **测试 2 — 工具调用循环**：56 条事件、7 组 `tool/call → tool/result`、8 步 agent loop，模型在工具报错后自主换策略（相对路径→绝对路径→`ls`）——**错误传播与重试语义在事件流中完整可见**。工具执行本体因测试环境无 PTY 失败（`PTY backend startup failed`，桌面真机不受影响，见 §5）。
 
-**事件面结论**：`HarnessSession.run()` 返回 `{finalResponse, events, notifications}`，`session.event` 信封带类型化事件——**足够重建任务时间线，Phase 3 任务检查器可直接消费**。
+**事件面结论**：`HarnessSession.run()` 返回结构化结果与类型化事件——**足够重建任务时间线，Phase 3 任务检查器可直接消费**。⚠️ 注意 0.2.2 起 `run()` 的语义是"订阅 + 聚合成败"而非实时推送，实时态须走 `onNotification`（详见 §4.6 语义修正）。
 
 ## 4. ACP 搁置证据（0.2.1 基线，已被 §4.5 部分推翻）
 
@@ -85,7 +85,7 @@
 ## 4.5 dsh 0.2.2-rc.1 增补验证（2026-11-05 下午，用户指出上游已发 0.2.2）
 
 **版本事实**（npm registry + 官方 GitHub `deepseek-ai/deepseek-harness` release 页）：
-- `@deepseek-ai/dsh@0.2.2-rc.1`（2026-11-04 发布，dist-tag `next`；`latest` 仍为 0.2.1-rc.5；无桌面安装包）。
+- `@deepseek-ai/dsh@0.2.2-rc.1`（2026-11-04 发布，dist-tag `next`；`latest` 仍为 0.2.1-rc.5）。**桌面构建产物存在**：`dsh-tauri/deepseek-harness-pkg` 同日发布 0.2.2-rc.1 构建（macOS/Linux/Windows 共 14 个 assets），但**均为 ZIP / asar.zip 归类包，无签名的 DMG/EXE/MSI 安装器**——准确表述是"有 ZIP 构建产物、无正式签名安装包"（§4.5 初稿写"无桌面安装包"，已按 GPT 指正修正）。
 - **cordis 约束反转**：0.2.2 要求 `@deepseek-ai/cordis ~4.1.0`（0.2.1 是 ~4.0.5）——E3 红线方向翻转，两代不可混装。
 - **Node ≥24.9 硬要求**（engines `node >=24.9.0`）。本机 Node 22.22.2 / brew node 23.11 均不满足；已下载独立 Node 24.22.2 到 `/tmp/dsh-research-20261105/node24/` 完成隔离验证。**DshCockpit 若升 0.2.2，Harness 子进程必须配 Node 24 运行时**（Electron 主进程 Node 22 不受影响，两者是独立进程）。
 
@@ -105,6 +105,60 @@
 2. Session API 新增独立接口：快照、事件日志、运行状态、事件投影**分别订阅**——Phase 3 检查器的数据源更干净。
 3. 迁移注意：headless 默认只读环境变量/.env（不读已保存密钥）；PTC SSH 协议 2→3；`apply_patch` 默认关闭；自定义插件需适配异步 Session Projection。
 
+## 4.6 dsh 0.2.2-rc.1 真机执行验证（2026-11-05 傍晚，用户提供的 StepFun key，仅注入测试进程）
+
+> 对 GPT 第二轮意见的正面回应：握手通过 ≠ 生产能力。本节把"真实模型调用 / 文件读写 / 工具循环 / 事件流 / 取消面"全部实测，并用真实事件样本替代推断。
+
+**环境**：`/tmp/dsh-research-20261105/harness-spike3`（Node 24.22.2 + dsh/sdk-client 0.2.2-rc.1）+ `DSH_HOME=/tmp/dsh-home-spike3` + 工作目录 `/tmp/dsh-research-20261105/spike3-workdir`；`DEEPSEEK_API_KEY=<用户当日提供>` 仅在该进程 env 中，未落盘、未写入任何配置。原始事件流保存在 `results/*.jsonl`，脱敏样本见 `results/session-event-sample-022.md`。
+
+**测试 1 — 纯问答（无工具）** ✅
+
+| 指标 | 值 |
+|---|---|
+| 握手 | 334 ms（冷启动，含 profile 组装） |
+| 端到端 | 2 152 ms |
+| 通知 / 事件 | 15 / 13 |
+| finishReason | `completed` |
+| finalResponse | `"2"` |
+| 事件序列 | `agent/inbox/spliced → turn/start → agent/inbox/spliced → step/start → system/message → user/message ×2 → request/header → request/context → session/title → assistant/message → step/end → turn/end` |
+
+**测试 2 — 工具循环 + 文件读写** ✅
+
+| 指标 | 值 |
+|---|---|
+| 端到端 | 7 159 ms |
+| 通知 / 事件 | 25 / 23 |
+| 工具调用 | **2 组** `tool/call → tool/result`（`read` secret-note.txt → `write` result.txt） |
+| agent loop | 3 个 `step` |
+| finishReason | `completed` |
+| 副作用实证 | 磁盘上 `result.txt` 内容为 `BANANA_42`，与模型回答一致 |
+
+**事件信封实测结构**（Phase 3 检查器的直接输入）：
+
+```json
+{ "type": "tool/call", "seq": 11, "time": 1793872345320,
+  "data": { "turn": 1, "step": 1, "callId": "chatcmpl-tool-…",
+            "name": "read", "arguments": "{\"file_path\":\"…/secret-note.txt\"}" } }
+```
+
+- `tool/result` 与 `tool/call` 通过 `callId` 关联，天然可做调用配对与耗时计算。
+- `request/header` 携带 `config.provider` / `config.model` / `maxTokens` 与**完整工具清单**（名称 + description + JSON Schema）——模型实际可见的能力面在事件流里可审计。
+- `step/start` / `step/end` 构成可嵌套的时间轴，`turn/start` / `turn/end` 给出轮次边界；`session.status`（running/idle）是独立的通知方法，**不是** `session.event`。
+
+**0.2.2 SDK 语义修正（三条，均实测/源码确认，推翻本文早期表述）**：
+
+1. **`launch` 选项在 0.2.2 已被忽略**。`DeepSeekHarness` 现在只认具名选项：`profile` / `patches` / `dshHome` / `env` / `dshBin`（客户端侧）+ `cwd` / `provider` / `model` / `reasoningEffort` / `maxTokens` / `approvalRequests`（会话侧）。照抄 0.2.1 的 `launch: { args: [...] }` 会**静默丢弃 `--patch`**，表现为"provider 未注册"而非报错——排查耗时极长（本次实测踩中）。
+2. **`run()` 不是推送，是聚合**。`run()` 内部 `subscribeSessionTree(id)` 后等 `session.query.completed`，把该区间的事件聚合成 `{finalResponse, finishReason, events}` 返回；**实时性必须走 `onNotification` / `subscribeSessionTree`**。因此 Phase 1 的 UI 实时态与 Phase 3 的回放态要用两套取数方式，不能混为一谈。
+3. **SDK Client 无会话级取消**。`@deepseek-ai/dsh-sdk-client@0.2.2-rc.1` 源码中 `cancelRequest` / `$/cancel` 出现次数为 **0**；可用的 JSON-RPC 方法只有 `command/run`、`command/done`、`session/prompt`、`session/query`、`session/resume`。ACP 侧则通过 **JSON-RPC 请求中止**实现取消（`requestSignal` abort → `cancelPrompt` → `stopReason: "cancelled"`）。**结论：若"中断正在执行的任务"是硬需求，SDK 单通道不足，需要 ACP 或自建中断路径（进程级 kill + 会话恢复）。**
+
+**0.2.2 自定义 provider 路由（踩坑后确认的唯一可行路径）**：
+
+- `dsh-llm-deepseek` 在 0.2.2 已是**只支持 Messages 协议**的适配器，源码明确拒绝 `protocol` 覆盖（"protocol is not configurable; remove it and use a Messages-compatible baseURL"），默认端点为 `https://api.deepseek.com/anthropic`。StepFun 这类 **chat-completions 兼容网关无法用它接入**。
+- 正确路径是 `@deepseek-ai/dsh-llm-pi-ai`：`api: openai-completions` + `baseURL` + 自声明 `models`。
+- 该插件**必须先用 `dsh plugin --profile <name> add @deepseek-ai/dsh-llm-pi-ai` 装进 profile**（写入 profile 的 `dependencies` 并由 pnpm 建独立 `node_modules`）；只写 `--patch` 插入行会因解析不到包而**静默不激活**（无任何 stderr 输出）。
+- `--patch` 的 `insert` 字段是**数组**（`insert: [ {id,name,config} ]`），写成映射会抛 `patch.insert?.forEach is not a function`。
+- `sdk-minimal` 的 `tool-fs` 默认 `read/write/edit: false`——**文件工具默认关闭**，做写文件任务必须在补丁里显式打开。
+
 
 ## 5. 环境坑（后续任何本地/真机测试必读）
 
@@ -116,11 +170,18 @@
 | E4 | 桌面版独占默认 `~/.dsh` | CLI profile 初始化冲突/挂起 | 测试一律 `DSH_HOME` 隔离 |
 | E5 | 工具 shell 无 PTY | dsh bash 工具 `PTY backend startup failed` | 桌面真机或带 TTY 会话验证工具执行本体 |
 | E6 | 全量测试并发下 `mcp-verify-gate` debounce 偶发 | 单独复跑 8/8 过 | 已知时序问题，非缺陷（2026-11-04 基线） |
+| E7 | 0.2.2 SDK 忽略 `launch` 选项 | `--patch` 被静默丢弃，报 `no adapter registered for provider "stepfun"` | 用 0.2.2 具名选项：`profile` / `patches` / `dshHome` / `env` |
+| E8 | 自定义 LLM 插件未装进 profile | `--patch` 插入行静默不激活（stderr 全空） | `dsh plugin --profile <name> add <pkg>`，再看 `--dump-config` 是否含该行 |
+| E9 | `--patch` 的 `insert` 写成映射 | `TypeError: patch.insert?.forEach is not a function`（启动即崩） | `insert` 必须是数组 |
+| E10 | `sdk-minimal` 的 `tool-fs` 默认只读 | 模型无 `read`/`write`/`edit` 工具，任务跑偏 | 补丁里显式 `read/write/edit: true` |
+| E11 | 会话 artifact 压缩模式不匹配 | `session.v4.jsonl.zstd uses .jsonl.zstd, but this backend is configured for compression "none"` | 换独立 `DSH_HOME` 或清理旧 `sessions/` 目录 |
 
 ## 6. 未验证项（诚实清单）
 
-- SDK Client 的 approval/userQuestions 回传面（本轮只验证了单向事件流；0.2.2 SDK 官方已支持操作审批回调，待 Phase 1 实施时验证）。
-- 长 turn / 上下文压缩 / 断线重连后的 session 续跑。
-- sdk profile（非 minimal）的完整插件树（含 fs 写工具）。
-- StepFun 网关的流式中断、限流行为。
-- 0.2.2-rc.1 的 `session/prompt` 真机执行（本轮 ACP 只验证到 session/new，未消耗模型调用）；0.2.2 转正（latest tag）后的最终迁移面。
+- SDK Client 的 approval/userQuestions 回传面（0.2.2 官方已支持操作审批回调，本次未触发交互式审批路径）。
+- **任务执行中的中断**：SDK 无会话级取消（§4.6），"进程级 kill + `resumeSession` 续跑"这条降级路径未实测。
+- 长 turn / 上下文压缩 / 断线重连后的 session 续跑（`resumeSession` 只做了 API 存在性确认）。
+- ACP 的 `session/prompt` 真机执行（本轮只验证到 `session/new` / `session/list`，未消耗模型调用）。
+- StepFun 网关的流式中断、限流行为（本次两次真机调用均一次成功）。
+- 0.2.2 转正（进 `latest` tag）后的最终迁移面；rc 期间 API 仍可能变化。
+

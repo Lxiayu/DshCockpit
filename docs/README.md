@@ -86,7 +86,7 @@
 | `docs/research/capability-providers.md` | **评估结论（2026-11-01）** | Capability Provider 选型结论：各域首选/备选/放弃表、K1–K6 硬约束（给 capability-platform 的输入）、判死清单、"采用"三项必答三问 |
 | `docs/research/deepseek-harness-api-surface.md` | 只读盘点（2026-11-01） | 官方 API 表面盘点（0.1.5-rc.2 vs 0.2.1-rc.5）：mux endpoints、RPC 方法、approval 回传、各插件能力与稳定性判定 |
 | `docs/research/runtime-poc-report-2026-11-01.md` | **POC 报告（2026-11-01）** | Issue #9 运行级验证：三版本协议探针、隔离环境、16/16 PASS、未验证项诚实清单 |
-| `docs/research/memory-and-sdk-validation-2026-11-05.md` | **验证报告（2026-11-05，关键）** | 记忆层与 SDK 桥接验证：projectmem 378/378、AgentMemory 4432 通过、SDK Client 真机（StepFun）事件流验证、环境坑清单 E1–E6；§4.5 增补 dsh 0.2.2-rc.1（ACP 解封、cordis 4.1.0、Node ≥24.9） |
+| `docs/research/memory-and-sdk-validation-2026-11-05.md` | **验证报告（2026-11-05，关键）** | 记忆层与 SDK 桥接验证：projectmem 378/378、AgentMemory 4432 通过、SDK Client 真机（StepFun）事件流验证、环境坑清单 E1–E11；§4.5 dsh 0.2.2-rc.1（ACP 解封、cordis 4.1.0、Node ≥24.9）；§4.6 0.2.2 真机执行（问答 + 工具循环 + 文件写入）+ SDK 语义三条修正（launch 失效 / run 聚合 / 无 cancel）+ provider 路由踩坑 |
 
 ## 3.1 设计与交互（设计阶段）
 
@@ -101,7 +101,7 @@
 | 文档 | 状态 | 说明 |
 |------|------|------|
 | `docs/plans/active/NEW-DIRECTION-PERSONAL-TEAM-2026-11-03.md` | **已批准（新方向总计划）** | 个人团队的指挥台：借鉴执行语义、四层架构、右栏视觉规范、S0–S7 路线；D7–D9 已决定 |
-| `docs/plans/active/VALUE-LAYER-REFACTOR-2026-11-05.md` | **已批准（2026-11-05 用户拍板）** | 价值层重构：Phase 1 SDK 桥接（runtime-mux 降级只读）→ Phase 2 Mission Memory（自研，参考 projectmem/AgentMemory）→ Phase 3 任务检查器 → Phase 4 清理；含拍板记录、风险与退出条件 |
+| `docs/plans/active/VALUE-LAYER-REFACTOR-2026-11-05.md` | **已批准（2026-11-05 用户拍板，含第二轮评审修订）** | 价值层重构：Phase 0.5 契约验证 → Phase 1 SDK 桥接（Shadow→Canary→Primary，双正交开关）→ Phase 2 Mission Memory（生命周期/内容级脱敏/真删除/中文检索）→ Phase 3 检查器（跨 Execution 工作历史 + HarnessHistoryReader）→ Phase 4 清理（legacy 延后退役）；含架构原则、拍板记录、风险 R1–R10 与退出条件 |
 | `docs/plans/active/S0-PROBE-TASKS-2026-11-03.md` | **待执行（S0 探针任务清单）** | 交给 DeepSeek 的 T0–T12 真机探针任务，含前置条件、三态判定、用户需确认的图形会话步骤 |
 | `docs/plans/active/P0-AUDIT-AND-P1-MISSION-KICKOFF-2026-11-01.md` | **进行中** | P0 地基校准 → P1 Mission Core 启动；负责人 Lead，用户最终拍板 |
 | `docs/plans/active/P0-ENGINEERING-EXECUTION-2026-11-01.md` | **进行中（P0 唯一执行依据）** | P0 工程实施：#21→#10→#14→#9，并行 #22/#19；含完成条件与工程纪律 |
