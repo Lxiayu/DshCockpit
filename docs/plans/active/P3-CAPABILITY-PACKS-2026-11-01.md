@@ -130,7 +130,7 @@ S4 是第一个真实用户，S5 是证据。
 
 - ❌ Pack 市场 / 远程分发
 - ❌ 5 个以上 Pack（先做 1 个走通全链路）
-- ❌ MemoryProvider 抽象（无第二实现，见 AGENTS.md §2.6）
+- ❌ MemoryProvider 抽象（无第二实现，见 repo-map.md §2.6）
 - ❌ 自研 plugin loader（消费官方）
 
 ---
@@ -230,7 +230,7 @@ createCapabilityInstaller  196 行 + 33 项测试
 3. **卸**：卸载并确认无残留
 
 **不做**：远程安装、包编辑、版本升级。那些等有真实需求再说
-（AGENTS.md §2.6「不为抽象而抽象」）。
+（repo-map.md §2.6「不为抽象而抽象」）。
 
 ### 实施
 

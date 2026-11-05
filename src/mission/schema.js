@@ -545,7 +545,7 @@ function validateAssumption(a) {
  *   但它同时是一个容易泄密的形状：
  *     · 若把 sessionRef 写成 raw sessionId（而不是派生句柄）→ 泄露会话身份
  *     · 若把 files[].path 写成绝对路径 → 泄露用户目录结构
- *   这两条 AGENTS.md §2.4 都禁止。所以持久化入口必须逐条挡住，
+ *   这两条 repo-map.md §2.4 都禁止。所以持久化入口必须逐条挡住，
  *   而不是等它写进不可篡改的日志之后再想办法。
  *
  * @param {object} r

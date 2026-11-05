@@ -205,7 +205,7 @@ test('mission board: no nowMs means no staleness claim (unknown != stale)', () =
 // ============================================================ 隐私
 
 test('mission board: NO free-text content reaches the board (counts + short title only)', () => {
-  // AGENTS.md §2.4：正文越少进快照越好。白板是概览，详情在 Desk。
+  // repo-map.md §2.4：正文越少进快照越好。白板是概览，详情在 Desk。
   const p = proj({
     missions: { a: mission('a', { intent: 'SECRET INTENT TEXT' }) },
     decisions: { d1: { decisionId: 'd1', missionId: 'a', rationale: 'SECRET RATIONALE' } },

@@ -120,24 +120,24 @@ test('size budget: the biggest file is acknowledged as known debt', () => {
 });
 
 test('size budget: the documented numbers match reality', () => {
-  // AGENTS.md 里写着 main.js 6041 行 / office-module 4726 行 —— 都过时了。
-  // 文档写错数字比不写更糟：它让人以为"还好"，而实际已经逼近上限。
-  const agents = fs.readFileSync(path.join(ROOT, 'AGENTS.md'), 'utf8');
-  const m = agents.match(/src\/main\.js[^\n]*?(\d+)\s*行/);
+  // 地图文件里写着 main.js / office-module.js 的行数（2026-11-05 由根 AGENTS.md 迁至
+  // docs/architecture/repo-map.md）。文档写错数字比不写更糟：它让人以为"还好"，而实际已经逼近上限。
+  const map = fs.readFileSync(path.join(ROOT, 'docs', 'architecture', 'repo-map.md'), 'utf8');
+  const m = map.match(/src\/main\.js[^\n]*?(\d+)\s*行/);
   if (m) {
     const documented = Number(m[1]);
     const actual = lineCount('src/main.js');
     const diff = Math.abs(actual - documented);
     assert.ok(diff < 400,
-      `AGENTS.md says main.js is ${documented} lines but it is ${actual}. `
+      `repo-map.md says main.js is ${documented} lines but it is ${actual}. `
       + 'A stale number reads as "it is fine" when it is not.');
   }
-  const m2 = agents.match(/office-module\.js[^\n]*?(\d+)\s*行/);
+  const m2 = map.match(/office-module\.js[^\n]*?(\d+)\s*行/);
   if (m2) {
     const documented2 = Number(m2[1]);
     const actual2 = lineCount('src/office/office-module.js');
     const diff2 = Math.abs(actual2 - documented2);
     assert.ok(diff2 < 150,
-      `AGENTS.md says office-module is ${documented2} lines but it is ${actual2}`);
+      `repo-map.md says office-module is ${documented2} lines but it is ${actual2}`);
   }
 });

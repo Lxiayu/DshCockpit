@@ -236,7 +236,7 @@ graph TB
 | POC 代码 | POC 在独立目录/分支，不进主流程 |
 | Mission 代码 | 新目录，不影响现有功能；失败即不合并 |
 
-**禁止**：`git reset --hard` / `git clean -fd` / `git checkack -- .`（AGENTS.md §6）。
+**禁止**：`git reset --hard` / `git clean -fd` / `git checkack -- .`（repo-map.md §6）。
 
 ## 12. 进度表（每批次更新）
 

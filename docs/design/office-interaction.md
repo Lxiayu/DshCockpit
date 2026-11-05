@@ -205,7 +205,7 @@ hitTestFurniture(px, py)  // 只查 hotspots，返回 id | null
 | B. 新推送通道 | `window-manager` 增加 `broadcastToOfficeViews('shell:work-summary', ...)` | **不推荐**：办公室页面只订阅 `office:state` 是硬契约（`office-preload.js` 注释"no raw send/on business channels"） |
 
 **建议 A**，且把 `work` 块的规范化放进 `runtime/work-summary.js`（新纯模块，不进组合根 require 冻结清单——**注意**：这需要改 `test/office-runtime-boundary.test.js:487` 的冻结清单，属"显式决定"）。
-**隐私**：`work` 块**只能有** `{ workItemId?, status, attempt, hasVerify, artifactCount }`——**goal 正文、路径、产物名一律不进**（否则违反 AGENTS.md §2.3 铁律）。目标标题的展示应走"用户点击 → 工作坞"路径，不在场景里渲染任务正文。
+**隐私**：`work` 块**只能有** `{ workItemId?, status, attempt, hasVerify, artifactCount }`——**goal 正文、路径、产物名一律不进**（否则违反 repo-map.md §2.3 铁律）。目标标题的展示应走"用户点击 → 工作坞"路径，不在场景里渲染任务正文。
 
 ### 4.3 【可选】物件点击的 IPC
 
@@ -261,7 +261,7 @@ hitTestFurniture(px, py)  // 只查 hotspots，返回 id | null
 
 | 铁律 | 对本文档的约束 |
 |---|---|
-| 办公室不是输入面（AGENTS.md §2.5） | 物件点击**只能触发壳动作或聚焦**，不能在场景里直接派发任务/审批。派发仍走 `shell:team` / `shell:work` |
+| 办公室不是输入面（repo-map.md §2.5） | 物件点击**只能触发壳动作或聚焦**，不能在场景里直接派发任务/审批。派发仍走 `shell:team` / `shell:work` |
 | `office:*` 通道集合冻结（9 个） | 不改集合。需要新动作 → `shell:*` |
 | 真相不伪造 | 无数据 → 空态；操作失败 → 显示错误，不假装成功 |
 | 快照隐私 | `work` 块只放枚举 + 计数；**goal 正文/路径/产物名永不进** |

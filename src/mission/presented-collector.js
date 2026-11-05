@@ -4,7 +4,7 @@
 // 第一性原理：为什么必须在**进入 Mission 之前**就把绝对路径削掉
 //
 //   官方 `present` 记录的是**绝对路径**（README："records absolute paths"）。
-//   而 AGENTS.md §2.4 是硬铁律：
+//   而 repo-map.md §2.4 是硬铁律：
 //     "raw sessionId / prompt 正文 / 工具参数原文 / 产物内容 / **绝对路径**
 //      不进 Office 快照与事实链"
 //

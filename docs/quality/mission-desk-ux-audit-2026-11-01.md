@@ -102,7 +102,7 @@ ENTITY_TYPES = ['mission', 'workstream', 'decision', 'openQuestion', 'deliverabl
    这个判据非常锐利。它也暴露了一个风险：**如果 Mission Desk 只是
    "更好看的信息展示"，那答案就不成立。**
 
-4. **§十三 的单一事实源与禁止伪造** —— 与我们 AGENTS.md 铁律完全一致。
+4. **§十三 的单一事实源与禁止伪造** —— 与我们 repo-map.md 铁律完全一致。
 
 ### 需要修正的地方（基于我们的实际情况）
 

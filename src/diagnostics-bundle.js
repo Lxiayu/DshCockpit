@@ -325,7 +325,7 @@ function createDiagnosticsBundle(deps) {
         : [],
       // 上游新增但尚未专门翻译的 journal 事件（按次数降序）。
       // 只有事件名与计数/时间戳——**没有 payload**：prompt、工具参数、
-      // 产物内容都不进诊断包（AGENTS.md §2.4）。
+      // 产物内容都不进诊断包（repo-map.md §2.4）。
       // 用途：升级运行时后判断"某能力到底发没发事件"，而不是靠猜。
       unmappedJournalEvents: Array.isArray(unmapped)
         ? unmapped.slice(0, MAX_UNMAPPED_EVENT_ROWS).map((e) => ({

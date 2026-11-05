@@ -80,7 +80,7 @@ expanded 才唤起主窗口的 office 视图。
 - 待办数 = `pending.length`
 - 运行数 = employees 中 `runtime` 处于运行态的个数
 
-**不新建数据通道**——这符合 AGENTS.md §2.1「事实作者唯一」。
+**不新建数据通道**——这符合 repo-map.md §2.1「事实作者唯一」。
 
 ### 决定 4：不做"迷你办公室渲染"
 

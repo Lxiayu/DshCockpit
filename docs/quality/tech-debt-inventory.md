@@ -815,7 +815,7 @@ const factoryRe = /const\s+(\w+)\s*=\s*(create\w+)\(\{\n([\s\S]*?)\n\}\);/g;
 - 无 `scripts.lint` / `scripts.typecheck`
 
 **影响**：
-- 唯一的质量闸是 1935 个测试 + 手工 `node --check`（AGENTS.md §6 要求"每删一段 → `node --check` + 相关测试"）
+- 唯一的质量闸是 1935 个测试 + 手工 `node --check`（repo-map.md §6 要求"每删一段 → `node --check` + 相关测试"）
 - 语法类错误靠 `node --check`，但**未使用变量/未定义变量/错误的 await/漏 return** 全部无法机械发现
 - 大文件改写（TD-01 的拆分）风险显著提高
 

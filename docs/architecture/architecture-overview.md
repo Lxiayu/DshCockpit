@@ -192,7 +192,7 @@ console.log(h.size,o.size);'
 | `shell:*` (75) | ❌ **无常量、无白名单、无集合测试** | ❌ | `grep -rn "SHELL_CHANNELS\|SHELL_IPC" src test` 无输出 |
 | `cockpit:*` (12) | ❌ | 部分（`cockpit-ui.test.js` 用 `assert.match` 逐条匹配源码字符串，非集合相等） | — |
 
-**结论 [已确认]**：AGENTS.md §2.5 写的「`office:*` 通道集合在契约里冻结」**是真的，且被 5 个测试机械保护**。但 **75 个 `shell:*` 通道 + 17 个 `workbench:*` 通道没有任何冻结机制** —— 这一点在文档里没被声明为"未冻结"，容易被误读为壳层整体有通道纪律。
+**结论 [已确认]**：repo-map.md §2.5 写的「`office:*` 通道集合在契约里冻结」**是真的，且被 5 个测试机械保护**。但 **75 个 `shell:*` 通道 + 17 个 `workbench:*` 通道没有任何冻结机制** —— 这一点在文档里没被声明为"未冻结"，容易被误读为壳层整体有通道纪律。
 
 **风险**：`shell:*` 是壳层最大接口面（占 56%），且包含所有高风险动作（`shell:public-remote-enable`、`shell:tunnel-start`、`shell:plugin-action`、`shell:execute-*`、`shell:work`、`shell:restore-snapshot`）。**没有集合测试意味着：新增/删除/改名一个 `shell:*` 通道不会让任何测试变红**（除非恰好被某个 `assert.match` 覆盖）。
 

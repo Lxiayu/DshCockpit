@@ -6,7 +6,8 @@
 > 3. 新增/移动/删除文档时同步本表；过时文档移入 `docs/archive/` 并在归档说明里写清原因。
 > 4. 文档结构按用途分层：契约（architecture）/ 产品方向（product）/ 研究（research）/
 >    决策（adr）/ 设计（design）/ 计划与报告（plans）/ 质量与来源（quality）/ 脚本产物（compat）。
-> 5. 仓库地图与开发铁律在根目录 `AGENTS.md`（≤130 行）；新会话先读它。
+> 5. **根 `AGENTS.md` 是工程代理行为协议（怎么做事）；仓库地图与项目铁律在
+>    `docs/architecture/repo-map.md`（≤130 行）。新会话先读这两份。**
 > 6. **2026-11-01 战略重定位**：产品从「Harness 桌面壳」转为「AI 团队工作空间」。
 >    入口：`docs/product/product-vision.md` → `docs/product/product-principles.md` →
 >    `docs/architecture/domain-model.md` → `docs/adr/ADR-0001-repositioning-ai-team-workspace.md`。
@@ -48,6 +49,7 @@
 | `docs/architecture/mission-core.md` | **设计阶段（2026-11-01，未实现）** | Mission Core 架构 |
 | `docs/architecture/capability-platform.md` | **设计阶段（2026-11-01，未实现）** | Capability Platform：Provider 抽象、Capability Manifest、Profile Composer、Plugin Lifecycle |
 | `docs/architecture/official-capability-matrix.md` | **权威（2026-11-01）** | 官方能力四层分级矩阵（L1 Core Service / L2 Experimental Plugin / L3 Bundle / L4 Internal）；6 个能力边界实证（含 0.1.5↔0.2.1 事件词表 diff：56→62，净增 6、零删除） |
+| `docs/architecture/repo-map.md` | **地图与铁律（2026-11-05 迁入）** | 原根 `AGENTS.md` 正文：产品定位、6 条架构铁律、目录地图（含实测行数）、开发流程、命令与基线（诚实版：7 个已知红项）、Git 安全、文档入口 |
 
 ## 1.1 架构决策记录（ADR）
 
@@ -101,7 +103,9 @@
 | 文档 | 状态 | 说明 |
 |------|------|------|
 | `docs/plans/active/NEW-DIRECTION-PERSONAL-TEAM-2026-11-03.md` | **已批准（新方向总计划）** | 个人团队的指挥台：借鉴执行语义、四层架构、右栏视觉规范、S0–S7 路线；D7–D9 已决定 |
-| `docs/plans/active/VALUE-LAYER-REFACTOR-2026-11-05.md` | **已批准（2026-11-05 用户拍板，含第二轮评审修订）** | 价值层重构：Phase 0.5 契约验证 → Phase 1 SDK 桥接（Shadow→Canary→Primary，双正交开关）→ Phase 2 Mission Memory（生命周期/内容级脱敏/真删除/中文检索）→ Phase 3 检查器（跨 Execution 工作历史 + HarnessHistoryReader）→ Phase 4 清理（legacy 延后退役）；含架构原则、拍板记录、风险 R1–R10 与退出条件 |
+| `docs/plans/active/VALUE-LAYER-REFACTOR-2026-11-05.md` | **已批准（2026-11-05 用户拍板；已过三轮评审，第三轮以本地代码就地修订）** | 价值层重构：Phase 0.5 契约验证 → Phase 1 SDK 桥接（Shadow→Canary→Primary，双正交开关）→ Phase 2 Mission Memory（生命周期/内容级脱敏/真删除/中文检索）→ Phase 3 检查器（跨 Execution 工作历史 + ExecutionHistoryReader）→ Phase 4 清理（legacy 延后退役）；含架构原则、拍板记录、风险 R1–R12 与退出条件 |
+| `docs/plans/active/VALUE-LAYER-REVIEW-2026-11-05.md` | **本地复检报告（2026-11-05，动工前必读）** | 以本地代码为准复核上述计划：18 条事实核验、**6 项必修偏差**（事件命名约定不符 / 与 finding 三实体重叠 / harness-reader 命名撞车 / SDK 供给位置未定义 / compaction 不存在 / 基线 7 红）、Phase 0.5 定性（基础设施开发而非产品开发）、10 条 patch 清单、可重跑命令 |
+| `docs/plans/active/DEEPSEEK-HANDOFF-2026-11-05.md` | **交接包（给实施方）** | Phase 0.5 的 T0–T5 任务卡：SDK 供给方案 / 事件命名与归并（待拍板）/ 契约 fixture + 契约测试 / RuntimeProfileManager 原型 / 中断方案二选一 / Electron 集成面；含验收命令、负向变异要求、明确不做与必须问人的六种情形 |
 | `docs/plans/active/S0-PROBE-TASKS-2026-11-03.md` | **待执行（S0 探针任务清单）** | 交给 DeepSeek 的 T0–T12 真机探针任务，含前置条件、三态判定、用户需确认的图形会话步骤 |
 | `docs/plans/active/P0-AUDIT-AND-P1-MISSION-KICKOFF-2026-11-01.md` | **进行中** | P0 地基校准 → P1 Mission Core 启动；负责人 Lead，用户最终拍板 |
 | `docs/plans/active/P0-ENGINEERING-EXECUTION-2026-11-01.md` | **进行中（P0 唯一执行依据）** | P0 工程实施：#21→#10→#14→#9，并行 #22/#19；含完成条件与工程纪律 |

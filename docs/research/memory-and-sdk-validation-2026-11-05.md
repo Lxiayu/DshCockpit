@@ -61,7 +61,7 @@
 4. **单写入者纪律**：与 `docs/research/memory-systems.md` 的结论一致，Mission Memory 必须保持唯一写入者。
 5. **agent-id 隔离/项目隔离**：检索按 project + agent 限定，防止串台。
 
-**不引入的理由**（维持 ADR-0005）：独立引擎进程 + 端口 + token + 原生二进制分发，与"单一事实源、零第三方 Memory Provider"的既定立场冲突；且其事件捕获是自建第二事实源，与 AGENTS.md 铁律冲突。
+**不引入的理由**（维持 ADR-0005）：独立引擎进程 + 端口 + token + 原生二进制分发，与"单一事实源、零第三方 Memory Provider"的既定立场冲突；且其事件捕获是自建第二事实源，与 repo-map.md 铁律冲突。
 
 ## 3. DeepSeek SDK Client 真机验证（关键）
 

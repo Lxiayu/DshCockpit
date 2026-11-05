@@ -7,7 +7,7 @@
 //
 //   **但那条路是错的**，两个理由：
 //
-//   1. 隐私（AGENTS.md §2.4）：raw sessionId 不进 Mission 事实链。
+//   1. 隐私（repo-map.md §2.4）：raw sessionId 不进 Mission 事实链。
 //      Mission 的 events.jsonl 会长期留存在用户工作区里，
 //      原样存 sessionId 等于把 Harness 的内部标识泄漏到一个
 //      语义上不需要它的地方。

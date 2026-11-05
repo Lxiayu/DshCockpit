@@ -5811,7 +5811,7 @@ async function readWorkspaceChanges(sessionId, seq) {
 //
 // 唯一职责：把 deliverables/presented 事件里的**绝对路径**削成工作区相对路径，
 // 且只保留工作区内的文件。绝对路径永远不离开 presented-collector 模块
-// （AGENTS.md §2.4：绝对路径不进事实链）。
+// （repo-map.md §2.4：绝对路径不进事实链）。
 // ---------------------------------------------------------------------------
 const presentedCollector = presentedCollectorModule.createPresentedCollector();
 
@@ -6100,7 +6100,7 @@ function ingestOfficeJournalEvent(sessionId, event) {
   //
   // 第一性原理：为什么这个事件必须在这里被截住
   //
-  //   官方 present 记录的是**绝对路径**，而 AGENTS.md §2.4 禁止绝对路径
+  //   官方 present 记录的是**绝对路径**，而 repo-map.md §2.4 禁止绝对路径
   //   进 Office 快照与事实链。若让它像其它事件一样透传给 office module，
   //   绝对路径就会经 adapter 落进事实链 —— 那时已经删不掉了。
   //

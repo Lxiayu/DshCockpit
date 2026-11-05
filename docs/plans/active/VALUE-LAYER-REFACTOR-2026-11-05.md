@@ -1,7 +1,7 @@
 # 价值层重构计划：SDK 桥接 + Mission Memory + 任务检查器（2026-11-05）
 
-> 状态：**已批准（2026-11-05 用户拍板三项决策，见 §2）**
-> 上游：`docs/research/memory-and-sdk-validation-2026-11-05.md`（证据底座）、`/Users/xia/Downloads/ChatGPT_重构项目价值定位_20261105-0246.md`（用户与 GPT 的新架构讨论）、`docs/plans/active/NEW-DIRECTION-PERSONAL-TEAM-2026-11-03.md`（新方向总计划，本文是其运行时与记忆层的落地升级）
+> 状态：**已批准（2026-11-05 用户拍板三项决策，见 §2）；已过三轮评审，第三轮以本地代码复核并就地修订，见 §2.6.1**
+> 上游：`docs/research/memory-and-sdk-validation-2026-11-05.md`（证据底座）、`docs/plans/active/VALUE-LAYER-REVIEW-2026-11-05.md`（本地复检报告，**动工前必读**）、`docs/plans/active/DEEPSEEK-HANDOFF-2026-11-05.md`（Phase 0.5 交接包）、`docs/plans/active/NEW-DIRECTION-PERSONAL-TEAM-2026-11-03.md`（新方向总计划，本文是其运行时与记忆层的落地升级）
 > 立场继承：`AGENTS.md`（Harness 拥有执行事实；不写第二套事实源）、`docs/adr/ADR-0005-memory-official-stack.md`（零第三方 Memory Provider）
 > 本文与 `AGENTS.md` §4 的"计划先行"流程对齐：批准后进入实施。
 
@@ -66,11 +66,26 @@ GPT 认可四阶段框架不推翻，但指出若干"未钉牢的边界"；本�
 
 1. **新增 Phase 0.5 契约验证**——"握手通过 ≠ 生产能力"，先把 0.2.2 的契约（事件形状、审批回调、续跑、Electron 进程内集成）固化成 fixture 与失败模式清单，再谈切换。
 2. **Phase 1 拆 Shadow → Canary → Primary 三段**，不再是"一次切换"；`bridgeMode` 拆成**两个正交开关**（派发通道 / 观察来源），因为"SDK 派发 + journal 只读观察"本来就该并存。
-3. **Task Inspector 重定义**：不是"单 Session 工具调用列表"，而是**跨多次 Execution 的长期工作历史**，且需要持久化与历史读取契约（`HarnessHistoryReader`），不是纯前端增量。
+3. **Task Inspector 重定义**：不是"单 Session 工具调用列表"，而是**跨多次 Execution 的长期工作历史**，且需要持久化与历史读取契约，不是纯前端增量。
 4. **Mission Memory 补齐生命周期**（Draft → UserConfirmed → Superseded / NeedsReview）、**内容级脱敏**（字段黑名单不够）、**真删除机制**、**中文检索测试集**。
 5. **cordis 用独立 Runtime Lockfile 锁定**，不用根目录 `~4.1.0` 范围（`~` 允许补丁漂移）。
 6. **旧 Team Runtime 退役延后**到验收之后，先标 `legacy` adapter。
 7. **产品定位**按 §0 架构原则收紧：Mission Core 是核心资产，SDK/ACP 是可替换执行适配层。
+
+## 2.6.1 第三轮：本地复检修订（2026-11-05 晚，以仓库代码为准）
+
+前两轮评审的事实基础是"云端读文档"。本轮把计划里的每条技术假设落到**本地代码与实测**上逐条核对，
+发现 6 处会让实施方写出"能跑但错"的代码。**完整证据与可重跑命令见
+`docs/plans/active/VALUE-LAYER-REVIEW-2026-11-05.md`**；此处只列结论，且以下各条**覆盖上文冲突表述**。
+
+| # | 上文的错误假设 | 本地事实 | 本计划已改为 |
+|---|---|---|---|
+| L1 | 新增事件 `memory/attempt` 等 | 现有事件命名是 `entity.action`（`finding.recorded`）；`validateEntity` 对未知类型 fail-closed，projection 对未识别事件**静默忽略** | `attempt.recorded` / `lesson.recorded` / `gotcha.recorded`（§4.2） |
+| L2 | 记忆是全新领域 | 已有 `finding` / `assumption` / `evidence` 三个 Shared Context 实体，与 lesson/gotcha 重叠 | 先做归并决策再动手（§4.2 前置决策） |
+| L3 | Phase 3 引入 `HarnessHistoryReader` | `src/mission/harness-reader.js` 已存在，语义是"实时快照归一化 + observedAtMs" | 改名 `ExecutionHistoryReader` / `execution-history.js`（§5.2） |
+| L4 | SDK 装上就能用 | `@deepseek-ai/*` 不在 `package.json`；运行时由 `prepare-runtime.js` 装进 `vendor/runtime` 或 arborist 物化到 `userData/runtime/<v>`；`package.json.runtimeVersion` 停在 `0.1.5-rc.2` | Phase 0.5 增"SDK 供给方案"（§2.7 第 6 项），并在 §3.3 补供给链路 |
+| L5 | 真删除"采用墓碑 + 物理压实" | `event-log.js` 只有 `needsArchive`，**无 compaction** | 标注为**新增能力**并补三条实现难点（§4.2.2） |
+| L6 | `CI=1 npm test` 全绿 | 实测 3474 项 / 3466 pass / **7 fail** / 1 skip（6 项缺 Pillow、1 项并发偶发） | 判据改为"红项集合不扩大 + 新增红可归因"（§3.4 / §8） |
 
 ---
 
@@ -85,8 +100,10 @@ GPT 认可四阶段框架不推翻，但指出若干"未钉牢的边界"；本�
 3. **续跑与中断**：`resumeSession` 在"进程被杀"后的行为；SDK 无 cancel 时的**降级中断方案**（kill 子进程 → `resumeSession` 续跑，或以 ACP 请求中止替代）——这条直接决定 Phase 1 的 UI 是否能有"停止"按钮。
 4. **Electron 集成面**：主进程（Node 22）加载 `@deepseek-ai/dsh-sdk-client` 是否可行（该包未声明 `engines`，属推断，须实测）；子进程 Node 24 的路径解析与打包后 asar 环境下的可执行性。
 5. **Provider 路由固化**：把"`dsh plugin add` + `insert` 数组补丁 + `tool-fs` 显式开启"这条已验证路径写成脚本化 provisioner，供打包环境复用（验证报告 §4.6）。
+6. **SDK 供给方案（第三轮新增，L4）**：`@deepseek-ai/dsh-sdk-client` 当前不在 `package.json`，运行时是 `scripts/prepare-runtime.js` 供给的独立 npm 树。必须先答四问：装哪棵树（避免双 cordis）／`dshBin` 指向／asar 内可否 require／Node 22 主进程可否加载。**答不出来不进 Phase 1。**
+7. **基线归因（第三轮新增，L6）**：把当前 7 个红项的环境成因记录成基线（`repo-map.md` §5），后续一律按"红项集合不扩大"验收。
 
-**退出条件**：上述五项各有一份"通过 / 失败 / 明确 Deferred"的结论；事件 fixture 进 CI；中断方案二选一定稿。
+**退出条件**：上述七项各有一份"通过 / 失败 / 明确 Deferred"的结论；事件 fixture 进 CI；中断方案二选一定稿。
 
 ---
 
@@ -125,6 +142,11 @@ GPT 认可四阶段框架不推翻，但指出若干"未钉牢的边界"；本�
   3. 生成 `--patch` 补丁文件（`insert` 数组语法、`tool-fs` 开关、provider 路由）；
   4. 版本/一致性自检（cordis 树版本、profile 依赖、插件是否真的激活）。
 - **独立 Runtime Lockfile**：cordis 与 Harness 全家版本不在根 `package.json` 用 `~4.1.0` 范围锁定（`~` 允许补丁漂移），改为**独立的运行时 lockfile**（`runtime/harness.lock.json` 或等价物）+ 生成脚本；`npm test` 前的一致性检查直接比对该 lockfile 的绝对版本。两代约束相反（0.2.1 `~4.0.5` / 0.2.2 `~4.1.0`），混装即崩（验证报告 E3）。
+  - **现有供给链路（第三轮补充，L4）**：`package.json.runtimeVersion` 是**当前唯一版本来源**——
+    `scripts/prepare-runtime.js` 据此装 `vendor/runtime`（打包进 `extraResources`），
+    `src/runtime-manager.js` 据此物化 `userData/runtime/<version>`。它现在是 `0.1.5-rc.2`，落后现役两代。
+    **升到 0.2.2 时必须同步**：`runtimeVersion` → 重新生成 `vendor/runtime` → 回写
+    `docs/compat/*` 兼容账本（`npm run check:compat-ledger` 会校验）。三步漏一步都是"看起来升了、其实没升"。
 - **rc 版本隔离**：所有 SDK 类型经 adapter 收窄；升级走独立的升级计划流程（不夹带在功能 PR 里）。
 
 ### 3.4 三段式推进（Shadow → Canary → Primary）
@@ -133,7 +155,7 @@ GPT 认可四阶段框架不推翻，但指出若干"未钉牢的边界"；本�
 |---|---|---|---|
 | **Shadow** | SDK 通道与现有链路**并行跑**同一批任务（不生效，仅比对）：SDK 事件流 vs journal 投影逐条对账 | 对账差异全部有解释（非缺陷）；零伪影 | 关开关即可（不进生产路径） |
 | **Canary** | 少量 Mission 走 SDK 派发（`dispatchChannel='sdk'`，可用白名单/比例控制），其余仍 legacy | 连续 N 个任务无人工干预完成；检查器可查；无重复事实 | 单任务级切回 legacy |
-| **Primary** | 默认 `dispatchChannel='sdk'`；`runtime-mux` 仅作桌面版共存观察源 | 现有测试全绿；一周观察期无 P1/P2 缺陷 | 全局开关 + `observationSource='journal'` 兜底 |
+| **Primary** | 默认 `dispatchChannel='sdk'`；`runtime-mux` 仅作桌面版共存观察源 | **红项集合不扩大**（基线见 `repo-map.md` §5）；一周观察期无 P1/P2 缺陷 | 全局开关 + `observationSource='journal'` 兜底 |
 
 ### 3.5 退出条件
 
@@ -148,6 +170,12 @@ GPT 认可四阶段框架不推翻，但指出若干"未钉牢的边界"；本�
 
 ## 4. Phase 2 —— Mission Memory（核心价值层）
 
+> **前置决策（第三轮新增，L1/L2，必须先拍板再动手）**：
+> ① 事件命名统一为 `entity.action` 形状；② `lesson` / `gotcha` 与现有
+> `finding` / `assumption` / `evidence` 是归并还是并存。理由与两个候选方案见
+> `docs/plans/active/VALUE-LAYER-REVIEW-2026-11-05.md` §2.1 / §2.2。
+> **未拍板就新增平行实体 = 制造第二套记法，直接违反 §4.1 边界。**
+
 **目标**：Mission Core 从"任务派发事实源"扩展为"项目经验记忆中心"，跨会话复利。
 
 ### 4.1 不做什么（边界）
@@ -158,14 +186,20 @@ GPT 认可四阶段框架不推翻，但指出若干"未钉牢的边界"；本�
 
 ### 4.2 事件模型扩展（参考两家，自研落地）
 
-`src/mission/schema.js` 新增事件类型（沿用 append-only `events.jsonl` + 投影）：
+`src/mission/schema.js` 新增事件类型（沿用 append-only `events.jsonl` + 投影）。
+**命名必须遵循现有 `entity.action` 约定**（`finding.recorded` / `decision.superseded` 为样板，见
+`src/mission/projection.js` 的 fold），不可写成 `memory/attempt` —— 那样 `validateEntity` 会直接拒绝，
+或绕过校验后被投影层**静默忽略**（事件在库里、UI 永远看不到）。
 
 | 事件 | 参考 | 字段要点 |
 |---|---|---|
-| `memory/attempt` | projectmem `attempt` | issueRef、描述、`worked/failed/partial`、位置（`file:line` 或模块名）、来源 TaskRef |
-| `memory/decision` | projectmem `decision` | 决策内容、可退役旧决策（`retires`）、理由、上下文引用 |
-| `memory/lesson` | AgentMemory lessons | 跨会话教训、适用条件、置信度 |
-| `memory/gotcha` | projectmem gotchas | 项目坑位、触发条件、规避方法 |
+| `attempt.recorded` | projectmem `attempt` | issueRef、描述、`worked/failed/partial`、位置（`file:line` 或模块名）、来源 TaskRef |
+| `decision.recorded` | 已有事件，扩展 | 决策内容、可退役旧决策（`retires`）、理由、上下文引用 |
+| `lesson.recorded` | AgentMemory lessons | 跨会话教训、适用条件、置信度 |
+| `gotcha.recorded` | projectmem gotchas | 项目坑位、触发条件、规避方法 |
+
+> 新增一个实体类型要**同时改三处**，缺一即半成品：
+> `ENTITY_TYPES`（schema.js:28）→ `validateEntity` 分派（schema.js:690）→ `projection.js` fold（:115 起）。
 
 配套投影与查询（`src/mission/`）：
 - **Brief 增强**（参考 projectmem `brief`）：`brief-sync.js` 写入 AGENTS.md 时带上"失败尝试警告 + 开放问题 + 近期决策"（警告按位置命中，防止重复踩坑——projectmem 已验证的核心价值）。
@@ -195,6 +229,10 @@ Draft ──用户确认──> UserConfirmed ──被新记忆退役──> Su
 - **真删除**：`PRIVACY_FORBIDDEN_FIELDS` 是**字段级**黑名单，挡不住"把密钥写进 description 的自由文本"。因此需要：
   1. 写入前的**内容级脱敏**（正则/熵检测识别 token、私钥块、连接串、邮箱等），命中即替换为 `<redacted:kind>`；
   2. **删除请求**要能真正抹掉内容：append-only 日志不允许改写，故采用"墓碑事件 + 物理压实"（compaction）两步——墓碑事件记录 `deletedEventId`，压实任务重写 `events.jsonl` 并同步清理投影索引；
+     **⚠ 该能力当前不存在**（`event-log.js` 只有 `needsArchive` / `logBytes` / `detectTruncation`，无重写与压实），是**本期新增**，三个实现难点：
+     ① 重写后 seq 必须保持单调，否则 `detectTruncation` 会报"不单调"；
+     ② 必须与 `store.js` 的 `backupCandidates` / `rotateBackups` 协同，否则备份里仍留着"已删除"的内容；
+     ③ 先写临时文件再原子 rename，避免压实中途崩溃留下半写日志；
   3. 删除必须可从 UI 触发（按记忆条目 / 按任务 / 按时间范围），并留下审计记录（谁、何时、范围，不含被删内容）。
 - **导出即泄露检查**：Brief 写入 `AGENTS.md` 前再跑一次脱敏扫描（AGENTS.md 会进入 git）。
 
@@ -235,7 +273,12 @@ Mission (长期目标)
 - **Execution** 是新增的一等概念：`TaskRef` 已能派生 `{sessionId, turn}`，但需要提升为**持久化实体**（`missionId / workstreamId / executionId / sessionId / 通道来源 / 起止时间 / 结果`），否则"跨执行历史"无处挂载。
 - 通道来源（`sdk` / `journal`）必须记在 Execution 上——同一工作线可能一部分任务走 SDK、一部分是桌面版 journal 记录。
 
-### 5.2 持久化与历史读取契约（`HarnessHistoryReader`）
+### 5.2 持久化与历史读取契约（`ExecutionHistoryReader`）
+
+> **命名说明（第三轮修订，L3）**：不要叫 `HarnessHistoryReader` —— `src/mission/harness-reader.js`
+> **已经存在**，做的是"实时快照归一化 + 强制 `observedAtMs`"，刻意不持有历史。同名不同物会导致实施方
+> 直接在原文件上加方法，把"毫秒级刷新"与"大文件分页"两种生命周期混成一个模块。
+> 新契约定为 `src/mission/execution-history.js`，两边文件头互相写一句"我不是谁"。
 
 检查器**不能只读内存里的事件数组**——进程重启后历史必须还在。定义的契约：
 
@@ -291,6 +334,8 @@ Mission (长期目标)
 | R8 | 检查器把"索引"做成第二套执行事实 | `HarnessHistoryReader` 只建索引不复制事实；对账测试（落库 vs 源）进 CI |
 | R9 | 自定义 provider 路由脆弱（插件须装进 profile、`launch` 选项被忽略、`tool-fs` 默认关闭） | `RuntimeProfileManager` 把 provision 过程脚本化 + 自检（插件是否真的激活、路由是否注册）；环境坑 E7–E10 进 AGENTS 附录 |
 | R10 | 记忆内容级泄露（字段黑名单挡不住自由文本） | 写入前脱敏 + 导出（AGENTS.md）前二次扫描 + 真删除（墓碑 + 压实） |
+| R11 | **压实半写**（新增，L5）：重写 `events.jsonl` 时进程中断 → 日志残缺、seq 断裂 | 临时文件 + 原子 rename；压实前后各跑一次 `detectTruncation`；备份轮转必须排除已删除内容 |
+| R12 | **双 cordis 树**（新增，L4）：SDK 装进仓库 `node_modules` 而 `dshBin` 指运行时树，两套 cordis 混用 | Phase 0.5 定"SDK 供给方案"：同树解析或显式隔离；升级走 Runtime Lockfile；`plugin loader null entry` 记为已知症状 |
 
 ## 8. 测试策略
 
@@ -300,7 +345,9 @@ Mission (长期目标)
 - **对账测试**：Shadow 阶段的 SDK 事件流 vs journal 投影逐条对账，差异必须显式归因（新测试类别）。
 - **真机（需 key，另行申请）**：问答、工具循环、检查器跨执行历史、Brief 跨会话、中断降级路径。
 - **回归**：`legacy` 路径在过渡期保持绿（退役前不得红）。
-- **门禁不变**：`CI=1 npm test` 全绿基线 + 运行时 lockfile 一致性检查（替代根目录范围声明）。
+- **门禁口径（第三轮修订，L6）**：`CI=1 npm test` 的判据是**"红项集合不扩大"**，不是"全绿"——
+  当前基线为 3474 项 / 3466 pass / 7 fail / 1 skip（6 项缺 Pillow、1 项并发偶发，见 `repo-map.md` §5）。
+  任何新增红必须归因，否则视为回归。另加运行时 lockfile 一致性检查（替代根目录范围声明）。
 
 ## 9. 明确不做（本期）
 

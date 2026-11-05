@@ -1,6 +1,6 @@
 // test/mission-presented-collector.test.js — 交付声明的收集与隐私闸门（S5）。
 //
-// 第一性原理：这组测试守的是 AGENTS.md §2.4 那条铁律
+// 第一性原理：这组测试守的是 repo-map.md §2.4 那条铁律
 //
 //   官方 present 记录的是**绝对路径**。而隐私规则说：
 //   "raw sessionId / prompt 正文 / 工具参数原文 / 产物内容 / **绝对路径**

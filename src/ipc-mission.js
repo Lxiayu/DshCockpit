@@ -1333,7 +1333,7 @@ function registerMissionIpc(ipcMain, ctx) {
      *   verifyDeliverables 能证明"文件没变过"，却证明不了"它是不是你要的"。
      *   后者只能靠人看一眼。所以必须能打开。
      *
-     * 安全边界（AGENTS.md §2.4 + §6.9）：
+     * 安全边界（repo-map.md §2.4 隐私铁律）：
      *   · 只接受**工作区相对路径**（不接受绝对路径、不接受 ../ 逃逸）
      *   · 解析后必须仍在工作区内（realpath 比较，防符号链接逃逸）
      *   · 路径**不进入**任何返回值或事实链 —— 只是本次调用内部使用
@@ -1701,7 +1701,7 @@ function registerMissionIpc(ipcMain, ctx) {
       // ---- 隐私边界：调用方传 sessionId，我们只存派生句柄 ----
       //
       // 第一版设计若直接把 sessionId 存进 TaskRef，会：
-      //   1. 违反 AGENTS.md §2.4（raw sessionId 不进 Mission 事实链）
+      //   1. 违反 repo-map.md §2.4（raw sessionId 不进 Mission 事实链）
       //   2. 诱导后续代码去 Harness 反查甚至缓存状态 → 两个事实作者
       //
       // 所以这里**只接受 sessionId 用于派生**，落盘的是 `sess-h-<digest>`。
@@ -2518,7 +2518,7 @@ function registerMissionIpc(ipcMain, ctx) {
       // 不是 Mission 的长期事实。持久化会逼我们扩展 schema（TaskRef 还要求
       // workstreamId 必填，没 workstream 时根本记不下来），成本远大于收益。
       //
-      // 为什么不返回 raw sessionId：隐私规则（AGENTS.md §2.4）。
+      // 为什么不返回 raw sessionId：隐私规则（repo-map.md §2.4）。
       // sessionId 只在这一层用，UI 拿到的是派发键 —— 它不含任何会话身份。
       return { ok: true, sessionId, delivered: true, dispatchKey };
     },

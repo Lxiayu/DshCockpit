@@ -63,7 +63,7 @@ if (t.status !== undefined) {
 ## 4. 隐私边界：harnessRef 不是 sessionId
 
 domain-model 明确要求 `harnessRef` 是**派生句柄**（`sess-h-<digest>:t-12`），
-不是 raw sessionId。这符合 AGENTS.md §2.4。
+不是 raw sessionId。这符合 repo-map.md §2.4。
 
 所以 IPC 层必须**做一个派生**，而不是把用户传入的 sessionId 直接存进去。
 

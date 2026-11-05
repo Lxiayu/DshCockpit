@@ -33,7 +33,7 @@
 //   Office 已经有一条成熟的 Team facts 路径：
 //     src/team/runtime/team-office-adapter.js + team-office-bridge.js
 //   再把这套 `toOfficeTeamFacts` 接进去，就会有**两条 Team 事实路径**
-//   同时喂 Office —— 直接违反 AGENTS.md 铁律 1（同一状态不许两个写入者）。
+//   同时喂 Office —— 直接违反 repo-map.md 铁律 1（同一状态不许两个写入者）。
 //
 //   而"用官方视图替换自研 facts"正是 ADR-0002 的 R0–R5 退役计划要做的事，
 //   它依赖官方 Agent Teams 的实测（#23 已解开形状问题，但整体退役未启动）。

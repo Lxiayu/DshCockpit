@@ -5,7 +5,7 @@
 //   我最初的想法是：在壳创建 Session 时把 Brief 塞进 system prompt。
 //   核实代码后发现这条路**不存在**，而且不该存在：
 //     · main.js:406 `harnessView.loadURL(runtimeUrl)` —— 壳是官方 dsh web UI 的容器
-//     · 用户是在**官方 UI 里**发 prompt 的。壳不接管输入面（AGENTS.md 铁律 5）
+//     · 用户是在**官方 UI 里**发 prompt 的。壳不接管输入面（repo-map.md 铁律 5）
 //     · `createSession` 只被旧的 Team Runtime 调用（team-shell-transport.js:171），
 //       主路径的会话根本不经过它
 //   所以"拦截注入"要么需要侵入官方 UI，要么需要重写输入路径 —— 两者都违反定位。

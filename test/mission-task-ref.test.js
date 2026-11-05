@@ -8,7 +8,7 @@
 //
 //   2. **拒绝状态**：schema 明确禁止 TaskRef 带 status（任务状态归 Harness）。
 //      如果这里放行，就会出现"两个事实作者" —— 而那正是本产品最核心的
-//      架构禁忌（AGENTS.md 铁律 1）。
+//      架构禁忌（repo-map.md 铁律 1）。
 //
 //   所以本文件重点测"不该做的事有没有被挡住"，而不是"能不能用"。
 'use strict';
@@ -42,7 +42,7 @@ test('taskref: different turns in the SAME session get DIFFERENT refs', () => {
 });
 
 test('taskref: the ref does NOT contain the raw session id (privacy invariant)', () => {
-  // AGENTS.md §2.4：raw sessionId 不进 Mission 事实链。
+  // repo-map.md §2.4：raw sessionId 不进 Mission 事实链。
   const secret = 'sess-SUPER-SECRET-TOKEN-9876';
   const r = tr.deriveHarnessRef({ sessionId: secret });
   assert.strictEqual(r.ok, true);

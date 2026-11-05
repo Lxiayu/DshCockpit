@@ -46,7 +46,7 @@ test('receipt: a coordinate carries the official seq/session and never the file 
   assert.deepEqual(c.files, [{ path: 'probe-s5.txt', display: 'probe-s5.txt', added: 1, deleted: 0 }]);
 
   // 隐私：凭证里只能有这些 key。任何 "content"/"text"/"body" 都意味着
-  // 我们把产物内容存进了 Mission，违反 AGENTS.md §2.4。
+  // 我们把产物内容存进了 Mission，违反 repo-map.md §2.4。
   const keys = Object.keys(c.files[0]).sort();
   assert.deepEqual(keys, ['added', 'deleted', 'display', 'path'],
     'a file entry may only carry path/display/counts — never content');
