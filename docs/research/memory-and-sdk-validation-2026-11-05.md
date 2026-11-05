@@ -13,8 +13,9 @@
 |---|---|---|---|---|
 | projectmem | 0.3.5 | MIT | 378/378 测试通过；CLI 记忆闭环可用；MCP stdio 可用 | ✅ **作为设计参考**（不作为依赖引入） |
 | AgentMemory | 0.9.32 | Apache-2.0 | 4432 通过 / 5 失败 / 6 跳过（失败全部是引擎二进制真实下载用例，属沙箱网络限制）；引擎手动安装后服务可用 | ✅ **作为设计参考**（不作为依赖引入） |
-| @deepseek-ai/dsh-sdk-client | 0.0.1-rc.1 | MIT | 握手 + 完整任务执行 + 工具调用循环真机验证通过 | ✅ **Phase 1 桥接采用** |
-| @deepseek-ai/dsh-acp | 0.0.1-rc.1 | MIT | 依赖 `@deepseek-ai/dsh-type-meta` 不存在于 npm registry，无法导入 | ❌ 暂不可用，搁置观察 |
+| @deepseek-ai/dsh-sdk-client | 0.2.1-rc.5 搭 0.0.1-rc.1 | MIT | 握手 + 完整任务执行 + 工具调用循环真机验证通过 | ✅ **Phase 1 桥接采用** |
+| @deepseek-ai/dsh-acp | 0.2.1-rc.5 搭 0.0.1-rc.1 | MIT | 依赖 `@deepseek-ai/dsh-type-meta` 不存在于 npm registry，无法导入 | ❌ 该版本不可用（0.2.2 已修复，见 §4.5） |
+| @deepseek-ai/dsh 全家 | **0.2.2-rc.1**（next tag） | MIT | ACP 依赖闭包完整；ACP 协议握手/建会话冒烟通过；SDK 握手通过；**Node ≥24.9 硬要求** | ✅ 可用但需 Node 24 运行时（见 §4.5） |
 
 用户拍板（2026-11-05）：**记忆层自研 Mission Memory**（参考 projectmem 与 AgentMemory 的设计，不闭门造车）；**运行时桥接采用 SDK Client 替换 + journal 只读**。
 
@@ -77,9 +78,33 @@
 
 **事件面结论**：`HarnessSession.run()` 返回 `{finalResponse, events, notifications}`，`session.event` 信封带类型化事件——**足够重建任务时间线，Phase 3 任务检查器可直接消费**。
 
-## 4. ACP 搁置证据
+## 4. ACP 搁置证据（0.2.1 基线，已被 §4.5 部分推翻）
 
-`@deepseek-ai/dsh-acp@0.0.1-rc.1` 的依赖闭包缺 `@deepseek-ai/dsh-type-meta`（npm registry 404），`require` 失败。等上游补发后再评估；不阻塞本次重构。
+`@deepseek-ai/dsh-acp@0.0.1-rc.1` 的依赖闭包缺 `@deepseek-ai/dsh-type-meta`（npm registry 404），`require` 失败。
+
+## 4.5 dsh 0.2.2-rc.1 增补验证（2026-11-05 下午，用户指出上游已发 0.2.2）
+
+**版本事实**（npm registry + 官方 GitHub `deepseek-ai/deepseek-harness` release 页）：
+- `@deepseek-ai/dsh@0.2.2-rc.1`（2026-11-04 发布，dist-tag `next`；`latest` 仍为 0.2.1-rc.5；无桌面安装包）。
+- **cordis 约束反转**：0.2.2 要求 `@deepseek-ai/cordis ~4.1.0`（0.2.1 是 ~4.0.5）——E3 红线方向翻转，两代不可混装。
+- **Node ≥24.9 硬要求**（engines `node >=24.9.0`）。本机 Node 22.22.2 / brew node 23.11 均不满足；已下载独立 Node 24.22.2 到 `/tmp/dsh-research-20261105/node24/` 完成隔离验证。**DshCockpit 若升 0.2.2，Harness 子进程必须配 Node 24 运行时**（Electron 主进程 Node 22 不受影响，两者是独立进程）。
+
+**验证环境**：`/tmp/dsh-research-20261105/harness-spike3`（Node 24.22.2 + dsh/sdk-client/acp 全 0.2.2-rc.1 + cordis 4.1.0）+ 隔离 `DSH_HOME=/tmp/dsh-home-spike3`。
+
+**测试 1 — SDK 握手**：`DeepSeekHarness` → `dsh --profile sdk-minimal`，冷启动握手 1391ms，`CLOSED_OK`。✅
+
+**测试 2 — ACP 端到端**（0.2.1 时代的搁置项）：
+- `@deepseek-ai/dsh-acp@0.2.2-rc.1` 依赖闭包**完整**（不再需要 `dsh-type-meta`；`dsh-brand`/`dsh-llm`/`dsh-agent`/`dsh-session`/`dsh-attachment`/`dsh-mcp-client`/`dsh-token-meter`/`dsh-user-approval`/`dsh-session-persistence` 均 0.2.2-rc.1 在册）。
+- `dsh --profile acp` 协议冒烟：`initialize`（706ms，agentInfo `deepseek-harness-acp`）→ `session/new`（981ms，返回 sessionId + configOptions 模型选择器）→ `session/list`（OK）。✅
+- 注意：ACP 是 cordis 插件形态（exports: Config/apply/inject/name），经 profile bundle 加载，不做独立库 import。
+
+**测试 3 — 0.2.2 SDK 能力面**：`DeepSeekHarness` 新增 `resumeSession/record/matchesReceipt/result/run`；`run()` 内部改用 `subscribeSessionTree`（事件树订阅）。官方 release 说明确认 TS/Python SDK 补齐**计划审阅、目标续跑、操作审批**回调——与 Phase 1 任务闭环、Phase 3 检查器直接对齐。
+
+**0.2.2 对本重构计划的其他关键影响**：
+1. 官方把「自动化任务」升级为**宿主级统一管理**（手动创建/编辑/复用或新建会话执行）——与 Mission Workstream 语义部分重叠。DshCockpit 的差异化须更聚焦"记忆 + 检查 + 呈现"，避免复刻官方任务管理 UI。
+2. Session API 新增独立接口：快照、事件日志、运行状态、事件投影**分别订阅**——Phase 3 检查器的数据源更干净。
+3. 迁移注意：headless 默认只读环境变量/.env（不读已保存密钥）；PTC SSH 协议 2→3；`apply_patch` 默认关闭；自定义插件需适配异步 Session Projection。
+
 
 ## 5. 环境坑（后续任何本地/真机测试必读）
 
@@ -87,14 +112,15 @@
 |---|---|---|---|
 | E1 | 宿主经 `NODE_OPTIONS`/`PYTHONPATH` 注入语言 shim，劫持 fs `mkdir` | 原生服务/CLI 静默挂起或 `Brokered host mkdir requires an available runtime file rule` | 命令前缀 `env -u NODE_OPTIONS -u PYTHONPATH` |
 | E2 | shell `mkdir` 被 brokered-bin shim 劫持 | 同上报错 | 用 `/bin/mkdir` 等系统真实路径 |
-| E3 | dsh 对 cordis 版本极敏感 | 混入 cordis 4.1.0 → `plugin loader null entry` 崩溃 | 锁 `@deepseek-ai/cordis ~4.0.5` 全家桶；勿显式装 `cordis-plugin-group@^1.1.0` |
+| E3 | dsh 对 cordis 版本极敏感，且**两代约束相反** | 0.2.1 混入 cordis 4.1.0 → 崩溃；0.2.2 要求 cordis ~4.1.0 | 0.2.1 锁 `~4.0.5` 全家桶 / 0.2.2 锁 `~4.1.0`；两代依赖树不得混装 |
 | E4 | 桌面版独占默认 `~/.dsh` | CLI profile 初始化冲突/挂起 | 测试一律 `DSH_HOME` 隔离 |
 | E5 | 工具 shell 无 PTY | dsh bash 工具 `PTY backend startup failed` | 桌面真机或带 TTY 会话验证工具执行本体 |
 | E6 | 全量测试并发下 `mcp-verify-gate` debounce 偶发 | 单独复跑 8/8 过 | 已知时序问题，非缺陷（2026-11-04 基线） |
 
 ## 6. 未验证项（诚实清单）
 
-- SDK Client 的 approval/userQuestions 回传面（本轮只验证了单向事件流）。
+- SDK Client 的 approval/userQuestions 回传面（本轮只验证了单向事件流；0.2.2 SDK 官方已支持操作审批回调，待 Phase 1 实施时验证）。
 - 长 turn / 上下文压缩 / 断线重连后的 session 续跑。
 - sdk profile（非 minimal）的完整插件树（含 fs 写工具）。
 - StepFun 网关的流式中断、限流行为。
+- 0.2.2-rc.1 的 `session/prompt` 真机执行（本轮 ACP 只验证到 session/new，未消耗模型调用）；0.2.2 转正（latest tag）后的最终迁移面。
