@@ -86,7 +86,7 @@
 | `docs/research/capability-providers.md` | **评估结论（2026-11-01）** | Capability Provider 选型结论：各域首选/备选/放弃表、K1–K6 硬约束（给 capability-platform 的输入）、判死清单、"采用"三项必答三问 |
 | `docs/research/deepseek-harness-api-surface.md` | 只读盘点（2026-11-01） | 官方 API 表面盘点（0.1.5-rc.2 vs 0.2.1-rc.5）：mux endpoints、RPC 方法、approval 回传、各插件能力与稳定性判定 |
 | `docs/research/runtime-poc-report-2026-11-01.md` | **POC 报告（2026-11-01）** | Issue #9 运行级验证：三版本协议探针、隔离环境、16/16 PASS、未验证项诚实清单 |
-| `docs/research/memory-and-sdk-validation-2026-11-05.md` | **验证报告（2026-11-05，关键）** | 记忆层与 SDK 桥接验证：projectmem 378/378、AgentMemory 4432 通过、SDK Client 真机（StepFun）事件流验证、ACP 搁置证据、环境坑清单 E1–E6 |
+| `docs/research/memory-and-sdk-validation-2026-11-05.md` | **验证报告（2026-11-05，关键）** | 记忆层与 SDK 桥接验证：projectmem 378/378、AgentMemory 4432 通过、SDK Client 真机（StepFun）事件流验证、环境坑清单 E1–E6；§4.5 增补 dsh 0.2.2-rc.1（ACP 解封、cordis 4.1.0、Node ≥24.9） |
 
 ## 3.1 设计与交互（设计阶段）
 
