@@ -30,13 +30,15 @@
 
 ## 2. 你必须知道的现状（否则一定踩坑）
 
-1. **基线不是全绿**：`CI=1 npm test` → 3474 项 / 3466 pass / **7 fail** / 1 skip。
-   6 个红是缺 Pillow，1 个红是并发偶发。**判据是"红项集合不扩大"，不是"全绿"**。
-   → 动手前先跑一次，把红项列表抄进你的工作记录，收工时再跑一次比对。
+1. **基线不是全绿**：`CI=1 npm test` → 3476 项 / 3468 pass / **7 fail** / 1 skip。
+   6 个红是缺 Pillow，1 个红是并发偶发。**T0 落地前过渡判据是"红项集合不扩大"**；
+   **T0 完成后恢复 0 fail**（那是你的任务之一）。
+   → 动手前先跑一次，把红项列表抄进你的工作记录。
 2. **`@deepseek-ai/*` 不在 `package.json`**，仓库 `node_modules/@deepseek-ai/` 是空的。
    运行时是 `scripts/prepare-runtime.js` 装到 `vendor/runtime`（打包）或
    `src/runtime-manager.js` 用 arborist 物化到 `userData/runtime/<version>`。
-   → 你没有权限决定"SDK 装哪棵树"，这是 T0 要先定的（见任务卡）。
+   → **SDK 装哪棵树已拍板**（计划 §2.8 决策 B）：**与 runtime 同树 + 宿主进程**。
+   T0 是**实施卡不是决策卡**，别再提替代方案。
 3. **`package.json.runtimeVersion` = `0.1.5-rc.2`**，与现役 0.2.1 / 目标 0.2.2 都不一致。
    它是 `prepare-runtime.js` 与 `build.js` 的唯一版本来源。**改它要连带 re-gen `vendor/runtime` 和 compat ledger**。
 4. **cordis 代际必须配对**：0.2.1 → `~4.0.5`，0.2.2 → `~4.1.0`。混装的报错是
@@ -44,44 +46,60 @@
 5. **事件命名是 `entity.action`**（`finding.recorded` / `taskRef.linked`），
    投影 fold 在 `src/mission/projection.js`，`unknown entity type` 在
    `src/mission/schema.js:690` 的 `validateEntity` 会被**直接拒绝**。
+6. **记忆实体已拍板**（计划 §2.8 决策 A）：只加一个 `lesson` 实体（`kind: lesson|gotcha|attempt`），
+   删 `memory/decision`，`finding` 不动。Phase 0.5 期间**不改 schema**（那是 Phase 2 的活）。
 
 ---
 
 ## 3. 任务卡
 
 > 每张卡都写了"交付物 / 验收 / 禁止"。**没有验收命令的交付物不算完成。**
-> 卡之间除标注外无依赖，但建议按 T0 → T2 → T3 → T4 → T5 顺序做。
+> 卡之间除标注外无依赖，建议按 T0 → T1 → T2 → T3 → T4 → T5 顺序做（T0/T1 的拍板已定，是动手卡）。
 
-### T0（前置，需人拍板）：SDK 供给方案
+### T0（拍板已定，动手卡）：SDK 同树供给 + 宿主进程
 
-**问题**：`@deepseek-ai/dsh-sdk-client@0.2.2-rc.1` 装在哪里、由谁解析、打包后怎么找到 `dshBin`。
+**拍板（计划 §2.8 决策 B）**：SDK 与 runtime **同树供给** + **宿主进程**。这张卡是**实施**，不是再选方案。
 
-**必须回答的四问**（写进 `docs/research/sdk-provisioning-2026-11-XX.md`）：
+**已源码确认的硬事实**（照做，别重新摸索）：
 
-| # | 问题 | 为什么必须回答 |
-|---|---|---|
-| 1 | SDK 包装进仓库 `node_modules`，还是装进运行时那棵树？ | 两棵树会带两套 cordis，混装即崩 |
-| 2 | `dshBin` 指向哪？开发态 vs 打包态路径分别是什么？ | 指向错了表现为 "no adapter registered for provider"（误导性极强） |
-| 3 | SDK 能否在 asar 内被 require？不能的话 `asarUnpack` 加什么？ | 打包后才暴露，开发态永远发现不了 |
-| 4 | Electron 主进程是 Node 22，SDK 包未声明 `engines`，能否加载？ | 属推断，**必须实测**；不行就得把 SDK 关进子进程 |
+1. `@deepseek-ai/dsh-sdk-client@0.2.2-rc.1` 精确依赖 `@deepseek-ai/dsh@0.2.2-rc.1`（本体 124K、
+   **90 个依赖、整树 897MB**）→ 装进仓库 `node_modules` = asar +897MB，**不可行**；
+2. SDK 把子进程命令**硬编码为 `process.execPath`**（`lib/index.js:172`，无覆盖选项）→
+   Electron 主进程（Node 22）里直接用 = spawn 出 Electron 本体，且不满足 dsh ≥24.9
+   → **必须跑在宿主进程里**，宿主由 `bestNodeBin()`（`src/main.js:1952`）拉起；
+3. 显式传 `dshBin` 会**跳过** SDK 的版本相等校验（`lib/index.js:164`）——
+   旧守门人换掉，新守门人是 Runtime Lockfile 一致性门禁，**别漏装**。
 
-**交付物**：一份方案文档 + 一个最小可跑脚本 `scripts/sdk-provision-check.js`（打印四问的实测答案）。
-**验收**：脚本在**干净 DSH_HOME** 下能跑出结论；四问都有"是/否 + 证据"。
-**禁止**：不要直接改 `package.json` 的 dependencies 来"试试看"——先出方案。
-**注意**：这条涉及依赖与运行时，按 `AGENTS.md` §13 必须先问人。
+**交付物**
 
-### T1（需人拍板）：事件命名与实体归并
+1. runtime 树 `package.json` 模板两处同步加 `@deepseek-ai/dsh-sdk-client`（精确版）：
+   `src/runtime-manager.js:448`（物化模板）与 `scripts/prepare-runtime.js`（vendor seed）；
+2. `scripts/sdk-provision-check.js`，在**干净 DSH_HOME** 下打印：
+   - 同树解析路径（SDK 与 dsh 是否同一 `node_modules`、是否去重为单份）；
+   - `dshBin` 开发态 / 打包态（`extraResources`）两个路径；
+   - 宿主进程端到端：`bestNodeBin()` 解析结果 → 宿主内动态 `import()` SDK → 无 key 握手冒烟；
+   - asar 打包后路径（跑不了打包就写"跑不了 + 原因"，**不许推断当结论**）；
+3. 给 0.2.2-rc.1 补 `src/runtime-capability.js` 的 KNOWN_MATRIX 记录
+   （现在 `judge('0.2.2-rc.1')` 返回 `unverified`、9 项能力 unknown——以隔离环境实测为准，不是抄文档）。
 
-**背景**：计划写的 `memory/attempt` 与现有 `entity.action` 约定不符；
-`lesson`/`gotcha` 与已有 `finding`/`assumption`/`evidence` 重叠。
+**验收**：provision-check 脚本可重跑且四项都有"是/否 + 证据"；`node --test` 相关套件不红。
+**禁止**：不改根 `package.json` 的 dependencies；不提"装进仓库树"的替代方案（已否决）。
+**注意**：依赖与运行时变更按 `AGENTS.md` §13 先问人——本卡已获用户批准的范围除外（同树两处模板 + capability 记录）。
 
-**两个待定问题**（**不要自己决定**，等用户拍板后写进计划再实施）：
+### T1（拍板已定，动手卡）：基线转绿
 
-1. 事件名用 `attempt.recorded` / `lesson.recorded` / `gotcha.recorded`（推荐），还是别的？
-2. 与 `finding` 归并（`gotcha` = `finding.kind: hazard`），还是并存（并写清分工判据）？
+**拍板（计划 §2.8 决策 C）**：把 7 个红**动手消掉**，不是记录归因。完成后全量判据恢复 **0 fail**。
 
-**你现在能做的**：先把"三处必改点"列成 checklist 放进计划，等拍板后一次性改：
-`ENTITY_TYPES`（schema.js:28）→ `validateEntity` 分派（schema.js:690）→ `projection.js` fold（:115 起）。
+**要做**
+
+1. **6 个 Pillow 红 → 条件 skip**：缺 Pillow 时 `t.skip()` 并打印原因；
+   CI 设 `REQUIRE_PIL=1` 时 skip **变回 fail**（本地宽容、CI 严格）；
+2. **`test/mcp-verify-gate.test.js` 并发偶发 → 串行化**（`{ concurrency: 1 }` 或等价），**不是重试**；
+3. **skip 白名单**登记进 `repo-map.md` §5（哪些 skip、为什么允许）。
+
+**验收**：本机 `CI=1 npm test` → **0 fail**（skip 只允许白名单内的）；有 Pillow 的环境跑一次记录结果。
+**禁止**：不许无条件 skip（那是把红藏起来，比红更糟）；不许改门禁测试的断言；
+`repo-map.md` §5 的白名单登记属于**文档同步**（允许），改 `test/` 门禁属于**松绑**（禁止）。
 
 ### T2：事件契约 fixture + 契约测试（本阶段主交付）
 
@@ -161,11 +179,11 @@ test/contract/harness-event-order.test.js          # 顺序约束 + callId 配�
 
 ### T5：Electron 集成面实测
 
-**要回答**：
+**要回答**（宿主进程形态已定，计划 §2.8 决策 B——**验证它，不是再选它**）：
 
-1. Electron 主进程（Node 22）`require('@deepseek-ai/dsh-sdk-client')` 是否可行；
-2. Harness 子进程需要 Node ≥24.9 —— 随包供给 Node 24 时，路径解析与打包后定位怎么做；
-3. asar 环境下子进程能否执行（`asarUnpack` 是否必需）。
+1. `bestNodeBin()`（`src/main.js:1952`）在干净机器上能否解析到 Node ≥24.9？解析不到时的降级行为是否可接受（显式报错而非玄学崩溃）；
+2. 宿主进程（真 Node ≥24.9 + 同树 SDK）端到端：握手 + 一次无 key 冒烟 + 优雅关闭梯子（stdin EOF → SIGTERM → SIGKILL）；
+3. 打包后 `extraResources` 里 runtime 树的路径解析（asar 内只留宿主脚本薄壳；SDK 不进 asar）。
 
 **交付物**：`docs/research/electron-sdk-integration-2026-11-XX.md` + 可重跑的探针脚本
 （放 `scripts/acceptance/`，因为它需要图形会话/打包产物，**不进 CI**）。
@@ -178,9 +196,10 @@ test/contract/harness-event-order.test.js          # 顺序约束 + callId 配�
 
 - [ ] `node --test test/contract/**` 绿，且**我在没有 key 的干净环境**跑过。
 - [ ] 三种负向变异都做过，结果如实记录（`DETECTED` / `masked`）。
-- [ ] `CI=1 npm test` 的红项集合与开工前**一致**（不是"更绿"，是"不多"）。
+- [ ] `CI=1 npm test`：T1 完成后 **0 fail**；若 T1 未完成，红项集合与开工前**一致**（不是"更绿"，是"不多"）。
+- [ ] 没有新增未登记的 skip（白名单见 `repo-map.md` §5）。
 - [ ] `node --test test/docs-index.test.js` 绿（我新增/移动了文档）。
-- [ ] 没有新增依赖（若必须，已先问人并记录在计划里）。
+- [ ] 没有新增依赖（T0 批准范围内的同树模板改动除外，已记录在计划里）。
 - [ ] 没有修改任何 `test/` 门禁、`AGENTS.md`、`repo-map.md` 来让自己通过。
 - [ ] 报告写了"改了什么/验证了什么/还剩什么"，且剩余问题没有被说成完成。
 
@@ -189,7 +208,7 @@ test/contract/harness-event-order.test.js          # 顺序约束 + callId 配�
 ## 5. 明确不做（本阶段）
 
 - 不写 UI、不改 `mission-desk.html`。
-- 不改 Mission schema / 事件类型（T1 拍板后才能动）。
+- 不改 Mission schema / 事件类型（拍板已定见 §2 现状第 6 条，但实施属 Phase 2，本阶段不动）。
 - 不改主链路派发（`missionPromptSession` 保持原样，Phase 1 才切）。
 - 不删 `src/team/runtime/**`（按 ADR-0002 延后退役）。
 - 不做记忆检索、不做检查器（Phase 2 / 3）。

@@ -83,11 +83,11 @@ node --check <file>                        # 语法检查
 - **cwd 坑**：Bash 默认 cwd 可能是仓库父目录。一律用绝对路径或 `zsh -c 'cd <repo> && ...'`。
 - **基线（2026-11-05 实测，诚实版）**：`CI=1 npm test` → **3476 tests / 3468 pass / 7 fail / 1 skip**。
   - 6 个红是**环境缺 Pillow**（`resources/characters/**` 的 PNG alpha 校验用 `python3 -c "import PIL"`）——
-    不是代码回归；装了 Pillow 即绿。
-  - 1 个红是 `test/mcp-verify-gate.test.js` 的并发时序偶发（单跑 8/8 通过）。
-  - 所以判据是：**红项集合不得扩大**，且新增红必须能归因。数字只用来判断"是不是掉了"。
-  - 唯一 skip 是 E5a-R1 真机探针（需图形会话）——**Skip 不计作 Pass**，由 `scripts/ci-gate.js` 四态报告保证，
-    见 `docs/quality/test-tiers-and-baseline.md`。
+    不是代码回归；装了 Pillow 即绿。1 个红是 `test/mcp-verify-gate.test.js` 并发时序偶发（单跑 8/8 通过）。
+  - **去向已定（价值层重构 T0/T1，计划 §2.8）**：6 红转条件 skip（CI 设 `REQUIRE_PIL=1` 时变回 fail）、
+    并发用例串行化；完成后判据恢复 **0 fail + skip 白名单**（白名单登记在本节）。T0/T1 落地前过渡判据是"红项集合不扩大"。
+  - 唯一登记 skip：E5a-R1 真机探针（需图形会话）——**Skip 不计作 Pass**，由 `scripts/ci-gate.js` 四态报告保证，
+    见 `docs/quality/test-tiers-and-baseline.md`。**新增 skip 必须登记，未登记的 skip 视同红。**
 - **pure Node 门禁**：`src/team/runtime/**` 与 `src/office/runtime/**` 禁止 Electron/DOM/fs/网络；
   `office-module` 的 require 集合冻结。
 - **CI 门禁**：`.github/workflows/ci.yml` 在 PR/push 上跑全量测试 +

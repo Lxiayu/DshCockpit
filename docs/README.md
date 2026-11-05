@@ -103,9 +103,9 @@
 | 文档 | 状态 | 说明 |
 |------|------|------|
 | `docs/plans/active/NEW-DIRECTION-PERSONAL-TEAM-2026-11-03.md` | **已批准（新方向总计划）** | 个人团队的指挥台：借鉴执行语义、四层架构、右栏视觉规范、S0–S7 路线；D7–D9 已决定 |
-| `docs/plans/active/VALUE-LAYER-REFACTOR-2026-11-05.md` | **已批准（2026-11-05 用户拍板；已过三轮评审，第三轮以本地代码就地修订）** | 价值层重构：Phase 0.5 契约验证 → Phase 1 SDK 桥接（Shadow→Canary→Primary，双正交开关）→ Phase 2 Mission Memory（生命周期/内容级脱敏/真删除/中文检索）→ Phase 3 检查器（跨 Execution 工作历史 + ExecutionHistoryReader）→ Phase 4 清理（legacy 延后退役）；含架构原则、拍板记录、风险 R1–R12 与退出条件 |
-| `docs/plans/active/VALUE-LAYER-REVIEW-2026-11-05.md` | **本地复检报告（2026-11-05，动工前必读）** | 以本地代码为准复核上述计划：18 条事实核验、**6 项必修偏差**（事件命名约定不符 / 与 finding 三实体重叠 / harness-reader 命名撞车 / SDK 供给位置未定义 / compaction 不存在 / 基线 7 红）、Phase 0.5 定性（基础设施开发而非产品开发）、10 条 patch 清单、可重跑命令 |
-| `docs/plans/active/DEEPSEEK-HANDOFF-2026-11-05.md` | **交接包（给实施方）** | Phase 0.5 的 T0–T5 任务卡：SDK 供给方案 / 事件命名与归并（待拍板）/ 契约 fixture + 契约测试 / RuntimeProfileManager 原型 / 中断方案二选一 / Electron 集成面；含验收命令、负向变异要求、明确不做与必须问人的六种情形 |
+| `docs/plans/active/VALUE-LAYER-REFACTOR-2026-11-05.md` | **已批准（2026-11-05 用户拍板；四轮评审，§2.8 第四轮三项定稿：lesson 折叠 / SDK 同树+宿主进程 / 基线 T0 转绿）** | 价值层重构：Phase 0.5 契约验证 → Phase 1 SDK 桥接（Shadow→Canary→Primary，双正交开关）→ Phase 2 Mission Memory（单一 lesson 实体 / 生命周期 / 内容级脱敏 / 真删除 / 中文检索）→ Phase 3 检查器（跨 Execution 工作历史 + ExecutionHistoryReader）→ Phase 4 清理（legacy 延后退役）；含架构原则、拍板记录、风险 R1–R13 与退出条件 |
+| `docs/plans/active/VALUE-LAYER-REVIEW-2026-11-05.md` | **本地复检报告（2026-11-05；决策依据存档，当前口径以计划 §2.8 为准）** | 以本地代码为准复核上述计划：18 条事实核验、**6 项必修偏差**（事件命名约定不符 / 与 finding 三实体重叠 / harness-reader 命名撞车 / SDK 供给位置未定义 / compaction 不存在 / 基线 7 红）、Phase 0.5 定性（基础设施开发而非产品开发）、10 条 patch 清单、可重跑命令 |
+| `docs/plans/active/DEEPSEEK-HANDOFF-2026-11-05.md` | **交接包（给实施方；T0/T1 已从"待拍板"改为"动手卡"）** | Phase 0.5 的 T0–T5 任务卡：SDK 同树供给 + 宿主进程 / 基线转绿（红→skip + 串行化 + 白名单）/ 契约 fixture + 契约测试 / RuntimeProfileManager 原型 / 中断方案二选一 / Electron 集成面；含验收命令、负向变异要求、明确不做与必须问人的六种情形 |
 | `docs/plans/active/S0-PROBE-TASKS-2026-11-03.md` | **待执行（S0 探针任务清单）** | 交给 DeepSeek 的 T0–T12 真机探针任务，含前置条件、三态判定、用户需确认的图形会话步骤 |
 | `docs/plans/active/P0-AUDIT-AND-P1-MISSION-KICKOFF-2026-11-01.md` | **进行中** | P0 地基校准 → P1 Mission Core 启动；负责人 Lead，用户最终拍板 |
 | `docs/plans/active/P0-ENGINEERING-EXECUTION-2026-11-01.md` | **进行中（P0 唯一执行依据）** | P0 工程实施：#21→#10→#14→#9，并行 #22/#19；含完成条件与工程纪律 |

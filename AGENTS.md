@@ -25,8 +25,9 @@
    对应 `src/mission/schema.js` 的 `FORBIDDEN_PERSISTED_FIELDS` 与 `PRIVACY_FORBIDDEN_FIELDS`。
 3. **不许改门禁来给自己松绑**：`test/` 下的门禁测试、`AGENTS.md`、`docs/architecture/repo-map.md`
    都是**约束你的东西**。为了让自己通过而修改它们 = 严重违规。发现约束本身有错，停下来报告，不要自行放宽。
-4. **基线判据是"红项集合不扩大"**，不是"全绿"：全量测试当前有已知红项（环境缺 Pillow 6 项 + 并发偶发 1 项），
-   见 `repo-map.md` §5。**新增红必须能归因**；把已知红说成"我修好了"或"本来就这样"都不允许。
+4. **基线判据分两段**：T0/T1（价值层重构）落地前是"红项集合不扩大"（当前 7 红：缺 Pillow 6 + 并发偶发 1，
+   见 `repo-map.md` §5）；落地后恢复 **0 fail + skip 白名单**。**新增红必须能归因；新增 skip 必须登记白名单**；
+   把已知红说成"我修好了"、用无条件 skip 把红藏起来，都不允许。
 5. **文档必须入索引**：`docs/` 下每个非归档 `.md` 都要在 `docs/README.md` 登记，否则 `test/docs-index.test.js` 会红。
 6. **Git 只到提交为止**：允许 `git add <具体文件>` + `git commit`；**推送、开 PR、改远端只在用户明确授权后进行**。
    严禁 `git reset --hard` / `git clean -fd` / `git checkout -- .` / `git add -A`。

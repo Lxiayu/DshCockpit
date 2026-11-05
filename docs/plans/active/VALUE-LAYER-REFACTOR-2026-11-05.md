@@ -1,6 +1,6 @@
 # 价值层重构计划：SDK 桥接 + Mission Memory + 任务检查器（2026-11-05）
 
-> 状态：**已批准（2026-11-05 用户拍板三项决策，见 §2）；已过三轮评审，第三轮以本地代码复核并就地修订，见 §2.6.1**
+> 状态：**已批准（2026-11-05 用户拍板，见 §2 与 §2.8 第四轮三项定稿）；已过四轮评审：第三轮本地代码复检见 §2.6.1，第四轮决策定稿见 §2.8**
 > 上游：`docs/research/memory-and-sdk-validation-2026-11-05.md`（证据底座）、`docs/plans/active/VALUE-LAYER-REVIEW-2026-11-05.md`（本地复检报告，**动工前必读**）、`docs/plans/active/DEEPSEEK-HANDOFF-2026-11-05.md`（Phase 0.5 交接包）、`docs/plans/active/NEW-DIRECTION-PERSONAL-TEAM-2026-11-03.md`（新方向总计划，本文是其运行时与记忆层的落地升级）
 > 立场继承：`AGENTS.md`（Harness 拥有执行事实；不写第二套事实源）、`docs/adr/ADR-0005-memory-official-stack.md`（零第三方 Memory Provider）
 > 本文与 `AGENTS.md` §4 的"计划先行"流程对齐：批准后进入实施。
@@ -37,6 +37,7 @@
 | 运行时桥接 | **SDK Client 替换 + journal 只读**：新任务全走 SDK 通道，runtime-mux 降级为桌面版事实只读源，可回滚 |
 | 真机测试 | 已完成两轮：0.2.1 基线（验证报告 §3）+ 0.2.2 真机执行（验证报告 §4.6：问答 + 工具循环 + 文件写入全部通过）；后续真机验证按需另行申请 key |
 | **版本目标（D4）** | **直接上 0.2.2-rc.1**（2026-11-05 用户拍板）：锁 cordis ~4.1.0 全家桶 + 随应用供给 Node ≥24.9 运行时（独立子进程，Electron 主进程 Node 22 不受影响）；一步到位获得计划审阅/目标续跑/操作审批与 ACP 通道 |
+| **第四轮定稿（2026-11-05 晚）** | 三项实施决策：记忆实体折叠（只加 `lesson`）· SDK 同树供给 + 宿主进程 · 基线 T0 动手转绿——见 **§2.8** |
 
 ## 2.5 0.2.2-rc.1 增补发现（2026-11-05 下午，用户提示后验证）
 
@@ -80,12 +81,12 @@ GPT 认可四阶段框架不推翻，但指出若干"未钉牢的边界"；本�
 
 | # | 上文的错误假设 | 本地事实 | 本计划已改为 |
 |---|---|---|---|
-| L1 | 新增事件 `memory/attempt` 等 | 现有事件命名是 `entity.action`（`finding.recorded`）；`validateEntity` 对未知类型 fail-closed，projection 对未识别事件**静默忽略** | `attempt.recorded` / `lesson.recorded` / `gotcha.recorded`（§4.2） |
-| L2 | 记忆是全新领域 | 已有 `finding` / `assumption` / `evidence` 三个 Shared Context 实体，与 lesson/gotcha 重叠 | 先做归并决策再动手（§4.2 前置决策） |
+| L1 | 新增事件 `memory/attempt` 等 | 现有事件命名是 `entity.action`（`finding.recorded`）；`validateEntity` 对未知类型 fail-closed，projection 对未识别事件**静默忽略** | 单一 `lesson.recorded`（`kind` 区分 lesson/gotcha/attempt，§2.8/§4.2） |
+| L2 | 记忆是全新领域 | 已有 `finding` / `assumption` / `evidence` 三个 Shared Context 实体，与 lesson/gotcha 重叠 | 已拍板折叠方案（§2.8）：只加 `lesson`，删 `memory/decision`，复用既有 `decision`/`finding` |
 | L3 | Phase 3 引入 `HarnessHistoryReader` | `src/mission/harness-reader.js` 已存在，语义是"实时快照归一化 + observedAtMs" | 改名 `ExecutionHistoryReader` / `execution-history.js`（§5.2） |
-| L4 | SDK 装上就能用 | `@deepseek-ai/*` 不在 `package.json`；运行时由 `prepare-runtime.js` 装进 `vendor/runtime` 或 arborist 物化到 `userData/runtime/<v>`；`package.json.runtimeVersion` 停在 `0.1.5-rc.2` | Phase 0.5 增"SDK 供给方案"（§2.7 第 6 项），并在 §3.3 补供给链路 |
+| L4 | SDK 装上就能用 | `@deepseek-ai/*` 不在 `package.json`；运行时由 `prepare-runtime.js` 装进 `vendor/runtime` 或 arborist 物化到 `userData/runtime/<v>`；`package.json.runtimeVersion` 停在 `0.1.5-rc.2` | 已拍板同树供给 + 宿主进程（§2.8/§3.3），T0 实施 |
 | L5 | 真删除"采用墓碑 + 物理压实" | `event-log.js` 只有 `needsArchive`，**无 compaction** | 标注为**新增能力**并补三条实现难点（§4.2.2） |
-| L6 | `CI=1 npm test` 全绿 | 实测 3474 项 / 3466 pass / **7 fail** / 1 skip（6 项缺 Pillow、1 项并发偶发） | 判据改为"红项集合不扩大 + 新增红可归因"（§3.4 / §8） |
+| L6 | `CI=1 npm test` 全绿 | 实测 3476 项 / 3468 pass / **7 fail** / 1 skip（6 项缺 Pillow、1 项并发偶发；第三轮初测 3474/3466，文档门禁加严后为 3476/3468） | T0 动手转绿（6 红→条件 skip、1 红串行化），完成后判据恢复 **0 fail**（§2.8/§8） |
 
 ---
 
@@ -100,10 +101,47 @@ GPT 认可四阶段框架不推翻，但指出若干"未钉牢的边界"；本�
 3. **续跑与中断**：`resumeSession` 在"进程被杀"后的行为；SDK 无 cancel 时的**降级中断方案**（kill 子进程 → `resumeSession` 续跑，或以 ACP 请求中止替代）——这条直接决定 Phase 1 的 UI 是否能有"停止"按钮。
 4. **Electron 集成面**：主进程（Node 22）加载 `@deepseek-ai/dsh-sdk-client` 是否可行（该包未声明 `engines`，属推断，须实测）；子进程 Node 24 的路径解析与打包后 asar 环境下的可执行性。
 5. **Provider 路由固化**：把"`dsh plugin add` + `insert` 数组补丁 + `tool-fs` 显式开启"这条已验证路径写成脚本化 provisioner，供打包环境复用（验证报告 §4.6）。
-6. **SDK 供给方案（第三轮新增，L4）**：`@deepseek-ai/dsh-sdk-client` 当前不在 `package.json`，运行时是 `scripts/prepare-runtime.js` 供给的独立 npm 树。必须先答四问：装哪棵树（避免双 cordis）／`dshBin` 指向／asar 内可否 require／Node 22 主进程可否加载。**答不出来不进 Phase 1。**
-7. **基线归因（第三轮新增，L6）**：把当前 7 个红项的环境成因记录成基线（`repo-map.md` §5），后续一律按"红项集合不扩大"验收。
+6. **SDK 供给方案（第三轮新增，L4；第四轮已定，见 §2.8/§3.3）**：`@deepseek-ai/dsh-sdk-client` 与 runtime **同树供给** + **宿主进程**。原"四问"中"装哪棵树 / `dshBin` 指向"已由源码事实定死（sdk-client 精确依赖 dsh、整树 897MB 不可能进 app 树、`process.execPath` 硬编码）；剩余两问（asar 打包后可执行性、宿主进程端到端实测）由交接包 T0 以 provision-check 脚本落证据。
+7. **基线转绿（第四轮升级，L6）**：不再是"记录归因"，而是 T0 动手——6 个 Pillow 红改**条件 skip**（CI 设 `REQUIRE_PIL=1` 时变回 fail）、`mcp-verify-gate` 并发用例串行化；完成后全量判据恢复 **0 fail**，skip 白名单登记进 `repo-map.md` §5。T0 落地前的过渡判据仍是"红项集合不扩大"。
 
 **退出条件**：上述七项各有一份"通过 / 失败 / 明确 Deferred"的结论；事件 fixture 进 CI；中断方案二选一定稿。
+
+---
+
+## 2.8 第四轮拍板（2026-11-05 晚，三项实施决策定稿）
+
+用户批准的三项决策及其证据。**以下各条覆盖上文一切冲突表述**，实施方（DeepSeek）以此为最终口径。
+
+### 决策 A：记忆实体折叠——只加 `lesson`，不加第四个实体
+
+- **只新增一个实体 `lesson`**：`gotcha` 与 `attempt` 是 `lesson.kind` 的取值（`lesson | gotcha | attempt`），**不各自成实体、不各自成事件**。
+- **删除 `memory/decision`**：与既有 `decision` 实体一字不差（`DECISION_STATUSES` 已含 `superseded`，schema.js:67；`rationale` 必填，:418），复用即可。
+- **`finding` / `assumption` / `evidence` 保持不动**：它们是 mission 绑定的"任务内事实/假设/凭证"；`lesson` 是 project 级"跨任务经验"。两者靠**作用域**分工，不靠字段合并——这正是"一条事实一条来源"的落地。
+- **判据**：现有实体盘点里，跨任务经验的承载物**一个都不存在**（finding/assumption/decision 全部 mission 绑定）——缺口只有这一个，所以只补一个。
+- schema 改动详见 §4.2（含三处必改点与可复用的 `CONFIDENCES` 三档）。
+
+### 决策 B：SDK 同树供给 + 宿主进程
+
+源码级证据（`@deepseek-ai/dsh-sdk-client@0.2.2-rc.1`，2026-11-05 实测）：
+
+1. **它是子进程客户端**：spawn 一个 dsh runtime 子进程走 stdio JSON-RPC（`lib/index.js:358`），不是进程内库。
+2. **版本精确锁死**：`dependencies: { "@deepseek-ai/dsh": "0.2.2-rc.1" }`（无 `^`），peers 要求 `dsh-sdk-protocol` / `dsh-session` / `dsh-llm` 同精确版 + `cordis ~4.1.0`；`lib/index.js:115` 有严格相等校验，两端版本不等直接抛错。
+3. **体积否决 app 树**：`@deepseek-ai/dsh` 本体 124K 但带 **90 个依赖**，整树 **897MB / 200 个顶层包**——装进仓库 `node_modules` = asar +897MB，且它 spawn 的是自己旁边那份 dsh 而不是 `runtimeDir/<version>` 里用户可更新的一份。**不可行**；独立第三棵树同理（又一份 897MB）。
+4. **`process.execPath` 硬编码**（`lib/index.js:172`，无覆盖选项）：Electron 主进程的 execPath 是 Electron 本体（Node 22），不满足 dsh ≥24.9。
+
+**结论（定稿）**：
+
+- **同树**：runtime 树的 `package.json`（`src/runtime-manager.js:448` 的物化模板 + `scripts/prepare-runtime.js` 的 vendor seed）同时声明 `@deepseek-ai/dsh` 与 `@deepseek-ai/dsh-sdk-client`，**都写精确版本**——npm 会去重为单份，版本锁步变成结构性保证。
+- **宿主进程**：Electron 主进程（Node 22）不直接 import SDK；由 `bestNodeBin()`（`src/main.js:1952`）拉起宿主脚本（跑在真 Node ≥24.9 上），宿主内动态 `import()` 同树 SDK 并驱动会话，主进程 ↔ 宿主走 IPC。宿主的 `process.execPath` 天然是 Node 24，问题消失。
+- **显式 `dshBin`**：指向同树的 `@deepseek-ai/dsh/lib/bin.js`。注意：传 `dshBin` 会**跳过** sdk-client 的版本相等校验（`lib/index.js:164`）——锁步改由 Runtime Lockfile 门禁保证，**旧守门人换掉就必须装新守门人**。
+- **capability 记录**：给 0.2.2-rc.1 补 `src/runtime-capability.js` 的 KNOWN_MATRIX 记录（当前 `judge('0.2.2-rc.1')` 返回 `unverified`、9 项能力 unknown）；不补则 `canRun` 永远是"未验证"。
+
+### 决策 C：基线口径——T0 动手转绿，不是"记录归因"
+
+- 6 个 Pillow 红 → **条件 skip**：缺 Pillow 时 `t.skip()` 并打印原因；CI 设 `REQUIRE_PIL=1` 时 skip 变回 fail（本地宽容、CI 严格）。
+- 1 个并发偶发（`test/mcp-verify-gate.test.js`）→ **串行化**（`{ concurrency: 1 }` 或等价），不是重试。
+- **skip 白名单**：允许的 skip 及原因登记进 `repo-map.md` §5——防止后来的人用 skip 掩盖真问题。
+- **为什么不留"红项集合不扩大"**：该判据**不可机械判定**（CI 无法自动执行，依赖人的记忆比对名单）；转绿后判据回到机器可判的 **0 fail**。
 
 ---
 
@@ -113,6 +151,7 @@ GPT 认可四阶段框架不推翻，但指出若干"未钉牢的边界"；本�
 
 ### 3.1 新增 `src/harness/sdk-bridge.js`（执行适配层）
 
+- **宿主进程形态（§2.8 决策 B，硬约束）**：sdk-bridge **不跑在 Electron 主进程里**——sdk-client 把子进程命令硬编码为 `process.execPath`（`lib/index.js:172`），而主进程的 execPath 是 Electron 本体（Node 22，不满足 dsh ≥24.9）。落地形态：`bestNodeBin()`（`src/main.js:1952`）拉起宿主脚本（真 Node ≥24.9），宿主内动态 `import()` 同树 SDK，主进程 ↔ 宿主走 IPC。sdk-bridge 的窄接口跨 IPC 语义不变。
 - 封装 `DeepSeekHarness`（`@deepseek-ai/dsh-sdk-client@0.2.2-rc.1`），**只暴露 DshCockpit 自己的窄接口**（`start` / `prompt` / `onEvent` / `resume` / `close`），SDK 类型不外溢：
   - **客户端选项必须用 0.2.2 具名面**：`profile` / `patches` / `dshHome` / `env`。**不得使用 `launch`**（0.2.2 静默忽略，验证报告 E7）。
   - **profile 供给**：`sdk-minimal` + 补丁（`tool-fs` 开启读写 + `llm-pi-ai` 路由声明）。补丁内容由 `RuntimeProfileManager`（3.3）生成，不硬编码。
@@ -136,6 +175,11 @@ GPT 认可四阶段框架不推翻，但指出若干"未钉牢的边界"；本�
 
 ### 3.3 运行时供给与依赖锁定
 
+- **SDK 同树供给（§2.8 决策 B，实施细则）**：
+  1. runtime 树 `package.json` 的 `dependencies` 同写 `@deepseek-ai/dsh` 与 `@deepseek-ai/dsh-sdk-client`，**均精确版本**（`0.2.2-rc.1`，不用 `^`/`~`）——sdk-client 的精确依赖使 npm 去重为单份，锁步成为结构性保证；
+  2. 应用侧**不从仓库 `node_modules` 解析 SDK**（那里没有也不许有），一律 `import(pathToFileURL(<runtimeRoot>/node_modules/@deepseek-ai/dsh-sdk-client/lib/index.js))`；
+  3. 显式传 `dshBin` = 同树 `<runtimeRoot>/node_modules/@deepseek-ai/dsh/lib/bin.js`；**传 `dshBin` 会跳过 sdk-client 的版本相等校验**（`lib/index.js:164`），锁步由本节的 Runtime Lockfile 门禁接手；
+  4. 打包面：SDK 随 `vendor/runtime` 走 `extraResources`（与现役 dsh 同路径），**不进 asar**；asar 内只留宿主脚本薄壳。
 - **`RuntimeProfileManager`（新增）**：负责
   1. Harness 子进程的 **Node ≥24.9 运行时**解析（随包分发的 Node 24 或启动时探测，R6）；
   2. 隔离 `DSH_HOME` 的创建与 profile provision（含 `dsh plugin add` 幂等检查）；
@@ -155,7 +199,7 @@ GPT 认可四阶段框架不推翻，但指出若干"未钉牢的边界"；本�
 |---|---|---|---|
 | **Shadow** | SDK 通道与现有链路**并行跑**同一批任务（不生效，仅比对）：SDK 事件流 vs journal 投影逐条对账 | 对账差异全部有解释（非缺陷）；零伪影 | 关开关即可（不进生产路径） |
 | **Canary** | 少量 Mission 走 SDK 派发（`dispatchChannel='sdk'`，可用白名单/比例控制），其余仍 legacy | 连续 N 个任务无人工干预完成；检查器可查；无重复事实 | 单任务级切回 legacy |
-| **Primary** | 默认 `dispatchChannel='sdk'`；`runtime-mux` 仅作桌面版共存观察源 | **红项集合不扩大**（基线见 `repo-map.md` §5）；一周观察期无 P1/P2 缺陷 | 全局开关 + `observationSource='journal'` 兜底 |
+| **Primary** | 默认 `dispatchChannel='sdk'`；`runtime-mux` 仅作桌面版共存观察源 | **0 fail**（T0 完成后基线恢复全绿，见 §2.8；T0 未落地前过渡判据为"红项集合不扩大"）；一周观察期无 P1/P2 缺陷 | 全局开关 + `observationSource='journal'` 兜底 |
 
 ### 3.5 退出条件
 
@@ -170,11 +214,10 @@ GPT 认可四阶段框架不推翻，但指出若干"未钉牢的边界"；本�
 
 ## 4. Phase 2 —— Mission Memory（核心价值层）
 
-> **前置决策（第三轮新增，L1/L2，必须先拍板再动手）**：
-> ① 事件命名统一为 `entity.action` 形状；② `lesson` / `gotcha` 与现有
-> `finding` / `assumption` / `evidence` 是归并还是并存。理由与两个候选方案见
-> `docs/plans/active/VALUE-LAYER-REVIEW-2026-11-05.md` §2.1 / §2.2。
-> **未拍板就新增平行实体 = 制造第二套记法，直接违反 §4.1 边界。**
+> **前置决策已定（第四轮拍板，§2.8 决策 A）**：事件命名统一为 `entity.action`；
+> **只新增一个 `lesson` 实体**（`gotcha` / `attempt` 是它的 `kind` 取值），不新增平行实体；
+> `memory/decision` 从计划删除（复用既有 `decision`，其 `superseded` 状态即退役语义）。
+> 候选方案对比见 `docs/plans/active/VALUE-LAYER-REVIEW-2026-11-05.md` §2.1 / §2.2。
 
 **目标**：Mission Core 从"任务派发事实源"扩展为"项目经验记忆中心"，跨会话复利。
 
@@ -191,12 +234,14 @@ GPT 认可四阶段框架不推翻，但指出若干"未钉牢的边界"；本�
 `src/mission/projection.js` 的 fold），不可写成 `memory/attempt` —— 那样 `validateEntity` 会直接拒绝，
 或绕过校验后被投影层**静默忽略**（事件在库里、UI 永远看不到）。
 
+**只新增一个事件 `lesson.recorded`（§2.8 决策 A：折叠方案）**——`gotcha` / `attempt` 不再各自成事件：
+
 | 事件 | 参考 | 字段要点 |
 |---|---|---|
-| `attempt.recorded` | projectmem `attempt` | issueRef、描述、`worked/failed/partial`、位置（`file:line` 或模块名）、来源 TaskRef |
-| `decision.recorded` | 已有事件，扩展 | 决策内容、可退役旧决策（`retires`）、理由、上下文引用 |
-| `lesson.recorded` | AgentMemory lessons | 跨会话教训、适用条件、置信度 |
-| `gotcha.recorded` | projectmem gotchas | 项目坑位、触发条件、规避方法 |
+| `lesson.recorded` | projectmem attempt/gotchas + AgentMemory lessons | `kind: lesson\|gotcha\|attempt`；`text`；适用/触发条件（kind=lesson/gotcha）；规避方法（kind=gotcha）；`worked/failed/partial` + 位置 `file:line`（kind=attempt）；置信度复用 `CONFIDENCES` 三档（schema.js:55，不新造刻度）；`supersededBy`（退役引用）；来源 TaskRef / sessionId |
+
+- **不新增 `decision` 事件**：退役旧决策复用既有 `decision.superseded`（`DECISION_STATUSES` 已含该态，schema.js:67）。
+- **`finding` 保持不动**：mission 绑定的"任务内事实"与 project 级"跨任务经验"靠**作用域**分工（`lesson` 天然跨 mission），不做字段合并——这是 §4.1 边界的直接推论。
 
 > 新增一个实体类型要**同时改三处**，缺一即半成品：
 > `ENTITY_TYPES`（schema.js:28）→ `validateEntity` 分派（schema.js:690）→ `projection.js` fold（:115 起）。
@@ -204,7 +249,7 @@ GPT 认可四阶段框架不推翻，但指出若干"未钉牢的边界"；本�
 配套投影与查询（`src/mission/`）：
 - **Brief 增强**（参考 projectmem `brief`）：`brief-sync.js` 写入 AGENTS.md 时带上"失败尝试警告 + 开放问题 + 近期决策"（警告按位置命中，防止重复踩坑——projectmem 已验证的核心价值）。
 - **派发前检查**：`confirmDispatch` 时按任务描述/目标文件命中历史失败尝试，在 UI 提示（不阻断，只提醒）。
-- **捕获纪律**（参考 AgentMemory 单写入者 + 隐私过滤）：attempt/lesson 的产生只有两个入口——用户在 UI 显式记录、任务收尾时由**最终 assistant 消息 + 人工确认**派生草稿；绝不自动从中间事件抓取。`PRIVACY_FORBIDDEN_FIELDS` 规则同样适用于记忆事件。
+- **捕获纪律**（参考 AgentMemory 单写入者 + 隐私过滤）：`lesson` 的产生只有两个入口——用户在 UI 显式记录、任务收尾时由**最终 assistant 消息 + 人工确认**派生草稿；绝不自动从中间事件抓取。`PRIVACY_FORBIDDEN_FIELDS` 规则同样适用于记忆事件。
 - **陈旧检测**（参考 projectmem staleness）：记忆引用的位置/文件变更时标记 stale，Brief 中降权展示。
 
 ### 4.2.1 记忆生命周期（新增，必需）
@@ -335,7 +380,8 @@ Mission (长期目标)
 | R9 | 自定义 provider 路由脆弱（插件须装进 profile、`launch` 选项被忽略、`tool-fs` 默认关闭） | `RuntimeProfileManager` 把 provision 过程脚本化 + 自检（插件是否真的激活、路由是否注册）；环境坑 E7–E10 进 AGENTS 附录 |
 | R10 | 记忆内容级泄露（字段黑名单挡不住自由文本） | 写入前脱敏 + 导出（AGENTS.md）前二次扫描 + 真删除（墓碑 + 压实） |
 | R11 | **压实半写**（新增，L5）：重写 `events.jsonl` 时进程中断 → 日志残缺、seq 断裂 | 临时文件 + 原子 rename；压实前后各跑一次 `detectTruncation`；备份轮转必须排除已删除内容 |
-| R12 | **双 cordis 树**（新增，L4）：SDK 装进仓库 `node_modules` 而 `dshBin` 指运行时树，两套 cordis 混用 | Phase 0.5 定"SDK 供给方案"：同树解析或显式隔离；升级走 Runtime Lockfile；`plugin loader null entry` 记为已知症状 |
+| R12 | **双 cordis 树**（L4）：SDK 与 dsh 分属两棵 npm 树 | **已定**：SDK 同树供给（§2.8/§3.3，结构性去重）；升级走 Runtime Lockfile；`plugin loader null entry` 记为已知症状 |
+| R13 | **`process.execPath` 硬编码**（第四轮新增）：SDK 子进程命令取宿主进程的 execPath，Electron 主进程 = Electron 本体（Node 22 < 24.9） | 宿主进程模式（§2.8 决策 B / §3.1）：`bestNodeBin()` 拉起真 Node ≥24.9 宿主；宿主路径探测失败 = 启动期显式报错，不是运行中玄学崩溃 |
 
 ## 8. 测试策略
 
@@ -345,9 +391,10 @@ Mission (长期目标)
 - **对账测试**：Shadow 阶段的 SDK 事件流 vs journal 投影逐条对账，差异必须显式归因（新测试类别）。
 - **真机（需 key，另行申请）**：问答、工具循环、检查器跨执行历史、Brief 跨会话、中断降级路径。
 - **回归**：`legacy` 路径在过渡期保持绿（退役前不得红）。
-- **门禁口径（第三轮修订，L6）**：`CI=1 npm test` 的判据是**"红项集合不扩大"**，不是"全绿"——
-  当前基线为 3474 项 / 3466 pass / 7 fail / 1 skip（6 项缺 Pillow、1 项并发偶发，见 `repo-map.md` §5）。
-  任何新增红必须归因，否则视为回归。另加运行时 lockfile 一致性检查（替代根目录范围声明）。
+- **门禁口径（第四轮定稿，L6/§2.8 决策 C）**：**T0 动手转绿**——6 个 Pillow 红改条件 skip
+  （CI 设 `REQUIRE_PIL=1` 时变回 fail）、`mcp-verify-gate` 并发用例串行化，skip 白名单登记进 `repo-map.md` §5。
+  T0 完成后判据恢复 **0 fail**（机器可判）；T0 落地前的过渡判据是"红项集合不扩大"
+  （当前基线 3476 项 / 3468 pass / 7 fail / 1 skip）。另加运行时 lockfile 一致性检查（替代根目录范围声明）。
 
 ## 9. 明确不做（本期）
 
