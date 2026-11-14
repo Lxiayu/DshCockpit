@@ -1,8 +1,56 @@
 {
   "schema": 1,
-  "updatedAt": "2026-09-16T13:45:00.838Z",
-  "latestVerified": "0.1.5-rc.2",
+  "updatedAt": "2026-11-14T09:40:10.252Z",
+  "latestVerified": "0.2.2-rc.3",
   "runs": [
+    {
+      "schema": 1,
+      "version": "0.2.2-rc.3",
+      "date": "2026-11-14",
+      "ok": true,
+      "platforms": {
+        "darwin-arm64": "pass",
+        "win32-x64": "pass"
+      },
+      "reason": "",
+      "trigger": "schedule",
+      "detail": {
+        "darwin-arm64": {
+          "install": {
+            "ok": true,
+            "ms": 44033,
+            "reason": ""
+          },
+          "dumpConfig": {
+            "ok": true,
+            "ms": 103,
+            "reason": ""
+          },
+          "healthCheck": {
+            "ok": true,
+            "reason": "",
+            "ms": 2730
+          }
+        },
+        "win32-x64": {
+          "install": {
+            "ok": true,
+            "ms": 71029,
+            "reason": ""
+          },
+          "dumpConfig": {
+            "ok": true,
+            "ms": 137,
+            "reason": ""
+          },
+          "healthCheck": {
+            "ok": true,
+            "reason": "",
+            "ms": 3746
+          }
+        }
+      }
+    },
     {
       "schema": 1,
       "version": "0.1.5-rc.2",
